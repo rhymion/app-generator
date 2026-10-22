@@ -137,7 +137,12 @@ Cypress.Commands.add('clickButton', (text: string) => {
  * Handles both associated labels (using 'for' attribute) and wrapped labels
  */
 Cypress.Commands.add('checkField', (label: string, expectedValue: string) => {
-  getAnyLabel(label).parent().find('input, textarea').first().should('have.value', expectedValue);
+  // Whitespace is collapsed on both sides: a label with an empty segment (an owner
+  // column an x-exclusive-parents row leaves empty) is shown with a doubled space.
+  const collapse = (text: string) => text.replace(/\s+/g, ' ').trim();
+  getAnyLabel(label).parent().find('input, textarea').first().should(($input) => {
+    expect(collapse(String($input.val() ?? ''))).to.equal(collapse(expectedValue));
+  });
 });
 
 /**
@@ -190,8 +195,13 @@ Cypress.Commands.add('selectAutocomplete', (label: string, searchText: string, o
   getAutocompleteInput(label).then(($input) => {
     cy.wrap($input).type('{selectall}' + searchText, { force: true });
   });
-  const escaped = clickText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  // The option text is compared with whitespace collapsed (below), so collapse the expected
+  // label too: a label ending in empty segments (e.g. a blank lot number) keeps trailing spaces.
+  const escaped = clickText.replace(/\s+/g, ' ').trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const exactRe = new RegExp(`^${escaped}$`);
+  // A label with an empty segment (an owner column an x-exclusive-parents row leaves
+  // empty) renders with a doubled space; compare with whitespace collapsed.
+  const normalizedOptionText = (el: HTMLElement) => (el.textContent ?? '').replace(/\s+/g, ' ').trim();
   // The MUI Autocomplete popper portals to document.body — it is NOT a
   // descendant of the input's accordion. When this command runs inside
   // `cy.within(.MuiAccordionDetails-root)` (e.g. via cy.withinAccordion),
@@ -207,11 +217,11 @@ Cypress.Commands.add('selectAutocomplete', (label: string, searchText: string, o
     cy.wrap(doc.body)
       .find(optionSelector)
       .should(($opts) => {
-        const $matched = $opts.filter((_, el) => exactRe.test(el.textContent ?? ''));
+        const $matched = $opts.filter((_, el) => exactRe.test(normalizedOptionText(el)));
         expect($matched.length).to.be.greaterThan(0);
       })
       .then(($opts) => {
-        const $matched = $opts.filter((_, el) => exactRe.test(el.textContent ?? '')).first();
+        const $matched = $opts.filter((_, el) => exactRe.test(normalizedOptionText(el))).first();
         cy.wrap($matched).click();
       });
   });

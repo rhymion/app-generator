@@ -30,6 +30,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/vercel-env.sh"
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/vercel-region.sh"
 
 # ── --status: read-only migration-state diagnostic, no writes ──────────────
 # Compares production vs. staging `prisma migrate status` without touching
@@ -531,7 +533,7 @@ else
 fi
 export VERCEL_PROJECT_ID
 
-# ── Step 1.5: Ensure Vercel project Root Directory ──────────────────────────
+# ── Step 1.5: Ensure Vercel project Root Directory and Function Region ──────────────────────────
 # Root Directory has no vercel.json field — confirmed against the current
 # Vercel REST API reference (Update an existing project /
 # Find a project by id or name, docs.vercel.com/docs/rest-api/reference/
@@ -545,7 +547,7 @@ export VERCEL_PROJECT_ID
 # Read-then-write keeps this idempotent: a project whose Root Directory is
 # already correct is a no-op.
 echo ""
-echo "[Step 1.5] Ensuring Vercel project Root Directory..."
+echo "[Step 1.5] Ensuring Vercel project Root Directory and Function Region..."
 _VERCEL_ROOT_DIRECTORY="${VERCEL_ROOT_DIRECTORY:-app-generator}"
 _VERCEL_PROJECTS_API="https://api.vercel.com/v9/projects/${VERCEL_PROJECT_ID}"
 _VERCEL_TEAM_QS=""
@@ -574,6 +576,20 @@ else
     fi
     echo "  Set rootDirectory: '${_VERCEL_ROOT_DIRECTORY}'"
   fi
+fi
+
+# Function Region: the project is created on the platform default (iad1) and
+# the committed vercel.json `regions` only applies once Root Directory points
+# at the submodule, so reconcile the dashboard setting to that committed value
+# too. Same read-then-write shape; the vercel.json itself is never edited.
+_VERCEL_REGION="$(vercel_committed_region "${ROOT}/app-generator/vercel.json")"
+if [[ -z "$_VERCEL_REGION" ]]; then
+  echo "[SKIP] no regions entry in app-generator/vercel.json; serverlessFunctionRegion left as is"
+elif [[ "$DRY_RUN" == "true" ]]; then
+  echo "[DRY-RUN] curl -K - \"${_VERCEL_PROJECTS_API}${_VERCEL_TEAM_QS}\" (read serverlessFunctionRegion)"
+  echo "[DRY-RUN] Would PATCH serverlessFunctionRegion to '${_VERCEL_REGION}' if it differs"
+else
+  vercel_reconcile_function_region "$VERCEL_TOKEN" "${_VERCEL_PROJECTS_API}${_VERCEL_TEAM_QS}" "$_VERCEL_REGION"
 fi
 
 # ── Helper: pull a live env-var value from Vercel (used for Blob token) ─────

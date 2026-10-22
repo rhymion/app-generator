@@ -227,3 +227,64 @@ class TestLegitimateImportEligiblePasses:
             }
         }
         validate_schema(schema)  # must not raise
+
+
+class TestNewFormBridgeChildNotEligible:
+    """cmd_1127: a new-form x-bridge child's parent is selected at create
+    time via selectedParentType/selectedParentId, never through a physical
+    FK column, so CSV export never emits a column that could satisfy it on
+    import — a bridge child is never import-eligible regardless of how
+    otherwise-legitimate its x-import-key/new/edit configuration is."""
+
+    def _bridge_schema(self, with_import=True):
+        widget = {
+            'type': 'object',
+            'required': ['id', 'code'],
+            'properties': {
+                'id': {'type': 'string', 'pattern': '^c[a-z0-9]{24,}$'},
+                'code': {'type': 'string'},
+            },
+            'x-bridge': {
+                'name': 'widgetable',
+                'child': 'widget',
+                'parentCardinality': 'exactlyOne',
+                'parents': [{'role': 'owner_hub', 'target': 'owner', 'labelField': 'name'}],
+            },
+        }
+        if with_import:
+            widget['x-import-key'] = ['code']
+        return {
+            'definitions': {
+                'widget': widget,
+                'widget_detail': {
+                    'x-generate': {'list': True, 'view': True, 'new': True, 'edit': True, 'api': True},
+                    'allOf': [{'$ref': '#/definitions/widget'}],
+                },
+                'widgetable': {
+                    'type': 'object',
+                    'required': ['id'],
+                    'properties': {'id': {'type': 'string', 'pattern': '^c[a-z0-9]{24,}$'}},
+                },
+                'owner': {
+                    'type': 'object',
+                    'required': ['id', 'name'],
+                    'properties': {
+                        'id': {'type': 'string', 'pattern': '^c[a-z0-9]{24,}$'},
+                        'name': {'type': 'string'},
+                    },
+                    'x-generate': {'list': True, 'view': True, 'new': True, 'edit': True, 'delete': True, 'api': True},
+                },
+            }
+        }
+
+    def test_bridge_child_with_import_key_and_create_edit_errors(self):
+        """Otherwise fully eligible (primary, create+edit true, import left
+        on) — the bridge declaration alone must be enough to reject it."""
+        with pytest.raises(SchemaValidationError, match='E_IMPORT_KEY_NOT_ELIGIBLE'):
+            validate_schema(self._bridge_schema(with_import=True))
+
+    def test_bridge_child_without_import_key_passes(self):
+        """No x-import-key at all: out of scope for this check regardless
+        of the bridge declaration (mirrors test_no_import_key_never_checked
+        above)."""
+        validate_schema(self._bridge_schema(with_import=False))  # must not raise

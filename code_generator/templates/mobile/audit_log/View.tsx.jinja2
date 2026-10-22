@@ -1,0 +1,69 @@
+import { useEffect, useState } from 'react';
+import { router } from 'expo-router';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useMessages } from '@/lib/messages';
+import { getAuditLogDetail, type AuditLogEntry } from '@/lib/audit_log/mobile_client';
+import { formatAuditTimestamp } from '@/components/audit_log/format';
+
+/** Read-only detail of one audit entry (GET /api/audit_log/<id>). */
+export function AuditLogView({ id }: { id: string }) {
+  const { t } = useMessages();
+  const [record, setRecord] = useState<AuditLogEntry | null>(null);
+  const [state, setState] = useState<'loading' | 'ready' | 'missing'>('loading');
+
+  useEffect(() => {
+    getAuditLogDetail(id)
+      .then((detail) => {
+        setRecord(detail);
+        setState(detail ? 'ready' : 'missing');
+      })
+      .catch(() => setState('missing'));
+  }, [id]);
+
+  if (state === 'loading') return <ActivityIndicator testID="view-loading" />;
+  if (state === 'missing' || !record) {
+    return (
+      <View style={styles.container} testID="view-missing">
+        <Text>{t('Errors.notFound')}</Text>
+      </View>
+    );
+  }
+
+  const fields: { key: string; label: string; value: string }[] = [
+    { key: 'target_table', label: t('Fields.targetTable'), value: record.target_table ?? '' },
+    { key: 'target_id', label: t('Fields.targetId'), value: record.target_id ?? '' },
+    { key: 'action', label: t('Fields.action'), value: record.action },
+    { key: 'actor_user', label: t('Fields.actorUser'), value: record.actor_user?.name ?? '' },
+    { key: 'created_at', label: t('Fields.created_at'), value: formatAuditTimestamp(record.created_at) },
+  ];
+
+  return (
+    <ScrollView style={styles.container} testID="view-audit_log">
+      <Pressable onPress={() => router.replace('/entity/audit_log' as never)} testID="view-back" style={styles.back}>
+        <Text style={styles.link}>{t('Common.goBack')}</Text>
+      </Pressable>
+      {fields.map((field) => (
+        <View key={field.key} style={styles.field}>
+          <Text style={styles.label}>{field.label}</Text>
+          <Text style={styles.value} testID={`view-field-${field.key}`}>{field.value}</Text>
+        </View>
+      ))}
+      {record.metadata ? (
+        <View style={styles.field}>
+          <Text style={styles.label}>{t('Fields.metadata')}</Text>
+          <Text style={styles.mono} testID="view-field-metadata">{JSON.stringify(record.metadata, null, 2)}</Text>
+        </View>
+      ) : null}
+    </ScrollView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, padding: 16 },
+  back: { marginBottom: 12 },
+  link: { color: '#2563eb' },
+  field: { marginBottom: 14, gap: 2 },
+  label: { fontSize: 13, fontWeight: '600', color: '#374151' },
+  value: { fontSize: 16 },
+  mono: { fontSize: 13, fontFamily: 'monospace', backgroundColor: '#f3f4f6', padding: 8, borderRadius: 6 },
+});

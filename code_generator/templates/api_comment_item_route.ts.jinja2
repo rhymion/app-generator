@@ -1,0 +1,100 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { authenticate, requireApiPermission, withActor, handleApiError, ApiError } from '@/lib/api-auth';
+import { getRateLimiter } from '@/lib/rate-limit';
+import { resolvePermissions } from '@/lib/authz';
+import prisma from '@/lib/prisma';
+import { get{{ parent_pascal }}Detail } from '@/lib/{{ parent }}/getters';
+import { update{{ parent_pascal }}Comment, delete{{ parent_pascal }}Comment } from '@/lib/{{ parent }}/actions';
+
+// PATCH  /api/{{ parent }}/[id]/comments/[commentId]   Body: { message: string }  ->  200 { success: true }
+// DELETE /api/{{ parent }}/[id]/comments/[commentId]                              ->  204
+//
+// The REST side of editing and deleting a comment on the {{ parent }} edit form. They run the same
+// update{{ parent_pascal }}Comment / delete{{ parent_pascal }}Comment Server Actions the form calls, as the
+// authenticated caller, so the author-only edit rule, the delete rule (the author, or a caller with
+// {{ parent }} delete permission), the @-mention notifications for newly added mentions and the
+// revalidation are the web's own.
+//
+// Access: as for adding a comment (POST .../comments), the caller must be able to update the
+// {{ parent }} record, and the comment must belong to that record; any other comment id is "Not found".
+
+const MAX_MESSAGE_LENGTH = 10000;
+
+type Params = { params: Promise<{ id: string; commentId: string }> };
+
+async function loadComment(request: NextRequest, { params }: Params) {
+  const { id, commentId } = await params;
+  const { userId: actorId } = await authenticate(request);
+  const _rl = await getRateLimiter().check('api:write', actorId);
+  if (!_rl.allowed) {
+    return {
+      actorId,
+      commentId,
+      response: NextResponse.json(
+        { error: 'rate_limited', retryAfter: _rl.retryAfterSeconds },
+        { status: 429, headers: { 'Retry-After': String(_rl.retryAfterSeconds), 'X-RateLimit-Bucket': 'api:write' } },
+      ),
+    };
+  }
+  // Coarse, item-independent gate before the record is read (see POST .../comments).
+  const basePerms = await requireApiPermission(actorId, '{{ parent }}', 'update');
+  const item = await get{{ parent_pascal }}Detail(id{% if should_filter_by_org or is_self_only %}, actorId{% endif %});
+  if (!item) {
+    return { actorId, commentId, response: NextResponse.json({ error: 'Not found' }, { status: 404 }) };
+  }
+  const resolved = await resolvePermissions(basePerms, item, actorId);
+  if (!resolved.update) {
+    throw new ApiError(403, `Access denied: {{ parent }}.update`);
+  }
+  const comment = await prisma.{{ comment_model }}.findUnique({
+    where: { id: commentId },
+    select: { creator_id: true, {{ comment_parent_fk }}: true },
+  });
+  if (!comment || comment.{{ comment_parent_fk }} !== {{ 'item.commentable_id' if has_commentable else 'id' }}) {
+    return { actorId, commentId, response: NextResponse.json({ error: 'Not found' }, { status: 404 }) };
+  }
+  return { actorId, commentId, comment, response: null };
+}
+
+export async function PATCH(request: NextRequest, context: Params) {
+  try {
+    const loaded = await loadComment(request, context);
+    if (loaded.response) return loaded.response;
+    const { actorId, commentId, comment } = loaded;
+    if (comment.creator_id !== actorId) {
+      throw new ApiError(403, 'Not authorized to edit this comment');
+    }
+
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json({ error: 'Request body must be JSON' }, { status: 400 });
+    }
+    const rawMessage = (body as { message?: unknown } | null)?.message;
+    const message = typeof rawMessage === 'string' ? rawMessage.trim() : '';
+    if (!message) {
+      return NextResponse.json({ error: 'message is required' }, { status: 400 });
+    }
+    if (message.length > MAX_MESSAGE_LENGTH) {
+      return NextResponse.json({ error: `message exceeds maximum length of ${MAX_MESSAGE_LENGTH}` }, { status: 400 });
+    }
+
+    await withActor(actorId, () => update{{ parent_pascal }}Comment(commentId, message));
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    return handleApiError(error);
+  }
+}
+
+export async function DELETE(request: NextRequest, context: Params) {
+  try {
+    const loaded = await loadComment(request, context);
+    if (loaded.response) return loaded.response;
+    const { actorId, commentId } = loaded;
+    await withActor(actorId, () => delete{{ parent_pascal }}Comment(commentId));
+    return new NextResponse(null, { status: 204 });
+  } catch (error) {
+    return handleApiError(error);
+  }
+}

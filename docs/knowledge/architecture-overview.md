@@ -43,6 +43,9 @@ The `x-generate` block in the entity definition controls which outputs are activ
 | `components/{entity}/FormUpsert.tsx` | `form_upsert.tsx.jinja2` | Always |
 | `components/{entity}/form_validation.ts` | `form_validation.ts.jinja2` | Always |
 | `components/{entity}/FormView.tsx` | `form_view.tsx.jinja2` | Always |
+| `lib/{entity}/use_entity_form.ts` | `use_entity_form.ts.jinja2` | If `new: true` or `edit: true` |
+| `lib/{entity}/use_entity_capabilities.ts` | `use_entity_capabilities.ts.jinja2` | If `new`, `edit` or `view` is true |
+| `lib/{entity}/use_entity_approval_actions.ts` | `use_entity_approval_actions.ts.jinja2` | If the view renders `ApprovalSection` |
 | `components/{entity}/column_def.tsx` | `column_def.tsx.jinja2` | If parent has children |
 | `app/[locale]/{entity}/page.tsx` | `page_list.tsx.jinja2` | If `list: true` |
 | `app/[locale]/{entity}/new/page.tsx` | `page_new.tsx.jinja2` | If `new: true` |
@@ -60,13 +63,20 @@ The `x-generate` block in the entity definition controls which outputs are activ
 Two cross-entity files are also regenerated on every run:
 
 - `lib/dashboard/catalog.ts` — aggregates all entities for the dashboard widget catalog
+- `lib/dashboard/access-scope.ts` — per-entity row-level read scope facts the dashboard aggregate applies (see `schema-yaml-configuration.md` §10)
 - `lib/attachment/bridge_actions.ts` — polymorphic attachment bridge for entities that own `attachable`,
   always emitted (`components/_standard/AttachmentSection.tsx` unconditionally imports from it). This
   file was renamed from `lib/attachment/actions.ts` — that name collided with the standard per-entity
   actions file the `attachment` entity itself gets when directly generated, and whichever generation
   step ran later used to silently clobber the other's exports (`code_generator/generate.py`, the
   "Attachment bridge actions" section). A third file, `lib/attachment/direct_actions.ts`, is emitted
-  only when some entity declares an `x-relationship: {target: attachment, type: direct}` FK.
+  only when some entity declares an `x-relationship: {target: attachment, type: direct}` FK, together with
+  `app/api/attachment/direct/route.ts`, which runs the same function over REST for mobile access token and API
+  key callers.
+  `setAttachmentsForBridge` authorizes the owner it is given, then requires every `items[].id` to be one of
+  that attachable's own rows of the requested type. Any other id rejects the whole call with
+  `AppError('NOT_FOUND')` before a write, and the update also filters on `attachable_id`, so one record's
+  editor can never rewrite an attachment of another record, in the same or another organization.
 
 ### cleanup.py
 
@@ -148,10 +158,10 @@ opt-in extension points, not just one — `form_validation_stub.ts.jinja2` (`com
 per-lifecycle hook stubs (`service_after_create_stub.ts.jinja2`, `..._after_update_stub`,
 `..._after_delete_stub`, `..._after_submit_stub`, `..._after_withdraw_stub`, `..._after_reject_stub`,
 `..._before_approve_stub`, `..._before_reject_stub`, `..._before_withdraw_stub`), the guard stubs
-(`autocomplete_filter_stub.ts.jinja2`, `list_filter_stub.ts.jinja2`, `invalidate_handler_stub.ts.jinja2`,
+(`autocomplete_filter_stub.ts.jinja2` — see [x-autocomplete-context.md](x-autocomplete-context.md), `list_filter_stub.ts.jinja2`, `invalidate_handler_stub.ts.jinja2`,
 `virtual_resolver.ts.jinja2`, `service_validation_delete_stub.ts.jinja2`), the scheduled-job stubs
 (`service_scheduled_handler_stub.ts.jinja2`, `..._scheduled_bulk_handler_stub`), and the Stripe
-integration stubs (`stripe_lib_stub.ts.jinja2`, `stripe_checkout_route_stub.ts.jinja2`,
+integration stubs (`stripe_lib_stub.ts.jinja2`,
 `stripe_webhook_route_stub.ts.jinja2`). This list drifts as new extension points are added — the
 living source of truth is `grep -n "_write_stub(" code_generator/generate.py`.
 

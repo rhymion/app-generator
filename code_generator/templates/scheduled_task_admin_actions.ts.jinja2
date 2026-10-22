@@ -1,0 +1,38 @@
+'use server';
+
+// GENERATED — do not edit (regenerated on every `generate-code` run).
+// Server Actions behind the scheduled-task admin page. Each one is limited to
+// holders of the ScheduledTaskRunner role (lib/scheduled-tasks/access.ts) and
+// delegates to lib/scheduled-tasks/admin.ts, which audits it and runs it
+// through the same guard as a scheduled run.
+import { revalidatePath } from 'next/cache';
+import { getScheduledTaskOperatorId } from '@/lib/scheduled-tasks/access';
+import { performOperatorAction, type OperatorActionKind, type OperatorActionResult } from '@/lib/scheduled-tasks/admin';
+
+export type ScheduledTaskActionResult = OperatorActionResult | { ok: false; code: 'FORBIDDEN' };
+
+async function run(
+  kind: OperatorActionKind,
+  taskId: string,
+  businessDate: string,
+  reason?: string,
+): Promise<ScheduledTaskActionResult> {
+  const operatorId = await getScheduledTaskOperatorId();
+  if (!operatorId) return { ok: false, code: 'FORBIDDEN' };
+  const result = await performOperatorAction(operatorId, kind, taskId, businessDate, reason);
+  // A refused input never reached the database, so the page needs no refresh.
+  if (result.ok || result.code !== 'BAD_INPUT') revalidatePath('/[locale]/scheduled_task_run', 'page');
+  return result;
+}
+
+export async function rerunScheduledTask(taskId: string, businessDate: string): Promise<ScheduledTaskActionResult> {
+  return run('rerun', taskId, businessDate);
+}
+
+export async function resolveScheduledTaskRun(taskId: string, businessDate: string, reason: string): Promise<ScheduledTaskActionResult> {
+  return run('resolve', taskId, businessDate, reason);
+}
+
+export async function skipScheduledTask(taskId: string, businessDate: string, reason: string): Promise<ScheduledTaskActionResult> {
+  return run('skip', taskId, businessDate, reason);
+}

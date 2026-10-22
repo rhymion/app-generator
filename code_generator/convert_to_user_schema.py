@@ -16,8 +16,8 @@ For every entity, Category A (Sec.3) content -- the raw entity's
 `build_user_schema.py` re-derives from Prisma). Only Category B fields
 that diverge from the Prisma-derived default (Sec.7 DP-R4-1: a
 `labelField` other than `name`) and Category C/D annotations are kept,
-under the same `fields:` / entity-level shape `build_user_schema.py`
-expects.
+under the same unified `properties:` / entity-level shape
+`build_user_schema.py` expects.
 """
 
 from __future__ import annotations
@@ -40,23 +40,33 @@ _VIEW_LEVEL_CONFIG_KEYS = (
     "x-relationships",
     "x-search",
     "x-custom-components",
+    "x-readonly-fields",
+    "x-filter-values",
 )
 
 # Category C entity-level keys that legacy format placed on the RAW entity
 # and Stage 3 moves onto the paired view / standalone entry (Sec.7 R4).
 _ENTITY_LEVEL_DATA_KEYS = (
     "x-import-key",
+    "x-bridge",
     "x-display",
-    "x-readonly-fields",
     "x-internal",
     "x-approval",
     "x-approval-lines",
+    "x-version-of",
     "x-write-locked-values",
     "x-ledger-source",
     "x-splittable",
     "x-reservation",
     "x-gdpr-mode",
+    "x-self-only",
+    "x-payment",
+    "x-nav",
+    "x-scheduled-task",
+    "x-exclusive-parents",
 )
+
+_VIEW_OF_KEY = "x-view-of"
 
 
 def _make_yaml() -> YAML:
@@ -161,17 +171,17 @@ def _convert_paired(view_entry: dict, raw_entity: dict, prisma_model) -> dict:
         if key in raw_entity:
             new_entry[key] = raw_entity[key]
 
-    fields = _convert_raw_properties_to_fields(raw_entity, prisma_model)
-    if fields:
-        new_entry["fields"] = fields
+    # Columns first, then relation embeds, in one `properties:` map.
+    properties = _convert_raw_properties_to_fields(raw_entity, prisma_model)
 
     allof = view_entry.get("allOf") or []
     if len(allof) > 1:
         second = allof[1] or {}
         if "required" in second:
             new_entry["required"] = second["required"]
-        if "properties" in second:
-            new_entry["properties"] = second["properties"]
+        properties.update(second.get("properties") or {})
+    if properties:
+        new_entry["properties"] = properties
     return new_entry
 
 
@@ -181,9 +191,30 @@ def _convert_standalone(entry: dict, prisma_model) -> dict:
         if key in ("type", "required", "properties"):
             continue
         new_entry[key] = value
-    fields = _convert_raw_properties_to_fields(entry, prisma_model)
-    if fields:
-        new_entry["fields"] = fields
+    properties = _convert_raw_properties_to_fields(entry, prisma_model)
+    if properties:
+        new_entry["properties"] = properties
+    return new_entry
+
+
+def _convert_view_of(entry: dict) -> dict:
+    """Rewrite a legacy `allOf` proxy view as `x-view-of: <model>`, keeping
+    every other key where it was and lifting the second branch's `required` /
+    `properties` to the entity level.
+    """
+    allof = entry["allOf"]
+    ref = (allof[0] or {}).get("$ref", "")
+    model = ref.rsplit("/", 1)[-1]
+    second = allof[1] if len(allof) > 1 else {}
+    new_entry: dict = {}
+    for key, value in entry.items():
+        if key == "allOf":
+            new_entry[_VIEW_OF_KEY] = model
+            for k2 in ("required", "properties"):
+                if k2 in (second or {}):
+                    new_entry[k2] = second[k2]
+        else:
+            new_entry[key] = value
     return new_entry
 
 
@@ -214,7 +245,8 @@ def convert_to_user_schema(legacy_data: dict, prisma_models: dict) -> dict:
             prisma_model = prisma_models.get(key)
             new_definitions[key] = _convert_standalone(entry, prisma_model)
         else:
-            new_definitions[key] = entry  # pass-through (e.g. `setting`)
+            # Another view of a model (e.g. `setting`).
+            new_definitions[key] = _convert_view_of(entry) if "allOf" in entry else entry
 
     out: dict = {}
     for top_key, top_value in legacy_data.items():

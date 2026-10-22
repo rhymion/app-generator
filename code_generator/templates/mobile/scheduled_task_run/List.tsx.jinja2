@@ -1,0 +1,214 @@
+import { useCallback, useEffect, useState } from 'react';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useMessages } from '@/lib/messages';
+import {
+  fetchOverview,
+  isPermissionDenied,
+  runOperatorAction,
+  type ActionResult,
+  type OperatorActionKind,
+  type Overview,
+  type TaskRunRow,
+} from '@/lib/scheduled_task_run/mobile_client';
+
+const STATUS_KEY: Record<TaskRunRow['status'], string> = {
+  running: 'statusRunning',
+  succeeded: 'statusSucceeded',
+  failed: 'statusFailed',
+  not_due: 'statusNotDue',
+  stuck: 'statusStuck',
+  blocked: 'statusBlocked',
+  pending: 'statusPending',
+};
+
+const RESULT_KEY: Record<string, string> = {
+  UNKNOWN_TASK: 'resultUnknownTask',
+  NOT_ALLOWED: 'resultNotAllowed',
+  REASON_REQUIRED: 'resultReasonRequired',
+  BLOCKED: 'resultBlocked',
+  RUNNING: 'resultRunning',
+  FAILED: 'resultFailed',
+  NO_ACTOR: 'resultNoActor',
+  FORBIDDEN: 'resultForbidden',
+  BAD_INPUT: 'resultBadInput',
+};
+
+const ACTIONS: OperatorActionKind[] = ['rerun', 'resolve', 'skip'];
+
+/** The day before or after a YYYY-MM-DD date. */
+function shiftDate(date: string, days: number): string {
+  const shifted = new Date(`${date}T00:00:00.000Z`);
+  shifted.setUTCDate(shifted.getUTCDate() + days);
+  return shifted.toISOString().slice(0, 10);
+}
+
+/**
+ * Scheduled task administration: each task's status for a business date, why it did not
+ * run, and the operator actions the server reports as open (GET /api/scheduled-task-runs).
+ * Actions are POSTed and the server's answer, including a 403 for a caller without the
+ * operator role, is what the screen shows.
+ */
+export function ScheduledTaskRunList() {
+  const { t } = useMessages();
+  const [date, setDate] = useState<string | undefined>(undefined);
+  const [overview, setOverview] = useState<Overview | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [failure, setFailure] = useState<'denied' | 'unknown' | null>(null);
+  const [reasons, setReasons] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(null);
+
+  const load = useCallback(async (target?: string) => {
+    setLoading(true);
+    try {
+      const result = await fetchOverview(target);
+      setOverview(result);
+      setDate(result.business_date);
+      setFailure(null);
+    } catch (err) {
+      setFailure(isPermissionDenied(err) ? 'denied' : 'unknown');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const label = (key: string, values?: Record<string, string | number>) => t(`ScheduledTaskRun.${key}`, values);
+
+  const resultText = (result: ActionResult): string => {
+    if (result.ok) return label('resultDone');
+    const key = RESULT_KEY[result.code];
+    if (!key) return t('Errors.unknown');
+    return label(key, { tasks: result.detail ?? '', detail: result.detail ?? '' });
+  };
+
+  const act = async (row: TaskRunRow, kind: OperatorActionKind) => {
+    const rowKey = `${row.task_id}|${row.business_date}`;
+    setBusy(true);
+    try {
+      const result = await runOperatorAction(row.task_id, kind, row.business_date, reasons[rowKey]);
+      setNotice({ ok: result.ok, text: resultText(result) });
+      await load(date);
+    } catch {
+      setNotice({ ok: false, text: t('Errors.unknown') });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const whyText = (row: TaskRunRow): string => {
+    switch (row.status) {
+      case 'blocked': return label('whyBlocked', { tasks: row.blocked_by.join(', ') });
+      case 'running': return label('whyRunning');
+      case 'stuck': return label('whyStuck');
+      case 'not_due': return label('whyNotDue');
+      case 'pending': return label('whyPending');
+      default: return '';
+    }
+  };
+
+  const renderRow = (row: TaskRunRow, showDate: boolean, prefix: string) => {
+    const rowKey = `${row.task_id}|${row.business_date}`;
+    const open = ACTIONS.filter((kind) => row.actions[kind]);
+    return (
+      <View key={rowKey} style={styles.row} testID={`${prefix}-row-${row.task_id}`}>
+        <Text style={styles.rowTitle} testID={`${prefix}-task-${row.task_id}`}>
+          {showDate ? `${row.task_id} (${row.business_date})` : row.task_id}
+        </Text>
+        <Text testID={`${prefix}-status-${row.task_id}`}>{label(STATUS_KEY[row.status])}</Text>
+        {row.interval ? <Text style={styles.detail}>{row.interval}</Text> : null}
+        {row.started_at ? <Text style={styles.detail}>{`${label('columnStarted')}: ${row.started_at}`}</Text> : null}
+        {row.finished_at ? <Text style={styles.detail}>{`${label('columnFinished')}: ${row.finished_at}`}</Text> : null}
+        {row.message ? <Text style={styles.detail} testID={`${prefix}-message-${row.task_id}`}>{row.message}</Text> : null}
+        {whyText(row) ? <Text style={styles.detail} testID={`${prefix}-why-${row.task_id}`}>{whyText(row)}</Text> : null}
+        {open.length > 0 ? (
+          <View style={styles.actions}>
+            {row.actions.resolve || row.actions.skip ? (
+              <TextInput
+                style={styles.input}
+                value={reasons[rowKey] ?? ''}
+                onChangeText={(text) => setReasons((prev) => ({ ...prev, [rowKey]: text }))}
+                placeholder={label('reasonPlaceholder')}
+                accessibilityLabel={label('reasonLabel')}
+                testID={`${prefix}-reason-${row.task_id}`}
+              />
+            ) : null}
+            <View style={styles.buttons}>
+              {open.map((kind) => (
+                <Pressable
+                  key={kind}
+                  style={busy ? styles.buttonDisabled : styles.button}
+                  disabled={busy}
+                  onPress={() => void act(row, kind)}
+                  testID={`${prefix}-${kind}-${row.task_id}`}
+                >
+                  <Text style={styles.buttonText}>{label(kind)}</Text>
+                </Pressable>
+              ))}
+            </View>
+          </View>
+        ) : null}
+      </View>
+    );
+  };
+
+  return (
+    <ScrollView style={styles.container} testID="list-scheduled_task_run">
+      <Text style={styles.title} testID="list-title">{label('title')}</Text>
+      {loading && !overview ? <ActivityIndicator testID="list-loading" /> : null}
+      {failure ? (
+        <Text style={styles.error} testID="list-error">
+          {failure === 'denied' ? label('forbidden') : t('Errors.unknown')}
+        </Text>
+      ) : null}
+      {notice ? (
+        <Text style={notice.ok ? styles.success : styles.error} testID="scheduled-task-notice">{notice.text}</Text>
+      ) : null}
+      {overview && date ? (
+        <>
+          <View style={styles.dateBar}>
+            <Pressable disabled={loading} onPress={() => void load(shiftDate(date, -1))} testID="date-prev">
+              <Text style={styles.link}>{t('Common.previousPage')}</Text>
+            </Pressable>
+            <Text testID="date-current">{date}</Text>
+            <Pressable disabled={loading} onPress={() => void load(shiftDate(date, 1))} testID="date-next">
+              <Text style={styles.link}>{t('Common.nextPage')}</Text>
+            </Pressable>
+          </View>
+          <Text style={styles.detail} testID="settings-note">
+            {label('settingsNote', { minutes: overview.settings.stuck_after_minutes })}
+          </Text>
+          {overview.rows.map((row) => renderRow(row, false, 'task'))}
+          <Text style={styles.subtitle}>{label('attentionTitle')}</Text>
+          {overview.attention.length === 0 ? (
+            <Text style={styles.detail} testID="attention-empty">{label('attentionEmpty')}</Text>
+          ) : (
+            overview.attention.map((row) => renderRow(row, true, 'attention'))
+          )}
+        </>
+      ) : null}
+    </ScrollView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, padding: 16 },
+  title: { fontSize: 20, fontWeight: '600', marginBottom: 12 },
+  subtitle: { fontSize: 16, fontWeight: '600', marginTop: 16, marginBottom: 8 },
+  dateBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
+  row: { paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#e5e7eb', gap: 2 },
+  rowTitle: { fontSize: 16, fontWeight: '500' },
+  detail: { fontSize: 13, color: '#6b7280' },
+  actions: { marginTop: 6, gap: 6 },
+  input: { borderWidth: 1, borderColor: '#d1d5db', borderRadius: 6, padding: 8 },
+  buttons: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
+  button: { paddingVertical: 8, paddingHorizontal: 12, borderRadius: 6, borderWidth: 1, borderColor: '#2563eb' },
+  buttonDisabled: { paddingVertical: 8, paddingHorizontal: 12, borderRadius: 6, borderWidth: 1, borderColor: '#9ca3af' },
+  buttonText: { color: '#2563eb' },
+  link: { color: '#2563eb' },
+  error: { color: '#b91c1c', marginBottom: 8 },
+  success: { color: '#15803d', marginBottom: 8 },
+});

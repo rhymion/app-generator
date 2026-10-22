@@ -9,12 +9,12 @@ description: |
   discussion) for anything else, including `Json`. If the entity's
   `x-generate` block is entirely `false` (no list/view/new/edit/delete/api/test
   generated), the field does not need to be declared in `json_schema.yaml`'s
-  `fields:` at all — add it to `prisma/schema.prisma` only, matching the
+  `properties:` at all — add it to `prisma/schema.prisma` only, matching the
   existing precedent of `approvable.rejection_reason`. Trigger when designing
   a new entity/field backed by a Prisma `Json` column, when `generate-code` or
   `prisma migrate dev` fails with `SchemaDivergenceError` mentioning an
   unsupported Prisma scalar type, or when reviewing a design doc's YAML
-  snippet that declares a Json-typed field under `fields:`.
+  snippet that declares a Json-typed field under `properties:`.
   Do NOT use for: SchemaDivergenceError raised for reasons other than an
   unsupported Prisma scalar type (e.g. a field-level fact mismatch between
   json_schema.yaml and schema.prisma — see `build_user_schema.py`'s R5 check).
@@ -47,14 +47,14 @@ _SCALAR_JSON_TYPE = {
 
 If the entity carrying the `Json` field has `x-generate` entirely `false`
 (no `list`/`view`/`new`/`edit`/`delete`/`invalidate`/`api`/`test`), nothing in
-the generator actually needs that field declared under `fields:` in
+the generator actually needs that field declared under `properties:` in
 `json_schema.yaml` — the generator produces no code that reads it. In that
 case:
 
 1. Add the column to `prisma/schema.prisma` directly (e.g.
    `payload Json`), with a comment explaining why it's absent from
    `json_schema.yaml`.
-2. Do **not** add it to `json_schema.yaml`'s `fields:` block.
+2. Do **not** add it to `json_schema.yaml`'s `properties:` block.
 3. Run `prisma migrate dev` to generate the migration — this does not go
    through `schema_deriver.py`, so it is unaffected by the missing
    derivation.
@@ -62,7 +62,7 @@ case:
    `SchemaDivergenceError` is never triggered for it.
 
 This exact pattern already exists in the schema: `approvable.rejection_reason`
-is a real Prisma column absent from `json_schema.yaml`'s `fields:` for the
+is a real Prisma column absent from `json_schema.yaml`'s `properties:` for the
 same reason. When declaring the workaround, reference this existing
 precedent so future readers know it's an established pattern, not an
 oversight.
@@ -84,7 +84,7 @@ notification:
   # String/Boolean/Int/DateTime scalars (schema_deriver.py _SCALAR_JSON_TYPE),
   # so it is intentionally omitted here, same as approvable.rejection_reason
   # is omitted above despite being a real Prisma column.
-  fields:
+  properties:
     user_id:
       x-relationship: {}
 ```
@@ -107,7 +107,7 @@ all `false`).
 
 ## Do NOT
 
-- Do not declare a `Json`-typed field under `json_schema.yaml`'s `fields:`
+- Do not declare a `Json`-typed field under `json_schema.yaml`'s `properties:`
   expecting `schema_deriver.py` to handle it — it will raise
   `SchemaDivergenceError` for any entity where that field participates in
   derivation.

@@ -1,7 +1,9 @@
 $schema: "http://json-schema.org/draft-07/schema#"
-format-version: 4.0
+format-version: 5.0
 
 # x-cloud: GCP Cloud Run opt-in (uncomment to use)
+# region should match the Neon project's region (and scripts/gcp-env.sh's
+# REGION) — see docs/knowledge/gcp-region-alignment.md. Not auto-checked.
 # x-cloud:
 #   enabled: true
 #   provider: gcp
@@ -11,6 +13,8 @@ format-version: 4.0
 x-generator:
   search:
     default_scope: all
+  audit-log-storage:
+    enabled: true
 
 # PII and Privacy Annotations
 x-pii:
@@ -40,6 +44,16 @@ x-mention:
     The generator will include mention-parser utilities for this field.
     On render: @[user_id:xxx] is resolved to user.name (or '[deleted]' after anonymization).
     On save: @username patterns are converted to @[user_id:xxx] format.
+
+x-trigram-filter:
+  type: boolean
+  description: |
+    Declared on a text column under an entity's `fields:`. The list panel's search box
+    (case-insensitive substring match) matches the entity's search columns by default: the
+    trigram index columns of an entity that is a cross-entity search target. `true` adds the
+    column (also on an entity that is not a search target) and gives it a COALESCE trigram GIN
+    index; `false` removes it from the search box. An entity that is not a search target and
+    declares nothing has no search box. A column-level annotation: the entity itself does not take it.
 
 x-gdpr-mode:
   type: string
@@ -73,17 +87,20 @@ x-payment:
   default: false
   description: |
     Opt-in Stripe payment integration. When at least one entity in the
-    schema declares `x-payment: true`, the generator emits three write-once
+    schema declares `x-payment: true`, the generator emits four write-once
     stub files (same convention as lib/<parent>/invalidate_handler.ts --
     written only if the file does not already exist, so hand-written
     implementations survive regeneration):
       - lib/stripe.ts                     -- Stripe SDK init, fail-closed on
                                               a missing STRIPE_SECRET_KEY
-      - app/api/payment/checkout/route.ts -- Checkout Session creation stub
+      - app/[locale]/payment/success/page.tsx and
+        app/[locale]/payment/cancel/page.tsx -- where Checkout sends the
+                                              buyer back
       - app/api/webhooks/stripe/route.ts  -- Webhook receiver stub
                                               (req.text() -> constructEvent)
     The generator does NOT generate a Plan/Product/Purchase-style entity, an
-    authz/entitlement layer, or any payment UI -- consumers model their own
+    authz/entitlement layer, or any payment UI beyond those two
+    return pages -- consumers model their own
     payment-related entities as ordinary schema entities and wire them into
     the stub routes. Scope is one-time purchases (Checkout Session
     mode: payment); subscription lifecycle handling is left to the consumer
@@ -92,8 +109,20 @@ x-payment:
     lib/stripe.ts and webhook route both throw at import time if their
     required key is unset (fail-closed; never a silent pass-through).
 
+# Sidebar navigation: the built-in administration entities share one group,
+# declared through the same x-nav / x-nav-groups mechanism as business
+# entities. A consumer schema can override the group or ordering by
+# redeclaring x-nav on an entity (or x-nav-groups.administration).
+x-nav-groups:
+  administration:
+    order: 900
+    icon: Settings
+
 definitions:
   user:
+    x-nav:
+      parent: administration
+      order: 10
     x-generate:
       list: true
       view: true
@@ -126,7 +155,7 @@ definitions:
         - name:
             primary: true
             width: 150
-    fields:
+    properties:
       name:
         x-pii: direct
       email:
@@ -153,15 +182,14 @@ definitions:
           target:
             - upsert
 
-    required:
-      - roles
-    properties:
       roles:
         type: array
         x-outputType: list
         items:
           $ref: "#/definitions/role"
 
+    required:
+      - roles
   setting:
     x-generate:
       list: false
@@ -197,19 +225,20 @@ definitions:
     # visible).
     x-self-only:
       admin_bypass: true
-    allOf:
-      - $ref: "#/definitions/user"
-      - type: object
-        required:
-          - roles
-        properties:
-          roles:
-            type: array
-            x-outputType: list
-            items:
-              $ref: "#/definitions/role"
+    x-view-of: user
+    required:
+      - roles
+    properties:
+      roles:
+        type: array
+        x-outputType: list
+        items:
+          $ref: "#/definitions/role"
 
   role:
+    x-nav:
+      parent: administration
+      order: 20
     x-generate:
       list: true
       view: true
@@ -228,19 +257,28 @@ definitions:
         type: many-to-many
         target: user
     x-import-key: [name]
-    fields:
+    x-display:
+      table:
+        - name:
+            primary: true
+            width: 200
+        - description:
+            width: 400
+    properties:
       name: {}
       description: {}
-    required:
-      - users
-    properties:
       users:
         type: array
         x-outputType: list
         items:
           $ref: "#/definitions/user"
 
+    required:
+      - users
   organization:
+    x-nav:
+      parent: administration
+      order: 40
     x-generate:
       list: true
       view: true
@@ -258,22 +296,31 @@ definitions:
     x-search:
       org_id_field: id
     x-import-key: [name]
-    fields:
+    x-display:
+      table:
+        - name:
+            primary: true
+            width: 200
+        - description:
+            width: 400
+    properties:
       name: {}
       description:
         x-ui:
           width: 8
 
-    required:
-      - users
-    properties:
       users:
         type: array
         x-outputType: list
         items:
           $ref: "#/definitions/user"
 
+    required:
+      - users
   permission:
+    x-nav:
+      parent: administration
+      order: 30
     x-generate:
       list: true
       view: true
@@ -291,10 +338,11 @@ definitions:
     x-display:
       table:
         - name:
+            primary: true
             width: 200
         - role:
             width: 200
-    fields:
+    properties:
       name:
         x-entity-select: true
       create: {}
@@ -303,11 +351,13 @@ definitions:
       delete: {}
       import:
         default: false
-    properties:
       role:
         $ref: "#/definitions/role"
 
   approval_flow:
+    x-nav:
+      parent: administration
+      order: 50
     x-generate:
       list: true
       view: true
@@ -337,13 +387,9 @@ definitions:
             width: 150
         - approver_role:
             width: 150
-    fields:
+    properties:
       entity_name:
         x-entity-select: true
-    required:
-      - approver_role
-      - preceding_transitions
-    properties:
       requestor_role:
         $ref: "#/definitions/role"
       approver_role:
@@ -359,6 +405,8 @@ definitions:
         items:
           $ref: "#/definitions/approval_flow"
 
+    required:
+      - approver_role
   approval_request:
     x-display:
       table:
@@ -366,7 +414,7 @@ definitions:
             width: 200
         - status:
             width: 100
-    fields:
+    properties:
       approvable_id:
         x-relationship:
           labelField: id
@@ -389,7 +437,7 @@ definitions:
       round_id: {}
 
   comment:
-    fields:
+    properties:
       message:
         x-mention: true
       commentable_id: {}
@@ -398,7 +446,7 @@ definitions:
       page: false
       embed: false
       api: custom
-    fields:
+    properties:
       type:
         enum:
           - like
@@ -414,7 +462,7 @@ definitions:
           constantParent: true
 
   attachment:
-    fields:
+    properties:
       type:
         enum:
           - image
@@ -429,11 +477,12 @@ definitions:
         format: uri
       attachable_id: {}
   dashboard_widget:
-    fields:
+    properties:
       dashboard_id:
         x-relationship: {}
       name: {}
       entity_name: {}
+      group_by_field: {}
       chart_type:
         enum:
           - pie
@@ -446,7 +495,6 @@ definitions:
           - grouped
           - stacked
           - standardized
-      series_field: {}
       group_by_bucket:
         enum:
           - day
@@ -454,12 +502,75 @@ definitions:
           - month
           - quarter
           - year
-      group_by_field: {}
+      # Native enum `Timezone` shared with app_setting.timezone (prisma/schema.prisma). Bucket boundaries of a
+      # date-time group-by field are computed in this zone; the IANA spelling comes only from lib/_timezone.ts.
+      # Default utc keeps the former always-UTC behavior.
+      timezone:
+        enum:
+          - pacific_pago_pago
+          - pacific_honolulu
+          - pacific_marquesas
+          - america_anchorage
+          - america_los_angeles
+          - america_denver
+          - america_chicago
+          - america_mexico_city
+          - america_new_york
+          - america_toronto
+          - america_bogota
+          - america_caracas
+          - america_st_johns
+          - america_sao_paulo
+          - america_nuuk
+          - atlantic_azores
+          - utc
+          - europe_london
+          - europe_madrid
+          - europe_paris
+          - europe_berlin
+          - europe_rome
+          - africa_lagos
+          - africa_cairo
+          - africa_johannesburg
+          - asia_jerusalem
+          - europe_istanbul
+          - europe_moscow
+          - asia_tehran
+          - asia_dubai
+          - asia_kabul
+          - asia_karachi
+          - asia_kolkata
+          - asia_kathmandu
+          - asia_dhaka
+          - asia_yangon
+          - asia_bangkok
+          - asia_jakarta
+          - asia_shanghai
+          - asia_hong_kong
+          - asia_singapore
+          - asia_manila
+          - australia_perth
+          - australia_eucla
+          - asia_seoul
+          - asia_tokyo
+          - australia_adelaide
+          - australia_sydney
+          - australia_lord_howe
+          - pacific_noumea
+          - pacific_auckland
+          - pacific_chatham
+          - pacific_apia
+          - pacific_kiritimati
+        default: utc
+      series_field: {}
       filter_field: {}
       filter_value: {}
       order:
         default: 0
   dashboard:
+    x-nav:
+      parent: administration
+      order: 60
     x-generate:
       list: true
       view: true
@@ -484,17 +595,24 @@ definitions:
         - name:
             primary: true
             width: 200
-    fields:
-      name: {}
-    required:
-      - widgets
     properties:
+      name: {}
       widgets:
         type: array
         items:
           $ref: "#/definitions/dashboard_widget"
+        # A hand-written editor (components/dashboard/widgets.tsx) replaces the generated grid
+        # on the edit form; it lists only the entities opted in with x-display.dashboard.
+        x-custom-component:
+          target:
+            - upsert
 
+    required:
+      - widgets
   app_setting:
+    x-nav:
+      parent: administration
+      order: 70
     # Business-date container (docs/knowledge/appendix/business-date-container.md):
     # organization_id nullable — a NULL row is the tenant-wide default, a
     # non-NULL row is a per-organization override. Both `organization_id`
@@ -513,21 +631,85 @@ definitions:
       search: false
     x-display:
       table:
-        - business_date:
+        # business_date is empty on an unpinned row, so it cannot be the (required) list primary field.
+        - timezone:
             primary: true
+            width: 150
+        - business_date:
             width: 150
         - organization:
             width: 200
         - is_pinned:
             width: 100
-        - timezone:
-            width: 150
-    fields:
+    properties:
       business_date: {}
       is_pinned:
         default: false
+      # Native enum `Timezone` (prisma/schema.prisma). The members must equal the Prisma enum and
+      # code_generator/helpers/timezones.py (pinned by tests/test_timezone_enum.py). The IANA spelling is
+      # in the generated lib/_timezone.ts, never here.
       timezone:
-        default: "UTC"
+        enum:
+          - pacific_pago_pago
+          - pacific_honolulu
+          - pacific_marquesas
+          - america_anchorage
+          - america_los_angeles
+          - america_denver
+          - america_chicago
+          - america_mexico_city
+          - america_new_york
+          - america_toronto
+          - america_bogota
+          - america_caracas
+          - america_st_johns
+          - america_sao_paulo
+          - america_nuuk
+          - atlantic_azores
+          - utc
+          - europe_london
+          - europe_madrid
+          - europe_paris
+          - europe_berlin
+          - europe_rome
+          - africa_lagos
+          - africa_cairo
+          - africa_johannesburg
+          - asia_jerusalem
+          - europe_istanbul
+          - europe_moscow
+          - asia_tehran
+          - asia_dubai
+          - asia_kabul
+          - asia_karachi
+          - asia_kolkata
+          - asia_kathmandu
+          - asia_dhaka
+          - asia_yangon
+          - asia_bangkok
+          - asia_jakarta
+          - asia_shanghai
+          - asia_hong_kong
+          - asia_singapore
+          - asia_manila
+          - australia_perth
+          - australia_eucla
+          - asia_seoul
+          - asia_tokyo
+          - australia_adelaide
+          - australia_sydney
+          - australia_lord_howe
+          - pacific_noumea
+          - pacific_auckland
+          - pacific_chatham
+          - pacific_apia
+          - pacific_kiritimati
+        default: utc
+      # Scheduled-task operations: NULL means the built-in default. Read at
+      # request time by the scheduled-task admin page, so changing them needs
+      # no generate-code run.
+      scheduled_task_stuck_after_minutes: {}
+      scheduled_task_recheck_minutes: {}
       # issue #681: organization_id carries prisma/schema.prisma's
       # `@@unique([organization_id])` -- at most one app_setting row per
       # organization. Declaring the FK as a one-to-one selector (matching
@@ -542,7 +724,6 @@ definitions:
         x-relationship:
           type: one-to-one
           target: organization
-    properties:
       organization:
         $ref: "#/definitions/organization"
 

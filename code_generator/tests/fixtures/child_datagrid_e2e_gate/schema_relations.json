@@ -1,0 +1,32 @@
+{
+  "user": [
+    "created_parent1s parent1[] @relation(\"Parent1Creator\")",
+    "updated_parent1s parent1[] @relation(\"Parent1Updater\")",
+    "created_parent_onlys parent_only[] @relation(\"ParentOnlyCreator\")",
+    "updated_parent_onlys parent_only[] @relation(\"ParentOnlyUpdater\")",
+    "created_p1c1s parent1_child1[] @relation(\"P1C1Creator\")",
+    "updated_p1c1s parent1_child1[] @relation(\"P1C1Updater\")",
+    "created_p1c2s parent1_child2[] @relation(\"P1C2Creator\")",
+    "updated_p1c2s parent1_child2[] @relation(\"P1C2Updater\")",
+    "created_excl_alphas excl_alpha[] @relation(\"ExclAlphaCreator\")",
+    "updated_excl_alphas excl_alpha[] @relation(\"ExclAlphaUpdater\")",
+    "created_excl_betas excl_beta[] @relation(\"ExclBetaCreator\")",
+    "updated_excl_betas excl_beta[] @relation(\"ExclBetaUpdater\")",
+    "created_excl_links excl_link[] @relation(\"ExclLinkCreator\")",
+    "updated_excl_links excl_link[] @relation(\"ExclLinkUpdater\")",
+    "created_excl_owneds excl_owned[] @relation(\"ExclOwnedCreator\")",
+    "updated_excl_owneds excl_owned[] @relation(\"ExclOwnedUpdater\")",
+    "created_hook_units hook_unit[] @relation(\"HookUnitCreator\")",
+    "updated_hook_units hook_unit[] @relation(\"HookUnitUpdater\")",
+    "created_hook_slots hook_slot[] @relation(\"HookSlotCreator\")",
+    "updated_hook_slots hook_slot[] @relation(\"HookSlotUpdater\")",
+    "created_inline_topics inline_topic[] @relation(\"InlineTopicCreator\")",
+    "updated_inline_topics inline_topic[] @relation(\"InlineTopicUpdater\")",
+    "created_inline_notes inline_note[] @relation(\"InlineNoteCreator\")",
+    "updated_inline_notes inline_note[] @relation(\"InlineNoteUpdater\")"
+  ],
+  "organization": [
+    "parent1s parent1[]",
+    "inline_topics inline_topic[]"
+  ]
+}

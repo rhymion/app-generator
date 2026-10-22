@@ -93,7 +93,41 @@ def test_vercel_json_crons_include_both(tmp_path):
     import json
     data = json.loads((out / 'vercel.json').read_text())
     paths = {c['path'] for c in data['crons']}
+    # nightly_rollup declares no interval, so it gets no cron entry (cmd_1208).
     assert paths == {
         '/api/scheduled-tasks/demo_reset',
         '/api/scheduled-tasks/widget_timeout',
     }
+
+
+def test_dependencies_artifact_carries_graph_intervals_and_declaration_order(tmp_path):
+    out = _run_pipeline(tmp_path)
+    deps = (out / 'lib' / 'scheduled-tasks' / 'dependencies.ts').read_text()
+    assert "'widget_timeout': ['demo_reset']," in deps
+    assert "'nightly_rollup': ['widget_timeout']," in deps
+    assert "'demo_reset': []," in deps
+    assert "'nightly_rollup': null," in deps
+    assert "'demo_reset': '0 3 * * *'," in deps
+    # Entity-level tasks first, then bulk, each in declaration order.
+    first = deps.index("'widget_timeout': [")
+    assert first < deps.index("'demo_reset': []") < deps.index("'nightly_rollup': [")
+
+
+def test_completion_record_model_injected_once_when_tasks_declared(tmp_path):
+    out = _run_pipeline(tmp_path)
+    prisma = (out / 'prisma' / 'schema.prisma').read_text()
+    assert prisma.count('model scheduled_task_run {') == 1
+    assert '@@unique([task_id, business_date])' in prisma
+    assert 'enum ScheduledTaskRunStatus {' in prisma
+    # Second generate-code run must not append a duplicate.
+    generate(str(tmp_path / 'generated_json_schema.yaml'), str(tmp_path))
+    prisma = (out / 'prisma' / 'schema.prisma').read_text()
+    assert prisma.count('model scheduled_task_run {') == 1
+
+
+def test_run_guard_is_the_real_guard_and_route_uses_it(tmp_path):
+    out = _run_pipeline(tmp_path)
+    guard = (out / 'lib' / 'scheduled-tasks' / 'run-guard.ts').read_text()
+    assert 'prisma.scheduled_task_run' in guard
+    route = (out / 'app' / 'api' / 'scheduled-tasks' / '[task]' / 'route.ts').read_text()
+    assert 'runScheduledTask(task, systemActor.id)' in route

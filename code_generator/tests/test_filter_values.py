@@ -475,6 +475,7 @@ class TestSpecContextOptionalFieldExcludesFilterValues:
                         "name": {"type": "string"},
                         "team": {"type": "string"},
                     },
+                    "x-display": {"table": [{"name": {"primary": True}}]},
                 },
                 "item_detail": {
                     "x-generate": {

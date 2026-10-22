@@ -13,24 +13,33 @@ from helpers.naming import (
 from helpers.type_mapping import get_ts_type
 from helpers.schema_helpers import (
     filter_fields, get_parent_relationships, get_detail_relation_name,
-    is_optional_fk_to_parent, get_parent_fk_props, get_one_to_one_rels,
+    is_optional_fk_to_parent, get_parent_fk_props, resolve_parent_fk_props, get_one_to_one_rels,
     get_detail_ref_rels, get_flatten_rels, get_approval_lines_props,
     derive_text_fields, derive_searchable_relation_fields,
-    derive_cross_entity_searchable_fields,
+    derive_cross_entity_searchable_fields, derive_searchable_integer_fields,
     get_internal_bridge_fk_prop_names,
-    get_entity_properties, get_self_only_flags,
+    get_entity_properties, get_self_only_flags, get_inline_create_targets,
     derive_write_locked_values,
     derive_write_locked_values_for_view,
     get_direct_attachment_fk_props,
     get_write_only_field_names,
     is_write_only_prop,
     child_has_own_write_capability,
+    derive_approval_legal_transition_edges,
+    resolve_approval_submit_on,
+    resolve_set_fields,
 )
+from keys import x_approval as approval_key
+from version_of import version_of_entities, version_of_for
+from payment_config import PAYMENT_PRICE_ID_FIELD
 from helpers.label_field import build_label_expression, render_prisma_include
 from helpers.bridge_direction import (
     collect_parent_bridge_fk_props, get_new_form_bridge,
 )
+from helpers.state_machine_parser import parse_state_machine_diagram, ParseError
+from pathlib import Path
 import copy
+import json
 import warnings
 
 # ---------------------------------------------------------------------------
@@ -289,6 +298,107 @@ def _is_date_field(defn: dict) -> bool:
     return _get_actual_type(defn) == 'string' and defn.get('format') in ('date', 'date-time', 'time')
 
 
+def _column_filter_kind(prop: dict) -> str:
+    """Prisma clause-shape kind for buildFilter/buildOrderBy's runtime dispatch
+    (app-generator#753): a plain 'contains' filter crashes against a native
+    enum/DateTime/Decimal column, so the runtime needs to know which clause
+    shape each column requires.
+    """
+    if prop.get('_prisma_native_enum_type'):
+        return 'enum'
+    if prop.get('_prisma_decimal_type'):
+        return 'decimal'
+    if prop.get('format') in ('date-time', 'date', 'time'):
+        # 'time' (Prisma DateTime @db.Timetz) reuses the 'date' clause shape
+        # unchanged (app-generator#756/cmd_1195): empirically verified via
+        # $queryRaw against a real @db.Timetz column (subtask_1195b) that
+        # Postgres casts ANY timestamp-shaped comparison value to `timetz`
+        # before comparing, silently discarding its date part -- a filter
+        # value built from a full-date-and-time MUI picker (whatever date
+        # happens to be selected) still compares correctly against the
+        # stored time-of-day. No separate clause shape or date-part
+        # normalization is needed.
+        return 'date'
+    actual = _get_actual_type(prop)
+    if actual == 'boolean':
+        return 'boolean'
+    if actual in ('integer', 'number'):
+        return 'number'
+    return 'string'
+
+
+# Fixed iteration/report order for the filter/sort wiring-check spec
+# (app-generator cmd_1200(b)) -- every ColumnFilterKind lib/_pagination.ts
+# dispatches on, kept in sync with lib/_pagination.ts's ColumnFilterKind type.
+FILTER_SORT_KIND_ORDER = ['string', 'enum', 'boolean', 'number', 'decimal', 'date']
+
+# Cross-cutting audit/base columns are excluded from representative selection
+# even where a schema happens to declare one of these names explicitly --
+# they're injected separately per-entity (id/created_at/updated_at/
+# creator_id/assignee_id, see build_context's own _scalar_props) and aren't
+# representative of "a real schema-declared column of this kind".
+_FILTER_SORT_EXCLUDED_PROPS = frozenset(
+    {'id', 'created_at', 'updated_at', 'creator_id', 'updater_id', 'assignee_id'}
+)
+
+
+def select_filter_sort_representatives(entities: list, schema: dict) -> dict:
+    """For each ColumnFilterKind (lib/_pagination.ts) present among this
+    schema's (api: true, test: true, list: true) entities' own declared
+    scalar columns, auto-select one representative (entity, column) --
+    the first one encountered in schema/entity iteration order.
+
+    Backs a single generated cy:api spec (cmd_1200(b)) that exercises
+    FIELD_KINDS -> buildFilter/buildOrderBy's real dispatch path against
+    each consumer repo's own actual entities, via plain REST GET queries
+    (no MUI filter operator -- see lib/_pagination.ts's FilterEntry doc
+    comment: a REST caller via parsePageOpts only ever produces a bare
+    scalar, so this can only reach each kind's *default* clause -- the
+    full operator matrix is lib/_pagination.test.ts's job, not this
+    spec's). No new x-* key: representative selection is a pure read of
+    already-computed `_column_filter_kind` classification.
+
+    A kind absent from the schema entirely is reported (not silently
+    dropped) via the returned `uncovered` list, so a caller can surface
+    "this repo has no X-kind column" explicitly rather than looking like
+    full coverage when it isn't.
+    """
+    selected: dict[str, dict] = {}
+    for entity in entities:
+        gen_cfg = entity.get('generate_config') or {}
+        if not gen_cfg.get('test'):
+            continue
+        if not gen_cfg.get('api'):
+            continue
+        if gen_cfg.get('list', True) is False:
+            continue
+        parent = entity['parent']
+        model = entity.get('model') or parent
+        model_def = _raw_def(model, schema)
+        if not model_def:
+            continue
+        filtered_props = filter_fields(model_def.get('properties') or {}, gen_cfg.get('fields'))
+        write_only = set(get_write_only_field_names(model_def.get('properties') or {}))
+        for prop, defn in filtered_props.items():
+            if prop in _FILTER_SORT_EXCLUDED_PROPS or prop in write_only:
+                continue
+            if not _is_scalar_prop(defn):
+                continue
+            kind = _column_filter_kind(defn)
+            if kind in selected:
+                continue
+            selected[kind] = {
+                'entity': parent,
+                'pascal': to_pascal_case(parent),
+                'api_path': f'/api/{parent}',
+                'column': prop,
+            }
+        if len(selected) == len(FILTER_SORT_KIND_ORDER):
+            break
+    uncovered = [k for k in FILTER_SORT_KIND_ORDER if k not in selected]
+    return {'selected': selected, 'uncovered': uncovered, 'kind_order': FILTER_SORT_KIND_ORDER}
+
+
 def _dedupe_ordered(items):
     seen = set()
     result = []
@@ -423,7 +533,7 @@ def _build_form_data_gets(prop_infos: list[dict], required_props: set | None = N
 # ---------------------------------------------------------------------------
 
 def _get_child_parent_id_props(child_name: str, model: str, parent_rels_raw: list[dict],
-                               schema: dict) -> set[str]:
+                               schema: dict, child_entry: dict | None = None) -> set[str]:
     """What FK props in the child definition point back to the parent?
 
     For self-referential children, uses the parent's own many-to-one rels to itself.
@@ -433,6 +543,8 @@ def _get_child_parent_id_props(child_name: str, model: str, parent_rels_raw: lis
     if child_name == model:
         return {r['prop_name'] for r in parent_rels_raw if r['target'] == model}
     child_def = _raw_def(child_name, schema)
+    if child_entry is not None:
+        return resolve_parent_fk_props(child_entry, child_def, model)
     return get_parent_fk_props(child_def, model)
 
 
@@ -509,6 +621,147 @@ def _child_readonly_default_value(prop_name: str, defn: dict, child_def: dict) -
     return 'null'
 
 
+def _list_child_attach_fk(child_raw: dict, schema: dict, parent_model: str) -> str | None:
+    """FK column that attaches a list child to `parent_model`, or None.
+
+    Only a one-to-many `list` child whose structural FK to the parent is
+    nullable is attached by pointing that FK at the parent (many-to-many
+    children are attached through a join table and may belong to several
+    parents; a required FK means the child is never attached or detached from
+    the parent's list). Such a child belongs to at most one parent, so a child
+    that already has another parent must not be attached to a second one.
+    """
+    if child_raw.get('output_type') != 'list':
+        return None
+    if (child_raw.get('relationship') or {}).get('type') == 'many-to-many':
+        return None
+    child_def = _raw_def(child_raw['name'], schema)
+    if not is_optional_fk_to_parent(child_def, parent_model):
+        return None
+    props = child_def.get('properties', {})
+    for fk in sorted(get_parent_fk_props(child_def, parent_model)):
+        if fk in props:
+            return fk
+    return None
+
+
+def _list_child_attach_callers(schema: dict, child_model: str) -> dict[str, str]:
+    """{parent entity: FK column} for every entity that embeds `child_model`
+    as a one-to-many list child attached through a nullable FK."""
+    callers: dict[str, str] = {}
+    for def_key, defn in (schema.get('definitions') or {}).items():
+        if def_key.startswith('__') or def_key.endswith('_input'):
+            continue
+        for child in _extract_children_of(defn, schema):
+            if child['name'] != child_model:
+                continue
+            fk = _list_child_attach_fk(child, schema, def_key)
+            if fk:
+                callers[def_key] = fk
+    return callers
+
+
+def _extract_children_of(defn: dict, schema: dict) -> list[dict]:
+    from generate_types import _extract_children
+    return _extract_children(defn, schema)
+
+
+def _ancestor_walk_code(client: str, model: str, fk: str, start_expr: str, var: str, indent: str) -> str:
+    """TypeScript that collects the ancestors of `start_expr` (the chain of
+    `fk` values) into the Set `var`. A cycle already stored in the data ends
+    the walk instead of looping."""
+    return (
+        f"{indent}const {var} = new Set<string>();\n"
+        f"{indent}for (let _cursor: string | null = {start_expr}; _cursor; ) {{\n"
+        f"{indent}  const _row: Record<string, string | null> | null = await {client}.{model}.findUnique({{ where: {{ id: _cursor }}, select: {{ {fk}: true }} }});\n"
+        f"{indent}  _cursor = _row?.{fk} ?? null;\n"
+        f"{indent}  if (!_cursor || {var}.has(_cursor)) break;\n"
+        f"{indent}  {var}.add(_cursor);\n"
+        f"{indent}}}\n"
+    )
+
+
+def _build_child_attach_guard(children_data: list[dict], model: str, for_update: bool) -> str:
+    """Service-layer check that every record sent for a one-to-many list child
+    can be attached to this parent: it must not already belong to another
+    parent (it is never moved), and for a self-referencing child it must be
+    neither the record itself nor one of its ancestors (no cycles). Both the
+    Server Action and the REST route reach the service through here."""
+    blocks = []
+    for c in children_data:
+        fk = c.get('attach_fk')
+        if not fk or not c['use_connect']:
+            continue
+        pn, cv, cm = c['property_name'], c['child_var'], c['name']
+        ids = f"{cv}Ids"
+        taken = f"_{cv}Taken"
+        reject = (f"throw new AppError('VALIDATION', 'A record that belongs to another parent '"
+                  f" + 'or to itself cannot be attached', '{pn}', 'invalid');")
+        if for_update:
+            where = f"{{ id: {{ in: {ids} }}, AND: [{{ {fk}: {{ not: null }} }}, {{ {fk}: {{ not: id }} }}] }}"
+        else:
+            where = f"{{ id: {{ in: {ids} }}, {fk}: {{ not: null }} }}"
+        lines = [
+            f"    if ({ids}.length > 0) {{\n"
+            f"      const {taken} = await tx.{cm}.findMany({{ where: {where}, select: {{ id: true }} }});\n"
+            f"      if ({taken}.length > 0) {reject}\n"
+        ]
+        if for_update and cm == model:
+            lines.append(f"      if ({ids}.includes(id)) {reject}\n")
+            lines.append(_ancestor_walk_code('tx', cm, fk, 'id', f"_{cv}Ancestors", '      '))
+            lines.append(f"      if ({ids}.some((kid) => _{cv}Ancestors.has(kid))) {reject}\n")
+        lines.append("    }")
+        blocks.append(''.join(lines))
+    return '\n'.join(blocks)
+
+
+def _exclusive_parent_columns(child_name: str, schema: dict) -> dict[str, list[str]]:
+    """Structural parent FK columns per parent listed in the child's
+    `x-exclusive-parents` (parent entity -> sorted columns).
+
+    Empty when the child does not declare the key, so schemas without it are
+    unaffected. Each parent's columns are resolved with the same lookup the
+    child's own parent link uses (`resolve_parent_fk_props`), so an unrelated FK
+    to the same entity is kept out.
+    """
+    child_def = _raw_def(child_name, schema)
+    declared = child_def.get('x-exclusive-parents')
+    if not isinstance(declared, list):
+        return {}
+    defs = schema.get('definitions') or {}
+    columns: dict[str, list[str]] = {}
+    for parent in declared:
+        cols: set[str] = set()
+        for entry in _extract_children_of(defs.get(parent) or {}, schema):
+            if entry['name'] != child_name or entry.get('output_type') in ('list', 'comments'):
+                continue
+            cols |= resolve_parent_fk_props(entry, child_def, parent)
+        columns[parent] = sorted(cols)
+    return columns
+
+
+def _exclusive_parent_all_columns(child_name: str, schema: dict) -> list[str]:
+    """Every listed parent's structural FK column, sorted and de-duplicated.
+
+    This is the full set the exactly-one-owner check counts; it is not the
+    per-parent subset used to hide columns on one parent's screen.
+    """
+    return sorted({c for cols in _exclusive_parent_columns(child_name, schema).values() for c in cols})
+
+
+def _exclusive_parent_fks(child_raw: dict, model: str, schema: dict) -> list[str]:
+    """Structural parent FK columns of the OTHER parents listed in the child's
+    `x-exclusive-parents`, as seen from the screen of parent `model`.
+
+    Empty when the child does not declare the key or `model` is not listed, so
+    schemas without the key are unaffected.
+    """
+    columns = _exclusive_parent_columns(child_raw['name'], schema)
+    if model not in columns:
+        return []
+    return sorted({c for parent, cols in columns.items() if parent != model for c in cols})
+
+
 def _build_child_data(children_raw: list[dict], model: str, schema: dict,
                       parent_rels_raw: list[dict]) -> list[dict]:
     result = []
@@ -564,7 +817,7 @@ def _build_child_data(children_raw: list[dict], model: str, schema: dict,
         )
         child_props_dict = child_def.get('properties', {})
 
-        parent_id_props = _get_child_parent_id_props(child_name, model, parent_rels_raw, schema)
+        parent_id_props = _get_child_parent_id_props(child_name, model, parent_rels_raw, schema, child_raw)
 
         # System-managed bridge FKs: never client-writable via the parent's nested
         # create/update body (they're set internally by reservation/approval flows,
@@ -641,12 +894,17 @@ def _build_child_data(children_raw: list[dict], model: str, schema: dict,
             )
             for p in props_no_id
         )
+        # x-exclusive-parents: the other listed parents' FK columns are hidden on
+        # this parent's screen, so a nested update never writes them. Omitting
+        # them (rather than writing `|| null`) keeps a row that already holds
+        # another owner intact, where the nested check then rejects it.
+        _exclusive_fks = _exclusive_parent_fks(child_raw, model, schema)
         field_map_update = '\n'.join(
             f'          {p}: f.{p} || null,'
             if _is_nullable_cuid(child_props_dict.get(p, {}))
             else f'          {p}: f.{p},'
             for p in props_no_id
-            if p not in readonly_field_names
+            if p not in readonly_field_names and p not in _exclusive_fks
         )
 
         child_var    = safe_var_name(prop_name)
@@ -709,18 +967,26 @@ def _build_child_data(children_raw: list[dict], model: str, schema: dict,
         # parsed Prisma schema instead.
         child_has_audit_fields = _model_has_audit_fields(child_name)
 
+        _attach_fk = _list_child_attach_fk(child_raw, schema, model) if use_connect else None
         result.append({
             **child_raw,
+            **({'exclusive_parent_fks': _exclusive_fks} if _exclusive_fks else {}),
+            **({
+                'exclusive_columns': _exclusive_parent_all_columns(child_name, schema),
+                'exclusive_owner_columns': sorted(resolve_parent_fk_props(child_raw, child_def, model)),
+            } if _exclusive_fks else {}),
             'child_var':        child_var,
             'child_pascal':     child_pascal,
             'form_key':         form_key,
             'is_many_to_many':  is_many_to_many,
             'use_connect':      use_connect,
+            **({'attach_fk': _attach_fk} if _attach_fk else {}),
             'is_independent':   is_independent,
             'nested_writable':  nested_writable,
             'output_type':      output_type,
             'props_no_id':      props_no_id,
             'props_with_id':    props_with_id,
+            'child_prop_defs':  {p: child_props_dict[p] for p in props_no_id},
             'field_type':       field_type,
             'field_type_with_id': field_type_with_id,
             'field_map_create': field_map_create,
@@ -857,6 +1123,114 @@ def _build_child_nested_update(children_data: list[dict]) -> str:
     return '\n'.join(lines)
 
 
+def _exclusive_check_children(children_data: list[dict]) -> list[dict]:
+    """Write children whose rows are owned by exactly one of several listed
+    parents (x-exclusive-parents) and are written by the parent's own nested
+    create/update. A connect-style child writes no owned rows."""
+    return [c for c in children_data if c.get('exclusive_columns') and not c['use_connect']]
+
+
+def exclusive_parents_service_imports(children_data: list[dict], can_update: bool) -> str:
+    """Import lines for the per-child exactly-one-owner helpers the parent
+    service calls. Empty when no write child declares x-exclusive-parents. The
+    column list is only needed by the update check."""
+    return ''.join(
+        "\nimport { "
+        + (f"EXCLUSIVE_PARENT_COLUMNS as {c['child_pascal']}ExclusiveColumns, " if can_update else '')
+        + f"validateExclusiveParents as validate{c['child_pascal']}ExclusiveParents }} "
+        f"from '@/lib/{c['name']}/exclusive_parents';"
+        for c in _exclusive_check_children(children_data)
+    )
+
+
+def _build_child_exclusive_create_check(children_data: list[dict]) -> str:
+    """Exactly-one-owner check for the child rows a parent create writes.
+    Prisma sets the owner FK of a nested create to the new parent, so the
+    check counts it as filled and judges the other listed columns the item
+    supplies (a crafted item that sets another one is rejected)."""
+    blocks = []
+    for c in _exclusive_check_children(children_data):
+        cv, cp = c['child_var'], c['child_pascal']
+        owner = ', '.join(f"{o}: true" for o in c['exclusive_owner_columns'])
+        blocks.append(
+            f"    for (const f of {cv}Items) {{\n"
+            f"      validate{cp}ExclusiveParents({{ ...f, {owner} }});\n"
+            f"    }}"
+        )
+    return '\n'.join(blocks)
+
+
+def _build_child_exclusive_update_check(children_data: list[dict]) -> str:
+    """Exactly-one-owner check for the child rows a parent update writes.
+    An existing row is judged on its value after the save: the item's value for
+    a listed column it supplies, the stored value for one it does not (the
+    hidden other-parent columns are never supplied by the grid). A new row is
+    judged like a create."""
+    blocks = []
+    for c in _exclusive_check_children(children_data):
+        cv, cp, cm = c['child_var'], c['child_pascal'], c['name']
+        select = ', '.join(f"{col}: true" for col in ['id', *c['exclusive_columns']])
+        owner = ', '.join(f"{o}: true" for o in c['exclusive_owner_columns'])
+        ids, existing = f"_{cv}ExclusiveIds", f"_{cv}ExclusiveRows"
+        blocks.append(
+            f"    {{\n"
+            f"      const {ids} = {cv}Items.map((f) => f.id).filter((x): x is string => Boolean(x));\n"
+            f"      const {existing} = new Map(\n"
+            f"        ({ids}.length > 0\n"
+            f"          ? await tx.{cm}.findMany({{ where: {{ id: {{ in: {ids} }} }}, select: {{ {select} }} }})\n"
+            f"          : []\n"
+            f"        ).map((r) => [r.id, r as Record<string, unknown>] as const),\n"
+            f"      );\n"
+            f"      for (const f of {cv}Items) {{\n"
+            f"        const item = f as Record<string, unknown>;\n"
+            f"        const stored = f.id ? {existing}.get(f.id) : undefined;\n"
+            f"        if (!f.id) {{\n"
+            f"          validate{cp}ExclusiveParents({{ ...item, {owner} }});\n"
+            f"        }} else if (stored) {{\n"
+            f"          validate{cp}ExclusiveParents(Object.fromEntries(\n"
+            f"            {cp}ExclusiveColumns.map((col) => [col, item[col] !== undefined ? item[col] : stored[col]]),\n"
+            f"          ));\n"
+            f"        }}\n"
+            f"      }}\n"
+            f"    }}"
+        )
+    return '\n'.join(blocks)
+
+
+def _child_current_value_fallback(c: dict, model: str, id_expr: str, supplied_expr: str | None) -> str:
+    """Update-call argument for one write child that keeps the relation
+    unchanged when the caller did not supply it (Issue #777).
+
+    update{Parent} treats every child argument as the complete new state
+    (`set` for a connect-style relation, delete-missing/update/create for an
+    owned child list), so passing `[]` for an omitted field silently cleared
+    it. Instead, an omitted field (`supplied_expr` is undefined, or None for
+    a caller that can never supply it, e.g. CSV import) is filled with the
+    row's current value -- the same state the UI's edit form resubmits when
+    the user leaves a relation untouched, so every downstream path in
+    update{Parent} sees an input shape it already handles. An explicitly
+    supplied list (including `[]`) is passed through unchanged.
+
+    Owned child rows are JSON round-tripped so Decimal/DateTime columns
+    arrive as the same string forms the edit form submits.
+    """
+    pn = c['property_name']
+    if c['use_connect']:
+        current = (
+            f"((await prisma.{model}.findUnique({{ where: {{ id: {id_expr} }}, "
+            f"select: {{ {pn}: {{ select: {{ id: true }} }} }} }}))?.{pn}.map((r) => r.id) ?? [])"
+        )
+    else:
+        select = ', '.join(f"{p}: true" for p in c['props_with_id'])
+        current = (
+            f"(JSON.parse(JSON.stringify((await prisma.{model}.findUnique({{ where: {{ id: {id_expr} }}, "
+            f"select: {{ {pn}: {{ select: {{ {select} }} }} }} }}))?.{pn} ?? [])))"
+        )
+    if supplied_expr is None:
+        return current
+    return f"({supplied_expr} ?? {current})"
+
+
 def _build_child_assignee_notify_create_code(children_data: list[dict], parent: str, parent_pascal: str) -> str:
     """Trigger #1 (cmd_413 fix) for datagrid-child rows carrying their own
     assignee_id (e.g. receiving_receipt_line.assignee_id under
@@ -924,9 +1298,48 @@ def _build_child_assignee_notify_update_code(children_data: list[dict], parent: 
     return '\n'.join(blocks)
 
 
-def _build_comment_actions(comment_children: list[dict], parent: str, model: str, has_assignee_id: bool, comment_has_mention: bool = False) -> str:
+def _comment_parent_access_block(parent: str, model: str, key_where: str, op: str,
+                                 item_select: str, scope: dict) -> str:
+    """Server-side access check shared by the comment add / edit / delete actions.
+
+    A comment write is a write on its parent record, so it runs the same gates the parent's own
+    update action runs: the parent row is read through the caller's organization scope (and the
+    x-self-only / x-filter-values scope, when declared), an out-of-scope or missing row is
+    NOT_FOUND, and requirePermission() then resolves the caller's permission for ``op`` against
+    that concrete row. Hiding the composer in the UI is not an enforcement boundary -- a Server
+    Action is callable on its own. Assumes ``userId`` is already declared in the enclosing scope.
+    """
+    where = [key_where]
+    prelude = ''
+    if scope.get('should_filter_by_org'):
+        prelude = (
+            "  const _assocOrgs = await getAssociatedOrganizations(userId);\n"
+            "  const _assocOrgIds = _assocOrgs.map((o) => o.id);\n"
+        )
+        where.append(
+            "OR: [{ organization_id: { in: _assocOrgIds } }, { organization_id: null }]"
+            if scope.get('org_relationship_optional')
+            else "organization_id: { in: _assocOrgIds }"
+        )
+    if scope.get('is_self_only'):
+        where.append("creator_id: userId")
+    for field, values in sorted((scope.get('filter_values') or {}).items()):
+        where.append(f"{field}: {{ in: {json.dumps(list(values))} }}")
+    return (
+        prelude
+        + f"  const parentRow = await prisma.{model}.findFirst({{\n"
+        f"    where: {{ {', '.join(where)} }},\n"
+        f"    select: {item_select},\n"
+        f"  }});\n"
+        f"  if (!parentRow) throw new AppError('NOT_FOUND', 'Not found');\n"
+        f"  await requirePermission('{parent}', '{op}', parentRow, userId);\n"
+    )
+
+
+def _build_comment_actions(comment_children: list[dict], parent: str, model: str, has_assignee_id: bool, comment_has_mention: bool = False,
+                           item_select: str = '{ id: true, creator_id: true }', scope: dict | None = None) -> str:
+    scope = scope or {}
     parent_pascal = to_pascal_case(parent)
-    assignee_select = ", assignee_id: true" if has_assignee_id else ""
     recipient_list = (
         "[parentRow.creator_id, parentRow.assignee_id]"
         if has_assignee_id else "[parentRow.creator_id]"
@@ -935,24 +1348,26 @@ def _build_comment_actions(comment_children: list[dict], parent: str, model: str
     for c in comment_children:
         child_model   = c['name']
         parent_id_prop = f'{model}_id'
+        add_access = _comment_parent_access_block(parent, model, f"id: {parent_id_prop}", 'update', item_select, scope)
+        comment_access = _comment_parent_access_block(parent, model, f"id: comment.{parent_id_prop}", 'update', item_select, scope)
         # Mention notifications (cmd_522): encodeMentions() retired from the save
         # path — the client-side picker inserts @[user_id:<id>] markers directly,
         # so the stored message is always the raw client text. Self-mentions are
         # excluded; on update, only newly-added mentions (vs. the prior message)
         # are notified.
         mention_notify_add = (
-            f"\n    const mentionedIds = extractMentionedUserIds(message).filter((mid) => mid !== userId);"
-            f"\n    for (const mentionedId of new Set(mentionedIds)) {{"
-            f"\n      notify(mentionedId, 'mentioned_in_comment', {{"
-            f"\n        title: 'You were mentioned in a {parent_pascal} comment',"
-            f"\n        href: `/{parent}/view/${{parentRow.id}}`,"
-            f"\n        commentSnippet: message.slice(0, 80),"
-            f"\n      }});"
-            f"\n    }}"
+            f"\n  const mentionedIds = extractMentionedUserIds(message).filter((mid) => mid !== userId);"
+            f"\n  for (const mentionedId of new Set(mentionedIds)) {{"
+            f"\n    notify(mentionedId, 'mentioned_in_comment', {{"
+            f"\n      title: 'You were mentioned in a {parent_pascal} comment',"
+            f"\n      href: `/{parent}/view/${{parentRow.id}}`,"
+            f"\n      commentSnippet: message.slice(0, 80),"
+            f"\n    }});"
+            f"\n  }}"
         ) if comment_has_mention else ""
         update_select = (
             "{ creator_id: true, message: true, " + parent_id_prop + ": true }"
-            if comment_has_mention else "{ creator_id: true }"
+            if comment_has_mention else "{ creator_id: true, " + parent_id_prop + ": true }"
         )
         mention_notify_update = (
             f"\n  const oldIds = new Set(extractMentionedUserIds(comment.message));"
@@ -967,30 +1382,26 @@ def _build_comment_actions(comment_children: list[dict], parent: str, model: str
             f"\n  }}"
         ) if comment_has_mention else ""
         lines.append(f"""
-export async function add{parent_pascal}Comment({parent_id_prop}: string, message: string): Promise<void> {{
+export async function add{parent_pascal}Comment({parent_id_prop}: string, message: string): Promise<{{ id: string }}> {{
   const userId = await getSessionUserIdOrThrow();
-  await prisma.{child_model}.create({{
+{add_access}  const created = await prisma.{child_model}.create({{
     data: {{ message, {parent_id_prop}, creator_id: userId }},
+    select: {{ id: true }},
   }});
   // Trigger #4 (notification design 2026-05-11): notify the entity creator
   // and (if present) assignee; never the commenter themselves.
-  const parentRow = await prisma.{model}.findUnique({{
-    where: {{ id: {parent_id_prop} }},
-    select: {{ id: true, creator_id: true{assignee_select} }},
-  }});
-  if (parentRow) {{
-    const recipients = new Set<string>(
-      {recipient_list}.filter((id): id is string => Boolean(id) && id !== userId)
-    );
-    for (const recipientId of recipients) {{
-      notify(recipientId, 'comment_created', {{
-        title: 'New comment on {parent_pascal}',
-        href: `/{parent}/view/${{parentRow.id}}`,
-        commentSnippet: message.slice(0, 80),
-      }});
-    }}{mention_notify_add}
-  }}
+  const recipients = new Set<string>(
+    {recipient_list}.filter((id): id is string => Boolean(id) && id !== userId)
+  );
+  for (const recipientId of recipients) {{
+    notify(recipientId, 'comment_created', {{
+      title: 'New comment on {parent_pascal}',
+      href: `/{parent}/view/${{parentRow.id}}`,
+      commentSnippet: message.slice(0, 80),
+    }});
+  }}{mention_notify_add}
   revalidatePath('/{parent}');
+  return {{ id: created.id }};
 }}
 
 export async function update{parent_pascal}Comment(commentId: string, message: string): Promise<void> {{
@@ -999,27 +1410,29 @@ export async function update{parent_pascal}Comment(commentId: string, message: s
   if (!comment || comment.creator_id !== userId) {{
     throw new Error('Not authorized to edit this comment');
   }}
-  await prisma.{child_model}.update({{ where: {{ id: commentId }}, data: {{ message }} }});{mention_notify_update}
+{comment_access}  await prisma.{child_model}.update({{ where: {{ id: commentId }}, data: {{ message }} }});{mention_notify_update}
   revalidatePath('/{parent}');
 }}
 
 export async function delete{parent_pascal}Comment(commentId: string): Promise<void> {{
   const userId = await getSessionUserIdOrThrow();
-  const comment = await prisma.{child_model}.findUnique({{ where: {{ id: commentId }}, select: {{ creator_id: true }} }});
+  const comment = await prisma.{child_model}.findUnique({{ where: {{ id: commentId }}, select: {{ creator_id: true, {parent_id_prop}: true }} }});
   if (!comment) return;
-  if (comment.creator_id !== userId) {{
-    await requirePermission('{parent}', 'delete');
+{comment_access}  if (comment.creator_id !== userId) {{
+    await requirePermission('{parent}', 'delete', parentRow, userId);
   }}
   await prisma.{child_model}.delete({{ where: {{ id: commentId }} }});
   revalidatePath('/{parent}');
 }}""")
+
     return '\n'.join(lines)
 
 
-def _build_comment_actions_bridge(parent: str, model: str, has_assignee_id: bool, comment_has_mention: bool = False) -> str:
+def _build_comment_actions_bridge(parent: str, model: str, has_assignee_id: bool, comment_has_mention: bool = False,
+                                  item_select: str = '{ id: true, creator_id: true }', scope: dict | None = None) -> str:
     """Generate comment actions using the shared commentable bridge (single comment table)."""
+    scope = scope or {}
     parent_pascal = to_pascal_case(parent)
-    assignee_select = ", assignee_id: true" if has_assignee_id else ""
     recipient_list = (
         "[parentRow.creator_id, parentRow.assignee_id]"
         if has_assignee_id else "[parentRow.creator_id]"
@@ -1027,65 +1440,53 @@ def _build_comment_actions_bridge(parent: str, model: str, has_assignee_id: bool
     # Mention notifications (cmd_522): encodeMentions() retired from the save
     # path — see _build_comment_actions for the rationale. The bridge variant
     # has no direct parent FK on the comment row (only commentable_id), so the
-    # update path re-resolves the parent row for the href, and only pays for
-    # that extra query when there are fresh mentions to notify.
+    # update path resolves the parent row (through the access check) for the href.
     mention_notify_add = (
-        f"\n    const mentionedIds = extractMentionedUserIds(message).filter((mid) => mid !== userId);"
-        f"\n    for (const mentionedId of new Set(mentionedIds)) {{"
-        f"\n      notify(mentionedId, 'mentioned_in_comment', {{"
-        f"\n        title: 'You were mentioned in a {parent_pascal} comment',"
-        f"\n        href: `/{parent}/view/${{parentRow.id}}`,"
-        f"\n        commentSnippet: message.slice(0, 80),"
-        f"\n      }});"
-        f"\n    }}"
+        f"\n  const mentionedIds = extractMentionedUserIds(message).filter((mid) => mid !== userId);"
+        f"\n  for (const mentionedId of new Set(mentionedIds)) {{"
+        f"\n    notify(mentionedId, 'mentioned_in_comment', {{"
+        f"\n      title: 'You were mentioned in a {parent_pascal} comment',"
+        f"\n      href: `/{parent}/view/${{parentRow.id}}`,"
+        f"\n      commentSnippet: message.slice(0, 80),"
+        f"\n    }});"
+        f"\n  }}"
     ) if comment_has_mention else ""
     update_select = (
         "{ creator_id: true, message: true, commentable_id: true }"
-        if comment_has_mention else "{ creator_id: true }"
+        if comment_has_mention else "{ creator_id: true, commentable_id: true }"
     )
     mention_notify_update = (
         f"\n  const oldIds = new Set(extractMentionedUserIds(comment.message));"
         f"\n  const newIds = extractMentionedUserIds(message);"
         f"\n  const freshMentions = newIds.filter((mid) => !oldIds.has(mid) && mid !== userId);"
-        f"\n  if (freshMentions.length > 0) {{"
-        f"\n    const mentionParentRow = await prisma.{model}.findFirst({{"
-        f"\n      where: {{ commentable_id: comment.commentable_id }},"
-        f"\n      select: {{ id: true }},"
+        f"\n  for (const mentionedId of freshMentions) {{"
+        f"\n    notify(mentionedId, 'mentioned_in_comment', {{"
+        f"\n      title: 'You were mentioned in a {parent_pascal} comment',"
+        f"\n      href: `/{parent}/view/${{parentRow.id}}`,"
+        f"\n      commentSnippet: message.slice(0, 80),"
         f"\n    }});"
-        f"\n    if (mentionParentRow) {{"
-        f"\n      for (const mentionedId of freshMentions) {{"
-        f"\n        notify(mentionedId, 'mentioned_in_comment', {{"
-        f"\n          title: 'You were mentioned in a {parent_pascal} comment',"
-        f"\n          href: `/{parent}/view/${{mentionParentRow.id}}`,"
-        f"\n          commentSnippet: message.slice(0, 80),"
-        f"\n        }});"
-        f"\n      }}"
-        f"\n    }}"
         f"\n  }}"
     ) if comment_has_mention else ""
+    add_access = _comment_parent_access_block(parent, model, "commentable_id", 'update', item_select, scope)
+    comment_access = _comment_parent_access_block(parent, model, "commentable_id: comment.commentable_id", 'update', item_select, scope)
     return f"""
-export async function add{parent_pascal}Comment(commentable_id: string, message: string): Promise<void> {{
+export async function add{parent_pascal}Comment(commentable_id: string, message: string): Promise<{{ id: string }}> {{
   const userId = await getSessionUserIdOrThrow();
-  await createComment({{ message, commentable_id, creator_id: userId }});
+{add_access}  const created = await createComment({{ message, commentable_id, creator_id: userId }});
   // Trigger #4 (notification design 2026-05-11): notify the entity creator
   // and (if present) assignee; never the commenter themselves.
-  const parentRow = await prisma.{model}.findFirst({{
-    where: {{ commentable_id }},
-    select: {{ id: true, creator_id: true{assignee_select} }},
-  }});
-  if (parentRow) {{
-    const recipients = new Set<string>(
-      {recipient_list}.filter((id): id is string => Boolean(id) && id !== userId)
-    );
-    for (const recipientId of recipients) {{
-      notify(recipientId, 'comment_created', {{
-        title: 'New comment on {parent_pascal}',
-        href: `/{parent}/view/${{parentRow.id}}`,
-        commentSnippet: message.slice(0, 80),
-      }});
-    }}{mention_notify_add}
-  }}
+  const recipients = new Set<string>(
+    {recipient_list}.filter((id): id is string => Boolean(id) && id !== userId)
+  );
+  for (const recipientId of recipients) {{
+    notify(recipientId, 'comment_created', {{
+      title: 'New comment on {parent_pascal}',
+      href: `/{parent}/view/${{parentRow.id}}`,
+      commentSnippet: message.slice(0, 80),
+    }});
+  }}{mention_notify_add}
   revalidatePath('/{parent}');
+  return {{ id: created.id }};
 }}
 
 export async function update{parent_pascal}Comment(commentId: string, message: string): Promise<void> {{
@@ -1094,16 +1495,16 @@ export async function update{parent_pascal}Comment(commentId: string, message: s
   if (!comment || comment.creator_id !== userId) {{
     throw new Error('Not authorized to edit this comment');
   }}
-  await updateComment(commentId, {{ message }});{mention_notify_update}
+{comment_access}  await updateComment(commentId, {{ message }});{mention_notify_update}
   revalidatePath('/{parent}');
 }}
 
 export async function delete{parent_pascal}Comment(commentId: string): Promise<void> {{
   const userId = await getSessionUserIdOrThrow();
-  const comment = await prisma.comment.findUnique({{ where: {{ id: commentId }}, select: {{ creator_id: true }} }});
+  const comment = await prisma.comment.findUnique({{ where: {{ id: commentId }}, select: {{ creator_id: true, commentable_id: true }} }});
   if (!comment) return;
-  if (comment.creator_id !== userId) {{
-    await requirePermission('{parent}', 'delete');
+{comment_access}  if (comment.creator_id !== userId) {{
+    await requirePermission('{parent}', 'delete', parentRow, userId);
   }}
   await deleteComment(commentId);
   revalidatePath('/{parent}');
@@ -1151,7 +1552,7 @@ def _get_selection_targets(children_raw: list[dict], parent_rels_raw: list[dict]
             continue
         child_def = _raw_def(child_raw['name'], schema)
         if child_def.get('properties'):
-            parent_fk_props = get_parent_fk_props(child_def, model)
+            parent_fk_props = resolve_parent_fk_props(child_raw, child_def, model)
             child_entity_rel_targets.extend(
                 r['target'] for r in get_parent_relationships(child_def)
                 if r['prop_name'] not in parent_fk_props
@@ -1276,15 +1677,22 @@ def _categorize_form_fields(filtered_props: dict, parent_rels_raw: list[dict],
 # ---------------------------------------------------------------------------
 
 def _get_entity_options(schema: dict) -> list[dict]:
-    """Returns list of {value, label} for all schema entities that have pages."""
+    """Returns the `x-entity-select` options: {value, label, key} for every generated entity, plus `audit_log`.
+
+    `audit_log` is the one system table a Permission row can name although it is not a schema definition
+    (`getModelPermissions` answers for it by name), so it is appended after the generated entities. Entities
+    without generated pages (`approval_request`, `comment`, ...) are not offered: they are not permission or
+    approval targets. `label` is the English fallback; `key` is the `EntityLabel` dictionary key the screens
+    display it with. The stored value is always the entity name.
+    """
     from generate_types import extract_entities
+    names = [e['parent'] for e in extract_entities(schema)] + ['audit_log']
     options = []
     seen = set()
-    for e in extract_entities(schema):
-        parent = e['parent']
-        if parent not in seen:
-            seen.add(parent)
-            options.append({'value': parent, 'label': to_title_case(parent)})
+    for name in names:
+        if name not in seen:
+            seen.add(name)
+            options.append({'value': name, 'label': to_title_case(name), 'key': to_camel_case(name)})
     return options
 
 
@@ -1348,6 +1756,7 @@ def build_anonymize_user_context(schema: dict) -> dict:
     Returns:
         has_pii_user: bool — True when the user entity has at least one x-pii field.
         pii_data_block: str — pre-formatted TypeScript lines for the data block.
+        scrubs_avatar: bool — True when image_id (the avatar attachment FK) is scrubbed.
         pii_fields: list — [{name, pii_type, field_type, scrub_value}] for each x-pii field.
     """
     user_def = _raw_def('user', schema)
@@ -1409,10 +1818,11 @@ def build_anonymize_user_context(schema: dict) -> dict:
         lines.append(f"{INDENT}mfa_secret: null,")
 
     lines.append(f"{INDENT}anonymized_at: anonymizedAt,")
-    lines.append(f"{INDENT}invalidated_at: anonymizedAt,")
+    lines.append(f"{INDENT}invalidated_at: invalidatedAt,")
 
     return {
         'has_pii_user': True,
+        'scrubs_avatar': any(f['name'] == 'image_id' for f in pii_fields),
         'pii_data_block': '\n'.join(lines),
         'pii_fields': pii_fields,
     }
@@ -1438,6 +1848,148 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         schema['definitions'].get(f'__{model}', {}) or schema['definitions'].get(model, {}),
         schema.get('definitions', {}),
     )
+    # x-state-machines (Issue #696, Stage 1 PR1): a top-level pointer map,
+    # `{model}.{field}: path/to.mmd` (state-transition-generator-design.md's
+    # input-placement section, finalized Option B). Exposed here as a plain
+    # field-name set so downstream code/templates can query "is this field
+    # governed by a state machine" without re-parsing the pointer map
+    # themselves.
+    _state_machine_field_to_path: dict[str, str] = {
+        _key.split('.', 1)[1]: _path
+        for _key, _path in (schema.get('x-state-machines') or {}).items()
+        if '.' in _key and _key.split('.', 1)[0] == model
+    }
+    state_machine_fields = set(_state_machine_field_to_path)
+
+    # state_machine_diagrams / state_machine_field_list (Issue #696, Stage 1
+    # PR2b): the parsed contents (states/edges/initial/terminal) of each
+    # governed field's .mmd diagram, plain-dict-shaped for direct `| tojson`
+    # template consumption -- feeds state_machine_transitions below, which
+    # generate.py collects across every model into the single runtime
+    # gatekeeper table, lib/state_transitions.ts. Re-parses rather than
+    # reusing validate.py's own parse pass --
+    # build_context() and validate_schema() are separate, non-communicating
+    # entry points in this generator's pipeline (see validate.py's own path-
+    # resolution comment on x-state-machines for the same cwd-relative
+    # convention followed here) -- but trusts the result is well-formed
+    # without re-running 己's reachability/dead-end/duplicate/stale-ref/
+    # Case-D checks: generate-code always runs validate_schema() before
+    # build_context() (see generate.py), so a ParseError reaching here means
+    # build_context() was invoked without that precondition (e.g. directly
+    # from a test) -- raised as a hard error rather than silently degrading,
+    # matching this module's existing "trust validated input" convention.
+    state_machine_diagrams: dict[str, dict] = {}
+    for _sm_field, _sm_path in _state_machine_field_to_path.items():
+        _sm_parsed = parse_state_machine_diagram(Path(_sm_path).read_text())
+        if isinstance(_sm_parsed, ParseError):
+            raise ValueError(
+                f"build_context: x-state-machines['{model}.{_sm_field}']: "
+                f"'{_sm_path}' failed to parse ({_sm_parsed.message}) -- "
+                f"validate_schema() should have caught this before "
+                f"generate-code reached build_context()."
+            )
+        state_machine_diagrams[_sm_field] = {
+            'states': sorted(_sm_parsed.states),
+            'edges': sorted(_sm_parsed.edges),
+            'initial_states': sorted(_sm_parsed.initial_states),
+            'terminal_states': sorted(_sm_parsed.terminal_states),
+        }
+    state_machine_field_list = sorted(state_machine_fields)
+
+    # state_machine_approval_edges (Issue #696, Stage 1 PR2b; design doc 丙's
+    # composition law): per governed field ALSO governed by this entity's own
+    # x-approval submit_on, the small fixed set of (fromState, toState) pairs
+    # x-approval itself considers legal -- see
+    # derive_approval_legal_transition_edges()'s docstring for why this is a
+    # pair-level set, not Case D's flat value-level set. A field absent from
+    # this dict is either not x-approval-governed at all, or is governed by
+    # a DIFFERENT field's x-approval submit_on -- either way, no AND-
+    # composition applies to it (assertTransitionAllowed{{Field}}() skips
+    # the x-approval check entirely when its own field key is absent here).
+    state_machine_approval_edges: dict[str, list] = {}
+    for _sm_field in state_machine_field_list:
+        _sm_appr_edges = derive_approval_legal_transition_edges(model_def, _sm_field)
+        if _sm_appr_edges is not None:
+            state_machine_approval_edges[_sm_field] = sorted(_sm_appr_edges)
+
+    # state_machine_transitions (Issue #696, Stage 1 PR2b): one entry per
+    # governed field, template-ready -- field/field_pascal/field_upper
+    # names and edges/approval_edges pre-serialized to JSON strings in
+    # Python, rather than applying `pascal_case`/`tojson` filters inside
+    # the template's own `{% for %}` loop. Deliberate: those are custom
+    # filters this generator registers on ITS OWN jinja2.Environment
+    # (generate.py's _make_env()), but several existing tests render these
+    # same two templates through a bare `jinja2.Environment()` of their
+    # own (no custom filters registered) -- Jinja2 validates a filter
+    # name's existence at template COMPILE time for any filter reference
+    # inside a `{% for %}` loop, even one that never executes at render
+    # time (confirmed directly: a bare `{% if %}`-guarded filter reference
+    # compiles fine against an empty list, but the identical filter
+    # reference inside a nested `{% for %}` loop raises
+    # TemplateAssertionError at compile time regardless of the loop
+    # iterating zero times) -- so those tests' compilation of service.ts.
+    # jinja2/service_validation.ts.jinja2 would break the moment either
+    # template used `| pascal_case` or `| tojson` inside this loop, even
+    # for a schema with zero state-transition-governed fields at all.
+    state_machine_transitions: list[dict] = [
+        {
+            'field': _sm_field,
+            'field_pascal': to_pascal_case(_sm_field),
+            'field_upper': _sm_field.upper(),
+            'edges_json': json.dumps([list(e) for e in state_machine_diagrams[_sm_field]['edges']]),
+            'approval_edges_json': (
+                json.dumps([list(e) for e in state_machine_approval_edges[_sm_field]])
+                if _sm_field in state_machine_approval_edges else None
+            ),
+            # initial_states_json (cmd_1139): the diagram's own
+            # `[*] --> state` declared initial state(s), for
+            # assertInitialStateAllowed()'s create-time check in
+            # lib/state_transitions.ts -- a sibling judgment to
+            # assertTransitionAllowed() that runs when currentId === null
+            # (no prevRow to read a fromState off of).
+            'initial_states_json': json.dumps(list(state_machine_diagrams[_sm_field]['initial_states'])),
+        }
+        for _sm_field in state_machine_field_list
+    ]
+
+    # is_approvable / approval_config (cmd_1154, ai-agent-integration-
+    # design.md §2/§3): whether this entity declares x-approval at all,
+    # and -- when it does -- the static shape of its submit/approve/
+    # reject/withdraw flow (which field/value each stage writes, whether
+    # rejection is terminal). Every other x-approval-derived value
+    # already computed in this function answers a narrower question
+    # (write_locked_values: "which VALUES are locked";
+    # state_machine_approval_edges: "which state-machine EDGES does
+    # x-approval additionally permit") -- none of them expose the plain
+    # fact "is this entity approval-governed at all", independent of
+    # whether it also happens to have an x-state-machines diagram. Feeds
+    # doc_entity.md.jinja2's Constraints section. Row-level truth ("is
+    # THIS row submittable right now") is deliberately NOT here -- that
+    # is a runtime capabilities endpoint's job, not a static spec's.
+    _x_approval_raw = approval_key.get(model_def)
+    is_approvable = bool(_x_approval_raw)
+    approval_config: dict | None = None
+    if _x_approval_raw:
+        _appr_entity_props = model_def.get('properties', {})
+        _appr_submit_field, _appr_submit_value = resolve_approval_submit_on(model_def)
+        _appr_on_approved = _x_approval_raw.get('on_approved') or {}
+        _appr_on_rejected = _x_approval_raw.get('on_rejected') or {}
+        _appr_on_withdrawn = _x_approval_raw.get('on_withdrawn') or {}
+        approval_config = {
+            'submit_field': _appr_submit_field,
+            'submit_value': _appr_submit_value,
+            'on_approved_set_fields': resolve_set_fields(
+                _appr_entity_props, _appr_on_approved.get('set_fields') or {},
+            ),
+            'on_rejected_set_fields': resolve_set_fields(
+                _appr_entity_props, _appr_on_rejected.get('set_fields') or {},
+            ),
+            'on_rejected_terminal': bool(_appr_on_rejected.get('terminal')),
+            'on_withdrawn_set_fields': resolve_set_fields(
+                _appr_entity_props, _appr_on_withdrawn.get('set_fields') or {},
+            ),
+        }
+
     # Inject parent-side bridge FK props synthesized from new-form x-bridge declarations
     # on child entities that list this model as a parent. These FKs look like
     # one-to-one_bridge relations so the existing OTO machinery handles auto-create/include.
@@ -1569,7 +2121,19 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         fn for fn, fp in filtered_props.items()
         if isinstance(fp, dict) and fp.get('x-readonly')
     }
-    readonly_fields: list[str] = sorted(_ro_from_entity | _ro_from_props | _server_value_prop_names)
+    # x-payment: the entity's own `stripe_price_id` is what every record is
+    # charged at, so it is never client input -- the column's default supplies
+    # it. Added here (not declared by the schema author) so it rides the same
+    # exclusion as x-readonly-fields. A Price on a *related* entity is not this
+    # entity's column and needs nothing here.
+    _ro_from_payment: set[str] = (
+        {PAYMENT_PRICE_ID_FIELD}
+        if model_def.get('x-payment') is True and PAYMENT_PRICE_ID_FIELD in filtered_props
+        else set()
+    )
+    readonly_fields: list[str] = sorted(
+        _ro_from_entity | _ro_from_props | _server_value_prop_names | _ro_from_payment
+    )
     # API route: select clause string and field list for AP-3=B readonly reject check.
     _api_ro_in_props = [f for f in readonly_fields if f in filtered_props]
     readonly_fields_api: list[str] = _api_ro_in_props
@@ -2051,17 +2615,35 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
 
     # ────────────────────────────────────────────────────────────────
     # Import eligibility — SINGLE PLACE (deliberately left open in cmd_328; cmd_330 adds import: flag).
-    # Rule: primary entity AND x-import-key AND import:true AND (new:true OR edit:true).
+    # Rule: primary entity AND x-import-key AND import:true AND (new:true OR edit:true)
+    # AND not a new-form x-bridge child.
     # import:false suppresses (a) own import route/UI/test only.
     # (b) dotted-FK lookups by other entities are unaffected —
     #     import_key_specs is built unconditionally below regardless of this flag.
+    #
+    # New-form x-bridge child exclusion: a bridge child's parent is selected
+    # via selectedParentType/selectedParentId at create time (see
+    # bridge_child_ir above), never through a physical FK column on the
+    # child itself. CSV export therefore never emits a column identifying
+    # the parent (_compute_export_visibility in validate.py excludes every
+    # FK prop, and this bridge selection isn't a real FK column on the child
+    # anyway) — so there is no information a CSV row could carry to satisfy
+    # the parent selection on import. Adding synthetic
+    # selectedParentType/selectedParentId import columns was considered and
+    # rejected: export never emits them, so doing so would make import
+    # require a column export can't produce, breaking the round trip.
+    # Excluding the entity from import_eligible entirely is the only option
+    # that doesn't build a broken import path.
     # ────────────────────────────────────────────────────────────────
     # Import eligibility requires the entity to be a primary entity (not an alias/view).
     # e.g., 'setting' (parent) maps to 'user' (model) — only 'user' should be import-eligible.
     # This satisfies the cmd_328 guidance: "having x-import-key must not be hardcoded to imply import-eligible".
     _is_primary_entity = (parent == model)
     _import_flag       = gen_cfg.get('import', True)          # x-generate.import (cmd_330)
-    import_eligible    = _is_primary_entity and has_import_key and _import_flag and (can_create or can_update)
+    import_eligible    = (
+        _is_primary_entity and has_import_key and _import_flag and (can_create or can_update)
+        and not bridge_child_ir
+    )
     import_can_create  = import_eligible and can_create   # Tier1: x-generate.new
     import_can_update  = import_eligible and can_update   # Tier1: x-generate.edit
 
@@ -2427,6 +3009,57 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     sortable_fields_quoted = ', '.join(f"'{c}'" for c in _scalar_props)
     filterable_fields_quoted = sortable_fields_quoted
 
+    # Per-column clause-shape kind for buildFilter/buildOrderBy (app-generator#753).
+    # id/created_at/updated_at/creator_id/assignee_id may be injected into
+    # _scalar_props above without a filtered_props entry -- .get({}) falls
+    # through to 'string', which happens to be correct for id/creator_id/
+    # assignee_id (string UUIDs) but wrong for created_at/updated_at
+    # (DateTime), so those two are defaulted explicitly below.
+    _field_kinds = {c: _column_filter_kind(filtered_props.get(c, {})) for c in _scalar_props}
+    for _dc in ('created_at', 'updated_at'):
+        if _dc in _field_kinds:
+            _field_kinds[_dc] = 'date'
+    field_kinds_quoted = ', '.join(f"'{c}': '{k}'" for c, k in _field_kinds.items())
+
+    # Valid raw enum literal list per 'enum'-kind column (app-generator#756
+    # Finding 3): buildFilter validates an incoming is/isAnyOf filter value
+    # against this before building the Prisma clause, since a value that
+    # isn't a real member of the enum type crashes rather than returning
+    # zero rows. Same source list _column_filter_kind's caller already reads
+    # for `entries` (generators.py's page_list_context) -- not re-derived,
+    # just also exposed here since getters_ctx (this function's return dict)
+    # is snapshotted before page_list_context ever runs (see build_context.py
+    # relation_filter_fields_quoted's comment above for why this can't live
+    # in generators.py instead).
+    _enum_members = {
+        c: filtered_props[c]['enum']
+        for c in _scalar_props
+        if _field_kinds.get(c) == 'enum' and isinstance(filtered_props.get(c, {}).get('enum'), list)
+    }
+    enum_members_quoted = ', '.join(
+        f"'{c}': [{', '.join(chr(39) + str(v) + chr(39) for v in vals)}]"
+        for c, vals in _enum_members.items()
+    )
+
+    # Decimal scale per 'decimal'-kind column (app-generator#756): the
+    # GridColDef.type: 'number' filter control's native <input type="number">
+    # round-trips a typed value through the browser's own IEEE-754 double
+    # (e.g. '99.99' -> 99.98999999999999488...) before it ever reaches
+    # buildFilter -- confirmed empirically via real Cypress UI interaction
+    # (subtask_1193a), not a theoretical concern: this breaks exact-match
+    # (and boundary comparison) filtering against a column whose stored
+    # value is exact. buildFilter re-quantizes a JS-number-typed decimal
+    # filter value with this scale (toFixed) before building the Prisma
+    # clause, recovering the precision the browser's number input lost.
+    # A REST caller's plain string value (parsePageOpts) is untouched --
+    # only ever a problem for a value that arrived as a JS number.
+    _decimal_scales = {
+        c: filtered_props[c]['x-decimal-scale']
+        for c in _scalar_props
+        if _field_kinds.get(c) == 'decimal' and filtered_props.get(c, {}).get('x-decimal-scale') is not None
+    }
+    decimal_scales_quoted = ', '.join(f"'{c}': {s}" for c, s in _decimal_scales.items())
+
     # Text fields used by searchXxxOptions for substring matching. Auto-derived
     # human-readable string columns (shared with the pg_trgm full-text search
     # rule in generate.py:_derive_text_fields) so callers don't accidentally
@@ -2447,9 +3080,20 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     for _rf in derive_cross_entity_searchable_fields(model, schema):
         if _rf not in searchable_relation_fields:
             searchable_relation_fields.append(_rf)
-    searchable_fields_display = searchable_text_fields + [
-        f"{rf['relation']}.{rf['field']}" for rf in searchable_relation_fields
+    # Integer columns that other entities' labelField shows as a plain segment
+    # (e.g. step_no): matched by equality against an all-digit token, since
+    # `contains` is string-only. See derive_searchable_integer_fields().
+    searchable_integer_fields = [
+        f for f in derive_searchable_integer_fields(model, schema) if f in filtered_props
     ]
+    # x-version-of identity: its display columns live on the current version, which a
+    # brand-new identity does not have yet, and a version's parent FK shows the identity
+    # id. Match the row id too (an extra OR alternative; existing matches are unchanged).
+    searchable_id = any(v['identity'] == model for v in version_of_entities(schema))
+    searchable_fields_display = searchable_text_fields + [
+        '.'.join(p for p in (rf['relation'], rf.get('via'), rf['field']) if p)
+        for rf in searchable_relation_fields
+    ] + searchable_integer_fields + (['id'] if searchable_id else [])
     # Default ordering for the search action — newest entities are the most
     # likely autocomplete picks. Falls back to id when no audit column exists.
     default_search_order_field = (
@@ -2833,9 +3477,26 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     )
     if _connect_child_data_lines:
         validation_data_obj = validation_data_obj + '\n' + _connect_child_data_lines
+    # Owned (non-connect) children are exposed the same way: `data['{{ property_name }}']` is the array of
+    # rows the caller submits. Keys are only added; no existing key changes meaning.
+    _owned_child_data_lines = '\n'.join(
+        f"      {c['property_name']}: {c['child_var']}Items,"
+        for c in write_ch
+        if not c['use_connect']
+    )
+    if _owned_child_data_lines:
+        validation_data_obj = validation_data_obj + '\n' + _owned_child_data_lines
 
     child_nested_create = _build_child_nested_create(write_ch)
     child_nested_update = _build_child_nested_update(write_ch)
+    # Parents that attach THIS entity to themselves through a nullable FK: the
+    # search below narrows its options to records that are not attached yet.
+    list_child_attach_callers = _list_child_attach_callers(schema, parent)
+    child_attach_guard_create = _build_child_attach_guard(write_ch, model, for_update=False)
+    child_attach_guard_update = _build_child_attach_guard(write_ch, model, for_update=True)
+    child_exclusive_create_check = _build_child_exclusive_create_check(write_ch)
+    child_exclusive_update_check = _build_child_exclusive_update_check(write_ch)
+    child_exclusive_imports = exclusive_parents_service_imports(write_ch, can_update)
     child_assignee_notify_create_code = _build_child_assignee_notify_create_code(
         write_ch, parent, to_pascal_case(parent)
     )
@@ -2854,11 +3515,21 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         for fp in (_comment_def.get('properties') or {}).values()
     )
 
-    # Comment actions code
+    # Comment actions code. The write actions run the parent entity's own access gates
+    # (organization scope, x-self-only, x-filter-values, requirePermission) -- see
+    # _comment_parent_access_block.
+    _comment_scope = {
+        'should_filter_by_org': should_filter_by_org,
+        'org_relationship_optional': org_relationship_optional,
+        'is_self_only': is_self_only,
+        'filter_values': filter_values,
+    }
     if commentable_rel:
-        comment_actions_code = _build_comment_actions_bridge(parent, model, has_assignee_id, comment_has_mention)
+        comment_actions_code = _build_comment_actions_bridge(
+            parent, model, has_assignee_id, comment_has_mention, item_context_select, _comment_scope)
     else:
-        comment_actions_code = _build_comment_actions(comment_children, parent, model, has_assignee_id, comment_has_mention)
+        comment_actions_code = _build_comment_actions(
+            comment_children, parent, model, has_assignee_id, comment_has_mention, item_context_select, _comment_scope)
 
     # Snapshot child mappings (for service). Uses write_ch, not embedded_ch:
     # an independent child is never touched by update{{parent}}'s own write,
@@ -2877,6 +3548,20 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
 
     # Selection targets (page_new, page_edit)
     selection_targets = _get_selection_targets(children_raw, parent_rels_raw, schema, model)
+    # Selection targets whose picker must offer only records that are not
+    # attached to a parent yet (one-to-many list child, nullable link). A target
+    # the parent also reaches through a plain many-to-one FK keeps its full
+    # initial list: both pickers share one list.
+    _model_props = _raw_def(model, schema).get('properties', {})
+    _plain_fk_targets = {
+        r['target'] for r in parent_rels_raw
+        if (_model_props.get(r['prop_name'], {}).get('x-relationship') or {}).get('type') == 'many-to-one'
+    }
+    list_child_attach_targets = [
+        c['name'] for c in children_raw
+        if c['name'] != model and c['name'] not in _plain_fk_targets
+        and _list_child_attach_fk(c, schema, model)
+    ]
     # Extend with bridge parent targets so child forms load parent entity autocomplete options
     if bridge_child_ir:
         selection_targets = _dedupe_ordered([*selection_targets, *bridge_child_ir.get('parent_targets', [])])
@@ -3185,10 +3870,50 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
                     'field_key': to_camel_case(_vfn),
                 })
 
+    # relation_filter_fields (app-generator#753): FK display columns with a
+    # simple (single-column) labelField get a nested Prisma where/orderBy
+    # clause in buildFilter/buildOrderBy instead of being silently dropped
+    # by the flat FILTERABLE_FIELDS/SORTABLE_FIELDS allow-list (the client
+    # already sends the relation name as `field` verbatim -- see
+    # DataGridClient.tsx's reload(), unchanged by this fix). Scoped to (a)
+    # FK columns actually shown in x-display.table (the existing UI-exposure
+    # gate -- no new x-display flag needed) and (b) a plain single-column
+    # labelField, same "simple labelField" guard used above for
+    # searchable-relation-fields (composite/dotted labelFields stay out of
+    # scope). Computed here (not in generators.py's page_list_context, which
+    # this entity's getters.ts context snapshot is built before generate.py
+    # ever calls) so getters.ts.jinja2 -- rendered from build_context()'s own
+    # return dict -- actually receives it.
+    _relation_filter_fields: list[tuple[str, str]] = []
+    if xdisplay_table_raw:
+        _rel_label_map_for_filter: dict[str, str] = {}
+        for _r in list(parent_rels_raw) + list(selector_oto_rels):
+            _rprop = _r['prop_name']
+            if _rprop.endswith('_id'):
+                _rlf = _r.get('label_field')
+                if isinstance(_rlf, str) and '.' not in _rlf:
+                    _rel_label_map_for_filter[_rprop[:-3]] = _rlf
+        for _vitem in xdisplay_table_raw:
+            _rfn = list(_vitem.keys())[0]
+            if _rfn in _rel_label_map_for_filter:
+                _relation_filter_fields.append((_rfn, _rel_label_map_for_filter[_rfn]))
+    relation_filter_fields_quoted = ', '.join(
+        f"'{_rel}': {{ field: '{_lf}' }}" for _rel, _lf in _relation_filter_fields
+    )
+
     # Detail def for custom components (entity-level: list of components, plural key).
     # Each item: {name, path?, target?}. Default target is ['list'] (backward compat).
     detail_def = schema['definitions'].get(def_key, {})
     _xcc_list_raw = detail_def.get('x-custom-components') or []
+    # x-version-of identity: mount the standard VersionHistory section unless the
+    # author declared x-custom-components themselves (any value, `[]` included).
+    if 'x-custom-components' not in detail_def and any(
+        v['identity'] == def_key for v in version_of_entities(schema)
+    ):
+        _xcc_list_raw = [{
+            'name': 'VersionHistory',
+            'target': ['view'],
+        }]
     if not isinstance(_xcc_list_raw, list):
         raise ValueError(
             f"x-custom-components on '{def_key}' must be a list of component objects; "
@@ -3215,18 +3940,19 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
             'path': _item.get('path'),
             'target': _item.get('target') or ['list'],
             'props_jsx': _jsx_props_str(_item.get('props') or {}),
+            'props': _item.get('props') or {},
         })
     # Per-target lists. Each entry is {name, path?, props_jsx} so templates can iterate.
     entity_custom_components = [
-        {'name': i['name'], 'path': i['path'], 'props_jsx': i['props_jsx']}
+        {'name': i['name'], 'path': i['path'], 'props_jsx': i['props_jsx'], 'props': i['props']}
         for i in _xcc_items if 'list' in i['target']
     ]
     entity_view_components = [
-        {'name': i['name'], 'path': i['path'], 'props_jsx': i['props_jsx']}
+        {'name': i['name'], 'path': i['path'], 'props_jsx': i['props_jsx'], 'props': i['props']}
         for i in _xcc_items if 'view' in i['target']
     ]
     entity_edit_components = [
-        {'name': i['name'], 'path': i['path'], 'props_jsx': i['props_jsx']}
+        {'name': i['name'], 'path': i['path'], 'props_jsx': i['props_jsx'], 'props': i['props']}
         for i in _xcc_items if 'edit' in i['target']
     ]
 
@@ -3239,6 +3965,15 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     )
     child_service_args = ', '.join(
         f"{c['child_var']}_ids ?? []" if c['use_connect'] else f"{c['property_name']} ?? []"
+        for c in write_ch
+    )
+    # Update-side counterpart (Issue #777): an omitted relation/child-list
+    # field leaves the existing relation unchanged instead of clearing it.
+    child_service_args_update = ', '.join(
+        _child_current_value_fallback(
+            c, model, 'id',
+            f"{c['child_var']}_ids" if c['use_connect'] else c['property_name'],
+        )
         for c in write_ch
     )
 
@@ -3430,7 +4165,16 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
             if narrowed:
                 child_include_entries.append(narrowed)
                 continue
-            child_rels = get_parent_relationships(cdef)
+            child_rels_raw = get_parent_relationships(cdef)
+            # Exclude only the structural parent FK (avoid circular include).
+            # Another FK on the child that happens to target the same model for
+            # a different purpose must stay in the fetched include. A
+            # many-to-many child has no structural parent FK at all.
+            if out_type == 'list' and (c.get('relationship') or {}).get('type') == 'many-to-many':
+                parent_fk_props = set()
+            else:
+                parent_fk_props = resolve_parent_fk_props(c, cdef, model)
+            child_rels = [r for r in child_rels_raw if r['prop_name'] not in parent_fk_props]
             if not child_rels:
                 child_include_entries.append(f"{prop}: true")
             else:
@@ -3809,6 +4553,16 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         *(f"{c['child_var']}_ids" if c['use_connect'] else c['property_name']
           for c in write_ch),
     ])
+    # Relation/child-list request-body fields the REST routes accept, for the
+    # OpenAPI request schemas (Issue #777 -- previously undocumented).
+    api_write_children = [
+        {
+            'body_key': f"{c['child_var']}_ids" if c['use_connect'] else c['property_name'],
+            'use_connect': c['use_connect'],
+            'item_props': {} if c['use_connect'] else c['child_prop_defs'],
+        }
+        for c in write_ch
+    ]
     # Null placeholders for flatten rel params (API routes don't edit flatten rels inline)
     _flatten_null_args = ', '.join(
         'null'
@@ -3819,32 +4573,50 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         f", {child_service_args}" if child_service_args else ""
     ) + (f", {_flatten_null_args}" if _flatten_null_args else "")
     service_args_for_update = f"actorId, id, {parent_service_args}" + (
-        f", {child_service_args}" if child_service_args else ""
+        f", {child_service_args_update}" if child_service_args_update else ""
     ) + (f", {_flatten_null_args}" if _flatten_null_args else "")
 
-    # CSV import -> service.ts convergence (cmd_996, Issue #93): the
+    # CSV import -> service.ts convergence (cmd_996, Issue #93; widened by
+    # cmd_1124 to also cover embedded DataGrid children -- a JSON Schema
+    # `required` relation array does not mean the child list must be
+    # non-empty, and Prisma accepts an empty array there too, so nothing
+    # actually stops an embedded-child entity's import from calling
+    # add{{parent_pascal}}/update{{parent_pascal}} with an empty child
+    # array/id-list, same as a childless entity always could): the
     # generated import route calls add{{parent_pascal}}/update{{parent_pascal}}
     # -- the same functions REST route.ts / Server Action actions.ts call --
     # instead of writing via a raw tx.model.create/update, so any guard
     # inside validateOnAdd/validateOnUpdate (x-write-locked-values,
     # x-approval, and every hand-written service_validation_custom.ts rule)
-    # now applies to CSV import too.
+    # now applies to CSV import too. A CSV row still cannot express nested
+    # child rows, so every write_ch child is passed an empty array/id-list
+    # literal on both create and update (import_service_child_args below,
+    # consumed by api_import_route.ts.jinja2) -- "import creates/updates
+    # the parent row only" is unchanged, only the path it takes changed.
     #
-    # Not feasible when add/update's signature carries a param a flat CSV
-    # row structurally cannot supply: embedded DataGrid children
-    # (child_params_for_add/_for_update -- one CSV cell cannot express an
-    # array of child objects) or a bridge-child parent selection
-    # (bridge_child_params_str). flatten-relation params are NOT a blocker:
-    # route.ts's own service_args_for_create/_for_update already pass a
-    # hardcoded `null` for every one of them ("API routes don't edit
-    # flatten rels inline") -- import does exactly the same via
-    # flatten_null_args below.
-    import_service_call_feasible = (
-        import_eligible
-        and not bridge_child_params_str
-        and not child_params_for_add
-        and not child_params_for_update
+    # A bridge-child parent selection (bridge_child_params_str) is no
+    # longer a partial exception here: such an entity is excluded from
+    # import_eligible entirely (see the "Import eligibility" block above),
+    # so it never reaches this point with import_eligible true. Every
+    # entity that reaches here (import_eligible true) always converges
+    # through add/update{{parent_pascal}} -- there is no remaining
+    # unconverged fallback case, so no separate "is the service call
+    # feasible" flag is needed; import_eligible alone answers it.
+
+    # Empty array/id-list literal per write_ch child on create, in the same
+    # order child_params_for_add/_for_update declare them (write_ch itself)
+    # -- `[]` type-checks against either shape (`{childVar}Ids: string[]` or
+    # `{childVar}Items: {field_type}[]`) via TypeScript's own contextual
+    # typing of a call argument. On update, a CSV row cannot express "these
+    # are now this row's children", so the row's current children/relation
+    # ids are passed back unchanged (Issue #777) -- an empty literal there
+    # would replace them with nothing.
+    import_service_child_args = ', '.join('[]' for _ in write_ch)
+    import_service_child_args_update = ', '.join(
+        _child_current_value_fallback(c, model, 'action.id', None)
+        for c in write_ch
     )
+
     # One expression per add{{parent_pascal}}/update{{parent_pascal}} parent
     # parameter, in client_prop_infos order -- the SAME list and order
     # parent_params_with_types (the signature itself, above) is built from.
@@ -3944,8 +4716,27 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         item_context_select=item_context_select,
         sortable_fields_quoted=sortable_fields_quoted,
         filterable_fields_quoted=filterable_fields_quoted,
+        field_kinds_quoted=field_kinds_quoted,
+        relation_filter_fields_quoted=relation_filter_fields_quoted,
+        # cmd_1198: the same already-computed sort/filter allow-list and
+        # per-column kind map, exposed as structured data (not a pre-joined
+        # JS-literal string) so generators_openapi.py can build accurate
+        # `page`/`pageSize`/`sort`/`f.*` OpenAPI query parameters from the
+        # SAME source getters.ts.jinja2 renders from, instead of a second,
+        # independently-derived guess that could drift out of sync with it.
+        sort_filter_fields=_scalar_props,
+        sort_filter_field_kinds=_field_kinds,
+        sort_filter_relation_fields=_relation_filter_fields,
+        sort_filter_enum_members=_enum_members,
+        # Internal bridge FK columns (approvable_id, attachable_id, ...): kept in the REST
+        # allow-list above, but the Web and mobile list panels never offer them.
+        sort_filter_panel_excluded=sorted(get_internal_bridge_fk_prop_names(model_def, schema)),
+        enum_members_quoted=enum_members_quoted,
+        decimal_scales_quoted=decimal_scales_quoted,
         searchable_text_fields=searchable_text_fields,
         searchable_relation_fields=searchable_relation_fields,
+        searchable_integer_fields=searchable_integer_fields,
+        searchable_id=searchable_id,
         searchable_fields_display=searchable_fields_display,
         default_search_order_field=default_search_order_field,
         default_search_order_dir=default_search_order_dir,
@@ -3994,6 +4785,17 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         child_args_for_call=child_args_for_call,
         child_nested_create=child_nested_create,
         child_nested_update=child_nested_update,
+        list_child_attach_callers=list_child_attach_callers,
+        list_child_attach_self_fk=list_child_attach_callers.get(parent),
+        attach_ancestor_walk_code=(
+            _ancestor_walk_code('prisma', model, list_child_attach_callers[parent], 'selfId', 'ancestorIds', '      ').rstrip('\n')
+            if parent in list_child_attach_callers else ''
+        ),
+        child_attach_guard_create=child_attach_guard_create,
+        child_attach_guard_update=child_attach_guard_update,
+        child_exclusive_create_check=child_exclusive_create_check,
+        child_exclusive_update_check=child_exclusive_update_check,
+        child_exclusive_imports=child_exclusive_imports,
         child_assignee_notify_create_code=child_assignee_notify_create_code,
         child_assignee_notify_update_code=child_assignee_notify_update_code,
         comment_actions_code=comment_actions_code,
@@ -4011,15 +4813,18 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         include_entries_detail=include_entries_detail,
         # Selection targets (page_new / page_edit)
         selection_targets=selection_targets,
+        list_child_attach_targets=list_child_attach_targets,
         required_relation_fields=required_relation_fields,
         fk_preservation_update_code=fk_preservation_update_code,
         # API routes
         all_body_fields_create=all_body_fields_create,
         service_args_for_create=service_args_for_create,
         service_args_for_update=service_args_for_update,
-        # CSV import -> service.ts convergence (cmd_996, Issue #93)
-        import_service_call_feasible=import_service_call_feasible,
+        # CSV import -> service.ts convergence (cmd_996, Issue #93; cmd_1124)
         import_service_parent_args=import_service_parent_args,
+        import_service_child_args=import_service_child_args,
+        import_service_child_args_update=import_service_child_args_update,
+        api_write_children=api_write_children,
         flatten_null_args=flatten_null_args,
         # Field categories (FormUpsert / FormView)
         field_categories=field_categories,
@@ -4054,6 +4859,9 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         entity_custom_components=entity_custom_components,
         entity_view_components=entity_view_components,
         entity_edit_components=entity_edit_components,
+        # x-version-of: set on the version entity (None otherwise); getters.ts adds the
+        # history/diff read functions behind the entity's own permission + org filter.
+        version_of=version_of_for(def_key, schema),
         # Helpers exposed for templates
         to_camel_case=to_camel_case,
         to_pascal_case=to_pascal_case,
@@ -4080,6 +4888,10 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         write_locked_values=write_locked_values,
         write_locked_fields=write_locked_fields,
         write_locked_values_select=write_locked_values_select,
+        # x-exclusive-parents: every listed parent's structural FK column when
+        # this entity declares the key (empty otherwise). The exactly-one-owner
+        # check counts this full set.
+        exclusive_parent_columns=_exclusive_parent_all_columns(model, schema),
         # x-server-value: server-computed field values (cmd_556/cmd_565).
         server_value_fields=server_value_fields,
         server_value_override_fields=server_value_override_fields,
@@ -4091,4 +4903,27 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         # GDPR mode: model-level and field-level x-gdpr-mode annotations.
         model_gdpr_mode=model_gdpr_mode,
         gdpr_mode_fields=gdpr_mode_fields,
+        # x-state-machines (Issue #696, Stage 1 PR1/PR2b): field names on
+        # this model governed by a state-transition pointer entry, their
+        # parsed diagram contents, and (where applicable) the x-approval
+        # AND-composition edge set -- see the state_machine_fields/
+        # state_machine_diagrams/state_machine_approval_edges comments
+        # above. Consumed by service.ts.jinja2/service_validation.ts.jinja2
+        # (transition{{Field}}()/assertTransitionAllowed{{Field}}()
+        # codegen).
+        state_machine_fields=state_machine_fields,
+        state_machine_field_list=state_machine_field_list,
+        state_machine_diagrams=state_machine_diagrams,
+        state_machine_approval_edges=state_machine_approval_edges,
+        state_machine_transitions=state_machine_transitions,
+        # is_approvable / approval_config (cmd_1154): see the derivation
+        # comment above -- entity-level, static fact of whether x-approval
+        # governs this entity, and the flow's static shape.
+        is_approvable=is_approvable,
+        approval_config=approval_config,
+        # x-create-inline: some many-to-one field offers to create a record of
+        # THIS entity in place. This entity then gets the dialog component and
+        # the return-id mode of its save action. validate.py has already
+        # rejected targets that cannot safely be created that way.
+        is_inline_create_target=parent in get_inline_create_targets(schema),
     )

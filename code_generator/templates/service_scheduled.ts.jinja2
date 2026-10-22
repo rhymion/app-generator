@@ -13,7 +13,7 @@ import type { PrismaClient } from '@/app/generated/prisma/client';
 import prisma from '@/lib/prisma';
 import { {{ handler }} } from './service_scheduled_handler';
 
-type Tx = Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'>;
+{% include "_partials/tx_type.ts.jinja2" %}
 
 /**
  * Runs the `{{ task_id }}` scheduled task: selects {{ snake_name }} rows matching

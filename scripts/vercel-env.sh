@@ -65,7 +65,7 @@ if [[ -f "$_ENV_FILE" ]]; then
   set +a
 else
   echo "ERROR: .env.production.local not found at ${_ENV_FILE}" >&2
-  echo "  Copy .env.production.local.example to .env.production.local and fill in values." >&2
+  echo "  Copy .env.vercel.production.local.example to .env.production.local and fill in values." >&2
   exit 1
 fi
 
@@ -204,6 +204,11 @@ vercel_env_inject() {
   esac
 
   echo "=== Injecting Vercel env vars: target=${target} ==="
+  # DATABASE_URL here is the Neon owner's pooled URL. An app that runs as the
+  # restricted audit_log role (docs/knowledge/audit-log-append-only.md) sets
+  # DATABASE_URL to that role's connection string by hand, and this injection
+  # overwrites it. The role's password is never handled by this script.
+  echo "NOTE: DATABASE_URL (${target}) is set to the owner's pooled URL. If this app runs as the restricted audit_log role, set DATABASE_URL back to that role's connection string afterwards (docs/knowledge/audit-log-append-only.md)." >&2
   inject_var DATABASE_URL "$db_url" "$target"
   # DIRECT_URL: the unpooled Neon endpoint, consumed by prisma.config.ts for
   # `migrate:deploy` (both the one-time run in vercel-setup.sh Steps 3/5 and

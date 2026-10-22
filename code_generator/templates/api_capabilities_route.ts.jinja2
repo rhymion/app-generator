@@ -1,0 +1,187 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { authenticate, requireApiPermission, handleApiError, ApiError } from '@/lib/api-auth';
+import { get{{ parent_pascal }}Detail } from '@/lib/{{ parent }}/getters';
+import { resolvePermissions{% if has_approvable_bridge %}, getUserRoleIds{% endif %} } from '@/lib/authz';
+{% if has_edit_guard %}
+import { assertEditAllowed } from '@/lib/{{ parent }}/edit_guard';
+{% endif %}
+{% if has_delete_guard %}
+import { assertDeleteAllowed } from '@/lib/{{ parent }}/delete_guard';
+{% endif %}
+{% if state_machine_transitions and can_update %}
+import { assertTransitionAllowed } from '@/lib/state_transitions';
+{% endif %}
+{% if has_approvable_bridge %}
+import prisma from '@/lib/prisma';
+import { canSubmitForApproval, canWithdrawApproval } from '@/lib/approval_request/submit_predicate';
+import { assertApprovalOrder } from '@/lib/approval_request/order-check';
+import { hasOnWithdrawn } from '@/lib/approval_request/on_withdrawn_dispatch';
+{% endif %}
+
+// AI-agent-integration design doc, Stage 1 scope item (b): a row-level
+// "what can I do to THIS row right now" answer, reusing every judgment
+// this generator already computes for the ordinary write path -- never a
+// second, divergent implementation of any of it (see
+// capabilities_context() in generators.py for the full rationale).
+// Entity-name/schema-shape facts (field types, role-level operation
+// ceilings, the diagram's static edge set, ...) belong in the OpenAPI
+// build artifact instead -- this endpoint answers only what depends on
+// this row's own current data.
+
+type Params = { params: Promise<{ id: string }> };
+
+export async function GET(request: NextRequest, { params }: Params) {
+  try {
+    const { id } = await params;
+    const { userId: actorId } = await authenticate(request);
+    // Coarse, item-independent gate FIRST, before this route ever queries
+    // the item table (cmd_1180): a caller with no possible access path at
+    // all -- no general grant, and not a member of any role that could
+    // grant item-level (Creator/Assignee) access -- is rejected right
+    // here, so record existence is never revealed via a 404-vs-403
+    // distinction to someone who could never have read ANY row of this
+    // model. `basePerms` (the unresolved RichPermissions) is reused below
+    // for the item-level resolution AND for update/delete -- this is the
+    // ONE and only getModelPermissions()-backed permission fetch this
+    // request makes for '{{ parent }}'.
+    const basePerms = await requireApiPermission(actorId, '{{ parent }}', 'read');
+    const item = await get{{ parent_pascal }}Detail(id{% if should_filter_by_org or is_self_only %}, actorId{% endif %});
+    if (!item) {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    }
+    // Now that the item is available, resolve item-level (Creator/
+    // Assignee) permission against it and re-check 'read' -- a caller who
+    // passed the coarse gate above via role membership alone (not a
+    // general grant) may still turn out not to own/be assigned to THIS
+    // specific item.
+    const resolved = await resolvePermissions(basePerms, item, actorId);
+    if (!resolved.read) {
+      throw new ApiError(403, `Access denied: {{ parent }}.read`);
+    }
+    const _item = item as Record<string, unknown>;
+
+    const operations = {
+      read: true,
+      update: {% if not can_update %}false{% elif is_self_only %}_item.creator_id === actorId{% else %}resolved.update{% endif %},
+      delete: {% if not can_delete %}false{% elif is_self_only %}_item.creator_id === actorId{% else %}resolved.delete{% endif %},
+    };
+
+    const write_locks = {
+      edit_locked: {% if has_edit_guard %}((): boolean => { try { assertEditAllowed(item as { {{ lockdown_field }}?: unknown }); return false; } catch { return true; } })(){% else %}null{% endif %},
+      delete_locked: {% if has_delete_guard %}((): boolean => { try { assertDeleteAllowed(item as { {{ lockdown_field }}?: unknown }); return false; } catch { return true; } })(){% else %}null{% endif %},
+      locked_fields: {{ write_locked_fields | tojson }} as string[],
+    };
+
+    const transitions: Record<string, { current_state: string; legal_next_states: string[] }> = {};
+{% if state_machine_transitions and can_update %}
+{% for t in state_machine_transitions %}
+    {
+      const _current = String(_item.{{ t.field }});
+      const _candidates = {{ state_machine_diagrams[t.field].states | tojson }} as string[];
+      const _legal = _candidates.filter((s) => {
+        try {
+          assertTransitionAllowed('{{ model }}', '{{ t.field }}', _current, s);
+          return true;
+        } catch {
+          return false;
+        }
+      });
+      transitions.{{ t.field }} = { current_state: _current, legal_next_states: _legal };
+    }
+{% endfor %}
+{% endif %}
+
+{% if has_approvable_bridge %}
+    let approval: {
+      can_submit: boolean;
+      can_withdraw: boolean;
+      can_approve: boolean;
+      can_reject: boolean;
+      round_status: string[];
+      current_round_request_ids: string[];
+      actionable_request_ids: string[];
+    } | null = null;
+    const _approvableId = _item.{{ approvable_fk }} as string | null | undefined;
+    if (_approvableId) {
+      // findFirst -> findMany is a real sequential dependency (findMany's
+      // round_id comes from findFirst's result); getUserRoleIds(actorId) has
+      // no data dependency on either, so it runs concurrently alongside the
+      // pair via Promise.all rather than after them.
+      const [_latestRoundRequests, _roleIds] = await Promise.all([
+        (async () => {
+          const _latestRoundRow = await prisma.approval_request.findFirst({
+            where: { approvable_id: _approvableId },
+            orderBy: { created_at: 'desc' },
+            select: { round_id: true },
+          });
+          return _latestRoundRow
+            ? await prisma.approval_request.findMany({
+                where: { approvable_id: _approvableId, round_id: _latestRoundRow.round_id },
+                select: { id: true, status: true, approval_flow: { select: { approver_role_id: true } } },
+              })
+            : [];
+        })(),
+        getUserRoleIds(actorId),
+      ]);
+      // Issue #745: each pending sibling's assertApprovalOrder check is
+      // independent (no data dependency between siblings) -- Promise
+      // .allSettled runs them concurrently instead of the previous
+      // sequential for-loop. The ordering-check logic itself (which
+      // sibling this caller can act on) is unchanged: canApprove/
+      // canReject are true iff at least one actionable pending sibling
+      // passes the same ordering contract every approve/reject route
+      // already enforces (a pending row whose preceding stage(s) are not
+      // yet approved is not actionable by anyone yet) -- identical to the
+      // OR-across-siblings result the sequential loop computed.
+      const _actionableRequests = _latestRoundRequests.filter(
+        (_req) =>
+          _req.status === 'pending' &&
+          _req.approval_flow &&
+          _roleIds.includes(_req.approval_flow.approver_role_id),
+      );
+      const _orderResults = await Promise.allSettled(
+        _actionableRequests.map((_req) => assertApprovalOrder(_req.id)),
+      );
+      const _canApprove = _orderResults.some((r) => r.status === 'fulfilled');
+      // The rows of the current round, and the ones among them this caller may approve or reject
+      // right now (role held and every preceding stage approved). A client that cannot evaluate the
+      // role rule itself (the mobile app) offers its approve / reject buttons on exactly these rows.
+      const _actionableRequestIds = _actionableRequests
+        .filter((_req, _i) => _orderResults[_i].status === 'fulfilled')
+        .map((_req) => _req.id);
+      const _canReject = _canApprove;
+      const _approvable = await prisma.approvable.findUnique({
+        where: { id: _approvableId },
+        select: { creator_id: true },
+      });
+      const _canWithdraw =
+        hasOnWithdrawn('{{ model }}') &&
+        !!_approvable &&
+        _approvable.creator_id === actorId &&
+        canWithdrawApproval(_latestRoundRequests);
+      approval = {
+        can_submit: canSubmitForApproval(_latestRoundRequests),
+        can_withdraw: _canWithdraw,
+        can_approve: _canApprove,
+        can_reject: _canReject,
+        round_status: _latestRoundRequests.map((r) => r.status),
+        current_round_request_ids: _latestRoundRequests.map((r) => r.id),
+        actionable_request_ids: _actionableRequestIds,
+      };
+    }
+{% endif %}
+
+    return NextResponse.json({
+      operations,
+      write_locks,
+      transitions,
+{% if has_approvable_bridge %}
+      approval,
+{% else %}
+      approval: null,
+{% endif %}
+    });
+  } catch (error) {
+    return handleApiError(error);
+  }
+}

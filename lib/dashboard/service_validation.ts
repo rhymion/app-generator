@@ -1,6 +1,7 @@
 import prisma from '@/lib/prisma';
 import { validateCustomRules } from '@/lib/dashboard/service_validation_custom';
 import { AppError } from '@/lib/_errors';
+import { isValidDateValue, type DateValueFormat } from '@/lib/_date_value';
 
 type TransactionClient = Pick<typeof prisma, 'dashboard'>;
 type RequiredField = { key: string; label: string };
@@ -24,6 +25,9 @@ function isInvalidDecimal(value: unknown): boolean {
   if (typeof value !== 'string' || value.trim() === '') return false;
   return !DECIMAL_PATTERN.test(value.trim());
 }
+
+const DATE_FIELDS: (RequiredField & { format: DateValueFormat })[] = [
+] ;
 
 const ONE_TO_ONE_RELATIONS: OneToOneRelation[] = [
 ] ;
@@ -86,6 +90,13 @@ async function validateSchemaRules(tx: TransactionClient, data: Record<string, u
     }
   }
 
+  // An unparseable date / time would reach Prisma and fail as a 500.
+  for (const field of DATE_FIELDS) {
+    if (!isValidDateValue(field.format, data[field.key])) {
+      throw new AppError('VALIDATION', `${field.label} must be a valid ${field.format === 'date' ? 'date' : field.format === 'time' ? 'time' : 'date and time'}`, field.key, 'invalid');
+    }
+  }
+
   for (const relation of ONE_TO_ONE_RELATIONS) {
     const value = data[relation.key];
     if (isMissingValue(value)) {
@@ -134,7 +145,11 @@ async function validateSchemaRules(tx: TransactionClient, data: Record<string, u
     await (validateCustomRules as CustomRulesFn)(tx, data, currentId, prevRow, actorId);
   } catch (e) {
     if (e instanceof AppError && e.code === 'VALIDATION' && !e.reason) {
-      throw new AppError('VALIDATION', e.message, e.field, 'invalid');
+      // Keep a message key the hand-written rule attached (read through a cast so
+      // an older write-once lib/_errors.ts without these fields still compiles).
+      const m = e as { messageKey?: string; messageArgs?: Record<string, string | number> };
+      const retagged = new AppError('VALIDATION', e.message, e.field, 'invalid');
+      throw m.messageKey ? Object.assign(retagged, { messageKey: m.messageKey, messageArgs: m.messageArgs }) : retagged;
     }
     throw e;
   }

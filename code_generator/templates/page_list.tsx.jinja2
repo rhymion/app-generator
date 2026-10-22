@@ -56,9 +56,9 @@ async function {{ parent_pascal }}ListContent({
   const pageNum = Number(rawPage ?? 0);
   const pageSizeNum = Number(rawPageSize ?? DEFAULT_PAGE_SIZE);
 
-  const [t{% if xdisplay_table %}, tf{% endif %}{% if has_chart %}, tc{% endif %}{% for ns in enum_ns_list %}, {{ ns.var_name }}T{% endfor %}] = await Promise.all([
+  const [t{% if xdisplay_table or list_query_code %}, tf{% endif %}{% if has_chart %}, tc{% endif %}{% for ns in enum_ns_list %}, {{ ns.var_name }}T{% endfor %}] = await Promise.all([
     getTranslations('EntityLabel'),
-{% if xdisplay_table %}
+{% if xdisplay_table or list_query_code %}
     getTranslations('Fields'),
 {% endif %}
 {% if has_chart %}
@@ -166,6 +166,9 @@ async function {{ parent_pascal }}ListContent({
 {% endif %}
 {% if primary_field %}
         primaryField="{{ primary_field }}"
+{% endif %}
+{% if list_query_code %}
+        listQuery={ {{ list_query_code }} }
 {% endif %}
       />
     </>

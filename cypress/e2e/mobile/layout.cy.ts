@@ -71,6 +71,10 @@ describe('Mobile-responsive shell', () => {
     it('auto-closes the drawer after navigating to another route', () => {
       cy.get('button[aria-controls="sidebar-nav"]').click();
       // Click a nav link inside the drawer — useEffect on usePathname() fires close()
+      // Role sits in the collapsed "Administration" group, so expand it first.
+      cy.get('.fixed.inset-0.z-40 nav#sidebar-nav')
+        .contains('button', 'Administration')
+        .click();
       cy.get('.fixed.inset-0.z-40 nav#sidebar-nav')
         .find('a')
         .contains('Role')

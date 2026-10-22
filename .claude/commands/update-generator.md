@@ -31,8 +31,10 @@ Run in this order:
 
 1. `npm run lint`             — **must run before any of the generate-code steps below** (see note)
 2. `npm run test:pytest`       — Python unit tests for code generator
-3. `npm run test:vitest`      — vitest unit/component tests
+3. `npm run test:vitest`      — vitest unit/component tests — on a fresh checkout run
+   `npm run db:generate` first (the Prisma client must exist; CI's Unit Tests job does the same)
 4. `npm run test:mention-gate` — fixture-schema generate-code → tsc check (see below)
+4a. `npm run test:mention-gate-plain-image` — same mention fixture with `user.image` as a plain `format: uri` column instead of a direct-attachment FK → tsc check (see below)
 5. `npm run test:decimal-gate` — fixture-schema generate-code → tsc check (see below)
 6. `npm run test:oto-mandatory-gate` — required one-to-one selector fixture generate-code → tsc check (see below)
 7. `npm run test:oto-decimal-gate` — one-to-one selector target with a Decimal column fixture generate-code → tsc check (see below)
@@ -42,14 +44,39 @@ Run in this order:
 11. `npm run test:payment-gate` — x-payment fixture generate-code → tsc check (see below)
 12. `npm run test:direct-attachment-gate` — x-relationship type:direct FK fixture generate-code → tsc check (see below)
 13. `npm run test:uri-kind-gate` — x-uri-kind list-page/editable-child-DataGrid fixture generate-code → tsc check (see below)
-14. `npm run test:e2e:build`   — docker:up:test + generate-code + db:push + db:generate + db:seed-tenant + build
-15. `npm run check:generated`  — generated code matches templates/schema
-16. `npm run test:e2e:cy:api`  — API Cypress specs only
-17. `npm run test:e2e:cy:ui`   — non-API Cypress specs (desktop + mobile)
-18. `npm audit --omit=dev --audit-level=high`
-19. `pip-audit -r requirements.txt`
-20. `npm run check:readme-sync` — fails closed if this branch's diff touches
+14. `npm run test:filter-sort-gate` — single entity carrying every ColumnFilterKind (enum/boolean/number/decimal/date/date-time/time/string) fixture generate-code → tsc check (see below)
+14a. `npm run test:child-datagrid-e2e-gate` — builds and RUNS a fixture app (default schema + the dedicated fixture schema) and runs its Cypress specs: embedded child DataGrid written from the parent screens (see below)
+14b. `npm run test:list-child-e2e-gate` — builds and RUNS a fixture app (default schema + the dedicated fixture schema) and runs its Cypress specs: a child embedded with `x-outputType: list` shown on the parent's screens, and association add / remove from the parent screen (see below)
+14c. `npm run test:comment-rest-e2e-gate` — builds and RUNS a fixture app (default schema + a commentable entity scoped by organization) and runs its Cypress specs: the REST routes for adding, editing and deleting a comment, the @-mention user search, and the attachments route for an `attachable` bridge owner (see below)
+14d. `npm run test:scheduled-task-e2e-gate` — builds and RUNS a fixture app (default schema + three scheduled tasks) and runs its Cypress API specs: the scheduled-task admin REST routes `/api/scheduled-task-runs` (see below)
+14e. `npm run test:version-of-e2e-gate` — builds and RUNS a fixture app (default schema + an `x-version-of` identity and version entity) and runs its Cypress API specs: version number at approval, one open draft per identity, `current_version_id`, deletion of settled non-approved drafts, the new version screen, the identity tombstone (see below)
+15. `npm run test:e2e:build`   — docker:up:test + generate-code + db:push + db:generate + db:seed-tenant + build
+16. `npm run check:generated`  — generated code matches templates/schema
+17. `npm run test:e2e:cy:api`  — API Cypress specs only
+18. `npm run test:e2e:cy:ui`   — non-API Cypress specs (desktop, mobile and `cypress/e2e/auth/**`); the auth MFA spec needs `MOCK_GOOGLE_OAUTH_TEST=true` in `.env.test.local`, as the `e2e-tests` CI job sets it; keep `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` empty in the worktree's `.env.test.local` (a copied real value makes the auth specs fail with a 500 on `/api/auth/callback/google`) while leaving `MOCK_GOOGLE_OAUTH_TEST=true` set
+19. `npm audit --omit=dev --audit-level=high`
+20. `pip-audit -r requirements.txt`
+21. `npm run check:readme-sync` — fails closed if this branch's diff touches
     README.md without also touching README_ja.md (or vice versa)
+22. `npm run test:e2e:mobile:pw` — **path-triggered**: builds and RUNS the Expo web app in three modes (fixture, default, scheduled) and runs its Playwright specs; about 20 minutes (see below)
+
+**Step 22 (`test:e2e:mobile:pw`, path-triggered)**: unlike steps 2-14, this step runs only when the change
+touches a path the mobile suite exercises. The decision is mechanical, not a judgment call:
+`bash scripts/mobile_pw_gate_applies.sh` (default base `origin/develop`; pass another base ref if the
+branch forked elsewhere) prints `yes` or `no`, and prints `yes` when it cannot resolve the base. The paths
+are `mobile/**`, `code_generator/templates/mobile/**`, `code_generator/mobile_entities.py`,
+`code_generator/mobile_nav.py`, `code_generator/generate.py`, `code_generator/validate.py`,
+`code_generator/tests/fixtures/mobile_entity_e2e_gate/**`,
+`code_generator/tests/fixtures/scheduled_task_e2e_gate/**`, `scripts/compose_child_datagrid_e2e_fixture.py`,
+`scripts/run_mobile_entity_playwright.sh`, `scripts/mobile_pw_gate_applies.sh` and `.github/workflows/ci.yml`; the script holds the
+authoritative list. `build_context.py` is not on it (it holds no mobile logic).
+Run `npm run test:e2e:mobile:pw` when the answer is `yes`; it runs `scripts/run_mobile_entity_playwright.sh`,
+which starts its own disposable stack per mode (own docker project, derived ports), so it runs locally
+without CI. A `no` answer is a skip you may state in the report together with the script output. The
+bare `npm run test:e2e:mobile:pw:raw` is not a gate command: it refuses to run without a prepared stack. The
+same list drives the CI job `mobile-playwright` (`.github/workflows/ci.yml`), which is independent of the
+other jobs. The specs are bound to this repository's default and fixture schemas, so app-template does not
+run them (see `docs/knowledge/mobile-app.md`). The unconditional-step rule above covers steps 2-14 only.
 
 **Step 1 (`npm run lint`) must run on a checkout where `generate-code` has
 not yet run** — that is what CI's `Lint` job actually checks (`npm ci && npm
@@ -77,13 +104,13 @@ number CI can never reproduce. Running lint first (matching CI's exact
 condition) makes local and CI agree on the same count by construction; see
 `docs/knowledge/lint-gate-must-match-ci-precondition.md`.
 
-Steps 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, and 13 run unconditionally, with no "unchanged" exemption: CI's
+Steps 2, 3, 4, 4a, 5, 6, 7, 8, 9, 10, 11, 12, 13, and 14 run unconditionally, with no "unchanged" exemption: CI's
 `unit-tests` (`npm run test:vitest`), `pytest` (Python Generator Tests),
-`mention-gate-fixture`, `decimal-gate-fixture`, `oto-mandatory-gate-fixture`,
+`mention-gate-fixture`, `mention-gate-plain-image-fixture`, `decimal-gate-fixture`, `oto-mandatory-gate-fixture`,
 `oto-decimal-gate-fixture`, `chart-decimal-gate-fixture`,
 `chart-scalar-gate-fixture`, `approval-lockdown-gate-fixture`,
-`payment-gate-fixture`, `direct-attachment-gate-fixture`, and
-`uri-kind-gate-fixture`
+`payment-gate-fixture`, `direct-attachment-gate-fixture`,
+`uri-kind-gate-fixture`, and `filter-sort-gate-fixture`
 jobs run on every push/PR to `main`/`master` with no path filter, so a local
 gate that conditionally skips any of them can go green while CI goes red on
 the same commit. This exact gap caused PR #218's Unit Tests job to fail after
@@ -96,7 +123,7 @@ entity (commentable + comment + `x-mention: true`) through the real
 type-checks just the two generated files that carry the
 `named_constants and has_commentable` branch — the branch cmd_532 found
 broken (`c.creator_id` read off a comment type that only ever declares
-`c.creator?.id`), and that this repo's own `test:e2e:build` (step 14) can
+`c.creator?.id`), and that this repo's own `test:e2e:build` (step 15) can
 never catch because no entity in this repo's own `json_schema.yaml` wires a
 `commentable` relation. ~4s. See `docs/knowledge/mention-system.md`
 "cmd_532: creator include fix and gate-blind-spot confirmation" and
@@ -104,6 +131,16 @@ never catch because no entity in this repo's own `json_schema.yaml` wires a
 does not (only this one branch — this repo's templates have on the order of
 700 `{% if %}` branches total, most still uncovered by any fixture), and how
 to extend it to a new dark branch.
+
+**Step 4a (`test:mention-gate-plain-image`)**: sibling of step 4. It runs the
+same commentable + comment + `x-mention: true` shape through the same
+`build_user_schema.py` → `generate.py` → `tsc --noEmit` pipeline, but with
+`user.image` kept as a plain `format: uri` string column. Step 4's fixture
+declares `user.image` as a direct-attachment FK, so it only type-checks one of
+the two Prisma select shapes the comment/mention creator avatar select can
+produce (`image: { select: { path: true } }` vs `image: true`); a consumer that
+declares `x-mention: true` without having adopted the FK shape is equally
+valid. ~6s, no database. See `scripts/check_mention_gate_plain_image_fixture.sh`.
 
 **Step 5 (`test:decimal-gate`, cmd_705)**: same shape as step 4, for a
 different dark branch — a fixture entity with a required and a nullable
@@ -114,7 +151,7 @@ throwing), `FormUpsert.tsx` (the `AppFieldText`-based decimal input
 rendering), `form_validation.ts`/`service_validation.ts` (the
 `DECIMAL_FIELDS` numeric-format check), and the CSV import route (the
 `'decimal'` `ts_type` coercion). This repo's own `json_schema.yaml` has zero
-Decimal-typed fields, so none of these branches are ever compiled by step 14
+Decimal-typed fields, so none of these branches are ever compiled by step 15
 otherwise. ~6s. See `scripts/check_decimal_gate_fixture.sh`.
 
 **Step 6 (`test:oto-mandatory-gate`, cmd_704 [2-a])**: runs a
@@ -127,7 +164,7 @@ found broken (`build_context.py`'s `required_relation_fields` rebuilt a
 single `initial{Target}s` name in `page_new.tsx.jinja2` for both
 `parent_rels_raw` and `selector_oto_rels` entries, but the latter actually
 destructures as `initialAvailable{Target}s`), and that this repo's own
-`test:e2e:build` (step 14) can never catch because no entity in this repo's
+`test:e2e:build` (step 15) can never catch because no entity in this repo's
 own `json_schema.yaml` — nor any currently known consumer schema — has a
 required one-to-one selector FK. ~5s. A separate fixture from
 `test:mention-gate` rather than an extension of it: unrelated branch, kept
@@ -157,7 +194,7 @@ branch — unrelated) and step 5 (`test:decimal-gate`, an entity's own
 columns / an *embedded* relation's Decimal columns — not the OTO
 selector's separate `getAvailable...` getter). This repo's own
 `json_schema.yaml` has no one-to-one selector FK at all, so none of this is
-ever compiled by step 14 otherwise. ~7s. See
+ever compiled by step 15 otherwise. ~7s. See
 `code_generator/tests/fixtures/oto_decimal_gate/json_schema.yaml`'s header
 for the new-fixture-vs-extend rationale and
 `scripts/check_oto_decimal_gate_fixture.sh` for the check itself.
@@ -181,7 +218,7 @@ per cmd_705's `_prisma_decimal_type` marker, but the raw row value is a
 (`test:oto-decimal-gate`, a one-to-one selector's separate
 `getAvailable...` getter — unrelated code path). This repo's own
 `json_schema.yaml` has no entity combining `x-display.chart` with a
-required Decimal column, so none of this is ever compiled by step 14
+required Decimal column, so none of this is ever compiled by step 15
 otherwise. ~5s. See
 `code_generator/tests/fixtures/chart_decimal_gate/json_schema.yaml`'s
 header for the new-fixture-vs-extend rationale and
@@ -220,7 +257,7 @@ branch — unrelated code path, and not extended by this fixture to keep
 this fixture's build/type-check independent of that one's own scope and
 history). This repo's own `json_schema.yaml` has no entity combining
 `x-display.chart` with a required Int/Float or extra required DateTime
-column, so none of this is ever compiled by step 14 otherwise. ~5s. See
+column, so none of this is ever compiled by step 15 otherwise. ~5s. See
 `code_generator/tests/fixtures/chart_scalar_gate/json_schema.yaml`'s
 header for the new-fixture-vs-extend rationale and
 `scripts/check_chart_scalar_gate_fixture.sh` for the check itself.
@@ -240,16 +277,16 @@ generated output (`APPROVAL_LOCKED_FIELDS`, the locked value, and
 `disabled: true`), since `tsc` alone would pass just as well on an entity
 whose locked-value branch silently didn't render. This repo's own
 `json_schema.yaml` declares no `x-approval` entity, so none of these
-branches are ever compiled by step 14 otherwise. ~6s. See
+branches are ever compiled by step 15 otherwise. ~6s. See
 `scripts/check_approval_lockdown_gate_fixture.sh`.
 
 **Step 11 (`test:payment-gate`)**: same shape as steps 4-10, for the
 write-once Stripe integration stubs (`lib/stripe.ts`,
-`app/api/payment/checkout/route.ts`, `app/api/webhooks/stripe/route.ts`)
+`app/api/webhooks/stripe/route.ts`)
 emitted when a fixture entity declares `x-payment: true`. Exists because
 `code_generator/tests/test_payment_gate_fixture.py` only proves the stubs
 are *written* — it never proves the written TypeScript actually
-type-checks, and this repo's own `test:e2e:build` (step 14) never compiles
+type-checks, and this repo's own `test:e2e:build` (step 15) never compiles
 these stubs either, because no entity in this repo's own `json_schema.yaml`
 declares `x-payment: true`. That gap is exactly how a stale Stripe SDK
 `apiVersion` literal (hardcoded in `stripe_lib_stub.ts.jinja2`) shipped
@@ -273,7 +310,7 @@ run through the same `build_user_schema.py` → `generate.py` → `tsc
 `getters.ts` (`get{Parent}Detail`'s decrypt/strip pass for
 `encrypted_original_name`/`name_iv` — the direct-attachment analogue of the
 existing `has_attachable` treatment, cmd_356). A brand-new feature this
-repo's own `test:e2e:build` (step 14) never compiles, because no entity in
+repo's own `test:e2e:build` (step 15) never compiles, because no entity in
 this repo's own `json_schema.yaml` declares `x-relationship.type: direct`,
 and neither does any currently known consumer schema. Deliberately narrow:
 does NOT cover a direct-attachment field rendered as a DataGrid child cell
@@ -301,10 +338,130 @@ repo's own `json_schema.yaml` has one `format: uri` field (`attachment.path`
 — `user.image` moved to a direct-attachment FK), and it is never listed in
 an `x-display.table`
 column set nor embedded as a one-to-many child's column, so this repo's
-own `test:e2e:build` (step 14) never compiles either branch. ~4-5s. See
+own `test:e2e:build` (step 15) never compiles either branch. ~4-5s. See
 `scripts/check_uri_kind_gate_fixture.sh`.
 
-Step 20 only proves both README files were touched, not that their content
+**Step 14 (`test:filter-sort-gate`, cmd_1200(c))**: a tenth, unrelated
+fixture entity (`filter_sort_gate_item`) carrying every `ColumnFilterKind`
+`lib/_pagination.ts` dispatches on at once — a native Prisma enum
+(`status`), `boolean` (`is_active`), `number` (`priority`), `Decimal`
+(`amount`), `format: date` (`valid_on`), `format: date-time`
+(`started_at`), and `format: time` (`daily_time`), alongside the plain
+`string` (`name`) every fixture already carries — run through the same
+`build_user_schema.py` → `generate.py` → `tsc --noEmit` pipeline,
+type-checking `getters.ts` (`FIELD_KINDS`/`ENUM_MEMBERS`/`DECIMAL_SCALES`
+const declarations, all populated together), `form_validation.ts`/
+`service_validation.ts`, and `FormUpsert.tsx`. This repo's own
+`json_schema.yaml` has zero enum/boolean/decimal/date-kind columns among
+its own (`api: true`, `test: true`, `list: true`) entities (confirmed
+empirically — see the coverage header `cmd_1200(b)` generates into
+`cypress/e2e/api/_filter_sort_matrix_gen.cy.ts`), so this repo's own
+`test:e2e:build` (step 15) never compiles any of these branches, let alone
+all of them coexisting on one entity at once — the one shape a per-kind
+regression (e.g. an object-literal generation collision once every kind is
+emitted together, not just one at a time) could hide in. ~6-7s (measured:
+6.6s, in the same order of magnitude as `test:decimal-gate`'s ~6.4-6.6s and
+`test:mention-gate`'s ~7.8s baseline). See
+`scripts/check_filter_sort_gate_fixture.sh`.
+
+**Step 14a (`test:child-datagrid-e2e-gate`)**: the one gate that builds and
+RUNS an app. `scripts/check_child_datagrid_e2e_gate_fixture.sh` copies the
+working tree into a disposable `.generated-child-datagrid-e2e-gate/`, merges
+the entities of `code_generator/tests/fixtures/child_datagrid_e2e_gate/` (a
+dedicated schema: `json_schema.yaml`, `schema_additions.prisma`,
+`schema_relations.json`) into the copy's schema, then runs the repository's own
+`npm run test:e2e:build` and `scripts/run-e2e.js` inside the copy, executing
+only the specs in that fixture's `cypress/e2e/`. The default schema, its
+generated output and the other fixtures are never edited. The copy has its own
+docker compose project and three ports derived from the checkout's path (a port
+already in use fails the run) and its own throwaway `AUTH_SECRET`; cleanup is
+`docker compose -p <that project> down -v`. The specs cover what a type check
+cannot: an embedded child DataGrid created, edited and deleted from the
+parent's new and edit screens (UI, Server Action, service, REST route), FK label
+display and selection for the plain / composite / dotted / composite+dotted
+label forms against the parent's own model and another model, required vs
+nullable columns left empty, a child with its own writable pages staying
+read-only on the parent screens, a read-only or independent sibling not
+removing the form props an editable child grid needs, and the `x-create-inline`
+dialog (create the referenced record in place at desktop and phone width,
+including a save for another organisation refused). ~8-10 min. CI runs it as
+`child-datagrid-e2e-gate-fixture`, skipped for a docs-only diff exactly like
+`e2e-tests`; locally it always runs. See
+`scripts/check_child_datagrid_e2e_gate_fixture.sh`.
+
+**Step 14b (`test:list-child-e2e-gate`)**: same machinery as step 14a.
+`scripts/check_list_child_e2e_gate_fixture.sh` copies the working tree into a
+disposable `.generated-list-child-e2e-gate/`, merges the entities of
+`code_generator/tests/fixtures/list_child_e2e_gate/` into the copy's schema
+(through `scripts/compose_child_datagrid_e2e_fixture.py`, which merges any
+fixture directory), builds the copy and runs only that fixture's Cypress specs,
+with its own docker compose project, ports and `AUTH_SECRET` (ports differ from
+step 14a's). The specs cover what the generator-level matrix
+(`code_generator/tests/test_list_child_combination_matrix.py`) cannot: a child
+with no pages of its own, an editable child with a nullable link whose label
+reads a second FK to the parent's own model (plus a sibling child with its own
+FK to that model), a many-to-many child and a self-referencing child, each shown
+on the parent's screens; and, from the parent screen, adding an existing child
+to the list and removing one from it without deleting the child record. CI runs
+it as `list-child-e2e-gate-fixture`, skipped for a docs-only diff exactly like
+`e2e-tests`; locally it always runs. See
+`scripts/check_list_child_e2e_gate_fixture.sh`.
+
+**Step 14c (`test:comment-rest-e2e-gate`)**: same machinery as steps 14a and 14b.
+`scripts/check_comment_rest_e2e_gate_fixture.sh` copies the working tree into a
+disposable `.generated-comment-rest-e2e-gate/`, merges the entity of
+`code_generator/tests/fixtures/comment_rest_e2e_gate/` (a commentable entity with
+a foreign key to organization) into the copy's schema, builds the copy and runs
+only that fixture's Cypress specs, with its own docker compose project, ports and
+`AUTH_SECRET`. The repository's own schema has no entity with a comment thread,
+so this is the only run that exercises `POST /api/<entity>/{id}/comments`,
+`PATCH` / `DELETE .../comments/{commentId}` and `GET /api/mention/users` against
+a real database: an API key and a mobile access token, the update-permission and
+organization checks, the author-only edit and the delete rule, the mention
+notifications, and the candidate search's organization scope. The fixture also
+holds `cr_asset`, an organization-scoped owner of the `attachable` bridge, so the
+same run exercises `PUT /api/<entity>/{id}/attachments` (replace semantics, the
+update-permission and organization checks, and the refusal of another record's
+attachment id). CI runs it as `comment-rest-e2e-gate-fixture`, skipped for a docs-only diff exactly like
+`e2e-tests`; locally it always runs. See
+`scripts/check_comment_rest_e2e_gate_fixture.sh`.
+
+**Step 14d (`test:scheduled-task-e2e-gate`)**: same machinery as steps 14a and
+14b. `scripts/check_scheduled_task_e2e_gate_fixture.sh` copies the working tree
+into a disposable `.generated-scheduled-task-e2e-gate/`, merges
+`code_generator/tests/fixtures/scheduled_task_e2e_gate/` into the copy
+(`scripts/compose_child_datagrid_e2e_fixture.py` adds its top-level
+`x-scheduled-tasks`, three tasks, and copies its handlers over the write-once
+stubs), builds the copy and runs only that fixture's Cypress API specs, with its
+own docker compose project, ports and `AUTH_SECRET`. The default schema declares
+no scheduled task, so its own `test:e2e:build` (step 15) never generates the
+admin page or the REST routes `GET /api/scheduled-task-runs` and
+`POST /api/scheduled-task-runs/{task}/{rerun|resolve|skip}`; the specs cover
+the overview with each task's last-run status, the three actions by a user with
+the `ScheduledTaskRunner` role (API key and mobile access token), the refusal of
+a user without the role (and that nothing was written), refused input and the
+audit rows. CI runs it as `scheduled-task-e2e-gate-fixture`, skipped for a
+docs-only diff exactly like `e2e-tests`; locally it always runs. See
+`scripts/check_scheduled_task_e2e_gate_fixture.sh`.
+
+**Step 14e (`test:version-of-e2e-gate`)**: same machinery as steps 14a-14d.
+`scripts/check_version_of_e2e_gate_fixture.sh` copies the working tree into a
+disposable `.generated-version-of-e2e-gate/`, merges
+`code_generator/tests/fixtures/version_of_e2e_gate/` into the copy, builds it and
+runs that fixture's Cypress API specs plus the generated UI and API specs of `vo_page` (an identity with a virtual primary column and `x-generate.test: true`), with its own docker compose project,
+ports and `AUTH_SECRET`. The default schema declares no `x-version-of` entity, so
+step 15 never generates `lib/<version>/version_of.ts`; the specs cover the number
+assigned at approval, the (identity, number) uniqueness, at most one open draft
+per identity, the identity's `current_version_id`, deletion of a terminally
+rejected or withdrawn draft with its child rows, the new version screen (opens
+prefilled, writes nothing until saved, then saves an unsubmitted draft; carried
+child rows and a one-to-one holder), and the identity tombstone (delete refused
+after an approved version, new draft refused for an invalidated identity). The
+specs are permanent. CI runs
+it as `version-of-e2e-gate-fixture`, skipped for a docs-only diff exactly like
+`e2e-tests`; locally it always runs.
+
+Step 21 only proves both README files were touched, not that their content
 actually agrees — if this task's diff includes a README.md change, bring
 README_ja.md's content up to date with it (and vice versa) before this
 step, not after. See `docs/knowledge/readme-en-ja-sync-gate.md`.

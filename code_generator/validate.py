@@ -11,18 +11,26 @@ Raises SchemaValidationError (a ValueError subclass) on failure so generate()
 can catch it and print a clean message without a traceback.
 """
 import re
+from collections import Counter
 from pathlib import Path
 
+from build_context import _raw_def, _extract_children_of
+from helpers.bridge_direction import get_new_form_bridge
 from helpers.label_field import resolve_label_paths
 from helpers.naming import to_pascal_case
 from helpers.schema_helpers import (
     get_parent_relationships, get_internal_bridge_fk_prop_names,
     get_entity_properties, get_entity_required, get_self_only_flags,
     get_direct_attachment_fk_props, schema_has_direct_attachment_fk,
-    is_write_only_prop,
+    is_write_only_prop, _get_actual_type, resolve_set_fields, resolve_parent_fk_props,
+    is_text_column_prop,
 )
+from helpers.state_machine_parser import ParseError, parse_state_machine_diagram
+from keys import x_approval as approval_key
 from manifest import sha256_file
+from payment_config import PAYMENT_PRICE_ID_FIELD, resolve_payment_price_source
 from schema_deriver import parse_prisma_schema
+from version_of import version_of_errors, validate_version_of_prisma as _validate_version_of_prisma
 
 _SNAKE_CASE = re.compile(r'^(__)?[a-z][a-z0-9_]*$')
 _ID_SUFFIX  = re.compile(r'_id$')
@@ -121,12 +129,141 @@ def _unique_scalar_columns(body: str) -> set[str]:
     return set(_UNIQUE_SCALAR.findall(body))
 
 
-def validate_prisma_indexes(schema_path: str | Path) -> None:
+def _x_display_table_items(entry: dict) -> list:
+    """Normalize an entity's `x-display.table` declaration to a list of
+    single-key dicts (or [] if absent). Mirrors context.py's own parsing:
+    `x-display` may be a bare list (older shorthand) or a dict with a
+    `table` key."""
+    xdisplay = entry.get('x-display')
+    if isinstance(xdisplay, list):
+        return xdisplay
+    if isinstance(xdisplay, dict) and isinstance(xdisplay.get('table'), list):
+        return xdisplay['table']
+    return []
+
+
+def _index_exempt_column(prop_def: dict) -> bool:
+    """Issue #726: enum and boolean columns are excluded from
+    derive_ui_exposed_index_columns()'s required-index set, so
+    validate_prisma_indexes() does not fail a model for lacking one. This is
+    a demo-simplicity decision, not a claim that these columns never benefit
+    from an index — load-test measurement (cmd_1192, subtask_1192c) found
+    that actual selectivity of the filtered value, not the column's type,
+    determines whether an index helps, and that an enum or boolean column
+    can still see a substantial win (e.g. filtering a minority value). A
+    consumer that wants one anyway (e.g. as the leftmost column of a
+    composite index) may still declare it; this only relaxes the
+    requirement, it does not forbid the column from being indexed."""
+    return bool(prop_def.get('_prisma_native_enum_type')) or _get_actual_type(prop_def) == 'boolean'
+
+
+def derive_ui_exposed_index_columns(schema: dict) -> dict[str, set[str]]:
+    """Per-Prisma-model set of scalar columns exposed for filtering/sorting
+    in generated UI — Issue #726's decided indexing policy: a column gets an
+    automatic index when it appears in a generated list view
+    (`x-display.table`), or is referenced by `x-filter-values`, UNLESS the
+    column is enum- or boolean-typed (see `_index_exempt_column()`).
+
+    Expects the EXPANDED intermediate schema (`code_generator/.generated/
+    json_schema.yaml`, the same input generate.py itself consumes) — not the
+    hand-authored `code_generator/json_schema.yaml` source. The hand-authored
+    form declares a many-to-one relationship as a bare property (e.g.
+    `role: {$ref: '#/definitions/role'}`); build_user_schema.py expands that
+    into the real FK scalar column (`role_id`, carrying `x-relationship`)
+    that this function's relation exclusion below depends on. Feeding the
+    hand-authored form here would misidentify every such relation-display
+    column (`role`, `organization`, ...) as a plain scalar column, and a
+    consumer that then wrote `@@index([role])` would target a Prisma
+    relation FIELD rather than its scalar FK column — not a valid index.
+
+    Excludes relationship display columns: an `x-display.table` entry naming
+    a relation (e.g. `resource`, backed by the real column `resource_id`)
+    rather than a scalar property is skipped here — the FK column itself is
+    already covered by `_relation_fk_columns()`/`_REQUIRED_INDEX_COLUMNS`.
+    Also excludes virtual columns with no backing DB column at all (neither
+    a scalar property nor a `{name}_id` relation) — there is nothing to
+    index.
+
+    Every raw (`__x`) and view (`x`) definition is scanned independently —
+    `x-display` is normally declared on the raw entity, `x-filter-values`
+    only ever on a view (see build_context.py) — and each definition key is
+    resolved to its backing Prisma model via `_resolve_backing_model_name()`,
+    so a column declared through a proxy view (e.g. `setting` -> `user`)
+    attributes its index requirement to the real model.
+    """
+    defs = schema.get('definitions', {}) or {}
+    out: dict[str, set[str]] = {}
+
+    for def_key, entry in defs.items():
+        if not isinstance(entry, dict):
+            continue
+
+        table = _x_display_table_items(entry)
+        filter_values = entry.get('x-filter-values') or {}
+        if not table and not filter_values:
+            continue
+
+        props = get_entity_properties(def_key, schema)
+        model_name = _resolve_backing_model_name(def_key, defs)
+        candidates = out.setdefault(model_name, set())
+
+        for item in table:
+            if not isinstance(item, dict) or not item:
+                continue
+            field_name = next(iter(item))
+            is_scalar_prop = field_name in props
+            is_relation = f'{field_name}_id' in props
+            if is_scalar_prop and not is_relation and not _index_exempt_column(props[field_name]):
+                candidates.add(field_name)
+
+        for field_name in filter_values:
+            prop_def = props.get(field_name)
+            if prop_def is not None and _index_exempt_column(prop_def):
+                continue
+            candidates.add(field_name)
+
+    return {model: cols for model, cols in out.items() if cols}
+
+
+def _autocomplete_context_field_in_form_state(prop_def: dict) -> bool:
+    """True when the generated FormUpsert keeps this field's current value in
+    React state, so x-autocomplete-context can name it. Text, number, decimal
+    and uri controls are uncontrolled inputs read through a ref; naming one
+    emits a reference to a variable the form never declares. Mirrors the
+    categories in build_context._categorize_form_fields."""
+    rel = prop_def.get('x-relationship')
+    if rel:
+        return rel.get('type') in ('many-to-one', 'one-to-one')
+    xc = prop_def.get('x-custom-component')
+    if isinstance(xc, dict) and isinstance(xc.get('target'), list) and 'upsert' in xc['target']:
+        return True
+    actual = _get_actual_type(prop_def)
+    if actual == 'boolean':
+        return True
+    if actual == 'string' and prop_def.get('format') in ('date', 'date-time', 'time'):
+        return True
+    if actual == 'string' and prop_def.get('format') == 'uri':
+        return False
+    if actual == 'string' and prop_def.get('x-entity-select'):
+        return True
+    return isinstance(prop_def.get('enum'), list)
+
+
+def validate_prisma_indexes(schema_path: str | Path, schema: dict | None = None) -> None:
     """Verify every model has @@index for required hot columns.
 
     A column counts as indexed when it appears as the leftmost column of some
     @@index([...]) declaration on the same model — that's what the Postgres
     planner can use for filtering on that single column.
+
+    `schema` (the parsed, EXPANDED intermediate schema — see
+    `derive_ui_exposed_index_columns()`'s docstring) is optional so this
+    stays callable against a bare `.prisma` file with no JSON-schema context
+    (as the existing unit tests do). When given, it additionally enforces
+    Issue #726's UI-exposed indexing policy. Every real caller in this
+    codebase (generate.py, validate_schema_cli.py) has the expanded schema in
+    hand and passes it, so this half of the check is fail-closed in
+    practice, not opt-in.
 
     Raises SchemaValidationError listing every missing index so the author
     fixes them in one pass.
@@ -138,11 +275,13 @@ def validate_prisma_indexes(schema_path: str | Path) -> None:
         )
     text = path.read_text()
 
+    ui_derived = derive_ui_exposed_index_columns(schema) if schema is not None else {}
+
     errors: list[str] = []
     for name, body in _iter_model_blocks(text):
         indexed = _leftmost_indexed_columns(body) | _unique_scalar_columns(body)
-        required_cols = set(_REQUIRED_INDEX_COLUMNS) | _relation_fk_columns(body)
-        for col in sorted(required_cols):
+        hot_cols = set(_REQUIRED_INDEX_COLUMNS) | _relation_fk_columns(body)
+        for col in sorted(hot_cols):
             if _model_has_column(body, col) and col not in indexed:
                 errors.append(
                     f"model '{name}': missing required @@index([{col}]).  "
@@ -150,6 +289,18 @@ def validate_prisma_indexes(schema_path: str | Path) -> None:
                     f"on it (FK/bridge lookups, Creator/Assignee scoping, org "
                     f"filtering) will fall back to a full table scan.  Run "
                     f"`python3 scripts/add_required_indexes.py` to add it, or write "
+                    f"`@@index([{col}])` (or a composite starting with this column) "
+                    f"by hand."
+                )
+        for col in sorted(ui_derived.get(name, set()) - hot_cols):
+            if _model_has_column(body, col) and col not in indexed:
+                errors.append(
+                    f"model '{name}': missing required @@index([{col}]).  "
+                    f"'{col}' is exposed for filtering/sorting in a generated list "
+                    f"view (x-display.table) or x-filter-values (Issue #726); "
+                    f"without an index, that query falls back to a full table scan "
+                    f"as the dataset grows.  Run `python3 scripts/"
+                    f"add_required_indexes.py` to add it, or write "
                     f"`@@index([{col}])` (or a composite starting with this column) "
                     f"by hand."
                 )
@@ -226,6 +377,11 @@ def validate_self_only_creator_id_columns(schema: dict, prisma_schema_path: str 
             f"x-self-only validation failed — {len(errors)} entity(ies) missing "
             f"a creator_id column:\n\n{bullet_list}\n"
         )
+
+
+def validate_version_of_prisma(schema: dict, prisma_schema_path: str | Path) -> None:
+    """Prisma-side prerequisites of `x-version-of` (see version_of.py)."""
+    _validate_version_of_prisma(schema, prisma_schema_path, SchemaValidationError)
 
 
 _ATTACHABLE_ID_NULLABLE = re.compile(r'^\s*attachable_id\s+String\?\s*$', re.MULTILINE)
@@ -544,7 +700,7 @@ def validate_submit_on_default_matches_prisma(schema: dict, prisma_schema_path: 
         # `_raw_def()`); a paired view's own `defn` simply won't have it, so
         # no dedup logic is needed here -- each submit_on is only ever
         # findable once, straight off whichever definition declares it.
-        submit_on_raw = (defn.get('x-approval') or {}).get('submit_on') or {}
+        submit_on_raw = approval_key.get_or_empty(defn).get('submit_on') or {}
         if not submit_on_raw:
             continue
         if len(submit_on_raw) != 1:
@@ -641,6 +797,243 @@ def _compute_export_visibility(def_key: str, defn: dict, defs: dict) -> tuple[se
         if isinstance(r['label_field'], str)
     }
     return export_scalar_fields, fk_display_cols
+
+
+def _state_machine_reachable_states(
+    initial_states: set[str], edges: list[tuple[str, str]],
+) -> set[str]:
+    """States reachable from `initial_states` via zero or more `edges` hops
+    (Issue #696 state-transition Stage 1 PR2a-2's unreachable-state check)."""
+    adjacency: dict[str, list[str]] = {}
+    for from_state, to_state in edges:
+        adjacency.setdefault(from_state, []).append(to_state)
+    seen = set(initial_states)
+    stack = list(initial_states)
+    while stack:
+        current = stack.pop()
+        for nxt in adjacency.get(current, []):
+            if nxt not in seen:
+                seen.add(nxt)
+                stack.append(nxt)
+    return seen
+
+
+def _exclusive_parents_errors(schema: dict) -> list[str]:
+    """Errors for every child entity declaring `x-exclusive-parents`.
+
+    The key lists the parent entities that each own the child through their own
+    nullable structural FK (one is filled per row). It is only meaningful when
+    every listed parent embeds the child as a one-to-many DataGrid child, so
+    anything else is rejected rather than ignored.
+    """
+    defs = schema.get('definitions', {})
+    errors: list[str] = []
+    for child, _ in defs.items():
+        if child.startswith('__'):
+            continue
+        child_def = _raw_def(child, schema)
+        if 'x-exclusive-parents' not in child_def:
+            continue
+        where = f"Entity '{child}': x-exclusive-parents"
+        declared = child_def['x-exclusive-parents']
+        if (not isinstance(declared, list)
+                or not all(isinstance(n, str) and n for n in declared)):
+            errors.append(f"{where} must be a list of parent entity names.")
+            continue
+        if len(declared) < 2:
+            errors.append(
+                f"{where} must list at least 2 parent entities, got {len(declared)}; "
+                f"the key hides the other parents' FK columns, so a single parent has nothing to hide."
+            )
+        if len(set(declared)) != len(declared):
+            dups = sorted(n for n, k in Counter(declared).items() if k > 1)
+            errors.append(f"{where} lists duplicate entities: {dups}.")
+        if child in declared:
+            errors.append(f"{where} must not list the child itself ('{child}').")
+        child_props = child_def.get('properties', {})
+        child_required = set(child_def.get('required') or ())
+        for parent in dict.fromkeys(declared):
+            if parent == child:
+                continue
+            if parent not in defs and f'__{parent}' not in defs:
+                errors.append(f"{where} lists unknown entity '{parent}'.")
+                continue
+            entries = [e for e in _extract_children_of(defs.get(parent) or {}, schema)
+                       if e['name'] == child]
+            grid = [e for e in entries
+                    if e.get('output_type') not in ('list', 'comments')
+                    and (e.get('relationship') or {}).get('type') != 'many-to-many']
+            if not grid:
+                if entries:
+                    errors.append(
+                        f"{where}: '{parent}' embeds '{child}' as an x-outputType list/comments or "
+                        f"many-to-many child; the key applies to one-to-many DataGrid children only."
+                    )
+                else:
+                    errors.append(
+                        f"{where}: '{parent}' does not have '{child}' as a one-to-many child "
+                        f"(no array property of '{parent}' references it)."
+                    )
+                continue
+            fks: set[str] = set()
+            for entry in grid:
+                fks |= resolve_parent_fk_props(entry, child_def, parent)
+            missing = sorted(fk for fk in fks if fk not in child_props)
+            if missing:
+                errors.append(
+                    f"{where}: the parent FK column(s) {missing} that '{parent}' uses to own "
+                    f"'{child}' do not exist on '{child}'."
+                )
+            for fk in sorted(fks & set(child_props)):
+                prop_type = child_props[fk].get('type') if isinstance(child_props[fk], dict) else None
+                if fk in child_required or not (isinstance(prop_type, list) and 'null' in prop_type):
+                    errors.append(
+                        f"{where}: the FK '{child}.{fk}' to '{parent}' is required. A row added "
+                        f"from another listed parent's screen cannot set it, so it must be nullable."
+                    )
+    return errors
+
+
+def _create_inline_errors(schema: dict) -> list[str]:
+    """Errors for every field declaring `x-create-inline`.
+
+    The key makes a many-to-one FK field also offer "Create new": the target's own
+    generated form opens in a dialog and, once saved, the new record is selected. The
+    dialog reuses the target's form and save action, so the declaration is only accepted
+    for targets whose own create path is safe to run from inside another form. Every
+    other shape is an error (fail closed), never silently ignored: a schema author who
+    declared the key expects the control to exist.
+    """
+    defs = schema.get('definitions', {})
+    errors: list[str] = []
+    for def_key in defs:
+        if def_key.startswith('__') or not _SNAKE_CASE.match(def_key):
+            continue
+        for prop_name, prop_def in get_entity_properties(def_key, schema).items():
+            if not isinstance(prop_def, dict) or 'x-create-inline' not in prop_def:
+                continue
+            flag = prop_def['x-create-inline']
+            where = f"Definition '{def_key}', property '{prop_name}': x-create-inline"
+            if not isinstance(flag, bool):
+                errors.append(f"{where} must be true or false, got {flag!r}.")
+                continue
+            if not flag:
+                continue
+            rel = prop_def.get('x-relationship') or {}
+            rel_type = rel.get('type')
+            target = rel.get('target', '')
+            if rel_type != 'many-to-one' or not target:
+                kind = {
+                    'one-to-one': 'a one-to-one selector',
+                    'one-to-one_bridge': 'a one-to-one bridge',
+                    'direct': 'a direct attachment',
+                }.get(rel_type, 'not a many-to-one relation')
+                errors.append(
+                    f"{where} is only supported on a many-to-one foreign-key field "
+                    f"(`x-relationship: {{type: many-to-one, target: ...}}`); this field is {kind}."
+                )
+                continue
+            if target not in defs and f'__{target}' not in defs:
+                continue  # an unknown target is already reported by the relationship checks
+            raw = _raw_def(target, schema)
+            target_view = defs.get(target) or {}
+            target_where = f"{where} points at '{target}', which"
+            if target_view.get('x-internal') or raw.get('x-internal'):
+                errors.append(f"{target_where} is x-internal and has no generated form.")
+                continue
+            gen = target_view.get('x-generate') or raw.get('x-generate') or {}
+            core_flags = ('list', 'view', 'new', 'edit', 'delete', 'api')
+            if not gen or all(gen.get(k) is False for k in core_flags):
+                errors.append(
+                    f"{target_where} has no generated pages (an internal or bridge entity), "
+                    f"so there is no form to open."
+                )
+                continue
+            if gen.get('new') is False:
+                errors.append(
+                    f"{target_where} has no create form (`x-generate.new: false`), so a user "
+                    f"cannot create one from here either."
+                )
+            if approval_key.has(raw):
+                errors.append(
+                    f"{target_where} declares x-approval: creating it starts an approval flow, "
+                    f"so the new record could not be used at once."
+                )
+            if raw.get('x-payment'):
+                errors.append(
+                    f"{target_where} declares x-payment: saving it redirects to a hosted "
+                    f"checkout page, which cannot happen inside a dialog."
+                )
+            if get_self_only_flags(target_view)[0] or get_self_only_flags(raw)[0]:
+                errors.append(
+                    f"{target_where} declares x-self-only: the record belongs to its creator, "
+                    f"so creating it from another entity's form is ambiguous."
+                )
+            nested = sorted(
+                name for name, p in get_entity_properties(target, schema).items()
+                if isinstance(p, dict) and p.get('x-create-inline') is True
+            )
+            if nested:
+                errors.append(
+                    f"{target_where} itself declares x-create-inline on {nested}. The dialog "
+                    f"shows the target's form, which must not open a further dialog "
+                    f"(nesting depth is 1)."
+                )
+    return errors
+
+
+_MOBILE_GENERATOR_KEYS = frozenset({'enabled'})
+
+
+def mobile_generation_enabled(schema: dict) -> bool:
+    """True when the schema opts in to generating the Expo app under mobile/.
+
+    Reads `x-generator.mobile.enabled`; absent means false (opt-in, default off).
+    """
+    gen = schema.get('x-generator')
+    mobile = gen.get('mobile') if isinstance(gen, dict) else None
+    return isinstance(mobile, dict) and mobile.get('enabled') is True
+
+
+_AUDIT_LOG_STORAGE_GENERATOR_KEYS = frozenset({'enabled'})
+
+
+def audit_log_storage_enabled(schema: dict) -> bool:
+    """True when the schema opts in to generating the audit_log storage factory and jobs.
+
+    Reads `x-generator.audit-log-storage.enabled`; absent means false (opt-in, default off).
+    """
+    gen = schema.get('x-generator')
+    block = gen.get('audit-log-storage') if isinstance(gen, dict) else None
+    return isinstance(block, dict) and block.get('enabled') is True
+
+
+def _validate_enabled_only_block(gen: dict, name: str, allowed: frozenset) -> list[str]:
+    """Errors for an `x-generator.<name>` block that accepts a boolean `enabled` and nothing else."""
+    if name not in gen:
+        return []
+    block = gen[name]
+    where = f"x-generator.{name}"
+    if not isinstance(block, dict):
+        return [f"{where} must be a mapping (e.g. `enabled: true`)."]
+    errors: list[str] = []
+    unknown = sorted(str(k) for k in block if k not in allowed)
+    if unknown:
+        errors.append(f"{where} has unknown key(s) {unknown}; supported: {sorted(allowed)}.")
+    if 'enabled' in block and not isinstance(block['enabled'], bool):
+        errors.append(f"{where}.enabled must be a boolean (true/false), got {block['enabled']!r}.")
+    return errors
+
+
+def validate_generator_config(schema: dict) -> None:
+    """Validate the `x-generator.mobile` and `x-generator.audit-log-storage` blocks (bool `enabled` only, no unknown keys)."""
+    gen = schema.get('x-generator')
+    if not isinstance(gen, dict):
+        return
+    errors = _validate_enabled_only_block(gen, 'mobile', _MOBILE_GENERATOR_KEYS)
+    errors += _validate_enabled_only_block(gen, 'audit-log-storage', _AUDIT_LOG_STORAGE_GENERATOR_KEYS)
+    if errors:
+        raise SchemaValidationError("\n".join(errors))
 
 
 def validate_schema(schema: dict) -> None:
@@ -890,6 +1283,14 @@ def validate_schema(schema: dict) -> None:
                         f"x-autocomplete-context must be a list of field name strings."
                     )
                 else:
+                    if rel.get('type') != 'many-to-one':
+                        errors.append(
+                            f"Definition '{def_key}', property '{prop_name}': "
+                            f"x-autocomplete-context only takes effect on a "
+                            f"'many-to-one' x-relationship; on '{rel.get('type')}' "
+                            f"the generated picker would ignore it.  Remove the key "
+                            f"or make the relationship many-to-one."
+                        )
                     for field_name in actx:
                         if field_name not in props:
                             errors.append(
@@ -898,6 +1299,16 @@ def validate_schema(schema: dict) -> None:
                                 f"which is not a property of '{def_key}'.  "
                                 f"formValues are pulled from this entity's own form state, "
                                 f"not from the relationship target '{target}'."
+                            )
+                        elif not _autocomplete_context_field_in_form_state(props[field_name]):
+                            errors.append(
+                                f"Definition '{def_key}', property '{prop_name}': "
+                                f"x-autocomplete-context references field '{field_name}', "
+                                f"whose generated form control keeps its value in a ref "
+                                f"rather than React state (a plain text, number, decimal "
+                                f"or uri field), so the form has no variable to send.  "
+                                f"Name a many-to-one FK, an enum, a boolean or a date "
+                                f"field instead."
                             )
 
     # -----------------------------------------------------------------------
@@ -1227,7 +1638,7 @@ def validate_schema(schema: dict) -> None:
                         )
 
     # -----------------------------------------------------------------------
-    # 6. x-display list primary field — required + non-nullable + labelField
+    # 6. x-display list primary field — declared + non-nullable + labelField
     # -----------------------------------------------------------------------
     def _is_optional_field(field_name: str, field_props: dict, req_set: set) -> bool:
         """True when field is absent from required list OR has 'null' in type union."""
@@ -1251,6 +1662,21 @@ def validate_schema(schema: dict) -> None:
         else:
             continue
 
+        # Same "has a list view" test generate.py applies before writing the
+        # list page: the list flag is on AND (no x-display at all OR an
+        # x-display.table is declared). Chart-only x-display entities, entities
+        # with `x-generate.list: false`, x-internal entities and child-only
+        # entities (never returned by extract_entities) have no list view.
+        if isinstance(xdisplay, list):
+            has_table_decl = True
+        elif isinstance(xdisplay, dict):
+            has_table_decl = isinstance(xdisplay.get('table'), list)
+        else:
+            has_table_decl = False
+        has_list_view = bool(entity.get('generate_config', {}).get('list', True)) and (
+            not xdisplay or has_table_decl
+        )
+
         # Locate the primary display field (first entry with primary: true)
         primary_field: str | None = None
         for item in table:
@@ -1264,6 +1690,15 @@ def validate_schema(schema: dict) -> None:
                 break
 
         if primary_field is None:
+            if has_list_view:
+                _missing_primary_msg = (
+                    f"Entity '{model}': has a list view but no x-display.table column "
+                    f"with 'primary: true'. Declare an x-display.table column "
+                    f"with 'primary: true'; it is the list link column and card title, "
+                    f"and a column that is merely named 'name' does not stand in for it."
+                )
+                if _missing_primary_msg not in errors:
+                    errors.append(_missing_primary_msg)
             continue
 
         fk_prop = f'{primary_field}_id'
@@ -1327,7 +1762,11 @@ def validate_schema(schema: dict) -> None:
 
         elif primary_field in props:
             # Primary field is a plain scalar (e.g. primary='name')
-            if _is_optional_field(primary_field, props, req_set):
+            # A column with a default is non-nullable but not listed as
+            # required, so either one satisfies "always has a value".
+            _pf = props.get(primary_field, {})
+            _pf_nullable = isinstance(_pf.get('type'), list) and 'null' in _pf['type']
+            if _is_optional_field(primary_field, props, req_set) and not ('default' in _pf and not _pf_nullable):
                 errors.append(
                     f"Entity '{model}': list primary field '{primary_field}' must be "
                     f"required (non-nullable)."
@@ -1533,6 +1972,36 @@ def validate_schema(schema: dict) -> None:
                     f"Definition '{def_key}', property '{prop_name}': "
                     f"x-pii value '{pii_val}' is not valid.  "
                     f"Allowed values: {sorted(_VALID_PII_VALUES)}."
+                )
+
+    # -----------------------------------------------------------------------
+    # 8b. x-trigram-filter column annotation validation
+    #     (opt-in trigram GIN index + list panel search box)
+    # -----------------------------------------------------------------------
+    # A column-level boolean declared under `fields:` of the user schema. It
+    # drives index DDL, so a declaration that cannot take effect (wrong type,
+    # a non-text column) is an error rather than a
+    # silent no-op. Like the other column annotations, it is read from the
+    # column wherever the merged schema carries it; no location check.
+    for def_key, defn in defs.items():
+        if not isinstance(defn, dict):
+            continue
+        for prop_name, prop_def in _own_properties(defn).items():
+            if not isinstance(prop_def, dict) or 'x-trigram-filter' not in prop_def:
+                continue
+            trigram_val = prop_def['x-trigram-filter']
+            if not isinstance(trigram_val, bool):
+                errors.append(
+                    f"Definition '{def_key}', property '{prop_name}': "
+                    f"x-trigram-filter must be a boolean; got "
+                    f"{type(trigram_val).__name__}."
+                )
+            elif trigram_val and not is_text_column_prop(prop_name, prop_def):
+                errors.append(
+                    f"Definition '{def_key}', property '{prop_name}': "
+                    f"x-trigram-filter: true requires a text column "
+                    f"(a string column that is not an id, foreign key, enum, "
+                    f"date/time/uri, Decimal or write-only column)."
                 )
 
     # -----------------------------------------------------------------------
@@ -1788,7 +2257,9 @@ def validate_schema(schema: dict) -> None:
             if _gen_cfg:
                 _primary_gen_cfgs.append(_gen_cfg)
 
-        _eligible = any(
+        _is_bridge_child = bool(get_new_form_bridge(_model_defn))
+
+        _eligible = (not _is_bridge_child) and any(
             (cfg.get('import', True) is not False)
             and (cfg.get('new', True) is not False or cfg.get('edit', True) is not False)
             for cfg in _primary_gen_cfgs
@@ -1801,7 +2272,15 @@ def validate_schema(schema: dict) -> None:
         if _import_explicitly_off:
             continue  # sanctioned export/dotted-FK-target-only opt-out
 
-        if not _primary_gen_cfgs:
+        if _is_bridge_child:
+            _reason = (
+                f"'{_model_key}' declares a new-form x-bridge (its parent is "
+                f"selected at create time via selectedParentType/"
+                f"selectedParentId, not a physical FK column) — CSV export "
+                f"never emits a column identifying the parent, so there is no "
+                f"way for an imported CSV row to supply it"
+            )
+        elif not _primary_gen_cfgs:
             _reason = (
                 f"'{_model_key}' is never generated as a primary entity of its "
                 f"own model (no '{_model_key}' or '{_model_key}_detail' "
@@ -1814,16 +2293,29 @@ def validate_schema(schema: dict) -> None:
                 f"'new' and 'edit' disabled — there is no create or edit route "
                 f"to receive imported rows"
             )
+        if _is_bridge_child:
+            _fix = (
+                f"Fix by either (a) removing '{_model_key}'s x-bridge "
+                f"declaration if it should be a regular importable entity "
+                f"with a real parent FK column, or (b) if x-import-key is "
+                f"only needed for CSV export / as a dotted-FK natural-key "
+                f"target for other entities, set x-generate.import: false on "
+                f"'{_model_key}' to make the opt-out explicit."
+            )
+        else:
+            _fix = (
+                f"Fix by either (a) making '{_model_key}' a primary "
+                f"create-or-edit-able entity (add/adjust a "
+                f"'{_model_key}_detail' x-generate block with new: true or "
+                f"edit: true), or (b) if x-import-key is only needed for CSV "
+                f"export / as a dotted-FK natural-key target for other "
+                f"entities, set x-generate.import: false on '{_model_key}' to "
+                f"make the opt-out explicit."
+            )
         errors.append(
             f"Definition '{_model_key}' (E_IMPORT_KEY_NOT_ELIGIBLE): declares "
             f"x-import-key {_ik_raw!r} with import left enabled (x-generate."
-            f"import is not false), but {_reason}. Fix by either (a) making "
-            f"'{_model_key}' a primary create-or-edit-able entity (add/adjust "
-            f"a '{_model_key}_detail' x-generate block with new: true or "
-            f"edit: true), or (b) if x-import-key is only needed for CSV "
-            f"export / as a dotted-FK natural-key target for other entities, "
-            f"set x-generate.import: false on '{_model_key}' to make the "
-            f"opt-out explicit."
+            f"import is not false), but {_reason}. {_fix}"
         )
 
     # -----------------------------------------------------------------------
@@ -1890,7 +2382,7 @@ def validate_schema(schema: dict) -> None:
     for def_key, defn in defs.items():
         if not _SNAKE_CASE.match(def_key):
             continue
-        x_approval = defn.get('x-approval')
+        x_approval = approval_key.get(defn)
         if not x_approval:
             continue
         for stage in ('on_approved', 'on_rejected'):
@@ -2029,7 +2521,7 @@ def validate_schema(schema: dict) -> None:
         # through instead of catching it.
         _model_name = _resolve_backing_model_name(def_key, defs)
         _raw_entry = defs.get(f'__{_model_name}') or defs.get(_model_name) or {}
-        x_approval = _raw_entry.get('x-approval') or {}
+        x_approval = approval_key.get_or_empty(_raw_entry)
         submit_on_raw = x_approval.get('submit_on') or {}
         on_withdrawn_sf = (x_approval.get('on_withdrawn') or {}).get('set_fields') or {}
         on_rejected_block = x_approval.get('on_rejected') or {}
@@ -2091,6 +2583,13 @@ def validate_schema(schema: dict) -> None:
     # 15. x-scheduled-task entity-level validation (cmd_750 / subtask_741a)
     # -----------------------------------------------------------------------
     _scheduled_task_ids = {}
+    # task_id -> (depends_on list, location string for error messages).
+    # Populated by both the entity-level loop below and the bulk loop
+    # (15.5); the graph itself (dangling reference / self-dependency /
+    # cycle) is validated in 15.6, only after both loops have finished and
+    # every task_id is known -- a `depends_on` may name a task declared
+    # later in the schema than the one declaring it (cmd_1148).
+    _scheduled_task_depends_on = {}
     for def_key, defn in defs.items():
         if not _SNAKE_CASE.match(def_key):
             continue
@@ -2129,14 +2628,35 @@ def validate_schema(schema: dict) -> None:
                 f"service_scheduled_handler.ts), got {handler!r}."
             )
 
+        # `interval` is optional (cmd_1208): a task without one is reached only
+        # through `task:run-all` (nightly direct execution) and gets no
+        # vercel.json `crons` entry. validate.py cannot verify that the
+        # deployment actually runs task:run-all on a schedule -- see the
+        # operational warning in docs/knowledge/scheduled-task-operations.md.
+        # When present it must still be a non-empty cron string.
         interval = xsched.get('interval')
-        if not isinstance(interval, str) or not interval:
+        if interval is not None and (not isinstance(interval, str) or not interval):
             errors.append(
-                f"Definition '{def_key}': x-scheduled-task.interval is required and must be "
-                f"a non-empty cron expression string in the format Vercel's `crons[].schedule` "
-                f"accepts (cmd_781) — generate.py writes it verbatim into vercel.json's `crons` "
-                f"array for this task's /api/scheduled-tasks/{{task_id}} path."
+                f"Definition '{def_key}': x-scheduled-task.interval, when present, must be "
+                f"a non-empty cron expression string (5-field cron; generate.py writes it "
+                f"verbatim into vercel.json's `crons` array, and task:run-all reads it as "
+                f"'when this task is due'). Omit the key to schedule the task through "
+                f"task:run-all only."
             )
+
+        depends_on = xsched.get('depends_on')
+        if depends_on is not None:
+            if not isinstance(depends_on, list) or not all(
+                isinstance(d, str) and d for d in depends_on
+            ):
+                errors.append(
+                    f"Definition '{def_key}': x-scheduled-task.depends_on must be a "
+                    f"list of non-empty task_id strings, got {depends_on!r}."
+                )
+            elif isinstance(task_id, str) and task_id:
+                _scheduled_task_depends_on[task_id] = (
+                    depends_on, f"Definition '{def_key}'"
+                )
 
         xfilter = xsched.get('filter')
         if not isinstance(xfilter, dict) or not xfilter:
@@ -2204,7 +2724,7 @@ def validate_schema(schema: dict) -> None:
             )
             _bulk_scheduled_tasks = []
 
-        _ALLOWED_BULK_SCHEDULED_TASK_KEYS = {'task_id', 'handler', 'interval'}
+        _ALLOWED_BULK_SCHEDULED_TASK_KEYS = {'task_id', 'handler', 'interval', 'depends_on'}
         for i, item in enumerate(_bulk_scheduled_tasks):
             loc = f"x-scheduled-tasks[{i}]"
             if not isinstance(item, dict):
@@ -2251,15 +2771,103 @@ def validate_schema(schema: dict) -> None:
                     f"got {handler!r}."
                 )
 
+            # `interval` is optional (cmd_1208) -- see the entity-level check above.
             interval = item.get('interval')
-            if not isinstance(interval, str) or not interval:
+            if interval is not None and (not isinstance(interval, str) or not interval):
                 errors.append(
-                    f"{loc}.interval is required and must be a non-empty cron "
-                    f"expression string in the format Vercel's `crons[].schedule` "
-                    f"accepts (cmd_781) -- generate.py writes it verbatim into "
-                    f"vercel.json's `crons` array for this task's "
-                    f"/api/scheduled-tasks/{{task_id}} path."
+                    f"{loc}.interval, when present, must be a non-empty cron "
+                    f"expression string (5-field cron; generate.py writes it "
+                    f"verbatim into vercel.json's `crons` array, and task:run-all "
+                    f"reads it as 'when this task is due'). Omit the key to "
+                    f"schedule the task through task:run-all only."
                 )
+
+            depends_on = item.get('depends_on')
+            if depends_on is not None:
+                if not isinstance(depends_on, list) or not all(
+                    isinstance(d, str) and d for d in depends_on
+                ):
+                    errors.append(
+                        f"{loc}.depends_on must be a list of non-empty task_id "
+                        f"strings, got {depends_on!r}."
+                    )
+                elif isinstance(task_id, str) and task_id:
+                    _scheduled_task_depends_on[task_id] = (depends_on, loc)
+
+    # -----------------------------------------------------------------------
+    # 15.6. depends_on: graph validation -- self-dependency, dangling
+    #       reference, cycle detection (cmd_1148). Generation-time,
+    #       fail-closed, same discipline this project already applies to
+    #       x-state-machines diagrams (16, below) -- a schema-authoring
+    #       error here must be rejected loudly at `generate-code` time, not
+    #       discovered at runtime as a job that waits forever on a
+    #       predecessor that can never complete (dangling) or on itself
+    #       (cycle). Runs after both the entity-level (15) and bulk (15.5)
+    #       loops so every task_id is known regardless of declaration
+    #       order -- a `depends_on` may name a task declared later in the
+    #       schema than the one declaring it.
+    # -----------------------------------------------------------------------
+    _depends_on_graph = {}
+    for _dep_task_id, (_deps, _loc) in _scheduled_task_depends_on.items():
+        for _dep in _deps:
+            if _dep == _dep_task_id:
+                errors.append(
+                    f"{_loc}: depends_on names {_dep_task_id!r} itself -- a task "
+                    f"cannot depend on its own completion."
+                )
+            elif _dep not in _scheduled_task_ids:
+                errors.append(
+                    f"{_loc}: depends_on names {_dep!r}, which is not declared "
+                    f"anywhere in x-scheduled-tasks/x-scheduled-task -- a typo, "
+                    f"or a task since renamed/removed with a stale dependency "
+                    f"left behind."
+                )
+        # The cycle-detection graph below deliberately excludes self-edges
+        # and dangling references -- both are already reported above with
+        # their own clearer message, and letting them into the graph would
+        # only produce a confusing second error naming the same edge.
+        _depends_on_graph[_dep_task_id] = [
+            _d for _d in _deps if _d != _dep_task_id and _d in _scheduled_task_ids
+        ]
+
+    _WHITE, _GRAY, _BLACK = 0, 1, 2
+    _dfs_color = {tid: _WHITE for tid in _depends_on_graph}
+    _reported_cycles = set()
+
+    def _walk_depends_on_cycle(start):
+        stack = [(start, iter(_depends_on_graph.get(start, [])))]
+        path = [start]
+        _dfs_color[start] = _GRAY
+        while stack:
+            node, edges_iter = stack[-1]
+            advanced = False
+            for dep in edges_iter:
+                if _dfs_color.get(dep, _WHITE) == _GRAY:
+                    cycle_start = path.index(dep)
+                    cycle = path[cycle_start:] + [dep]
+                    key = tuple(sorted(set(cycle)))
+                    if key not in _reported_cycles:
+                        _reported_cycles.add(key)
+                        errors.append(
+                            "depends_on cycle detected: "
+                            + " -> ".join(cycle)
+                            + " -- a task can never depend, even indirectly, on "
+                              "its own future completion."
+                        )
+                elif _dfs_color.get(dep, _WHITE) == _WHITE:
+                    _dfs_color[dep] = _GRAY
+                    path.append(dep)
+                    stack.append((dep, iter(_depends_on_graph.get(dep, []))))
+                    advanced = True
+                    break
+            if not advanced:
+                _dfs_color[node] = _BLACK
+                stack.pop()
+                path.pop()
+
+    for _task_id in _depends_on_graph:
+        if _dfs_color[_task_id] == _WHITE:
+            _walk_depends_on_cycle(_task_id)
 
     # Vercel's per-project cron-job limit is 100, unchanged across Hobby/Pro/
     # Enterprise (last confirmed 2026-07-15 —
@@ -2283,6 +2891,437 @@ def validate_schema(schema: dict) -> None:
             f"docs/knowledge/scheduled-task-operations.md). Reduce the number of "
             f"distinct task_ids, or dispatch multiple filters from within one handler."
         )
+
+    # -----------------------------------------------------------------------
+    # 15.7. x-payment (Issue #775): the record lifecycle needs a Stripe Price
+    #       for the Checkout Session and a delete path to remove an unpaid
+    #       (provisional) record. x-payment stays a bare boolean; the Price's
+    #       source is a field-name convention (payment_config.py): the entity's
+    #       own `stripe_price_id`, else exactly one foreign key to an entity
+    #       that declares it.
+    #       Checked on whichever definition carries the key (the raw '__x'
+    #       half after build_user_schema.py, the bare entity otherwise).
+    # -----------------------------------------------------------------------
+    for def_key, defn in defs.items():
+        if not isinstance(defn, dict) or 'x-payment' not in defn:
+            continue
+        xpay = defn['x-payment']
+        entity = def_key[2:] if def_key.startswith('__') else def_key
+        if xpay is not True and xpay is not False:
+            errors.append(
+                f"Definition '{entity}': x-payment must be the boolean true (or false), got "
+                f"{xpay!r}. It takes no options: the Price comes from a "
+                f"'{PAYMENT_PRICE_ID_FIELD}' field."
+            )
+            continue
+        if xpay is False:
+            continue
+        pay_props = get_entity_properties(def_key, schema)
+        pay_required = get_entity_required(def_key, schema)
+        price_source = resolve_payment_price_source(pay_props, schema)
+        if price_source['kind'] == 'none':
+            errors.append(
+                f"Definition '{entity}': x-payment: true requires a '{PAYMENT_PRICE_ID_FIELD}' "
+                f"field (string, a Stripe Price id) on the entity itself or on exactly one entity "
+                f"it has a foreign key to -- found neither."
+            )
+        elif price_source['kind'] == 'ambiguous':
+            found = ', '.join(
+                f"'{c['fk_field']}' -> '{c['target']}'" for c in price_source['candidates']
+            )
+            errors.append(
+                f"Definition '{entity}': x-payment: true could not resolve "
+                f"'{PAYMENT_PRICE_ID_FIELD}' -- found it on more than one related entity via "
+                f"foreign keys {found}. The Price source must be unambiguous: remove one of the "
+                f"relationships, or declare '{PAYMENT_PRICE_ID_FIELD}' on '{entity}' itself."
+            )
+        else:
+            if price_source['kind'] == 'self':
+                price_owner, price_owner_props = entity, pay_props
+                price_owner_required = pay_required
+            else:
+                price_owner = price_source['target']
+                price_owner_props = get_entity_properties(price_owner, schema)
+                price_owner_required = get_entity_required(price_owner, schema)
+            price_def = price_owner_props[PAYMENT_PRICE_ID_FIELD] or {}
+            got_type = price_def.get('type')
+            if got_type != 'string':
+                errors.append(
+                    f"Definition '{price_owner}': x-payment field '{PAYMENT_PRICE_ID_FIELD}' must "
+                    f"be of type 'string', got {got_type!r}."
+                )
+            # A column with a default is non-nullable but not listed as
+            # required, so either one satisfies "always has a value".
+            if PAYMENT_PRICE_ID_FIELD not in price_owner_required and 'default' not in price_def:
+                errors.append(
+                    f"Definition '{price_owner}': x-payment field '{PAYMENT_PRICE_ID_FIELD}' must "
+                    f"be required (a non-nullable column) -- a record without it has nothing to charge."
+                )
+            if price_source['kind'] == 'self' and 'default' not in price_def:
+                errors.append(
+                    f"Definition '{entity}': x-payment field '{PAYMENT_PRICE_ID_FIELD}' must declare "
+                    f"a `default:` (with a matching Prisma @default). It is excluded from client "
+                    f"input so a buyer cannot choose the Price, and the default is what every "
+                    f"record is charged; to price per related record, declare the field on that "
+                    f"related entity instead."
+                )
+        # x-generate lives on the bare entity after build_user_schema.py.
+        pay_gen = (defs.get(entity, {}).get('x-generate') or defn.get('x-generate') or {})
+        if pay_gen.get('delete') is False:
+            errors.append(
+                f"Definition '{entity}': x-payment: true requires x-generate.delete to stay "
+                f"enabled -- an unpaid (expired or failed) record is removed through the "
+                f"entity's generated delete function."
+            )
+
+    # -----------------------------------------------------------------------
+    # 16. x-state-machines precondition guard (Issue #696, state-transition
+    #     Stage 1 PR1; see state-transition-generator-design.md's input-
+    #     placement and diagram-validation sections). No-op when the
+    #     top-level pointer map is absent (the design's opt-in guarantee).
+    #     Checks field existence/type and pointer-entry ambiguity, neither
+    #     of which requires reading a pointed-to .mmd file's own contents
+    #     (states/edges) — the Mermaid parser and the remaining diagram-
+    #     content validation cases are PR2's scope. A third, entity-level
+    #     check ("Case E") used to live here too, rejecting a pointer entry
+    #     outright whenever the entity's import route could not converge
+    #     through service.ts; it has been removed in favor of a field-level
+    #     fix in build_context.py (see the comment further below).
+    # -----------------------------------------------------------------------
+    _state_machine_pointers = schema.get('x-state-machines')
+    if _state_machine_pointers:
+        if not isinstance(_state_machine_pointers, dict):
+            errors.append(
+                f"x-state-machines must be a mapping of '{{model}}.{{field}}: "
+                f"path/to.mmd' entries, got "
+                f"{type(_state_machine_pointers).__name__}."
+            )
+            _state_machine_pointers = {}
+
+        # (ii) ambiguity — two entries naming the same (model, field) pair.
+        # A literal duplicate YAML key can't survive yaml.safe_load (the
+        # later occurrence silently wins, so by the time this dict exists
+        # there is only one) — the real way two distinct keys collide is the
+        # raw/view '__' split alias (e.g. 'goods_receipt.status' and
+        # '__goods_receipt.status' naming the identical underlying model +
+        # field). Strip a leading '__' from the model segment before
+        # comparing.
+        _sm_resolved_pairs: dict[tuple[str, str], list[str]] = {}
+        for _sm_key in _state_machine_pointers:
+            if not isinstance(_sm_key, str) or '.' not in _sm_key:
+                errors.append(
+                    f"x-state-machines key {_sm_key!r} must be of the form "
+                    f"'{{model}}.{{field}}' (state-transition-generator-"
+                    f"design.md's input-placement section)."
+                )
+                continue
+            _sm_model, _sm_field = _sm_key.rsplit('.', 1)
+            _sm_model_resolved = _sm_model[2:] if _sm_model.startswith('__') else _sm_model
+            _sm_resolved_pairs.setdefault((_sm_model_resolved, _sm_field), []).append(_sm_key)
+
+        for (_pair_model, _pair_field), _owning_keys in _sm_resolved_pairs.items():
+            if len(_owning_keys) > 1:
+                errors.append(
+                    f"x-state-machines: {sorted(_owning_keys)!r} all name the "
+                    f"same (model, field) pair ({_pair_model!r}, "
+                    f"{_pair_field!r}) — ambiguous, which diagram governs? "
+                    f"Each governed (model, field) pair must have exactly "
+                    f"one pointer entry."
+                )
+
+        # (i) field existence/type, per declared pointer entry.
+        for _sm_key, _sm_path in _state_machine_pointers.items():
+            if not isinstance(_sm_key, str) or '.' not in _sm_key:
+                continue  # already reported above
+            _sm_model, _sm_field = _sm_key.rsplit('.', 1)
+            _sm_model_def = _raw_def(_sm_model, schema)
+            _sm_model_props = _sm_model_def.get('properties') or {}
+
+            if 'id' not in _sm_model_props:
+                errors.append(
+                    f"x-state-machines['{_sm_key}']: model '{_sm_model}' "
+                    f"does not exist in this schema."
+                )
+                continue
+
+            _sm_field_def = _sm_model_props.get(_sm_field)
+            if _sm_field_def is None:
+                errors.append(
+                    f"x-state-machines['{_sm_key}']: model '{_sm_model}' has "
+                    f"no field '{_sm_field}'."
+                )
+            else:
+                _sm_is_enum_like = (
+                    bool(_sm_field_def.get('_prisma_native_enum_type'))
+                    or (
+                        isinstance(_sm_field_def.get('enum'), list)
+                        and bool(_sm_field_def.get('enum'))
+                    )
+                )
+                if not _sm_is_enum_like:
+                    errors.append(
+                        f"x-state-machines['{_sm_key}']: field '{_sm_field}' "
+                        f"on model '{_sm_model}' is type "
+                        f"{_get_actual_type(_sm_field_def)!r} with no "
+                        f"declared enum values — a state-transition-"
+                        f"governed field must be an enum (nativeEnum or a "
+                        f"plain 'enum:' list); a diagram's state names have "
+                        f"nowhere to map onto otherwise."
+                    )
+
+            # -------------------------------------------------------------
+            # Diagram-content checks (Issue #696 state-transition Stage 1
+            # PR2a-2; state-transition-generator-design.md's Fail-Closed
+            # Diagram Validation table rows that DO require reading the
+            # pointed-to .mmd file's own contents — unreachable/dead-end/
+            # duplicate/stale-ref, plus Case D). PR2a-1
+            # (state_machine_parser.py) supplies the parser; this is its
+            # first real consumer.
+            #
+            # Path resolution: there is no pre-existing "resolve a schema-
+            # embedded relative file path" convention elsewhere in this file
+            # to reuse (validate_schema() itself takes no schema_path/
+            # base_dir argument, and the other Path-based checks here all
+            # resolve prisma_schema_path, a caller-supplied absolute path,
+            # never a path read out of the schema content itself). Resolved
+            # here relative to the current working directory instead,
+            # matching how the real npm scripts (package.json's
+            # generate-code/validate:schema) already invoke
+            # build_user_schema.py/generate.py/validate_schema_cli.py with
+            # cwd-relative arguments (`code_generator/json_schema.yaml`,
+            # `./`) from the project root — not a new convention invented
+            # from a blank slate, but also not a literal reuse of an
+            # existing resolver, since none existed. Flagged for review as
+            # a judgment call, not a verified pre-existing pattern.
+            # -------------------------------------------------------------
+            try:
+                _sm_mmd_text = Path(_sm_path).read_text()
+            except OSError:
+                errors.append(
+                    f"x-state-machines['{_sm_key}']: pointed-to file "
+                    f"'{_sm_path}' does not exist."
+                )
+                continue
+
+            _sm_diagram = parse_state_machine_diagram(_sm_mmd_text)
+            if isinstance(_sm_diagram, ParseError):
+                _sm_loc = (
+                    f" (line {_sm_diagram.line_number}: {_sm_diagram.line_text!r})"
+                    if _sm_diagram.line_number else ""
+                )
+                errors.append(
+                    f"x-state-machines['{_sm_key}']: '{_sm_path}': "
+                    f"{_sm_diagram.message}{_sm_loc}"
+                )
+                continue
+
+            _sm_reachable = _state_machine_reachable_states(
+                _sm_diagram.initial_states, _sm_diagram.edges,
+            )
+            _sm_unreachable = sorted(_sm_diagram.states - _sm_reachable)
+            if _sm_unreachable:
+                errors.append(
+                    f"x-state-machines['{_sm_key}']: '{_sm_path}': "
+                    f"unreachable state(s) {_sm_unreachable!r} — no path "
+                    f"from a declared initial state ('[*] --> state') "
+                    f"reaches them."
+                )
+
+            # cmd_1145: a self-edge ("X --> X") is never counted as a real
+            # way out here. assertTransitionAllowed()'s own fromState ===
+            # toState rule (state_transitions.ts.jinja2) already permits a
+            # same-state transition unconditionally, with or without a
+            # matching diagram edge -- so a state whose ONLY declared
+            # outgoing edge targets itself has no real exit at runtime any
+            # more than a state with zero declared edges does. Excluding
+            # self-edges from this "has an outgoing edge" test is what
+            # surfaces that case as the dead end it actually is.
+            _sm_dead_ends = sorted(
+                s for s in _sm_diagram.states
+                if not any(frm == s and to != s for frm, to in _sm_diagram.edges)
+                and s not in _sm_diagram.terminal_states
+            )
+            if _sm_dead_ends:
+                errors.append(
+                    f"x-state-machines['{_sm_key}']: '{_sm_path}': "
+                    f"dead-end state(s) {_sm_dead_ends!r} have no outgoing "
+                    f"edge and are not declared terminal "
+                    f"('state --> [*]')."
+                )
+
+            _sm_dupe_edges = sorted(
+                {edge for edge, n in Counter(_sm_diagram.edges).items() if n > 1}
+            )
+            if _sm_dupe_edges:
+                errors.append(
+                    f"x-state-machines['{_sm_key}']: '{_sm_path}': "
+                    f"duplicate edge(s) {_sm_dupe_edges!r} — two edges "
+                    f"declared between the same (fromState, toState) pair; "
+                    f"nothing can disambiguate which edge's condition/"
+                    f"effect should apply."
+                )
+
+            # Stale-ref (an edge referencing a state name never declared as
+            # a node): unreachable via THIS parser's own grammar as things
+            # stand — state_machine_parser.py adds both endpoints of every
+            # bare "state --> state" edge to StateMachineDiagram.states as a
+            # side effect of parsing it, so _sm_diagram.edges' endpoints are
+            # always a subset of _sm_diagram.states by construction; no real
+            # .mmd text can produce a StateMachineDiagram that fails this
+            # check. Kept anyway as a defensive/forward-compatible check
+            # (harmless today, would start mattering if a future parser
+            # revision ever adds a bare state-declaration construct
+            # decoupled from edges) — see
+            # test_stale_ref_state_via_monkeypatched_parser for how this is
+            # exercised without a real reachable .mmd input, and this PR's
+            # own report for this being flagged as a design note rather
+            # than swept under.
+            _sm_stale_refs = sorted(
+                {s for edge in _sm_diagram.edges for s in edge} - _sm_diagram.states
+            )
+            if _sm_stale_refs:
+                errors.append(
+                    f"x-state-machines['{_sm_key}']: '{_sm_path}': edge(s) "
+                    f"reference undeclared state(s) {_sm_stale_refs!r}."
+                )
+
+            # Issue #715: every value in the governed field's own enum must
+            # be a state the diagram declares. Without this, adding an enum
+            # value and forgetting the diagram generates cleanly, the value
+            # still shows up as a selectable UI option (i18n scaffolding
+            # follows the enum), and every write path then rejects it with
+            # a generic "not a valid initial state"/"no such transition"
+            # error that looks like any other invalid value.
+            if _sm_field_def is not None:
+                _sm_enum_values = _sm_field_def.get('enum')
+                if isinstance(_sm_enum_values, list):
+                    _sm_enum_missing = [
+                        str(v) for v in _sm_enum_values
+                        if v is not None and str(v) not in _sm_diagram.states
+                    ]
+                    if _sm_enum_missing:
+                        errors.append(
+                            f"x-state-machines['{_sm_key}']: model "
+                            f"'{_sm_model}' field '{_sm_field}' declares "
+                            f"enum value(s) {_sm_enum_missing!r} that "
+                            f"diagram '{_sm_path}' never mentions — add "
+                            f"them to the diagram (every write of a value "
+                            f"the diagram lacks is rejected at runtime), "
+                            f"or remove them from the enum."
+                        )
+
+            # Default-value fail-closed check (Issue #710 corollary): a
+            # governed field's own JSON Schema `default`, when declared,
+            # must itself be one of this diagram's declared initial
+            # state(s) ('[*] --> state'). This is the counterpart that
+            # makes service_validation.ts.jinja2's create/update guards
+            # (Issue #710's own fix) safe to let a client-omitted field
+            # fall through unchecked: that write path relies on the
+            # column's DB/Prisma default landing the row in a legal
+            # diagram state without ever calling assertInitialStateAllowed
+            # at all. Without this generation-time guarantee, a future
+            # schema edit could point a governed field's default somewhere
+            # the diagram never declares as an initial state, and an
+            # omitted-field write would then silently create a row in a
+            # state the diagram doesn't consider reachable from creation —
+            # exactly the gap Issue #710 was filed over, reopened from the
+            # schema-authoring side instead of the write-path side. See
+            # service_validation.ts.jinja2's own comment at the matching
+            # guards for the other half of this same causal link.
+            if _sm_field_def is not None:
+                _sm_default = _sm_field_def.get('default')
+                if _sm_default is not None and str(_sm_default) not in _sm_diagram.initial_states:
+                    errors.append(
+                        f"x-state-machines['{_sm_key}']: model '{_sm_model}' "
+                        f"field '{_sm_field}' declares default {_sm_default!r}, "
+                        f"which is not one of the initial state(s) "
+                        f"{sorted(_sm_diagram.initial_states)!r} declared by "
+                        f"diagram '{_sm_path}' ('[*] --> state') — a write "
+                        f"that omits this field "
+                        f"would land in a state the diagram does not treat as "
+                        f"a legal starting point."
+                    )
+
+            # Case D (x-approval structural conflict, narrowed): the
+            # original difference-set check (every edge state must be in
+            # x-approval's legal value set) was far broader than intended
+            # and rejected real diagrams like goods_receipt_line's (an
+            # on_approved with no set_fields at all, plus a 'split' state
+            # an unrelated x-* mechanism writes that x-approval never
+            # touches). The only structurally impossible shape is a single
+            # edge direction: a rejected/withdrawn state transitioning
+            # straight to the approved state — that skips the approval
+            # decision itself. The reverse (approved -> rejected/withdrawn)
+            # is a legitimate revocation path and must never be flagged;
+            # reuses resolve_set_fields() rather than re-deriving
+            # set_fields resolution independently.
+            _sm_approval = approval_key.get(_sm_model_def)
+            if _sm_field_def is not None and _sm_approval:
+                _sm_entity_props = _sm_model_def.get('properties', {})
+
+                _sm_on_approved_raw = (_sm_approval.get('on_approved') or {}).get('set_fields') or {}
+                _sm_on_approved_resolved = resolve_set_fields(_sm_entity_props, _sm_on_approved_raw)
+                _sm_on_approved_value = (
+                    str(_sm_on_approved_resolved[_sm_field])
+                    if _sm_field in _sm_on_approved_resolved else None
+                )
+
+                # No on_approved.set_fields for this field (e.g.
+                # goods_receipt_line, whose on_approved only sets
+                # emit_hook) — the forbidden edge shape can't even be
+                # expressed, so no diagram content can trip this check.
+                if _sm_on_approved_value is not None:
+                    _sm_reject_withdraw_values = set()
+                    for _sm_stage in ('on_rejected', 'on_withdrawn'):
+                        _sm_stage_raw = (_sm_approval.get(_sm_stage) or {}).get('set_fields') or {}
+                        _sm_stage_resolved = resolve_set_fields(_sm_entity_props, _sm_stage_raw)
+                        if _sm_field in _sm_stage_resolved:
+                            _sm_reject_withdraw_values.add(str(_sm_stage_resolved[_sm_field]))
+
+                    _sm_case_d_edges = sorted(
+                        edge for edge in _sm_diagram.edges
+                        if edge[0] in _sm_reject_withdraw_values
+                        and edge[1] == _sm_on_approved_value
+                    )
+                    if _sm_case_d_edges:
+                        errors.append(
+                            f"x-state-machines['{_sm_key}']: model '{_sm_model}' "
+                            f"also declares x-approval for field '{_sm_field}'; "
+                            f"diagram '{_sm_path}' edge(s) {_sm_case_d_edges!r} "
+                            f"transition directly from a rejected/withdrawn "
+                            f"state to the approved state "
+                            f"({_sm_on_approved_value!r}) — structurally "
+                            f"impossible, since only the approval decision "
+                            f"itself may set that value (Case D)."
+                        )
+
+            # An entity-level "Case E" ban, and later a field-level CSV
+            # import lockout that replaced it, both used to live here / in
+            # build_context.py. Both removed: whether an entity's import
+            # route converges through service.ts and whether one of its
+            # fields is governed by a state-transition diagram are
+            # independent questions, and transition legality is an
+            # ordinary write-path check like any other constraint — not
+            # something an entry point special-cases. A governed field's
+            # CSV column is imported like any other column; the write path
+            # (validateOnAdd/Update) is responsible for rejecting a value
+            # that isn't a legal transition target, exactly as it would
+            # reject any other invalid value.
+
+    # -----------------------------------------------------------------------
+    # x-exclusive-parents
+    # -----------------------------------------------------------------------
+    errors.extend(_exclusive_parents_errors(schema))
+
+    # -----------------------------------------------------------------------
+    # x-create-inline
+    # -----------------------------------------------------------------------
+    errors.extend(_create_inline_errors(schema))
+
+    # -----------------------------------------------------------------------
+    # x-version-of
+    # -----------------------------------------------------------------------
+    errors.extend(version_of_errors(schema))
 
     # -----------------------------------------------------------------------
     # Report

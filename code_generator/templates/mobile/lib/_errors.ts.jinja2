@@ -1,0 +1,30 @@
+// Types shared with the Web app's lib/_errors.ts: the failure value the
+// generated entity hooks (lib/<entity>/use_entity_form.ts) understand. Only the
+// types are mirrored; the Web file's AppError class is server-side.
+export type ErrorCode =
+  | 'SESSION_EXPIRED'
+  | 'PERMISSION_DENIED'
+  | 'NOT_FOUND'
+  | 'VALIDATION'
+  | 'CONFLICT'
+  | 'RESERVATION_LOCKED'
+  | 'RELATED_RECORD_INVALID'
+  | 'CAPACITY'
+  | 'UNKNOWN';
+
+export type ValidationReason = 'missing' | 'invalid';
+
+export type MessageArgs = Record<string, string | number>;
+
+export type ActionSuccess = { ok: true };
+// A save that returns the id of the record it wrote.
+export type ActionCreated = { ok: true; id: string };
+export type ActionFailure = {
+  ok: false;
+  errorCode: ErrorCode;
+  field?: string;
+  reason?: ValidationReason;
+  messageKey?: string;
+  messageArgs?: MessageArgs;
+};
+export type ActionResult = ActionSuccess | ActionFailure;

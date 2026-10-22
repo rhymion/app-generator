@@ -1,0 +1,91 @@
+// AUTO-GENERATED - DO NOT EDIT
+//
+// x-version-of: '{{ version }}' is a version of '{{ identity }}'. Called from
+// the service create path ({{ version }}/service.ts) and from the approval
+// dispatch modules in lib/approval_request/, always inside the caller's
+// transaction, so a throw rolls the whole write back.
+import type { PrismaClient } from '@/app/generated/prisma/client';
+import { AppError } from '@/lib/_errors';
+
+{% include "_partials/tx_type.ts.jinja2" %}
+
+{% if identity_invalidatable %}
+/**
+ * A retired ({{ identity }}.invalidated_at set) {{ identity }} takes no new
+ * draft; its approved versions stay readable and referenced.
+ */
+export async function assertIdentityActive(tx: Tx, identityId: string): Promise<void> {
+  const identity = await tx.{{ identity }}.findUnique({ where: { id: identityId }, select: { invalidated_at: true } });
+  if (identity?.invalidated_at) {
+    throw new AppError('VALIDATION', 'This {{ identity }} is invalidated and takes no new draft', '{{ identity_fk }}', 'invalid');
+  }
+}
+
+{% endif %}
+/**
+ * An {{ identity }} that has an approved version (one holding a number) cannot
+ * be deleted: deleting it would delete the history. Retire it by invalidation;
+ * a {{ identity }} with only unapproved drafts can still be deleted.
+ */
+export async function assertIdentityDeletable(tx: Tx, identityIds: string[]): Promise<void> {
+  if (identityIds.length === 0) return;
+  const approved = await tx.{{ version }}.count({
+    where: { {{ identity_fk }}: { in: identityIds }, {{ number }}: { not: null } },
+  });
+  if (approved > 0) {
+    throw new AppError('VALIDATION', 'This {{ identity }} has an approved version and cannot be deleted', '{{ identity_fk }}', 'invalid');
+  }
+}
+
+/**
+ * At most one open draft per identity. A version row is closed once its
+ * approval has been granted (`approvable.approved_at` is set) or once an
+ * approval request of it was terminally rejected; a closed row stays as a
+ * record and never blocks the next version. Every other row is open: a row that
+ * was never submitted, a pending one, and one that was rejected without
+ * `terminal` or withdrawn (the user fixes it and resubmits).
+ */
+export async function assertSingleOpenDraft(tx: Tx, identityId: string, selfId: string | null): Promise<void> {
+  const siblings = await tx.{{ version }}.findMany({
+    where: { {{ identity_fk }}: identityId, ...(selfId ? { id: { not: selfId } } : {}) },
+    select: { approvable_id: true },
+  });
+  if (siblings.length === 0) return;
+  const bridgeIds = siblings.map((s) => s.approvable_id).filter((v): v is string => v != null);
+  const open =
+    bridgeIds.length < siblings.length ||
+    (await tx.approvable.count({
+      where: {
+        id: { in: bridgeIds },
+        approved_at: null,
+        approval_requests: { none: { status: 'terminal_rejected' } },
+      },
+    })) > 0;
+  if (open) {
+    throw new AppError('VALIDATION', 'Another draft of this {{ identity }} is still open', '{{ identity_fk }}', 'invalid');
+  }
+}
+
+/**
+ * Approval time: give the version the next number of its identity and make it
+ * the identity's current version. Abandoned drafts never take a number.
+ */
+export async function assignVersionNumber(tx: Tx, versionId: string): Promise<void> {
+  const row = await tx.{{ version }}.findUnique({
+    where: { id: versionId },
+    select: { {{ identity_fk }}: true, {{ number }}: true },
+  });
+  if (!row || row.{{ number }} != null) return;
+  const top = await tx.{{ version }}.aggregate({
+    where: { {{ identity_fk }}: row.{{ identity_fk }} },
+    _max: { {{ number }}: true },
+  });
+  await tx.{{ version }}.update({
+    where: { id: versionId },
+    data: { {{ number }}: (top._max.{{ number }} ?? 0) + 1 },
+  });
+  await tx.{{ identity }}.update({
+    where: { id: row.{{ identity_fk }} },
+    data: { current_version_id: versionId },
+  });
+}

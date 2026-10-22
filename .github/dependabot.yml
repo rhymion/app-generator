@@ -61,6 +61,26 @@
 # additionally silences routine minor/patch bumps outright. Scoped to
 # `update-types` minor/patch only, so a cypress CVE still reaches us via
 # `npm-security` (ignore does not apply to security-update PRs).
+#
+# Exception: jsdom is likewise excluded from routine minor/patch
+# grouping/updates (cmd_1128, 2026-09-21). Root cause (isolated-worktree
+# single-variable control experiment on PR #699 — jsdom swapped alone,
+# everything else held fixed): jsdom 30.0.1 -> 30.1.0 alone breaks
+# components/_standard/{CardListClient,FormWithChildGrid,NotificationBell}.test.tsx
+# (`TypeError: nodeToRestore.current.focus is not a function` inside MUI's
+# FocusTrap cleanup). Confirmed upstream jsdom regression, not a
+# product-code or MUI-template issue: jsdom/jsdom#4344 (closed 2026-09-21,
+# "relatedTarget on a focus event is the Document object ... after the
+# previously-focused element is removed from the DOM — regression since
+# 30.1.0") and mui/material-ui#49159 (closed 2026-09-21 with no FocusTrap
+# change — MUI's own maintainers: "this is a jsdom bug ... We will update
+# jsdom as needed, when it's the case"). The upstream fix (jsdom/jsdom#4345,
+# "Add focus fixup rule (rebased)") was still open/unmerged as of this
+# writing, and no jsdom release newer than 30.1.0 exists yet. Debt: revisit
+# once jsdom ships a release containing #4345 (or its successor) and
+# re-verify the three test files above before removing this ignore entry.
+# Scoped to `update-types` minor/patch only, so a jsdom CVE still reaches us
+# via `npm-security` (ignore does not apply to security-update PRs).
 version: 2
 updates:
   - package-ecosystem: "npm"
@@ -80,6 +100,7 @@ updates:
           - "patch"
         exclude-patterns:
           - "cypress"
+          - "jsdom"
       npm-mui-major:
         applies-to: version-updates
         update-types:
@@ -98,6 +119,15 @@ updates:
       # Held back until a follow-up cmd re-verifies dashboard.cy.ts against
       # a newer cypress. Does not suppress security-update PRs.
       - dependency-name: "cypress"
+        update-types:
+          - "version-update:semver-minor"
+          - "version-update:semver-patch"
+      # cmd_1128, 2026-09-21: jsdom 30.1.0 regression (see comment block
+      # above / this cmd's report). Held back until jsdom ships a release
+      # containing jsdom/jsdom#4345 (or its successor) and the three
+      # affected test files are re-verified. Does not suppress
+      # security-update PRs.
+      - dependency-name: "jsdom"
         update-types:
           - "version-update:semver-minor"
           - "version-update:semver-patch"

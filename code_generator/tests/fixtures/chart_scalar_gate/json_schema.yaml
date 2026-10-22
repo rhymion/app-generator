@@ -30,7 +30,7 @@ definitions:
       invalidate: false
       api: false
       test: false
-    fields:
+    properties:
       name: {}
       email: {}
 
@@ -46,7 +46,7 @@ definitions:
       invalidate: false
       api: false
       test: false
-    fields:
+    properties:
       name: {}
 
   # The entity this fixture exists to exercise: x-display.chart declared,
@@ -74,7 +74,7 @@ definitions:
       chart:
         span: week
         row_by: chart_scalar_gate_row
-    fields:
+    properties:
       name: {}
       chart_scalar_gate_row_id:
         x-relationship:
@@ -90,8 +90,3 @@ definitions:
       logged_date:
         format: date
       is_flagged: {}
-    required:
-      - item_count
-      - logged_at
-      - logged_date
-      - is_flagged

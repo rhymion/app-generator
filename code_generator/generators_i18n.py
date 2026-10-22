@@ -15,8 +15,15 @@ import re
 from pathlib import Path
 
 from helpers.naming import to_camel_case, to_title_case
+from version_of import version_of_entities
 from helpers.schema_helpers import filter_fields
-from nav_config import build_nav_config, nav_list_entities, upsert_nav_group_i18n
+from nav_config import (
+    build_nav_config,
+    nav_extra_entities,
+    nav_list_entities,
+    schema_declares_scheduled_tasks,
+    upsert_nav_group_i18n,
+)
 
 # The locale whose messages/*.json values ARE the schema-computed defaults
 # (see i18n/routing.ts defaultLocale). Every other locale file's newly-added
@@ -102,6 +109,31 @@ _CUSTOM_COMPONENT_FIELD_KEYS: dict[str, dict[str, str]] = {
 # Unlike _CUSTOM_COMPONENT_FIELD_KEYS (merged into Fields), these keep their
 # own top-level section so the component's translations stay grouped together.
 _CUSTOM_COMPONENT_SECTIONS: dict[str, dict[str, dict[str, str]]] = {
+    # x-version-of identities get this component injected automatically.
+    'VersionHistory': {
+        'VersionHistory': {
+            'title': 'Version history',
+            'draft': 'Draft',
+            'versionLabel': 'Version {number}',
+            'current': 'Current',
+            'superseded': 'Superseded',
+            'number': 'Version',
+            'status': 'Status',
+            'created': 'Created',
+            'compare': 'Compare',
+            'newVersion': 'New version',
+            'compareFrom': 'From',
+            'compareTo': 'To',
+            'diffTitle': 'Changes between versions',
+            'added': 'Added',
+            'removed': 'Removed',
+            'changed': 'Changed',
+            'unchanged': 'Unchanged',
+            'rowsUnmatchedNotice': 'Rows could not be matched between versions; showing additions and removals only.',
+            'compareWithCurrent': 'Compare with current version',
+            'loadError': 'The version history could not be loaded.',
+        },
+    },
     'CopyShiftsButton': {
         'ShiftTemplate': {
             'copyToShifts': 'Copy to Shifts',
@@ -117,9 +149,14 @@ def _collect_custom_component_sections(entities: list, schema: dict) -> dict[str
     result: dict[str, dict[str, str]] = {}
     for entity in entities:
         def_key = entity.get('definition_key', '')
-        custom_comps = schema['definitions'].get(def_key, {}).get('x-custom-components') or []
+        entity_def = schema['definitions'].get(def_key, {})
+        custom_comps = entity_def.get('x-custom-components') or []
         if not isinstance(custom_comps, list):
             continue
+        if 'x-custom-components' not in entity_def and any(
+            v['identity'] == def_key for v in version_of_entities(schema)
+        ):
+            custom_comps = [{'name': 'VersionHistory'}]
         for custom_comp in custom_comps:
             if not isinstance(custom_comp, dict):
                 continue
@@ -348,6 +385,67 @@ def _update_nav_group_i18n_file(path: Path, groups: list) -> tuple[bool, list[st
 # site-config.ts updater
 # ---------------------------------------------------------------------------
 
+# English defaults for the mobile search screen's own text (the `Search`
+# namespace, written only when the app generates the search route).
+SEARCH_MESSAGES = {
+    'minLength': 'Type at least 2 characters.',
+    'failed': 'Search failed. Please try again.',
+    'noResults': 'No results.',
+    'notAvailable': 'Not available in the app',
+}
+
+# English defaults for the scheduled-task admin page's own text (the
+# `ScheduledTaskRun` namespace, written only when the schema declares a task).
+# Placeholders in braces are filled by the page/component; other locales get
+# these English strings until translated, like every other generated section.
+SCHEDULED_TASK_RUN_MESSAGES = {
+    'title': 'Scheduled tasks',
+    'forbidden': "You need the 'ScheduledTaskRunner' role to view scheduled task runs.",
+    'businessDate': 'Business date',
+    'show': 'Show',
+    'settingsNote': 'A run counts as stuck after {minutes} minutes. Change this in App Setting.',
+    'columnTask': 'Task',
+    'columnStatus': 'Status',
+    'columnStarted': 'Started',
+    'columnFinished': 'Finished',
+    'columnMessage': 'Message',
+    'columnWhy': 'Why',
+    'columnActions': 'Actions',
+    'statusRunning': 'Running',
+    'statusSucceeded': 'Succeeded',
+    'statusFailed': 'Failed',
+    'statusNotDue': 'Not due',
+    'statusStuck': 'Stuck',
+    'statusBlocked': 'Blocked',
+    'statusPending': 'Not run yet',
+    'whyBlocked': 'Waiting for {tasks}',
+    'whyRunning': 'Already running',
+    'whyStuck': 'Running for too long; the run may have crashed',
+    'whyNotDue': 'Not due tonight',
+    'whyPending': 'Has not been run for this date',
+    'rerun': 'Rerun',
+    'resolve': 'Mark resolved',
+    'skip': 'Skip',
+    'reasonLabel': 'Reason',
+    'reasonPlaceholder': 'Reason (required to skip)',
+    'confirmRerun': 'Rerun',
+    'confirmResolve': 'Mark as resolved without rerunning:',
+    'confirmSkip': 'Skip without running:',
+    'attentionTitle': 'Failed or stuck runs on other dates',
+    'attentionEmpty': 'No failed or stuck runs on other dates.',
+    'resultDone': 'Done.',
+    'resultUnknownTask': 'Unknown task.',
+    'resultNotAllowed': 'This action is not available for the current state of the run.',
+    'resultReasonRequired': 'A reason is required.',
+    'resultBlocked': 'Blocked: {tasks} has not succeeded for this date.',
+    'resultRunning': 'A run is already in progress.',
+    'resultFailed': 'The task failed: {detail}',
+    'resultNoActor': 'The scheduled-task system user is missing; run db:seed-baseline.',
+    'resultForbidden': "You need the 'ScheduledTaskRunner' role.",
+    'resultBadInput': 'Invalid request.',
+}
+
+
 def _update_site_config(path: Path, nav_entities: list, nav_config: dict) -> bool:
     content = path.read_text(encoding='utf-8')
 
@@ -434,22 +532,28 @@ def _update_sidebar(path: Path, nav_entities: list) -> bool:
 # Main entry point
 # ---------------------------------------------------------------------------
 
-def update_i18n_and_config(entities: list, schema: dict, output_dir: Path) -> None:
+def update_i18n_and_config(entities: list, schema: dict, output_dir: Path, has_search: bool = False) -> None:
     """
     Update i18n message files and navigation config for all entities.
 
     `entities` — the full list returned by extract_entities().
     `output_dir` — project root (same as passed to generate()).
+    `has_search` — the app generates the global search route, so the mobile search screen's `Search` namespace is written.
     """
     # Entities that appear in the sidebar nav — shared with cleanup.py's
-    # own removal pass, see nav_config.nav_list_entities (cmd_817).
-    nav_entities = nav_list_entities(entities)
+    # own removal pass, see nav_config.nav_list_entities.
+    nav_entities = nav_list_entities(entities) + nav_extra_entities(schema)
 
     # EntityLabel keys for all entities (including alternate-model entities like setting*)
     entity_label_entries = {
         to_camel_case(e['parent']): to_title_case(e['parent'])
-        for e in entities
+        for e in entities + nav_extra_entities(schema)
     }
+    # Every `x-entity-select` option (an entity a Permission row can name, with or without pages) is
+    # shown through this dictionary on the Web and mobile screens, so each one needs its key.
+    from build_context import _get_entity_options
+    for option in _get_entity_options(schema):
+        entity_label_entries.setdefault(option['key'], option['label'])
 
     # Nav keys (same set as nav_entities)
     nav_entries = {
@@ -463,7 +567,7 @@ def update_i18n_and_config(entities: list, schema: dict, output_dir: Path) -> No
     # Nested sidebar navigation groups (x-nav.parent / x-nav-groups). Raises
     # NavValidationError (fail-closed) for a cycle, excess depth, or unknown
     # icon name — propagates to the caller, aborting generation.
-    nav_config = build_nav_config(entities, schema)
+    nav_config = build_nav_config(entities + nav_extra_entities(schema), schema)
 
     # nativeEnum option keys (one section per Prisma enum / x-enum-namespace)
     native_enum_ns = _collect_native_enum_namespaces(schema)
@@ -474,6 +578,10 @@ def update_i18n_and_config(entities: list, schema: dict, output_dir: Path) -> No
     # Merge namespace-keyed sections rather than spreading (a spread would let a
     # colliding namespace clobber the other's entries entirely instead of merging).
     namespace_sections: dict[str, dict[str, str]] = {}
+    if has_search:
+        namespace_sections['Search'] = dict(SEARCH_MESSAGES)
+    if schema_declares_scheduled_tasks(schema):
+        namespace_sections['ScheduledTaskRun'] = dict(SCHEDULED_TASK_RUN_MESSAGES)
     for ns_map in (native_enum_ns, custom_component_ns):
         for ns, ns_entries in ns_map.items():
             namespace_sections.setdefault(ns, {}).update(ns_entries)

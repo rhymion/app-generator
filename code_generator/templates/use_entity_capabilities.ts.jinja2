@@ -1,0 +1,46 @@
+// Framework-neutral permission-derived UI capabilities for {{ parent }}.
+//
+// Pure: no next/*, next-intl or UI library imports, so every client platform
+// derives the same show/hide decisions from the same permissions object.
+import type { ModelPermissions } from '@/lib/authz';
+
+export type EntityCapabilitiesInput = {
+  permissions?: ModelPermissions;
+  // True when the screen is an edit screen (a record already exists).
+  isEdit?: boolean;
+  // True when the form is rendered inside an x-create-inline dialog.
+  inDialog?: boolean;
+};
+
+export type EntityCapabilities = {
+  canDelete: boolean;
+  canEdit: boolean;
+  canContinue: boolean;
+};
+
+export function resolveEntityCapabilities({ permissions, isEdit = false, inDialog = false }: EntityCapabilitiesInput): EntityCapabilities {
+  return {
+    canDelete: permissions ? permissions.delete : true,
+{% if can_update %}
+    canEdit: permissions?.update ?? true,
+{% else %}
+    // x-generate.edit: false -- this entity has no update path at all, so no
+    // screen may surface an edit affordance regardless of the caller's update
+    // permission.
+    canEdit: false,
+{% endif %}
+{% if can_continue %}
+    // "Save and continue editing": an edit screen is only reachable with update
+    // permission; on /new the same permission is required for the record to be
+    // editable once it exists. Not offered in a dialog: the dialog closes after
+    // the save.
+    canContinue: !inDialog && (isEdit || Boolean(permissions?.update)),
+{% else %}
+    canContinue: false,
+{% endif %}
+  };
+}
+
+export function useEntityCapabilities(input: EntityCapabilitiesInput): EntityCapabilities {
+  return resolveEntityCapabilities(input);
+}

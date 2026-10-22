@@ -14,14 +14,19 @@ Built with [Next.js](https://nextjs.org/), [Prisma](https://www.prisma.io/), and
 
 - **Schema-driven generation** — YAML schema (`code_generator/json_schema.yaml`) + Prisma schema → TypeScript, React, and Cypress files via a Python pipeline
 - **Full CRUD pages** — list, view, create, edit, and delete pages generated per entity
+- **Framework-neutral UI hooks** — each entity's form state, submit orchestration, error mapping, permission-derived show/hide decisions and approval wiring are generated as `lib/{entity}/use_entity_*.ts` modules with no Next.js, `next-intl`, DOM or UI-library imports, so a non-Web client can reuse them — see [`docs/knowledge/shared-ui-hooks.md`](docs/knowledge/shared-ui-hooks.md)
 - **Gantt chart views** — entity-level opt-in Gantt chart pages
-- **REST API** — JSON endpoints with API key authentication generated per entity
+- **REST API** — JSON endpoints with API key authentication generated per entity, plus a row-level `GET /api/{entity}/[id]/capabilities` endpoint reporting which operations/writes/transitions are legal for that specific row right now, and a `GET /api/{entity}/options` endpoint that searches or looks up the records a relation field can select (the REST side of the web pickers, with the same permission and organization scoping), and, for an entity with a comment thread, `POST` / `PATCH` / `DELETE` comment routes plus a `GET /api/mention/users` search for `@`-mentions (the REST side of the comment box, running the same actions) — see [`docs/knowledge/comment-and-mention-rest-routes.md`](docs/knowledge/comment-and-mention-rest-routes.md)
+- **API idempotency keys + per-API-key rate limiting** — an optional `Idempotency-Key` header on a single-record create endpoint makes a retried `POST` safe (same key + same body replays the original result; same key + a different body is rejected as a conflict), backed by a one-day-retention database table written in the same transaction as the record it guards; every `authenticateApiKey()`-only REST route also enforces a per-caller `api:read`/`api:write` rate-limit ceiling (both env-overridable) — see [`docs/knowledge/api-idempotency-and-rate-limiting.md`](docs/knowledge/api-idempotency-and-rate-limiting.md)
+- **API key expiry** — an optional, nullable `user.api_key_expires_at` (`null` = never expires, the existing behavior for every key) checked in the single shared `authenticateApiKey()`; a request made with an expired key is rejected with `401 API key expired.` — see [`docs/knowledge/api-key-expiry.md`](docs/knowledge/api-key-expiry.md)
+- **Generated documentation + OpenAPI 3.1 spec** — per-entity human-readable docs (`docs/generated/{entity}.md`, mirrored under `/en/docs`) including a "Constraints" section for approval-flow/write-lock entities, plus a combined machine-readable `docs/generated/openapi.json` build artifact served at `GET /api/openapi.json` (API key or session required, every environment) and, on demand, an interactive `/swagger` explorer gated behind `SWAGGER_UI_ENABLED` (development/staging only, never enabled in production) — see [`docs/knowledge/generated-documentation-and-openapi-spec.md`](docs/knowledge/generated-documentation-and-openapi-spec.md)
 - **Generated Cypress tests** — UI and API test suites generated alongside application code
-- **Dashboard charts** (`x-display.dashboard: true`) — column, bar, line, and pie chart rendering with stacking modes, timestamp bucketing, typed multi-condition filters, CSV/Excel export, and a REST aggregate endpoint (`/api/{entity}/aggregate`) generated per entity
+- **Dashboard charts** (`x-display.dashboard: true`) — column, bar, line, and pie chart rendering with stacking modes, timestamp bucketing in a selectable time zone, a single-field widget filter, CSV export, and one schema-wide REST aggregate endpoint (`POST /api/dashboard/aggregate`) — see [`docs/knowledge/dashboard-guide.md`](docs/knowledge/dashboard-guide.md)
 - **Inventory reservation** (`x-reservation`) — opt-in capacity/inventory reservation; `count` mode reserves a numeric counter column, `item` mode locks rows via an `inventory_allocation` bridge table
 - **Wrapper component architecture** — generated per-entity components use shared wrappers in `components/_standard/` (statically provided; not overwritten by re-runs) and generated components import shared `App*` wrappers from `components/ui/` instead of `@mui/*`, so auto-generated code no longer depends on MUI directly (provider setup excepted)
 - **Cross-entity full-text search** (`x-generate.search: true`) — `GET /api/search` REST endpoint and a global search UI page (`app/[locale]/search/page.tsx`) generated when searchable entities exist; UNION ALL across opted-in entities with per-entity tenant and permission filters; Japanese 2-gram search via pg_bigm; facets (hit counts per entity type) and XSS-safe snippet highlight
 - **`x-ui.rows`** — textarea row count for any string field controlled via `x-ui: { rows: N }` in the schema
+- **One `properties:` map per entity** — an entity's scalar columns and its relation objects are written together under JSON Schema's standard `properties:`; the builder sorts each entry by what Prisma says the name is. A proxy view over a model is written `x-view-of: <model>` instead of an `allOf` wrapper. `code_generator/migrate_fields_into_properties.py` rewrites an older schema that still has the entity-level `fields:` key — see [`docs/knowledge/schema-yaml-configuration.md`](docs/knowledge/schema-yaml-configuration.md)
 - **FK scalar auto-inference** — FK scalar columns (e.g. `organization_id`) no longer need to be declared explicitly in `code_generator/json_schema.yaml`; the generator derives them from Prisma relation properties
 - **FK autocomplete custom filter hook** (`autocomplete_filter_stub.ts.jinja2`) — per-entity once-stub for narrowing autocomplete and list results beyond the built-in permission filter
 
@@ -30,6 +35,7 @@ Built with [Next.js](https://nextjs.org/), [Prisma](https://www.prisma.io/), and
 - Many-to-one, many-to-many, one-to-one, and self-referential relationships
 - Inline DataGrid children and embedded lists
 - Independent children with their own pages
+- **Create the referenced record in place** (`x-create-inline: true` on a many-to-one FK field) — the field's autocomplete also offers *Create new*, which opens the target's own generated form in a dialog and selects the saved record, so the user does not leave the form to create it first; the target's permissions, validation and organisation scoping apply unchanged. See [`docs/knowledge/create-fk-record-in-place.md`](docs/knowledge/create-fk-record-in-place.md)
 - **Generalized bridge pattern** — reusable schema-level bridge for real one-to-one and polymorphic relations via an internal through-table (`<model>able`); no extra FK columns on the parent, parent autocomplete preserved, and internal bridge tables omitted from JSON schema output
 
 ### Authentication & Authorization
@@ -53,12 +59,13 @@ Built with [Next.js](https://nextjs.org/), [Prisma](https://www.prisma.io/), and
 - **Inventory reservation** — schema-level `x-reservation` for capacity and inventory management (count and item modes); lifecycle transitions for the owning entity go through the Approval Flow System's approve/(terminal) reject rather than a bespoke reservation-lifecycle mechanism
 - **Inventory ledger** (`x-ledger-source`) — an `inventory_transaction` ledger entity and `transactionable` bridge, generated when a ledger top-level declaration is present in the schema; annotate a receiving-receipt or billing-detail entity with `x-ledger-source` to emit write/adjust/move stub templates
 - **Split action** (`x-splittable`) — annotate an entity to generate a split-action UI section and API route for lot-level split operations from the list or edit page
-- **Dashboard charts** — per-entity chart widgets (column, bar, line, pie) generated from schema; stacking modes, time bucketing, typed filters, CSV/Excel export, and REST aggregate endpoints
+- **Dashboard charts** — per-entity chart widgets (column, bar, line, pie) generated from schema; stacking modes, time bucketing in a selectable time zone, a widget filter, CSV export, and one schema-wide REST aggregate endpoint
 - **Cross-entity search** — `GET /api/search` with UNION ALL across searchable entities; facets, highlight, Japanese pg_bigm support; header search icon and full search page generated
 - **Approval event dispatch** — post-approval hooks (`x-approval.on_approved.set_fields`, `x-approval.on_approved.emit_hook`) with fire-once idempotency via `approvable.approved_at`; `x-approval-lines` generates matching pre-/post-create helpers that wire approval-line entities to inventory ledger operations
 - **Declarative write-locked values** (`x-write-locked-values`) — annotate an entity with `{field_name: [value, ...]}` to reject a plain create/update that writes one of those values directly (screen, REST API, Server Action, and CSV import all enforce it), while still rendering the value as a disabled — not hidden — form option; composes with `x-approval`'s own locked values as a union, so a field can be protected by either or both mechanisms at once, with no schema-authoring dependency between them; see [`docs/knowledge/x-write-locked-values-field-lockdown.md`](docs/knowledge/x-write-locked-values-field-lockdown.md)
+- **Versioned history** (`x-version-of`, opt-in) — declared on the version entity of an identity + `x-approval` version pair: the version number is assigned at approval (unique per identity), at most one open draft per identity, the identity's `current_version_id` follows each approval, a rejected or withdrawn draft is deleted with its child rows, a new version opens as a prefilled create screen (nothing is written until saved), and an identity with an approved version cannot be deleted; see [`docs/knowledge/schema-yaml-configuration.md`](docs/knowledge/schema-yaml-configuration.md) section 7.8
 - **Terminal rejection** (`x-readonly-fields`) — annotate fields to lock them once an entity reaches a terminal rejected state; rejection fires a once-stub (`service_after_reject_stub.ts`) via `on_rejected_dispatch` for custom post-rejection logic (e.g. notifications, inventory adjustments)
-- **Stripe payments** (`x-payment`, opt-in) — declaring `x-payment: true` on any entity generates write-once stubs for Stripe Checkout Session creation and webhook handling (`lib/stripe.ts`, `app/api/payment/checkout/route.ts`, `app/api/webhooks/stripe/route.ts`), fail-closed on missing secrets; one-time purchases only, no entity/authz/UI generated — see [Payments](#payments-stripe-opt-in) below
+- **Stripe payments** (`x-payment`, opt-in) — declaring `x-payment: true` on an entity makes a new record provisional until Stripe Checkout confirms payment (created through the form or the REST API, confirmed or removed by the webhook), charged at a Stripe Price (`stripe_price_id`, on the entity or on a related entity) and a server-decided quantity, with promotion codes enabled; also generates write-once Stripe stubs and the `/payment/success` and `/payment/cancel` return pages, fail-closed on missing secrets; one-time purchases only — see [Payments](#payments-stripe-opt-in) below
 
 ### Performance
 
@@ -79,16 +86,19 @@ Built with [Next.js](https://nextjs.org/), [Prisma](https://www.prisma.io/), and
 
 - **GCP Cloud Run** (`x-cloud` annotation, opt-in) — multi-stage `Dockerfile`, GCS-backed uploads (Signed URL upload + proxy routes), and idempotent environment automation scripts (`gcp-env.sh`, `gcp-setup.sh`, `gcp-deploy.sh`, `gcp-seed.sh`, `gcp-teardown.sh`); Vercel remains the default when `x-cloud` is not set
 
+- **Scheduled tasks** (`x-scheduled-task` / `x-scheduled-tasks`) — recurring handlers with optional `depends_on` ordering, per-day completion records, an admin page (`/scheduled_task_run`) and REST routes (`/api/scheduled-task-runs`) for run status and rerun / resolve / skip, and `npm run task:run` / `task:run-all` for running them directly against the database (nightly Cloud Run Job + Cloud Scheduler provisioning via `gcp-task-runner.sh`); see [docs/knowledge/scheduled-task-operations.md](docs/knowledge/scheduled-task-operations.md)
+
 ### Audit & Compliance
 
 - **Audit log** — schema-agnostic, read-only viewer (`app/[locale]/audit_log/page.tsx`) over all generated entities' create/update/delete actions
-- **GDPR / data protection** — `x-pii` field classification (`direct`/`sensitive`/`indirect`), an `anonymizeUser()` erasure function, `x-gdpr-mode` data-subject-scope classification (`internal`/`consumer`/`both`; schema-validated, not yet consumed by codegen), AES-256-GCM at-rest attachment filename encryption, and `x-mention` user-mention parsing in comments
+- **GDPR / data protection** — `x-pii` field classification (`direct`/`sensitive`/`indirect`), an `anonymizeUser()` erasure function, `x-gdpr-mode` data-subject-scope label (`internal`/`consumer`/`both`; schema-validated, no generated effect), AES-256-GCM at-rest attachment filename encryption, and `x-mention` user-mention parsing in comments
 - **Terms of Service / Privacy Policy** (`/[locale]/legal/terms`, `/[locale]/legal/privacy`) — Markdown template documents linked from the registration page; adding a document language is dropping a `content/legal/<doc>.<locale>.md` file, independent of the site's UI locale list (see `docs/knowledge/legal-documents.md`)
 
 ### Other
 
 - Internationalization (English and Japanese, next-intl v4)
 - Dark mode (system-aware, SSR-safe)
+- Expo (React Native) mobile app generated into `mobile/` when `x-generator.mobile.enabled: true` is set in the schema (off by default), with footer tabs and drill-down lists built from the same `x-nav` / `x-nav-groups` as the desktop sidebar, and native list (with sort, filter, search and bulk delete), detail and form screens (with native pickers for foreign keys, one-to-one selectors, many-to-many fields and one-to-many lists, a file input for direct attachment fields, an attachment list (add, remove, reorder) for entities with the `attachable` bridge, chips for entity-select fields, a row editor for editable one-to-many child collections, creating the referenced record in place, payment checkout, approve / reject / withdraw buttons and the split action on approval entities, and the comment thread with reactions, a comment box with `@`-mention lookup, and edit and delete of comments on commentable entities), insertion points for hand-written native components (`x-custom-components`, `x-custom-component`; stubs generated once, drawing nothing) that share their form, validation and permission logic with the Web screens, and a read-only audit log list and detail, and scheduled task administration; entities left on the placeholder screen are listed, with the reason, in the generation log and in `mobile/MOBILE_ENTITIES.md`
 - 5 extension points for customization without overwriting generated code
 
 ---
@@ -311,11 +321,11 @@ See [docs/knowledge/multi-tenancy-and-permissions.md](docs/knowledge/multi-tenan
 
 ## Audit & Compliance
 
-**Audit log** — a schema-agnostic, read-only viewer (`app/[locale]/audit_log/page.tsx`) over the `audit_log` model, showing create/update/delete actions across all generated entities. `lib/audit_log/getters.ts` resolves the actor user via FK join and paginates via `CardListPagination`; the raw `metadata` JSON is shown only on the admin-only detail page. The `audit_log` model's columns predate 2.0.0, but the `actor_user` relation it joins through (and its `onDelete: Restrict` foreign key) is new in 3.0 — see [docs/UPGRADE-3.0.md](docs/UPGRADE-3.0.md).
+**Audit log** — a schema-agnostic, read-only viewer (`app/[locale]/audit_log/page.tsx`) over the `audit_log` model, showing create/update/delete actions across all generated entities. `lib/audit_log/getters.ts` resolves the actor user via FK join and paginates via `CardListPagination`; the raw `metadata` JSON is shown only on the admin-only detail page. The `audit_log` model's columns predate 2.0.0, but the `actor_user` relation it joins through (and its `onDelete: Restrict` foreign key) is new in 3.0 — see [docs/UPGRADE-3.0.md](docs/UPGRADE-3.0.md). The table is append-only (client guard, row trigger, restricted application role) with a chained digest for tamper detection — see [docs/knowledge/audit-log-append-only.md](docs/knowledge/audit-log-append-only.md), including the steps for switching the application to the restricted database role. A consumer keeps its own deployment runbook at `docs/knowledge/audit-log-operations.md`.
 
 **GDPR / data protection**:
-- `x-pii` field classification (`direct` / `sensitive` / `indirect`) drives which fields `anonymizeUser()` scrubs on erasure (GDPR Art. 17 right to erasure). The scrub is transactional and irreversible; it does not delete the user row, to preserve referential integrity, and records `anonymized_at` on the `user` model.
-- `x-gdpr-mode` (`internal` / `consumer` / `both`) classifies a model/field's data-subject scope for compliance bookkeeping. It is schema-validated (`code_generator/validate.py`) but not yet read by any codegen template — no effect on generated code as of 3.0.
+- `x-pii` field classification (`direct` / `sensitive` / `indirect`) drives which `user` fields `anonymizeUser()` scrubs on erasure (GDPR Art. 17 right to erasure). The scrub is transactional and irreversible; it does not delete the user row, to preserve referential integrity, and records `anonymized_at` on the `user` model. It runs from the user's `invalidate` action, not from a reversible deactivation. See [docs/knowledge/x-pii.md](docs/knowledge/x-pii.md).
+- `x-gdpr-mode` (`internal` / `consumer` / `both`) classifies a model/field's data-subject scope for compliance bookkeeping. It is schema-validated (`code_generator/validate.py`) but no codegen template reads it, so it has no effect on generated code. `x-retention` is not read either. See [docs/knowledge/x-gdpr-mode.md](docs/knowledge/x-gdpr-mode.md).
 - Attachment filenames are encrypted at rest with AES-256-GCM (`lib/compliance/attachment_name_crypto.ts`).
 - `x-mention` enables `@[user_id:uuid]` mention syntax in comments, with generated mention-parser utilities.
 
@@ -323,18 +333,34 @@ See [docs/knowledge/multi-tenancy-and-permissions.md](docs/knowledge/multi-tenan
 
 ## Payments (Stripe, opt-in)
 
-Not a default-schema feature. Declaring `x-payment: true` on any entity in
-`json_schema.yaml` causes `generate-code` to write three write-once stub
-files the first time it runs (same convention as
-`lib/<parent>/invalidate_handler.ts` — edits survive regeneration):
-`lib/stripe.ts` (SDK init, fails closed if `STRIPE_SECRET_KEY` is unset),
-`app/api/payment/checkout/route.ts` (Checkout Session creation), and
-`app/api/webhooks/stripe/route.ts` (webhook receiver, signature-verified,
-fails closed if `STRIPE_WEBHOOK_SECRET` is unset). The generator does not
-generate a `Plan`/`Product`/`Purchase`-style entity, an authz/entitlement
-layer, or any payment UI — model those as ordinary schema entities and
-wire them into the stub routes. Scope is one-time purchases only (Checkout
-Session `mode: payment`); subscriptions are left for a consumer to add. See
+Not a default-schema feature. Declaring `x-payment: true` on an entity ties
+its record creation to a Stripe Checkout payment. Creating a record (through
+the form or `POST /api/{entity}`) stores it as provisional and opens a
+Checkout Session: the form redirects the buyer to Stripe's hosted page, and
+the API answers `{ "record": ..., "checkoutUrl": ... }`. The signature-verified
+webhook then confirms the record when the payment succeeds and deletes it when
+the session expires or the payment fails. Several entities can declare
+`x-payment`; one webhook serves them all. The charge is a pre-created
+Stripe Price, resolved on the server from a required `stripe_price_id` field:
+either on the entity itself (fixed by its `default:`, never client input) or on
+the one related entity that declares it (for example `room_reservation` is
+priced by its `room`); `generate-code` fails if there is none or more than one.
+The quantity comes from a write-once hook, `lib/payment/<entity>_quantity.ts`
+(default `1`), and Checkout accepts Stripe promotion codes. The generator adds a `payable` model to `prisma/schema.prisma` for
+this; write your migration at deploy time.
+
+`generate-code` also writes four write-once stub files the first time it runs
+(same convention as `lib/<parent>/invalidate_handler.ts` — edits survive
+regeneration): `lib/stripe.ts` (SDK init, fails closed if `STRIPE_SECRET_KEY`
+is unset), `app/[locale]/payment/success/page.tsx`
+and `app/[locale]/payment/cancel/page.tsx` (where Checkout sends the buyer
+back), and `app/api/webhooks/stripe/route.ts` (webhook receiver,
+signature-verified, fails closed if `STRIPE_WEBHOOK_SECRET` is unset). The
+generated specs of an `x-payment` entity need no Stripe key: the `test:e2e:cy:*`
+scripts set `PAYMENT_FAKE_STRIPE=1`, which swaps in an in-memory fake client
+(never in a live environment); without it the real client is used. Scope is
+one-time purchases only (Checkout Session `mode: payment`); subscriptions are
+left for a consumer to add. See
 [docs/knowledge/stripe-payment-integration.md](docs/knowledge/stripe-payment-integration.md).
 
 ---
@@ -346,7 +372,8 @@ Session `mode: payment`); subscriptions are left for a consumer to add. See
 - **Parallel fetching**: data and permission checks are fetched in parallel using `Promise.all`, minimizing server round-trips.
 - **Query timeout** (`lib/prisma.ts`): the direct-connection (PrismaPg) path applies a default 30-second `statement_timeout`, configurable via `STATEMENT_TIMEOUT_MS` (`0` disables it). This is the default path in every environment — Accelerate (`PRISMA_DATABASE_URL`) is opt-in and off by default; if enabled, `statement_timeout` is not forwarded and has no effect.
 - **FK index coverage**: `scripts/add_required_indexes.py` auto-detects `@relation` FK columns and adds `@@index` for them (the generator's demo schema grew from 18 to 36 indexes).
-- **pg_trgm GIN indexes for search**: `generate-code` emits `scripts/create-gin-indexes.sql`, applied manually with `psql` — kept outside `prisma/schema.prisma` to avoid a `prisma migrate dev` drift loop on `gin_trgm_ops`.
+- **pg_trgm + tsvector GIN indexes for search**: `generate-code` emits `instrumentation.ts`, which calls `lib/db-init.ts`'s `ensureSearchIndexes()` on every server cold start (Vercel and GCP/Cloud Run alike) to create them automatically; `scripts/create-gin-indexes.sql` is a manual/migration-time fallback — kept outside `prisma/schema.prisma` to avoid a `prisma migrate dev` drift loop on `gin_trgm_ops`.
+- **List search box**: an entity that is a cross-entity search target has a search box on its list over its trigram search columns, sharing their GIN indexes; the column-level `x-trigram-filter: true` / `false` (on the column's entry under `properties:`) adds or removes a column — see [`docs/knowledge/list-panel-trigram-filter.md`](docs/knowledge/list-panel-trigram-filter.md).
 - **Search `COUNT(*)` opt-out**: `SearchOpts.count: false` skips both `COUNT(*)` queries in cross-entity search (returns `total: -1`).
 
 See [docs/knowledge/performance-improvements.md](docs/knowledge/performance-improvements.md).
@@ -461,6 +488,8 @@ order — `x-cloud` enable → `generate-code` → `gcp-setup.sh` → `gcp-deplo
 | `gcp-deploy.sh` | Build the image, run migrations, deploy to Cloud Run |
 | `gcp-seed.sh` | Seed the database |
 | `gcp-teardown.sh` | Tear down GCP resources (two-step confirmation) |
+| `gcp-task-runner.sh` | Provision a nightly Cloud Run Job + Cloud Scheduler job that runs `task:run-all` (`DRY_RUN=true` previews) |
+| `gcp-task-runner-teardown.sh` | Delete exactly what `gcp-task-runner.sh` created, never the project; the audit-log bucket only with `DELETE_AUDIT_LOG_BUCKET=true` (`DRY_RUN=true` previews). See `docs/knowledge/gcp-task-runner-operations.md` |
 
 `gcp-deploy.sh` needs the `Dockerfile` that `generate-code` emits — run
 `generate-code` after enabling `x-cloud`, before `gcp-deploy.sh`.
@@ -533,6 +562,7 @@ All architectural documentation lives in `docs/knowledge/`:
 |------|---------|
 | [architecture-overview.md](docs/knowledge/architecture-overview.md) | Code generation pipeline, project structure, generated vs. hand-written boundary, tech stack, environment configuration |
 | [schema-yaml-configuration.md](docs/knowledge/schema-yaml-configuration.md) | Full reference for `code_generator/json_schema.yaml` |
+| [dashboard-guide.md](docs/knowledge/dashboard-guide.md) | Dashboard how-to: opting entities in, the widget editor, problem messages, end-user settings and `POST /api/dashboard/aggregate` |
 | [prisma-schema-conventions.md](docs/knowledge/prisma-schema-conventions.md) | Prisma model naming, index, and relation conventions |
 | [code-generation-custom-extensions.md](docs/knowledge/code-generation-custom-extensions.md) | Extension points: where to add custom code without overwriting generated files |
 | [testing-cypress.md](docs/knowledge/testing-cypress.md) | Generated Cypress patterns, MUI interaction helpers, CI/CD configuration |
@@ -542,9 +572,14 @@ All architectural documentation lives in `docs/knowledge/`:
 | [troubleshooting.md](docs/knowledge/troubleshooting.md) | Common build, test, code generation, and database failure patterns with step-by-step fixes |
 | [i18n-locale-routing.md](docs/knowledge/i18n-locale-routing.md) | next-intl v4 setup, locale routing, translation file conventions |
 | [dark-mode-and-hydration.md](docs/knowledge/dark-mode-and-hydration.md) | System-aware dark mode, SSR-safe theme initialization |
-| [timezone-handling.md](docs/knowledge/timezone-handling.md) | Server/client timezone conventions |
+| [timezone-handling.md](docs/knowledge/timezone-handling.md) | Server/client timezone conventions, the `Timezone` enum behind `app_setting.timezone` |
 | [child-datagrid-reference-columns.md](docs/knowledge/child-datagrid-reference-columns.md) | Inline DataGrid children, reference column rendering |
 | [mobile-responsive-layout.md](docs/knowledge/mobile-responsive-layout.md) | Responsive layout conventions, search header icon, mobile account section |
+| [relation-picker-rest-route.md](docs/knowledge/relation-picker-rest-route.md) | `GET /api/{entity}/options`: REST search and id lookup for relation pickers, running the same function as the web autocomplete; authentication, permission and organization isolation |
+| [comment-and-mention-rest-routes.md](docs/knowledge/comment-and-mention-rest-routes.md) | REST routes for adding, editing and deleting a comment and for searching `@`-mention candidates; they run the edit form's actions as the authenticated caller; access checks, validation, tests |
+| [x-autocomplete-context.md](docs/knowledge/x-autocomplete-context.md) | `x-autocomplete-context` on an FK field: which form values reach the target's `autocomplete_filter.ts`, the generated form and split-action paths, validation |
+| [mobile-app.md](docs/knowledge/mobile-app.md) | Generated Expo mobile app: footer tabs and drill-down from `x-nav`, entity screens, header, token authentication, Playwright checks |
+| [list-search-panel.md](docs/knowledge/list-search-panel.md) | The list's search box, multi-column sort and multi-field filter panel on Desktop and Mobile Web: the spec each list page passes, the logic shared with the Expo list (`lib/_list_query.ts`), how it combines with the grid's own header controls, tests |
 | [search.md](docs/knowledge/search.md) | Cross-entity full-text search: schema opt-in, pg_bigm, authorization, generated API and UI |
 | [appendix/approval-flow.md](docs/knowledge/appendix/approval-flow.md) | Approval flow system detail, post-approval event dispatch (`on_approved`) |
 | [appendix/comment-bridge.md](docs/knowledge/appendix/comment-bridge.md) | Comment bridge system detail |
@@ -553,6 +588,9 @@ All architectural documentation lives in `docs/knowledge/`:
 | [gcp-automation-design.md](docs/knowledge/gcp-automation-design.md) | GCP Cloud Run deployment: `x-cloud` opt-in, Dockerfile, GCS uploads, environment automation scripts |
 | [claude-code-settings-consumer-side.md](docs/knowledge/claude-code-settings-consumer-side.md) | `.claude/settings.json` discovery rules, OS-independent permission syntax, the compound-command matching trap, and how to verify a settings file actually loaded — read this before editing `.claude/settings.json` here or in `app-template` |
 | [legal-documents.md](docs/knowledge/legal-documents.md) | Terms of Service / Privacy Policy pages: why document locale is decoupled from the site UI locale, Markdown-over-JSON/MDX rationale, and how to add a document language |
+| [generated-documentation-and-openapi-spec.md](docs/knowledge/generated-documentation-and-openapi-spec.md) | Generated per-entity docs' "Constraints" section (approval flow, write-locked fields) and the `docs/generated/openapi.json` OpenAPI 3.1 build artifact — list query parameters, `readOnly`, bulk requestBody, per-operation 4xx responses, and import/export paths; also `GET /api/openapi.json` (authenticated document route, every environment) and the `SWAGGER_UI_ENABLED`-gated `/swagger` explorer (development/staging only) |
+| [api-idempotency-and-rate-limiting.md](docs/knowledge/api-idempotency-and-rate-limiting.md) | `Idempotency-Key` support on single-record create endpoints (same-transaction database table, one-day retention) and the `api:read`/`api:write` per-API-key rate-limit buckets |
+| [api-key-expiry.md](docs/knowledge/api-key-expiry.md) | Optional `user.api_key_expires_at` checked in `authenticateApiKey()`; `null` never expires, an expired key is rejected with `401 API key expired.` |
 
 ---
 
@@ -597,7 +635,8 @@ All architectural documentation lives in `docs/knowledge/`:
 | Schema-driven textarea rows (x-ui.rows) | ✅ Implemented |
 | GCP Cloud Run deployment (x-cloud) | ✅ Implemented |
 | Audit log viewer | ✅ Implemented |
-| GDPR / data protection (x-pii, anonymizeUser, x-gdpr-mode) | ✅ Implemented |
+| GDPR / data protection (x-pii, anonymizeUser) | ✅ Implemented |
+| `x-gdpr-mode`, `x-retention` annotations | Schema-validated labels only; no generated effect |
 | Attachment display opt-out (showImages/showFiles) | ✅ Implemented |
 | Performance hardening (statement_timeout, FK indexes, GIN indexes, COUNT opt-out) | ✅ Implemented |
 | Declarative write-locked values (x-write-locked-values) | ✅ Implemented |

@@ -1,7 +1,7 @@
 // GENERATED ONCE — safe to edit (will not be overwritten on regeneration)
 import type { PrismaClient } from '@/app/generated/prisma/client';
 
-type Tx = Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'>;
+{% include "_partials/tx_type.ts.jinja2" %}
 
 /**
  * Called before an approval_request for {{ snake_name }} is marked rejected

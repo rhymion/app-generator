@@ -1,0 +1,5 @@
+/** Local date-time text for an ISO timestamp; the raw text when it does not parse. */
+export function formatAuditTimestamp(value: string): string {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+}

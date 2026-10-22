@@ -3,8 +3,11 @@ import { withAccelerate } from '@prisma/extension-accelerate';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaNeon } from '@prisma/adapter-neon';
 import { pinSslModeVerifyFull } from './db-url';
+import { resolvePrismaPoolMax } from './prisma-pool';
+import { cacheOnGlobal } from './global-singleton';
+import { auditLogAppendOnlyExtension } from './audit-log-integrity/guard';
 
-const globalForPrisma = global as unknown as { prisma: PrismaClient };
+const globalForPrisma = global as unknown as Record<string, unknown>;
 
 // Production logs only warnings/errors. Per-query logging in prod was a hot
 // per-request stderr write (one log line per Prisma call); see #5 in
@@ -24,6 +27,20 @@ const slowQueryLogEnabled =
   (process.env.NODE_ENV !== 'production' && process.env.PRISMA_SLOW_QUERY_LOG !== 'false');
 const slowQueryThresholdMs = Number(process.env.PRISMA_SLOW_QUERY_THRESHOLD_MS ?? 50);
 
+// Per-adapter connection pool cap, overridable via PRISMA_POOL_MAX. Default
+// (5) assumes the common case: this URL is a pooled endpoint (Neon's
+// `-pooler` connection string, Prisma Postgres, PgBouncer, RDS Proxy, etc.)
+// that itself multiplexes down to a bounded number of real backend
+// connections — Cloud Run max-instances=10 × pool max=5 = 50 connections,
+// comfortably under a Neon 0.25 CU compute's pooler backend limit (~93 —
+// 0.9 × its 104 max_connections; see docs/knowledge/prisma-pool-max-tuning.md
+// for the full derivation and how to re-check this against your own
+// provisioned pooler). **A direct/unpooled connection (e.g. Cloud SQL) must
+// set PRISMA_POOL_MAX=2 explicitly** — see the `max: 2` exception-case
+// rationale comment at the PrismaPg direct-connection adapter construction
+// site below.
+const prismaPoolMax = resolvePrismaPoolMax(process.env.PRISMA_POOL_MAX);
+
 function attachSlowQueryListener(client: PrismaClient<'query'>): void {
   if (!Number.isFinite(slowQueryThresholdMs)) return;
   client.$on('query', (e: Prisma.QueryEvent) => {
@@ -42,7 +59,7 @@ function attachSlowQueryListener(client: PrismaClient<'query'>): void {
 // TLS verification fails (rca_266a/267a). Doreen is following up with
 // Prisma support after other urgent work; once resolved, set PRISMA_DATABASE_URL
 // again to switch back to this branch without further code changes.
-const createPrismaClient = () => {
+const createBasePrismaClient = () => {
   if (process.env.PRISMA_DATABASE_URL) {
     const accelerateUrl = process.env.PRISMA_DATABASE_URL;
     // Fail fast if PRISMA_DATABASE_URL is a placeholder (e.g. created by
@@ -115,7 +132,7 @@ const createPrismaClient = () => {
     // @prisma/adapter-neon — not installed directly, per Neon's own
     // guidance) falls back to automatically when no constructor is set.
     const adapter = new PrismaNeon(
-      { connectionString, max: 2 },
+      { connectionString, max: prismaPoolMax },
       schemaName ? { schema: schemaName } : undefined,
     );
     if (slowQueryLogEnabled) {
@@ -168,13 +185,19 @@ const createPrismaClient = () => {
     // rejects top-level await outright. cypress/support/db-helpers.ts
     // already imports PrismaPg statically with no bundling issues, so
     // this mirrors an established, safe pattern (cmd_538).
-    // Pool cap for the socket path (rca_267a §6, Option A): Cloud Run
-    // max-instances=10 × pool max=2 = 20 connections < Cloud SQL db-f1-micro
-    // max_connections=25, leaving headroom for admin/migration connections.
     // `max` is a pg.PoolConfig field on the adapter's first constructor arg
     // (Prisma 7 PrismaPg API — https://www.prisma.io/docs/orm/prisma-client/setup-and-configuration/databases-connections/connection-pool).
+    // The prismaPoolMax default (see the constant's own comment above)
+    // assumes this URL is a pooled endpoint. **Exception**: a direct,
+    // unpooled connection to a fixed-max_connections instance (e.g. Cloud
+    // SQL, now retired from this project's own deployment but still a shape
+    // a consumer repo may run) must set PRISMA_POOL_MAX=2 explicitly — this
+    // is the original rca_267a §6, Option A calculation: Cloud Run
+    // max-instances=10 × pool max=2 = 20 connections < Cloud SQL
+    // db-f1-micro max_connections=25, leaving headroom for admin/migration
+    // connections. See docs/knowledge/prisma-pool-max-tuning.md.
     const adapter = new PrismaPg(
-      { connectionString, max: 2 },
+      { connectionString, max: prismaPoolMax },
       schemaName ? { schema: schemaName } : undefined,
     );
     if (slowQueryLogEnabled) {
@@ -193,8 +216,24 @@ const createPrismaClient = () => {
   }
 };
 
-const prisma = globalForPrisma.prisma || createPrismaClient();
+// Every client the application uses rejects update/delete on audit_log (the
+// append-only guard, docs/knowledge/audit-log-append-only.md). The cast keeps
+// the plain PrismaClient type the rest of the code base already relies on.
+const createPrismaClient = () =>
+  createBasePrismaClient().$extends(auditLogAppendOnlyExtension) as unknown as PrismaClient;
 
-if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma;
+// Cache unconditionally, in every environment (see lib/global-singleton.ts
+// for why). This used to skip the cache outside dev
+// (`if (process.env.NODE_ENV !== "production") globalForPrisma.prisma =
+// prisma;`), which assumed each production request runs in a fresh process
+// (classic serverless) -- an assumption that breaks under an execution
+// model that evaluates this module's bundle more than once within one
+// long-lived process (e.g. a platform that keeps a warm instance handling
+// multiple concurrent invocations, each with its own bundle-scoped copy of
+// this module): skipping the cache there silently multiplied real
+// connection pools within a single process, each opening its own set of
+// backend connections independent of PRISMA_POOL_MAX's intended
+// per-process ceiling.
+const prisma = cacheOnGlobal(globalForPrisma, 'prisma', createPrismaClient) as PrismaClient;
 
 export default prisma;

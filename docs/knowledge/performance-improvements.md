@@ -327,6 +327,213 @@ cosmetic cleanup.
 
 ---
 
+## 5. List Pagination: `findMany` + `count` Run Independently (Not `$transaction`)
+
+### Problem
+
+`get{Parent}Page()` (`getters.ts.jinja2`) originally bundled its `findMany` and `count`
+calls into a single batch transaction:
+
+```ts
+const [rowsRaw, total] = await prisma.$transaction([
+  prisma.{{ model }}.findMany({ where, orderBy, skip, take, ... }),
+  prisma.{{ model }}.count({ where }),
+]);
+```
+
+A `prisma.$transaction([...])` (the batch/array form) needs to acquire connections for
+*every* member query up front, atomically, before either query can start — and Prisma's
+default `maxWait` for this acquisition step is 2000ms (confirmed via
+`@prisma/client/runtime/client.d.ts`'s `PrismaClientBaseOptions.transactionOptions` doc
+comment: `"maxWait ?= 2000"`; distinct from the batch form's `timeout`, default 5000ms,
+which bounds the queries' own execution once started — the two are separate
+`BatchTransactionOptions` fields, easy to conflate).
+
+Under concurrent load (`PRISMA_POOL_MAX=5`, with the cross-entity search endpoint's own
+parallel queries — see `search.md`'s Issue #725/#727/P2028-hotfix history — also competing
+for pooled connections), the batch transaction could not always acquire both member
+queries' connections within 2000ms. This produced `P2028` ("Unable to start a transaction
+in the given time") on every list endpoint using this pattern, reproduced at real data
+scale (N=30,000) with `PRISMA_POOL_MAX=5` under concurrent search load: `GET /api/policy`
+21.55% error rate, `GET /api/service_request` 22.10%, `DELETE /api/provider/:id` 20.59% —
+while list/detail endpoints without this transaction wrapper stayed at 0% error under the
+identical load, isolating the transaction wrapper (not general pool pressure) as the cause.
+
+### Fix
+
+Run `findMany` and `count` as two independent queries via `Promise.all` instead:
+
+```ts
+const [rowsRaw, total] = await Promise.all([
+  prisma.{{ model }}.findMany({ where, orderBy, skip, take, ... }),
+  prisma.{{ model }}.count({ where }),
+]);
+```
+
+Each query now independently acquires whichever pooled connection frees up first, instead
+of both needing to be grabbed atomically before either can start — eliminating the
+`maxWait` bottleneck entirely. This mirrors the fix already applied to `buildSearchQuery()`
+(`search_helpers.ts.jinja2`) for the analogous P2028-under-`$transaction` failure mode.
+
+This section eliminates P2028 on the read side by removing an unnecessary transaction.
+`addEntity`/`updateEntity`'s write-side `$transaction` cannot be removed the same way (a
+multi-model write genuinely needs atomicity) — see
+`docs/knowledge/p2028-capacity-misclassification-fix.md` for how P2028 is instead handled
+correctly there when it does occur under contention.
+
+### Trade-off: no longer atomic
+
+`findMany` and `count` can now see different snapshots if a write lands between them (e.g.
+a row inserted or deleted mid-page-load could make `total` off by one relative to
+`rowsRaw`). This is accepted, not overlooked: every list/detail read path that never wrapped
+its query in a transaction at all already makes this same trade (a plain `findMany` reads a
+snapshot that can be stale by the time it reaches the client), and real-scale load testing
+found those non-transactional endpoints error-free while this transactional pair alone
+produced `P2028`. If a future requirement needs `findMany`/`count` to be read from a single
+consistent snapshot, that requirement must come with an explicit review of both `maxWait`
+and `timeout` against measured query time under real load — re-adding `$transaction`
+without that review reintroduces this exact regression.
+
+### Regression coverage
+
+`code_generator/tests/test_list_pagination_no_transaction_wrapper.py` renders the fixture
+schema through the real `build_user_schema.py` → `generate.py` pipeline and asserts no
+generated `getters.ts` wraps `findMany`+`count` in `prisma.$transaction([...])` — confirmed
+to fail against the pre-fix template (2 assertions, both catch the regression independently).
+
+---
+
+## 6. Batching Permission Queries Across Models (`getModelPermissions`)
+
+### Problem
+
+`getModelPermissions(model, userId)` (`lib/authz.ts`) is called once per model — every
+generated entity's own `requirePermission`/`canAccess` calls, plus the cross-entity search
+path (`search_helpers.ts.jinja2`, one call per entity in `ALL_ENTITIES`). Its underlying
+query filtered by `name: model`:
+
+```ts
+const rows = await prisma.permission.findMany({
+  where: { name: model, OR: [ /* 3-branch role/global OR */ ] },
+  select: { create: true, read: true, update: true, delete: true, import: true, role: { select: { name: true } } },
+});
+```
+
+The per-request React `cache()` wrapper on `getModelPermissions` only dedups repeat calls
+for the *same* `(model, userId)` pair. A cross-entity search touching N entities in one
+request still issued N separate `permission.findMany` queries — one per model, all for the
+same user, all satisfying the identical role-membership OR clause — because each call's
+cache key includes `model`.
+
+### Fix
+
+Dropped the `name: model` filter from the query and added `select: { name: true, ... }` so
+the result carries which model each row belongs to. The fetch itself moved into a new
+function, `getPermissionRowsForUser(userId)` — cached by `userId` alone (both the
+per-request React `cache()` layer and the per-process TTL LRU layer) — so every model a
+request asks about converges on the same cached row set instead of triggering its own
+query:
+
+```ts
+const getPermissionRowsForUser = cache(async (userId: string) => {
+  // ... same 3-branch OR, no name filter, select adds `name: true` ...
+});
+
+// inside getModelPermissions(model, userId):
+const allRows = await getPermissionRowsForUser(resolvedUserId);
+const rows = allRows.filter((row) => row.name === model);
+```
+
+`getModelPermissions` itself is unchanged apart from this substitution — the audit_log
+special case, the `SELF_ONLY_ADMIN_BYPASS_ENTITIES` no-rows fallback, and the
+Creator/Assignee aggregation loop all still operate on `rows` (now the per-model slice of
+the batched result) exactly as before. A 25-entity cross-entity search collapses from 25
+`permission.findMany` calls to 1 per (request, user); a single-model call (an ordinary list
+or detail page) is unaffected in query count, only in query shape (no `name` filter).
+
+### Why this doesn't change what any model's permissions resolve to
+
+The 3-branch OR clause (global `role_id: null` rows, the user's non-special roles, and the
+always-fetched Creator/Assignee role definitions) is unchanged — removing the `name`
+filter only widens which models' rows come back in one call, not which rows match the OR
+for a given model. `role`/`permission` records carry no `organization_id` (RBAC is
+tenant-global), so batching across models does not cross any org-isolation boundary.
+`lib/authz.test.ts`'s "batched multi-model query" test group pins this: given one batched
+result spanning multiple models, filtering to any single model reproduces exactly the same
+permissions a model-only query would have returned, with no cross-model leakage.
+
+### Regression coverage
+
+`lib/authz.test.ts` — the "batched multi-model query: per-model grouping is equivalent to
+a per-model query" describe block asserts, against a single mocked result set spanning
+three different models: (1) the requested model's permissions are correct even when other
+models are present in the same batch, (2) a model with no rows in the batch is still
+denied (no accidental grant from another model's rows), (3) a global `role_id: null` row
+resolves correctly when mixed with other models, and (4) exactly one `findMany` call is
+issued per `getModelPermissions` invocation, with no `name` key in the query's `where`.
+
+---
+
+## 7. Folding Relation Loads Into the Main Query (`relationLoadStrategy: 'join'`)
+
+### Problem
+
+Every generated detail/list getter that embeds a relation (`get{Parent}Detail`'s
+`include_props_detail`, `get{Parent}Page`'s `include_props_list`, plus the analogous search
+list and CSV export getters) leaves Prisma's relation-load strategy at its default. For a
+relational connector via a driver adapter (this project's PrismaPg/PrismaNeon), that default
+issues one SEPARATE query per relation — each grabbing its own pooled connection — instead
+of a single query. `getDashboardDetail` (embeds `widgets`, `creator`, `updater`) issued 5
+queries; `getOrganizationDetail` (embeds `users`, `creator`, `updater`) issued 4.
+
+### Fix
+
+Added `previewFeatures = ["relationJoins"]` to `prisma/schema.prisma`'s `generator client`
+block (and to every gate fixture's own `schema.prisma`, since each fixture generates its own
+isolated Prisma client — omitting it there makes `relationLoadStrategy` type as `never`,
+a `tsc` error rather than a runtime one), then added `relationLoadStrategy: 'join'` to every
+`include:`-bearing query in `getters.ts.jinja2` (detail getter, main list getter, search list
+getter, one-to-one selector's "available options" getter, CSV export chunk getter). Prisma
+folds each relation into the main query via a `LEFT JOIN LATERAL` instead of issuing it
+separately.
+
+### Measurement (subtask_1176c, isolated worktree, PrismaPg driver adapter, Postgres 18)
+
+DB statement-log method (`ALTER SYSTEM SET log_statement = 'all'` + `docker logs` line count,
+per subtask_1171b's precedent — immune to the app-level in-memory counter's per-route module
+duplication problem under `next dev`):
+
+| Getter | Before (default strategy) | After (`relationLoadStrategy: 'join'`) |
+|---|---|---|
+| `getDashboardDetail` | 5 queries | 1 query |
+| `getOrganizationDetail` | 4 queries | 1 query |
+
+Both entities' generated SQL confirmed as a single `SELECT ... LEFT JOIN LATERAL (...) ON
+true ...` per call, not a client-side merge of separate result sets.
+
+### Why this needed a live-DB smoke test first, not just a schema-level check
+
+Driver-adapter compatibility issues with this preview feature were historically reported
+against some Prisma versions; a clean `prisma generate` alone does not prove a query with
+`relationLoadStrategy: 'join'` actually executes correctly against this project's specific
+driver adapter. Before implementing, subtask_1176c ran an isolated live-DB smoke test
+(`findUnique`/`findMany` with `include` + `relationLoadStrategy: 'join'` against a real
+Postgres 18 test container via `PrismaPg`) and confirmed it executes cleanly at Prisma
+7.10.0 before touching the template.
+
+### Regression coverage
+
+`code_generator/tests/test_relation_joins_load_strategy.py` — asserts (1) `prisma/schema.prisma`
+declares the preview feature, (2) a detail getter with an embedded relation
+(`decimal_gate_wrapper` fixture) emits `relationLoadStrategy: 'join'` alongside its
+`include:`, (3) a list getter with an embedded many-to-one FK (this repo's own dogfood
+`permission` entity, `include: { role: true }`) does too, and (4) a list getter with no
+relation to embed (dogfood `organization`, which only embeds creator/updater in its detail
+getter, never its list getter) emits neither `include:` nor `relationLoadStrategy` — the
+option must never appear without a relation to fold.
+
+---
+
 ## Summary Table
 
 | Technique | Where applied | Effect |
@@ -335,5 +542,8 @@ cosmetic cleanup.
 | Skeleton screens | All generated pages | Visual placeholder instead of blank/spinner |
 | Parallel permissions + data | `getters.ts` (list + detail) | Saves one sequential DB round-trip |
 | `getModelPermissions` returns `userId` | `lib/authz.ts` | Eliminates separate `getSessionUserId` call |
+| Batch permission rows across models per (request, user) | `lib/authz.ts` (`getPermissionRowsForUser`) | 25-entity search: 25 `permission.findMany` calls → 1 |
+| `relationLoadStrategy: 'join'` on every relation-embedding getter | `getters.ts.jinja2` | `getDashboardDetail` 5→1 queries, `getOrganizationDetail` 4→1 |
 | Remove `revalidatePath` from upsert (kept on delete — same-route redirect) | `actions.ts` | Eliminates double `getAllEntities` on save |
 | Remove `router.refresh()` from `handleBack` | `FormUpsert.tsx` | Eliminates extra `getDetail` on back navigation |
+| `findMany`+`count` via `Promise.all` (not `$transaction`) | `getters.ts` (list pagination) | Avoids batch-transaction `maxWait` P2028 under concurrent load |

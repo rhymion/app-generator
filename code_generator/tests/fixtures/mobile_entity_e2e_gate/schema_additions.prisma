@@ -1,0 +1,411 @@
+// Fixture models for scripts/run_mobile_entity_playwright.sh (appended to a COPY of
+// prisma/schema.prisma; the default schema is never edited). The relation back-fields the
+// default `user` model needs are listed in schema_relations.json.
+
+enum MobileNoteStatus {
+  open
+  closed
+}
+
+model mobile_note {
+  id         String           @id @default(cuid())
+  title      String
+  details    String?
+  status     MobileNoteStatus
+  priority   Int?
+  amount     Decimal?         @db.Decimal(10, 2)
+  is_done    Boolean
+  due_on     DateTime?
+  remind_at  DateTime?        @db.Timestamptz(0)
+  remind_time DateTime?       @db.Timetz(0)
+  created_at DateTime         @default(now()) @db.Timestamptz(0)
+  updated_at DateTime         @updatedAt @db.Timestamptz(0)
+  creator_id String
+  creator    user             @relation("MobileNoteCreator", fields: [creator_id], references: [id])
+  updater_id String
+  updater    user             @relation("MobileNoteUpdater", fields: [updater_id], references: [id])
+  @@index([title])
+  @@index([status])
+  @@index([priority])
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
+model mobile_log {
+  id         String   @id @default(cuid())
+  message    String
+  created_at DateTime @default(now()) @db.Timestamptz(0)
+  updated_at DateTime @updatedAt @db.Timestamptz(0)
+  creator_id String
+  creator    user     @relation("MobileLogCreator", fields: [creator_id], references: [id])
+  updater_id String
+  updater    user     @relation("MobileLogUpdater", fields: [updater_id], references: [id])
+  @@index([message])
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
+model mobile_rule {
+  id          String   @id @default(cuid())
+  name        String
+  entity_name String
+  created_at  DateTime @default(now()) @db.Timestamptz(0)
+  updated_at  DateTime @updatedAt @db.Timestamptz(0)
+  creator_id  String
+  creator     user     @relation("MobileRuleCreator", fields: [creator_id], references: [id])
+  updater_id  String
+  updater     user     @relation("MobileRuleUpdater", fields: [updater_id], references: [id])
+  @@index([name])
+  @@index([entity_name])
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
+model mobile_group {
+  id         String   @id @default(cuid())
+  name       String
+  mobile_tasks mobile_task[]
+  mobile_shipments mobile_shipment[]
+  mobile_invoice_lines mobile_invoice_line[]
+  created_at DateTime @default(now()) @db.Timestamptz(0)
+  updated_at DateTime @updatedAt @db.Timestamptz(0)
+  creator_id String
+  creator    user     @relation("MobileGroupCreator", fields: [creator_id], references: [id])
+  updater_id String
+  updater    user     @relation("MobileGroupUpdater", fields: [updater_id], references: [id])
+  @@index([name])
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
+model mobile_tag {
+  id         String   @id @default(cuid())
+  name       String
+  mobile_tasks mobile_task[] @relation("MobileTaskTags")
+  label_tasks  mobile_task[] @relation("MobileTaskLabel")
+  created_at DateTime @default(now()) @db.Timestamptz(0)
+  updated_at DateTime @updatedAt @db.Timestamptz(0)
+  creator_id String
+  creator    user     @relation("MobileTagCreator", fields: [creator_id], references: [id])
+  updater_id String
+  updater    user     @relation("MobileTagUpdater", fields: [updater_id], references: [id])
+  @@index([name])
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
+model mobile_profile {
+  id         String   @id @default(cuid())
+  name       String
+  mobile_task mobile_task?
+  created_at DateTime @default(now()) @db.Timestamptz(0)
+  updated_at DateTime @updatedAt @db.Timestamptz(0)
+  creator_id String
+  creator    user     @relation("MobileProfileCreator", fields: [creator_id], references: [id])
+  updater_id String
+  updater    user     @relation("MobileProfileUpdater", fields: [updater_id], references: [id])
+  @@index([name])
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
+model mobile_task {
+  id                String          @id @default(cuid())
+  title             String
+  mobile_group_id   String
+  mobile_group      mobile_group    @relation(fields: [mobile_group_id], references: [id])
+  mobile_profile_id String?         @unique
+  mobile_profile    mobile_profile? @relation(fields: [mobile_profile_id], references: [id])
+  mobile_label_id   String?
+  mobile_label      mobile_tag?     @relation("MobileTaskLabel", fields: [mobile_label_id], references: [id])
+  tags              mobile_tag[]    @relation("MobileTaskTags")
+  created_at        DateTime        @default(now()) @db.Timestamptz(0)
+  updated_at        DateTime        @updatedAt @db.Timestamptz(0)
+  creator_id        String
+  creator           user            @relation("MobileTaskCreator", fields: [creator_id], references: [id])
+  updater_id        String
+  updater           user            @relation("MobileTaskUpdater", fields: [updater_id], references: [id])
+  @@index([title])
+  @@index([mobile_group_id])
+  @@index([mobile_label_id])
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
+model mobile_org_item {
+  id              String       @id @default(cuid())
+  name            String
+  organization_id String
+  organization    organization @relation(fields: [organization_id], references: [id])
+  created_at      DateTime     @default(now()) @db.Timestamptz(0)
+  updated_at      DateTime     @updatedAt @db.Timestamptz(0)
+  creator_id      String
+  creator         user         @relation("MobileOrgItemCreator", fields: [creator_id], references: [id])
+  updater_id      String
+  updater         user         @relation("MobileOrgItemUpdater", fields: [updater_id], references: [id])
+  @@index([name])
+  @@index([organization_id])
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
+model mobile_category {
+  id         String   @id @default(cuid())
+  name       String
+  mobile_tickets mobile_ticket[]
+  created_at DateTime @default(now()) @db.Timestamptz(0)
+  updated_at DateTime @updatedAt @db.Timestamptz(0)
+  creator_id String
+  creator    user     @relation("MobileCategoryCreator", fields: [creator_id], references: [id])
+  updater_id String
+  updater    user     @relation("MobileCategoryUpdater", fields: [updater_id], references: [id])
+  @@index([name])
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
+model mobile_ticket {
+  id                 String          @id @default(cuid())
+  title              String
+  mobile_category_id String
+  mobile_category    mobile_category @relation(fields: [mobile_category_id], references: [id])
+  created_at         DateTime        @default(now()) @db.Timestamptz(0)
+  updated_at         DateTime        @updatedAt @db.Timestamptz(0)
+  creator_id         String
+  creator            user            @relation("MobileTicketCreator", fields: [creator_id], references: [id])
+  updater_id         String
+  updater            user            @relation("MobileTicketUpdater", fields: [updater_id], references: [id])
+  @@index([title])
+  @@index([mobile_category_id])
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
+model mobile_order {
+  id              String   @id @default(cuid())
+  name            String
+  stripe_price_id String   @default("price_mobile_order_fixed")
+  created_at      DateTime @default(now()) @db.Timestamptz(0)
+  updated_at      DateTime @updatedAt @db.Timestamptz(0)
+  creator_id      String
+  creator         user     @relation("MobileOrderCreator", fields: [creator_id], references: [id])
+  updater_id      String
+  updater         user     @relation("MobileOrderUpdater", fields: [updater_id], references: [id])
+  @@index([name])
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
+model mobile_thread {
+  id             String      @id @default(cuid())
+  title          String
+  commentable_id String      @unique
+  commentable    commentable @relation(fields: [commentable_id], references: [id], onDelete: Cascade)
+  created_at     DateTime    @default(now()) @db.Timestamptz(0)
+  updated_at     DateTime    @updatedAt @db.Timestamptz(0)
+  creator_id     String
+  creator        user        @relation("MobileThreadCreator", fields: [creator_id], references: [id])
+  updater_id     String
+  updater        user        @relation("MobileThreadUpdater", fields: [updater_id], references: [id])
+  @@index([title])
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
+enum MobileRequestStatus {
+  draft
+  submitted
+  approved
+  rejected
+}
+
+model mobile_request {
+  id            String              @id @default(cuid())
+  title         String
+  status        MobileRequestStatus @default(draft)
+  approvable_id String              @unique
+  approvable    approvable          @relation(fields: [approvable_id], references: [id])
+  created_at    DateTime            @default(now()) @db.Timestamptz(0)
+  updated_at    DateTime            @updatedAt @db.Timestamptz(0)
+  creator_id    String
+  creator       user                @relation("MobileRequestCreator", fields: [creator_id], references: [id])
+  updater_id    String
+  updater       user                @relation("MobileRequestUpdater", fields: [updater_id], references: [id])
+  @@index([title])
+  @@index([status])
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
+enum MobileShipmentStatus {
+  draft
+  pending
+  approved
+  rejected
+  split
+}
+
+model mobile_shipment {
+  id              String                @id @default(cuid())
+  title           String
+  quantity        Int
+  status          MobileShipmentStatus  @default(draft)
+  mobile_group_id String
+  mobile_group    mobile_group          @relation(fields: [mobile_group_id], references: [id])
+  approvable_id   String                @unique
+  approvable      approvable            @relation(fields: [approvable_id], references: [id])
+  created_at      DateTime              @default(now()) @db.Timestamptz(0)
+  updated_at      DateTime              @updatedAt @db.Timestamptz(0)
+  creator_id      String
+  creator         user                  @relation("MobileShipmentCreator", fields: [creator_id], references: [id])
+  updater_id      String
+  updater         user                  @relation("MobileShipmentUpdater", fields: [updater_id], references: [id])
+  @@index([title])
+  @@index([quantity])
+  @@index([status])
+  @@index([mobile_group_id])
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
+model mobile_document {
+  id          String      @id @default(cuid())
+  title       String
+  file_id     String?     @unique
+  file        attachment? @relation("MobileDocumentFile", fields: [file_id], references: [id], onDelete: SetNull)
+  contract_id String      @unique
+  contract    attachment  @relation("MobileDocumentContract", fields: [contract_id], references: [id])
+  created_at  DateTime    @default(now()) @db.Timestamptz(0)
+  updated_at  DateTime    @updatedAt @db.Timestamptz(0)
+  creator_id  String
+  creator     user        @relation("MobileDocumentCreator", fields: [creator_id], references: [id])
+  updater_id  String
+  updater     user        @relation("MobileDocumentUpdater", fields: [updater_id], references: [id])
+  @@index([title])
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
+model mobile_room {
+  id         String   @id @default(cuid())
+  room_no    String
+  category   String
+  room_state Int
+  mobile_stays mobile_stay[]
+  created_at DateTime @default(now()) @db.Timestamptz(0)
+  updated_at DateTime @updatedAt @db.Timestamptz(0)
+  creator_id String
+  creator    user     @relation("MobileRoomCreator", fields: [creator_id], references: [id])
+  updater_id String
+  updater    user     @relation("MobileRoomUpdater", fields: [updater_id], references: [id])
+  @@index([room_no])
+  @@index([category])
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
+model mobile_stay {
+  id             String       @id @default(cuid())
+  guest_name     String
+  category       String
+  mobile_room_id String?
+  mobile_room    mobile_room? @relation(fields: [mobile_room_id], references: [id])
+  created_at     DateTime     @default(now()) @db.Timestamptz(0)
+  updated_at     DateTime     @updatedAt @db.Timestamptz(0)
+  creator_id     String
+  creator        user         @relation("MobileStayCreator", fields: [creator_id], references: [id])
+  updater_id     String
+  updater        user         @relation("MobileStayUpdater", fields: [updater_id], references: [id])
+  @@index([guest_name])
+  @@index([category])
+  @@index([mobile_room_id])
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
+model mobile_step {
+  id         String        @id @default(cuid())
+  name       String
+  parent_id  String?
+  parent     mobile_step?  @relation("MobileStepTree", fields: [parent_id], references: [id])
+  children   mobile_step[] @relation("MobileStepTree")
+  created_at DateTime      @default(now()) @db.Timestamptz(0)
+  updated_at DateTime      @updatedAt @db.Timestamptz(0)
+  creator_id String
+  creator    user          @relation("MobileStepCreator", fields: [creator_id], references: [id])
+  updater_id String
+  updater    user          @relation("MobileStepUpdater", fields: [updater_id], references: [id])
+  @@index([name])
+  @@index([parent_id])
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
+enum MobileInvoiceLineStatus {
+  open
+  billed
+}
+
+model mobile_invoice {
+  id         String                @id @default(cuid())
+  invoice_no String
+  lines      mobile_invoice_line[]
+  created_at DateTime              @default(now()) @db.Timestamptz(0)
+  updated_at DateTime              @updatedAt @db.Timestamptz(0)
+  creator_id String
+  creator    user                  @relation("MobileInvoiceCreator", fields: [creator_id], references: [id])
+  updater_id String
+  updater    user                  @relation("MobileInvoiceUpdater", fields: [updater_id], references: [id])
+  @@index([invoice_no])
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
+model mobile_invoice_line {
+  id                String                   @id @default(cuid())
+  mobile_invoice_id String
+  mobile_invoice    mobile_invoice           @relation(fields: [mobile_invoice_id], references: [id], onDelete: Cascade)
+  description       String
+  quantity          Int
+  line_status       MobileInvoiceLineStatus  @default(open)
+  shipped_on        DateTime?                @db.Timestamptz(0)
+  mobile_group_id   String
+  mobile_group      mobile_group             @relation(fields: [mobile_group_id], references: [id])
+  created_at        DateTime                 @default(now()) @db.Timestamptz(0)
+  updated_at        DateTime                 @updatedAt @db.Timestamptz(0)
+  @@index([mobile_invoice_id])
+  @@index([mobile_group_id])
+}
+
+model mobile_asset {
+  id            String     @id @default(cuid())
+  title         String
+  attachable_id String     @unique
+  attachable    attachable @relation(fields: [attachable_id], references: [id], onDelete: Cascade)
+  created_at    DateTime   @default(now()) @db.Timestamptz(0)
+  updated_at    DateTime   @updatedAt @db.Timestamptz(0)
+  creator_id    String
+  creator       user       @relation("MobileAssetCreator", fields: [creator_id], references: [id])
+  updater_id    String
+  updater       user       @relation("MobileAssetUpdater", fields: [updater_id], references: [id])
+  @@index([title])
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
+model mobile_gadget {
+  id         String   @id @default(cuid())
+  title      String
+  code       String?
+  pin        String?
+  created_at DateTime @default(now()) @db.Timestamptz(0)
+  updated_at DateTime @updatedAt @db.Timestamptz(0)
+  creator_id String
+  creator    user     @relation("MobileGadgetCreator", fields: [creator_id], references: [id])
+  updater_id String
+  updater    user     @relation("MobileGadgetUpdater", fields: [updater_id], references: [id])
+  @@index([title])
+  @@index([code])
+  @@index([creator_id])
+  @@index([updater_id])
+}

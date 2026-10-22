@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireDualAuth, handleApiError } from '@/lib/api-auth';
+import { requireCaller, handleApiError } from '@/lib/api-auth';
 import { ApiError } from '@/lib/api-auth';
 import prisma from '@/lib/prisma';
 import { dispatchOnWithdrawn, ENTITIES_WITH_ON_WITHDRAWN } from '@/lib/approval_request/on_withdrawn_dispatch';
@@ -11,7 +11,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const { id } = await params;
     // cmd_648: dual-auth — X-API-Key/Authorization header when present,
     // session cookie otherwise (see app/api/search/route.ts).
-    const { userId } = await requireDualAuth(request);
+    const { userId } = await requireCaller(request);
 
     const req = await prisma.approval_request.findUnique({
       where: { id },

@@ -301,8 +301,9 @@ def test_x_nav_survives_raw_view_split_for_paired_entity(tmp_path):
     with (_REPO_ROOT / 'json_schema.yaml').open('r', encoding='utf-8') as f:
         user_schema = yaml.load(f)
 
-    assert 'x-nav' not in user_schema['definitions']['organization'], (
-        'default schema must not declare x-nav on organization (golden-diff-zero, §9)'
+    assert user_schema['definitions']['organization']['x-nav']['parent'] == 'administration', (
+        'default schema places organization in the administration group; '
+        'the override below proves a consumer schema can move it'
     )
     user_schema['definitions']['organization']['x-nav'] = {'parent': 'admin_group', 'order': 1}
 

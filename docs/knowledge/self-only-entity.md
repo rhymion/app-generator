@@ -145,7 +145,7 @@ admin shortcut, not be silently overridden by it.
 
 ## Applying `x-self-only` to a non-generator-owned entity: `setting`
 
-`setting` (`allOf: [$ref: user, ...]`) is a proxy view over the acting user's own `user` row, not
+`setting` (`x-view-of: user`) is a proxy view over the acting user's own `user` row, not
 an independent table — the Stage 1 design initially assumed every self-only entity would have its
 own `creator_id` column to filter on, but here the row *is* a `user` row, and `user` has no
 `creator_id` at all. The resolution: `user.creator_id` is made to always equal `user.id` (every

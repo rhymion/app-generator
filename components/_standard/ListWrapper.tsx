@@ -38,6 +38,10 @@ function ListWrapper(
 }: ListWrapperProps)
 {
 
+  // A row of a related record that has a page of its own carries an `href` (a path of this app).
+  const recordLink = (item: ListWrapperItem) =>
+    typeof item.href === 'string' && item.href ? <Link href={item.href}>{item.label || item.value}</Link> : (item.label || item.value);
+
   const isUrlValue = (v: unknown): v is string =>
     typeof v === 'string' && (v.startsWith('/') || v.startsWith('http'));
 
@@ -72,7 +76,7 @@ function ListWrapper(
     }
     return (
       <ListItemText
-        primary={item.label || item.value}
+        primary={recordLink(item)}
         secondary={itemType === 'file' ? `File: ${item.value?.name || 'N/A'}` : undefined}
       />
     );

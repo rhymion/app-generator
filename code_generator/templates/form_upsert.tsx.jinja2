@@ -1,8 +1,7 @@
 'use client';
 
-import { {% if uses_use_callback %}useCallback, {% endif %}{% if uses_use_effect %}useEffect, {% endif %}useMemo, {% if uses_use_ref %}useRef, {% endif %}useState } from 'react';
+import { {% if uses_use_callback %}useCallback, {% endif %}{% if uses_use_effect %}useEffect, {% endif %}useMemo{% if uses_use_ref %}, useRef{% endif %}{% if uses_use_state %}, useState{% endif %} } from 'react';
 import { useRouter } from '@/i18n/navigation';
-import { useTransition } from 'react';
 import { useTranslations } from 'next-intl';
 {% if has_child_entity_autocomplete %}
 import type { EntityAutocompleteCellConfig } from '@/components/_standard/EntityAutocompleteCellEditor';
@@ -24,9 +23,22 @@ import { upsert{{ parent_pascal }}{% if can_delete %}, remove{{ parent_pascal }}
 import { COMMENT_REACTION_TYPES } from '@/lib/reaction_constants';
 {% endif %}
 import type { FormUpsertProps{% if has_comment_children and named_constants %}, CommentReactionSummary{% endif %} } from '@/lib/{{ parent }}/types';
-import type { ActionFailure } from '@/lib/_errors';
+import { useEntityForm } from '@/lib/{{ parent }}/use_entity_form';
+import type { EntityFormSaveResult, EntityFormTranslate, EntityFormTranslators } from '@/lib/{{ parent }}/use_entity_form';
+{% if can_delete or can_invalidate or can_continue %}
+import { useEntityCapabilities } from '@/lib/{{ parent }}/use_entity_capabilities';
+{% endif %}
+{% if is_inline_create_target %}
+import { useInlineCreate } from '@/components/_standard/InlineCreate';
+{% endif %}
+{% if inline_create_imports %}
+{{ inline_create_imports }}
+{% endif %}
 import FormWithChildGrid from '@/components/_standard/FormWithChildGrid';
 import AuditInfo from '@/components/_standard/AuditInfo';
+{% if uses_timezone_select %}
+import TimeZoneSelect from '@/components/_standard/TimeZoneSelect';
+{% endif %}
 import { {% if uses_app_field_text %}AppFieldText, {% endif %}{% if uses_app_field_boolean %}AppFieldBoolean, {% endif %}AppValidationError{% if has_entity_autocomplete %}, AppFieldRelation{% endif %}{% if has_flatten_accordion_upsert %}, AppSection{% endif %}{% if has_field_select %}, AppFieldSelect{% endif %} } from '@/components/ui';
 {% if has_comment_children %}
 import CommentListWrapper from '@/components/_standard/CommentListWrapper';
@@ -74,20 +86,36 @@ import { validateForm } from './form_validation';
 
 export default function FormUpsert({{ form_upsert_params }}) {
   const router = useRouter();
-  const [isPending, startTransition] = useTransition();
   const tf = useTranslations('Fields');
   const te = useTranslations('EntityLabel');
   const tc = useTranslations('Common');
   const terr = useTranslations('Errors');
+  // Root translator: resolves a hand-written rejection's namespace-qualified messageKey.
+  const tmsg = useTranslations();
 {% if enum_ns_hooks %}
 {{ enum_ns_hooks }}
 {% endif %}
-  const [error, setError] = useState<string | null>(null);
-  const [validationError, setValidationError] = useState<string | null>(null);
-{% if can_delete or can_invalidate %}
-  const canDelete = permissions ? permissions.delete : true;
-{% endif %}
+  const { isPending, error, {% if uses_set_error %}setError, {% endif %}validationError, validate, submit } = useEntityForm({
+    translators: {
+      terr: terr as unknown as EntityFormTranslate,
+      tmsg: tmsg as unknown as EntityFormTranslators['tmsg'],
+    },
+    save: async (formData) => (await upsert{{ parent_pascal }}(formData)) as EntityFormSaveResult,
+  });
   const srcSnapshot = useMemo(() => JSON.stringify(src), [src]);
+{% if is_inline_create_target %}
+  // x-create-inline: set when another entity's form opened this form in a dialog.
+  const inlineCreate = useInlineCreate();
+{% endif %}
+{% if can_delete or can_invalidate or can_continue %}
+  const { {% if can_delete or can_invalidate %}canDelete{% endif %}{% if (can_delete or can_invalidate) and can_continue %}, {% endif %}{% if can_continue %}canContinue{% endif %} } = useEntityCapabilities({
+    permissions,
+    isEdit,
+{% if is_inline_create_target %}
+    inDialog: Boolean(inlineCreate),
+{% endif %}
+  });
+{% endif %}
 {% if all_states %}
 
 {{ all_states }}
@@ -112,29 +140,11 @@ export default function FormUpsert({{ form_upsert_params }}) {
 {% endif %}
 {{ validation_call }}
 
-  const getErrorMessage = (err: ActionFailure): string => {
-    switch (err.errorCode) {
-      case 'SESSION_EXPIRED':   return terr('sessionExpired');
-      case 'PERMISSION_DENIED': return terr('permissionDenied');
-      case 'NOT_FOUND':         return terr('notFound');
-      case 'VALIDATION':        return err.field ? (err.reason === 'invalid' ? terr('fieldInvalid', { field: err.field }) : terr('fieldRequired', { field: err.field })) : terr('unknown');
-      case 'CONFLICT':          return err.field ? terr('fieldAlreadyLinked', { field: err.field }) : terr('staleMutation');
-      case 'RESERVATION_LOCKED': return terr('reservationLocked');
-      case 'RELATED_RECORD_INVALID': return terr('relatedRecordInvalid');
-      case 'CAPACITY':          return terr('capacityExhausted');
-      default:                  return terr('unknown');
-    }
-  };
-
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
 
     if (isPending) return;
-    const validationMessage = getValidationError();
-    setValidationError(validationMessage);
-    if (validationMessage) {
-      return;
-    }
+    if (!validate(getValidationError)) return;
 
 {% if child_validation_code %}
 {{ child_validation_code }}
@@ -142,6 +152,18 @@ export default function FormUpsert({{ form_upsert_params }}) {
 {% endif %}
     const formData = new FormData();
     formData.set('id', src.id);
+{% if is_inline_create_target %}
+    // Ask the action for the new id instead of a redirect (x-create-inline).
+    if (inlineCreate) {
+      formData.set('__return_id', '1');
+    }
+{% endif %}
+{% if can_continue %}
+    const submitter = (e.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null;
+    if (canContinue && submitter?.value === 'continue') {
+      formData.set('__continue', '1');
+    }
+{% endif %}
     if (isEdit) {
       formData.set('__src_snapshot', srcSnapshot);
     }
@@ -152,16 +174,7 @@ export default function FormUpsert({{ form_upsert_params }}) {
 {{ child_form_data_handling }}
 {% endif %}
 
-    try {
-      startTransition(async () => {
-        const result = (await upsert{{ parent_pascal }}(formData)) as ActionFailure | void;
-        if (result && !result.ok) {
-          setError(getErrorMessage(result));
-        }
-      });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'An error occurred');
-    }
+    submit(formData{% if is_inline_create_target %}, inlineCreate ? (id) => inlineCreate.onCreated(id) : undefined{% endif %});
   };
 {% if can_delete %}
 
@@ -178,6 +191,12 @@ export default function FormUpsert({{ form_upsert_params }}) {
 {% endif %}
 
   const handleBack = () => {
+{% if is_inline_create_target %}
+    if (inlineCreate) {
+      inlineCreate.onCancel();
+      return;
+    }
+{% endif %}
     router.push('/{{ parent }}');
   };
 {% if has_comment_children %}
@@ -233,12 +252,21 @@ export default function FormUpsert({{ form_upsert_params }}) {
         onInvalidate={isEdit && canDelete ? handleInvalidate : undefined}
 {% endif %}
         onBack={handleBack}
+{% if is_inline_create_target %}
+        inDialog={Boolean(inlineCreate)}
+{% endif %}
         deleteEntityLabel={te('{{ parent_camel }}')}
         submitButtonLabel={tc('save')}
+{% if can_continue %}
+        continueButtonLabel={canContinue ? tc('saveAndContinue') : undefined}
+{% endif %}
         error={error}
       />
 {% if comment_children_jsx %}
 {{ comment_children_jsx }}
+{% endif %}
+{% if inline_create_dialogs_jsx %}
+{{ inline_create_dialogs_jsx }}
 {% endif %}
 {% for comp in entity_edit_components %}
       <{{ comp.name }} src={src}{% if comp.props_jsx %} {{ comp.props_jsx }}{% endif %} permissions={permissions} currentUserRoleIds={currentUserRoleIds} currentUserId={currentUserId} />

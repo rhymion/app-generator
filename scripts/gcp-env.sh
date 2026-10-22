@@ -13,31 +13,51 @@ if [[ -f "$_ENV_FILE" ]]; then
   set +a
 else
   echo "ERROR: .env.production.local not found at ${_ENV_FILE}" >&2
-  echo "  Copy .env.production.local.example to .env.production.local and fill in values." >&2
+  echo "  Copy .env.gcp.production.local.example to .env.production.local and fill in values." >&2
   exit 1
 fi
 
 # Defaults for optional config (override in .env.production.local if needed)
+# REGION should match the region of the Neon project DATABASE_URL/DIRECT_URL
+# point at (and code_generator/json_schema.yaml's x-cloud.region) — see
+# docs/knowledge/gcp-region-alignment.md. Not automatically cross-checked.
 REGION="${REGION:-asia-northeast1}"
 SERVICE_NAME="${SERVICE_NAME:-app}"
 SA_NAME="${SA_NAME:-app-cloud-run-sa}"
 REPO_NAME="${REPO_NAME:-app-generator}"
 
-# PROJECT_ID: prefer .env.production.local, fall back to gcloud config
-PROJECT_ID="${PROJECT_ID:-$(gcloud config get-value project 2>/dev/null || true)}"
+# PROJECT_ID: prefer .env.production.local, fall back to gcloud config.
+# The fallback used to be silent, which let a stale ambient `gcloud config`
+# project (left over from an unrelated earlier session) get used without any
+# visible sign that PROJECT_ID had not actually been set here — see
+# docs/knowledge/gcp-automation-design.md for the incident this caused.
+if [[ -z "${PROJECT_ID:-}" ]]; then
+  PROJECT_ID="$(gcloud config get-value project 2>/dev/null || true)"
+  if [[ -n "$PROJECT_ID" ]]; then
+    echo "WARNING: PROJECT_ID not set in .env.production.local — falling back to the ambient gcloud CLI project '${PROJECT_ID}'." >&2
+    echo "  If this is not the project you intend to deploy to, set PROJECT_ID explicitly in .env.production.local, or run: gcloud config set project YOUR_PROJECT_ID" >&2
+  fi
+fi
 gcloud config set project "${PROJECT_ID}" &>/dev/null || true
 
 # Required variables — abort with a clear message if missing
 : "${PROJECT_ID:?PROJECT_ID is required — set in .env.production.local or run: gcloud config set project YOUR_PROJECT_ID}"
-# DATABASE_URL / DIRECT_URL: Neon connection strings, obtained from the Neon
-# console (or reused from the same Neon project as proj_c's Vercel deployment
-# — this script does not provision Neon itself). DATABASE_URL is the pooled
+# DATABASE_URL / DIRECT_URL: Neon connection strings. Reuse the values this
+# repo's own scripts/vercel-setup.sh already wrote into this SAME
+# .env.production.local (DATABASE_URL_PROD / DATABASE_URL_UNPOOLED_PROD) if a
+# Vercel deployment for the same app was already set up — no manual Neon
+# console lookup needed in that case. This script still does not provision
+# Neon itself: if neither a manual value nor a prior Vercel setup exists,
+# obtain both from the Neon console (or run scripts/vercel-setup.sh first to
+# get-or-create the Neon project automatically). DATABASE_URL is the pooled
 # (PgBouncer) endpoint for app runtime queries; DIRECT_URL is the unpooled
 # endpoint required by the migrate Job's `prisma migrate deploy` — see
 # docs/knowledge/prisma-direct-vs-pooled-connection.md for why a pooled
 # connection must never run migrations.
-: "${DATABASE_URL:?DATABASE_URL is required — set in .env.production.local (Neon pooled connection string)}"
-: "${DIRECT_URL:?DIRECT_URL is required — set in .env.production.local (Neon direct/unpooled connection string, used by the app-migrate Job; see docs/knowledge/prisma-direct-vs-pooled-connection.md)}"
+DATABASE_URL="${DATABASE_URL:-${DATABASE_URL_PROD:-}}"
+DIRECT_URL="${DIRECT_URL:-${DATABASE_URL_UNPOOLED_PROD:-}}"
+: "${DATABASE_URL:?DATABASE_URL is required — set in .env.production.local (Neon pooled connection string), or run scripts/vercel-setup.sh first to derive DATABASE_URL_PROD automatically}"
+: "${DIRECT_URL:?DIRECT_URL is required — set in .env.production.local (Neon direct/unpooled connection string, used by the app-migrate Job; see docs/knowledge/prisma-direct-vs-pooled-connection.md), or run scripts/vercel-setup.sh first to derive DATABASE_URL_UNPOOLED_PROD automatically}"
 
 # AUTH_SECRET: generate-once-persist (if unset, generates and writes back to .env.production.local)
 if [[ -z "${AUTH_SECRET:-}" ]]; then
@@ -72,6 +92,19 @@ fi
 # otherwise covers.
 PRISMA_ACCELERATE_API_KEY="${PRISMA_ACCELERATE_API_KEY:-}"
 
+# Optional: PRISMA_POOL_MAX override, forwarded to the deployed Cloud Run
+# service by gcp-deploy.sh's Step 4 when set. Leave blank for this script's
+# default target (Neon's pooled endpoint) — lib/prisma-pool.ts's own default
+# (5) is already sized for that. Set explicitly (to 2) only if DATABASE_URL
+# above points at a direct/unpooled connection (e.g. a self-managed Cloud
+# SQL instance) instead of Neon — see docs/knowledge/prisma-pool-max-tuning.md.
+PRISMA_POOL_MAX="${PRISMA_POOL_MAX:-}"
+
+# Optional: CRON_SECRET, registered by gcp-setup.sh Step 5 as app-cron-secret
+# when set (the nightly Cloud Run Job path has its own env file; see
+# scripts/gcp-task-runner.sh).
+CRON_SECRET="${CRON_SECRET:-}"
+
 # Upstash global DB primary region (Step 4.5). AWS-style region name; the DB is
 # created as global tier. ap-northeast-1 (Tokyo) is closest to GCP asia-northeast1.
 UPSTASH_PRIMARY_REGION="${UPSTASH_PRIMARY_REGION:-ap-northeast-1}"
@@ -89,5 +122,6 @@ export PROJECT_ID REGION SERVICE_NAME
 export SA_NAME SA_EMAIL REPO_NAME GCS_BUCKET
 export IMAGE MIGRATE_IMAGE DATABASE_URL DIRECT_URL REDIS_URL
 export AUTH_SECRET UPSTASH_EMAIL UPSTASH_API_KEY PRISMA_ACCELERATE_API_KEY
+export PRISMA_POOL_MAX CRON_SECRET
 export SEED_ADMIN_EMAIL SEED_ADMIN_PASSWORD
 export UPSTASH_PRIMARY_REGION

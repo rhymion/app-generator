@@ -1,11 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { authenticateApiKey, requireApiPermission, handleApiError } from '@/lib/api-auth';
+{% set needs_resolve = can_view or (can_update and not is_self_only) or (can_delete and not is_self_only) %}
+import { authenticate, requireApiPermission, handleApiError{% if needs_resolve %}, ApiError{% endif %} } from '@/lib/api-auth';
+import { getRateLimiter } from '@/lib/rate-limit';
+{% if needs_resolve %}
+import { resolvePermissions } from '@/lib/authz';
+{% endif %}
 {% if (can_view and comment_has_mention) or can_update or can_delete %}import prisma from '@/lib/prisma';
 {% endif %}{% if can_view %}
 import { get{{ parent_pascal }}Detail } from '@/lib/{{ parent }}/getters';
 {% endif %}
 {% if can_view and comment_has_mention %}
-import { decodeMentions, extractMentionedUserIds, type UserContext } from '@/lib/mention/parser';
+import { decodeMentions, extractMentionedUserIds, listMentions, type UserContext } from '@/lib/mention/parser';
 import { getTranslations } from 'next-intl/server';
 {% endif %}
 {% if can_update or can_delete %}
@@ -20,12 +25,29 @@ type Params = { params: Promise<{ id: string }> };
 export async function GET(request: NextRequest, { params }: Params) {
   try {
     const { id } = await params;
-    const { userId: actorId } = await authenticateApiKey(request);
+    const { userId: actorId } = await authenticate(request);
+    const _rl = await getRateLimiter().check('api:read', actorId);
+    if (!_rl.allowed) {
+      return NextResponse.json(
+        { error: 'rate_limited', retryAfter: _rl.retryAfterSeconds },
+        { status: 429, headers: { 'Retry-After': String(_rl.retryAfterSeconds), 'X-RateLimit-Bucket': 'api:read' } },
+      );
+    }
+    // cmd_1180: coarse, item-independent gate BEFORE the item fetch below
+    // -- a caller with no possible access path at all (no general grant,
+    // no Creator/Assignee role) is rejected before this route ever
+    // queries the item table, so record existence is never revealed to
+    // them via a 404-vs-403 distinction. `basePerms` is reused (not
+    // re-fetched) for the item-level resolution just below.
+    const basePerms = await requireApiPermission(actorId, '{{ parent }}', 'read');
     const item = await get{{ parent_pascal }}Detail(id{% if should_filter_by_org or is_self_only %}, actorId{% endif %});
     if (!item) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
-    await requireApiPermission(actorId, '{{ parent }}', 'read', item);
+    const resolved = await resolvePermissions(basePerms, item, actorId);
+    if (!resolved.read) {
+      throw new ApiError(403, `Access denied: {{ parent }}.read`);
+    }
 {% if comment_has_mention %}
     // Mention decode (cmd_522c): get{{ parent_pascal }}Detail() returns RAW
     // @[user_id:<id>] markers (needed by the page/FormView path's
@@ -52,7 +74,13 @@ export async function GET(request: NextRequest, { params }: Params) {
       : [];
     const _mentionUserContext: UserContext = Object.fromEntries(_mentionUsers.map((u) => [u.id, u.name]));
     const _tCommon = await getTranslations('Common');
-    const _decodeComment = <T extends { message: string }>(c: T) => ({ ...c, message: decodeMentions(c.message, _mentionUserContext, _tCommon('deletedUser')) });
+    // `mentions` lists the markers in the order they appear in the message, so a client that edits the
+    // decoded text can put them back (see docs/knowledge/mobile-app.md, Comments).
+    const _decodeComment = <T extends { message: string }>(c: T) => ({
+      ...c,
+      message: decodeMentions(c.message, _mentionUserContext, _tCommon('deletedUser')),
+      mentions: listMentions(c.message, _mentionUserContext, _tCommon('deletedUser')),
+    });
     const decodedItem = {
       ...item,
 {% if named_constants and has_commentable %}
@@ -79,7 +107,23 @@ export async function GET(request: NextRequest, { params }: Params) {
 export async function PUT(request: NextRequest, { params }: Params) {
   try {
     const { id } = await params;
-    const { userId: actorId } = await authenticateApiKey(request);
+    const { userId: actorId } = await authenticate(request);
+    const _rl = await getRateLimiter().check('api:write', actorId);
+    if (!_rl.allowed) {
+      return NextResponse.json(
+        { error: 'rate_limited', retryAfter: _rl.retryAfterSeconds },
+        { status: 429, headers: { 'Retry-After': String(_rl.retryAfterSeconds), 'X-RateLimit-Bucket': 'api:write' } },
+      );
+    }
+{% if not is_self_only %}
+    // cmd_1180: coarse, item-independent gate BEFORE the item fetch below
+    // -- a caller with no possible access path at all (no general grant,
+    // no Creator/Assignee role) is rejected before this route ever
+    // queries the item table, so record existence is never revealed to
+    // them via a 404-vs-403 distinction. `basePerms` is reused (not
+    // re-fetched) for the item-level resolution further down.
+    const basePerms = await requireApiPermission(actorId, '{{ parent }}', 'update');
+{% endif %}
 {% if should_filter_by_org %}
     const _assocOrgs = await getAssociatedOrganizations(actorId);
     const _assocOrgIds = _assocOrgs.map((o) => o.id);
@@ -113,7 +157,10 @@ export async function PUT(request: NextRequest, { params }: Params) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
 {% else %}
-    await requireApiPermission(actorId, '{{ parent }}', 'update', existing);
+    const resolved = await resolvePermissions(basePerms, existing, actorId);
+    if (!resolved.update) {
+      throw new ApiError(403, `Access denied: {{ parent }}.update`);
+    }
 {% endif %}
     const body = await request.json();
     const { {{ all_body_fields_create }} } = body;
@@ -133,7 +180,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
   } catch (error) {
 {% if reservation_config and reservation_config.mode == 'count' %}
     if (error instanceof ReservationMutationError) {
-      return NextResponse.json({ error: (error as Error).message }, { status: 409 });
+      return NextResponse.json({ error: (error as Error).message, code: 'RESERVATION_LOCKED' }, { status: 409 });
     }
 {% endif %}
     return handleApiError(error);
@@ -144,7 +191,23 @@ export async function PUT(request: NextRequest, { params }: Params) {
 export async function DELETE(request: NextRequest, { params }: Params) {
   try {
     const { id } = await params;
-    const { userId: actorId } = await authenticateApiKey(request);
+    const { userId: actorId } = await authenticate(request);
+    const _rl = await getRateLimiter().check('api:write', actorId);
+    if (!_rl.allowed) {
+      return NextResponse.json(
+        { error: 'rate_limited', retryAfter: _rl.retryAfterSeconds },
+        { status: 429, headers: { 'Retry-After': String(_rl.retryAfterSeconds), 'X-RateLimit-Bucket': 'api:write' } },
+      );
+    }
+{% if not is_self_only %}
+    // cmd_1180: coarse, item-independent gate BEFORE the item fetch below
+    // -- a caller with no possible access path at all (no general grant,
+    // no Creator/Assignee role) is rejected before this route ever
+    // queries the item table, so record existence is never revealed to
+    // them via a 404-vs-403 distinction. `basePerms` is reused (not
+    // re-fetched) for the item-level resolution further down.
+    const basePerms = await requireApiPermission(actorId, '{{ parent }}', 'delete');
+{% endif %}
 {% if should_filter_by_org %}
     const _assocOrgs = await getAssociatedOrganizations(actorId);
     const _assocOrgIds = _assocOrgs.map((o) => o.id);
@@ -174,14 +237,17 @@ export async function DELETE(request: NextRequest, { params }: Params) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
 {% else %}
-    await requireApiPermission(actorId, '{{ parent }}', 'delete', existing);
+    const resolved = await resolvePermissions(basePerms, existing, actorId);
+    if (!resolved.delete) {
+      throw new ApiError(403, `Access denied: {{ parent }}.delete`);
+    }
 {% endif %}
     await delete{{ parent_pascal }}({% if is_audited %}actorId, {% endif %}[id]);
     return new NextResponse(null, { status: 204 });
   } catch (error) {
 {% if reservation_config and reservation_config.mode == 'count' %}
     if (error instanceof ReservationMutationError) {
-      return NextResponse.json({ error: (error as Error).message }, { status: 409 });
+      return NextResponse.json({ error: (error as Error).message, code: 'RESERVATION_LOCKED' }, { status: 409 });
     }
 {% endif %}
     return handleApiError(error);

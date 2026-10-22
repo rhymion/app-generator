@@ -149,18 +149,37 @@ echo "  OK: Migration complete."
 # ─── Step 4: Deploy Cloud Run service (Neon) ──────────────────────────────────
 echo ""
 echo "[Step 4] Deploying Cloud Run service (Neon)..."
-echo "  NOTE: AUTH_URL is excluded (AUTH_TRUST_HOST=true is sufficient)"
+# NOTE: AUTH_URL can't be set here — the service's URL isn't known until
+# after this first deploy creates/updates it (Step 5 discovers it). Step 5.5
+# below sets AUTH_URL once SERVICE_URL is known. AUTH_TRUST_HOST=true alone
+# is NOT sufficient on Cloud Run (see Step 5.5's comment) — this used to say
+# it was; that was wrong (cmd_1114).
 
 # The service connects to Neon's pooled endpoint via DATABASE_URL.
 # lib/prisma.ts takes the pooled (else) branch when PRISMA_DATABASE_URL is absent.
 # To revive Accelerate, add PRISMA_DATABASE_URL=app-prisma-database-url:latest back
 # to the --set-secrets list below (and re-enable the guard + Step 0 above).
+
+# PRISMA_POOL_MAX forwarding: unset by default, which is correct for this
+# script's own target (Neon's pooled endpoint) — lib/prisma-pool.ts's own
+# default (5) is already sized for that shape, and forwarding nothing here
+# leaves that default in effect. Only set PRISMA_POOL_MAX in
+# .env.production.local (see gcp-env.sh) if DATABASE_URL above has been
+# pointed at a direct/unpooled connection instead (e.g. a self-managed Cloud
+# SQL instance) — without this forwarding, that env var would be set locally
+# but silently never reach the deployed container, risking exceeding that
+# instance's own max_connections. See docs/knowledge/prisma-pool-max-tuning.md.
+_DEPLOY_ENV_VARS="AUTH_TRUST_HOST=true,NODE_ENV=production"
+if [[ -n "${PRISMA_POOL_MAX:-}" ]]; then
+  _DEPLOY_ENV_VARS="${_DEPLOY_ENV_VARS},PRISMA_POOL_MAX=${PRISMA_POOL_MAX}"
+fi
+
 run gcloud run deploy "${SERVICE_NAME}" \
   --image="${SERVICE_IMAGE_TAG}" \
   --region="${REGION}" \
   --service-account="${SA_EMAIL}" \
   --set-secrets=DATABASE_URL=app-database-url:latest,AUTH_SECRET=app-nextauth-secret:latest,GCS_BUCKET=app-gcs-bucket-name:latest,REDIS_URL=app-redis-url:latest \
-  --set-env-vars=AUTH_TRUST_HOST=true,NODE_ENV=production \
+  --set-env-vars="${_DEPLOY_ENV_VARS}" \
   --no-invoker-iam-check \
   --min-instances=0 \
   --max-instances=10
@@ -177,6 +196,35 @@ SERVICE_URL=$(gcloud run services describe "${SERVICE_NAME}" \
 echo ""
 echo "================================================================="
 echo "  Deploy complete"
-echo "  SERVICE_URL: ${SERVICE_URL}"
+echo "  SERVICE_URL:  ${SERVICE_URL}"
+# The bare origin above 404s: i18n middleware requires a locale-prefixed
+# path (see proxy.ts) and there is no content at "/". Print a URL that
+# actually resolves, same as the Vercel path already redirects to
+# (verified: app-generator-sample.vercel.app/ -> 307 -> /en/login).
+echo "  Login page:   ${SERVICE_URL}/en/login  (or /ja/login for Japanese)"
 echo "================================================================="
+echo ""
+
+# ─── Step 5.5: Set AUTH_URL now that the service's stable URL is known ────────
+# Confirmed by curling a live Cloud Run deployment (cmd_1114): Cloud Run's
+# front end forwards the container's internal listening port (e.g. ":8080")
+# in the Host header even on the public HTTPS (443) connection. proxy.ts's
+# buildExternalUrl/normalizeIntlRedirect now correct for this on page-level
+# redirects, but Auth.js's own /api/auth/* redirects (sign-out, etc.) build
+# their URLs from AUTH_TRUST_HOST-driven header inference (x-forwarded-host
+# ?? host), which inherits the exact same leak — AUTH_TRUST_HOST=true alone
+# does not fix it. Setting AUTH_URL removes that header dependency entirely
+# for Auth.js's own redirects, since AUTH_URL takes precedence over header
+# inference in Auth.js core.
+#
+# The service's URL is stable across redeploys of the same service (it only
+# changes if the service itself is deleted and recreated), so this update is
+# idempotent and safe to run on every deploy — including right after Step 4
+# creates the service for the very first time, once SERVICE_URL becomes
+# knowable here in Step 5.
+echo "[Step 5.5] Setting AUTH_URL=${SERVICE_URL}..."
+run gcloud run services update "${SERVICE_NAME}" \
+  --region="${REGION}" \
+  --update-env-vars=AUTH_URL="${SERVICE_URL}"
+echo "  OK: AUTH_URL set."
 echo ""

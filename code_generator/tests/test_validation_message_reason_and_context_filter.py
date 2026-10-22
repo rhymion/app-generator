@@ -167,15 +167,15 @@ class TestValidationReasonDiscriminator:
         assert 'reason: e.reason' in rendered
 
     def test_get_error_message_branches_on_reason_for_validation(self):
-        """form_upsert.tsx.jinja2's getErrorMessage must render a different
+        """use_entity_form.ts.jinja2's getEntityFormErrorMessage must render a different
         i18n key for reason 'invalid' than for the default/missing case --
         this is the actual user-visible fix. Before this, VALIDATION always
         rendered terr('fieldRequired', ...) regardless of cause."""
         ctx = form_upsert_context(_build_ctx(), _schema())
         full_ctx = {**_build_ctx(), **ctx}
-        rendered = _make_env().get_template('form_upsert.tsx.jinja2').render(**full_ctx)
-        start = rendered.index('const getErrorMessage')
-        end = rendered.index('\n  };', start)
+        rendered = _make_env().get_template('use_entity_form.ts.jinja2').render(**full_ctx)
+        start = rendered.index('export function getEntityFormErrorMessage')
+        end = rendered.index('\n}\n', start)
         block = rendered[start:end]
         assert "err.reason === 'invalid'" in block
         assert "fieldInvalid" in block

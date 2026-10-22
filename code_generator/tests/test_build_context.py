@@ -719,11 +719,12 @@ class TestChildIncludeDeepLabelFieldMerge:
         return next((e for e in ctx["include_entries_detail"] if e.startswith("items:")), None)
 
     def test_no_label_field_uses_basic_child_includes(self):
-        """Without label_field, child include uses only the child's own FK relations."""
+        """Without label_field, child include uses only the child's own FK relations,
+        excluding the back-ref to the parent (avoid circular include)."""
         ctx = build_context(self._entity(), self.SCHEMA)
         entry = self._items_entry(ctx)
         assert entry is not None
-        assert "main: true" in entry
+        assert "main: true" not in entry  # back-ref to parent excluded
         assert "buyer: true" in entry
         assert "buyer: { include:" not in entry  # no deep merge
 
@@ -741,7 +742,7 @@ class TestChildIncludeDeepLabelFieldMerge:
         entry = self._items_entry(ctx)
         assert entry is not None
         assert "buyer: { include: { user: true } }" in entry
-        assert "main: true" in entry  # child's other FK unaffected
+        assert "main: true" not in entry  # back-ref to parent excluded
 
     def test_existing_true_promoted_to_include_dict(self):
         """When child FK and label_field share the same root relation (buyer), the
@@ -760,7 +761,7 @@ class TestChildIncludeDeepLabelFieldMerge:
         )
         entry = self._items_entry(ctx)
         assert entry is not None
-        assert "main: true" in entry
+        assert "main: true" not in entry  # back-ref to parent excluded
         assert "buyer: true" in entry
         assert "buyer: { include:" not in entry
 
@@ -772,6 +773,35 @@ class TestChildIncludeDeepLabelFieldMerge:
         )
         entry = self._items_entry(ctx)
         assert "buyer: { include: { user: true } }" in entry
+
+    def test_child_with_only_parent_back_ref_falls_back_to_flat_true(self):
+        """A child whose ONLY FK relation is the back-ref to its parent (e.g.
+        dashboard_widget.dashboard_id on dashboard.widgets) must fall back to a
+        flat `{prop}: true` include, not a redundant `{prop}: { include: {} } }`
+        wrapper -- filtering the back-ref out of child_rels can empty it entirely."""
+        schema = {
+            "definitions": {
+                "Main": {
+                    "type": "object",
+                    "required": ["id"],
+                    "properties": {"id": {"type": "string"}, "name": {"type": "string"}},
+                },
+                "Item": {
+                    "type": "object",
+                    "required": ["id", "main_id"],
+                    "properties": {
+                        "id": {"type": "string"},
+                        "main_id": {
+                            "type": "string",
+                            "x-relationship": {"type": "many-to-one", "target": "Main"},
+                        },
+                    },
+                },
+            }
+        }
+        ctx = build_context(self._entity(), schema)
+        entry = self._items_entry(ctx)
+        assert entry == "items: true"
 
 
 def test_merge_into_child_inner_dict_merge():
@@ -2726,3 +2756,103 @@ class TestNormalizedValueExprWriteOnly:
         columns only."""
         expr = _normalized_value_expr("password", "password", self._write_only_defn(nullable=False))
         assert expr == "password === '' ? undefined : password"
+
+
+# ---------------------------------------------------------------------------
+# Integer labelField segment search: the displayed label of a relation can end
+# in an integer (e.g. a step number). `contains` is string-only, so the
+# generated searchXxxOptions matches an all-digit token by equality as well.
+# ---------------------------------------------------------------------------
+
+class TestSearchableIntegerLabelSegment:
+
+    @staticmethod
+    def _schema(label_field, extra_props: dict = None) -> dict:
+        return {"definitions": {
+            "placement": {
+                "type": "object",
+                "required": ["id", "name", "step_no"],
+                "properties": _base_props({"step_no": {"type": "integer"}, **(extra_props or {})}),
+            },
+            "argument": {
+                "type": "object",
+                "required": ["id", "name", "placement_id"],
+                "properties": _base_props({"placement_id": _fk_field("placement", label=label_field)}),
+            },
+        }}
+
+    @staticmethod
+    def _render(schema: dict) -> str:
+        from generate import _make_env
+        from generators import service_context
+        ctx = build_context(_entity("placement"), schema)
+        full_ctx = {**ctx, **service_context(ctx, schema)}
+        return _make_env().get_template('getters.ts.jinja2').render(**full_ctx)
+
+    def test_integer_segment_is_derived(self):
+        schema = self._schema(["name", "step_no"])
+        ctx = build_context(_entity("placement"), schema)
+        assert ctx["searchable_integer_fields"] == ["step_no"]
+
+    def test_search_matches_digit_token_by_equality(self):
+        rendered = self._render(self._schema(["name", "step_no"]))
+        assert "if (/^\\d{1,9}$/.test(token)) {" in rendered
+        assert "orClauses.push({ step_no: { equals: Number(token) } });" in rendered
+        # string fields keep their contains match for the same token
+        assert "orClauses.push({ name: { contains: token, mode: 'insensitive' } });" in rendered
+
+    def test_no_integer_segment_leaves_search_unchanged(self):
+        schema = self._schema(["name"])
+        ctx = build_context(_entity("placement"), schema)
+        assert ctx["searchable_integer_fields"] == []
+        rendered = self._render(schema)
+        assert "equals: Number(token)" not in rendered
+        assert "test(token)" not in rendered
+
+    def test_non_integer_numeric_segment_not_derived(self):
+        schema = self._schema(["name", "ratio"], {"ratio": {"type": "number"}})
+        ctx = build_context(_entity("placement"), schema)
+        assert ctx["searchable_integer_fields"] == []
+
+
+# ---------------------------------------------------------------------------
+# x-version-of identity: the generated search also matches the row id, so an
+# identity with no current version yet (and a version's parent FK, which shows
+# the identity id) can be found. Other entities and existing matches unchanged.
+# ---------------------------------------------------------------------------
+
+class TestIdentitySearchMatchesId:
+
+    @staticmethod
+    def _schema(declare_version_of: bool) -> dict:
+        version = {
+            "type": "object",
+            "required": ["id", "title", "item_id"],
+            "properties": _base_props({"title": {"type": "string"}, "item_id": _fk_field("item", label="id")}),
+        }
+        if declare_version_of:
+            version["x-version-of"] = {"identity": "item", "number": "version_no"}
+        return {"definitions": {
+            "item": {"type": "object", "required": ["id", "name"], "properties": _base_props({})},
+            "item_version": version,
+        }}
+
+    @staticmethod
+    def _render(schema: dict) -> str:
+        from generate import _make_env
+        from generators import service_context
+        ctx = build_context(_entity("item"), schema)
+        full_ctx = {**ctx, **service_context(ctx, schema)}
+        return _make_env().get_template('getters.ts.jinja2').render(**full_ctx)
+
+    def test_identity_search_adds_id_clause_and_keeps_name(self):
+        schema = self._schema(True)
+        assert build_context(_entity("item"), schema)["searchable_id"] is True
+        rendered = self._render(schema)
+        assert "orClauses.push({ id: { contains: token, mode: 'insensitive' } });" in rendered
+        assert "orClauses.push({ name: { contains: token, mode: 'insensitive' } });" in rendered
+
+    def test_non_identity_search_is_unchanged(self):
+        schema = self._schema(False)
+        assert build_context(_entity("item"), schema)["searchable_id"] is False
+        assert "{ id: { contains: token" not in self._render(schema)

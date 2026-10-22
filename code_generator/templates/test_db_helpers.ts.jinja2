@@ -4,6 +4,7 @@ import { PrismaPg } from '@prisma/adapter-pg'
 import { PrismaClient } from '@/app/generated/prisma/client';
 import { TEST_CREDENTIALS, TEST_API_KEY, getTestPasswordHash } from './test-credentials';
 import { createId } from "@paralleldrive/cuid2";
+import { SEED_ENTITY_GRANTS } from '../../scripts/generated/seed-entities';
 
 // Use direct database connection for tests
 // Accelerate extension is required but will use direct connection for non-Accelerate URLs
@@ -21,11 +22,19 @@ const prisma = new PrismaClient({ adapter })
 export async function resetTestDatabase() {
   // Delete all records in correct order to respect foreign key constraints
   // Delete child tables first, then parent tables
+
+  // audit_log and audit_log_digest are append-only: a row trigger rejects
+  // DELETE, so they are emptied with TRUNCATE (which row triggers do not
+  // see). The connection here is the table owner; the application role has
+  // no TRUNCATE privilege. See docs/knowledge/audit-log-append-only.md.
+  await prisma.$executeRaw`TRUNCATE TABLE audit_log, audit_log_digest`;
 {% for level in deletion_levels %}
 
   // Level {{ loop.index }}: {{ level | join(', ') }}
 {% for model in level %}
+{% if model not in ('audit_log', 'audit_log_digest') %}
   await prisma.{{ model }}.deleteMany();
+{% endif %}
 {% endfor %}
 {% endfor %}
 
@@ -90,7 +99,11 @@ export const ALL_ENTITIES = [
 ];
 
 /**
- * Grant the test user full CRUD permissions on every entity via an Administrator role.
+ * Grant the test user the permissions a real seeded Administrator holds, via an Administrator role.
+ * For every entity that `npm run db:grant-all-permissions` also covers, the operations come from the
+ * same generated SEED_ENTITY_GRANTS (which respects each entity's x-generate flags), so a spec never
+ * holds a right that no real role has. Entities outside SEED_ENTITY_GRANTS (for example labelField
+ * targets) keep full CRUD. A spec that needs a right beyond this adds it explicitly.
  * Call after seedTestDatabase() for normal-flow tests that require access to CRUD pages.
  *
  * Required because authz.ts uses default-deny: a user with no permission records is
@@ -110,21 +123,22 @@ export async function grantAllEntityPermissions(): Promise<void> {
     },
   });
 
-  await Promise.all(ALL_ENTITIES.map(entity =>
-    prisma.permission.create({
+  await Promise.all(ALL_ENTITIES.map(entity => {
+    const grant = SEED_ENTITY_GRANTS[entity] ?? { create: true, read: true, update: true, delete: true, import: true };
+    return prisma.permission.create({
       data: {
         name: entity,
         role_id: adminRole.id,
-        create: true,
-        read: true,
-        update: true,
-        delete: true,
-        import: true,
+        create: grant.create,
+        read: grant.read,
+        update: grant.update,
+        delete: grant.delete,
+        import: grant.import,
         creator_id: testUser.id,
         updater_id: testUser.id,
       },
-    })
-  ));
+    });
+  }));
 
   await prisma.user.update({
     where: { id: testUser.id },

@@ -28,7 +28,7 @@ function exactRe(text: string): RegExp {
 describe('Testing {{ title }} pages and their behavior [mobile]', () => {
   beforeEach(() => {
     cy.viewport(MOBILE.width, MOBILE.height);
-{% if primary_fk_dep and not primary_fk_dep.is_user_account and primary_fk_dep.extra_required_fields %}
+{% if uses_call_seq %}
     cy.task('db:reset{{ pascal }}CallSeq');
 {% endif %}
     cy.task('db:reset');
@@ -48,14 +48,14 @@ describe('Testing {{ title }} pages and their behavior [mobile]', () => {
     it('1.1 shows the empty state when there are no items', () => {
       cy.visit('/en/{{ parent }}');
       cy.contains('No items found.').should('be.visible');
-      // Sanity: no row Checkboxes when the list is empty.
-      cy.get('input[type="checkbox"][aria-label^="Select "]').should('not.exist');
+      // Sanity: no cards when the list is empty.
+      cy.get('[data-testid="mobile-card-list"] .MuiCard-root').should('not.exist');
     });
 {% else %}
     it('1.1 shows {{ seed_count }} seed-only card(s) before any user data', () => {
       cy.visit('/en/{{ parent }}');
       // db:seed + db:grantAllPermissions pre-populate {{ seed_count }} {{ parent }} record(s)
-      cy.get('input[type="checkbox"][aria-label^="Select "]').should('have.length', {{ seed_count }});
+      cy.get('[data-testid="mobile-card-list"] .MuiCard-root').should('have.length', {{ seed_count }});
     });
 {% endif %}
 
@@ -63,13 +63,13 @@ describe('Testing {{ title }} pages and their behavior [mobile]', () => {
       cy.task('db:populate{{ pascal }}', 1);
       cy.visit('/en/{{ parent }}');
       cy.contains(exactRe('{{ list_id_1 }}')).should('be.visible');
-      cy.get('input[type="checkbox"][aria-label^="Select "]').should('have.length', {{ seed_count + 1 }});
+      cy.get('[data-testid="mobile-card-list"] .MuiCard-root').should('have.length', {{ seed_count + 1 }});
     });
 
     it('1.3 renders multiple cards', () => {
       cy.task('db:populate{{ pascal }}', 3);
       cy.visit('/en/{{ parent }}');
-      cy.get('input[type="checkbox"][aria-label^="Select "]').should('have.length', {{ seed_count + 3 }});
+      cy.get('[data-testid="mobile-card-list"] .MuiCard-root').should('have.length', {{ seed_count + 3 }});
     });
 
     it('1.4 opens the view page when the card title is tapped', () => {
@@ -160,7 +160,10 @@ describe('Testing {{ title }} pages and their behavior [mobile]', () => {
       // avoiding seed items (e.g. the logged-in admin) that cannot be self-deleted.
       cy.task<any[]>('db:populate{{ pascal }}', 2).then((records) => {
         cy.visit('/en/{{ parent }}');
-        const name = records[0].name as string;
+{% if name_label_map %}
+        const nameLabels: Record<string, string> = {{ name_label_map }};
+{% endif %}
+        const name = {% if name_label_map %}nameLabels[records[0].name as string] ?? {% endif %}(records[0].name as string);
         cy.get(`input[type="checkbox"][aria-label="Select ${name}"]`).first().check();
         // Toolbar delete only enables once at least one card is selected.
         cy.get('button[aria-label="Delete Selected"]').should('not.be.disabled').click();
@@ -189,8 +192,11 @@ describe('Testing {{ title }} pages and their behavior [mobile]', () => {
       // avoiding seed items that may have FK restrictions preventing deletion.
       cy.task<any[]>('db:populate{{ pascal }}', 3).then((records) => {
         cy.visit('/en/{{ parent }}');
-        const firstName = records[0].name as string;
-        const secondName = records[1].name as string;
+{% if name_label_map %}
+        const nameLabels: Record<string, string> = {{ name_label_map }};
+{% endif %}
+        const firstName = {% if name_label_map %}nameLabels[records[0].name as string] ?? {% endif %}(records[0].name as string);
+        const secondName = {% if name_label_map %}nameLabels[records[1].name as string] ?? {% endif %}(records[1].name as string);
         if (firstName !== secondName) {
           cy.get(`input[type="checkbox"][aria-label="Select ${firstName}"]`).first().check();
           cy.get(`input[type="checkbox"][aria-label="Select ${secondName}"]`).first().check();

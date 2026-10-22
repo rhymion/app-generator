@@ -1,5 +1,5 @@
 'use client';
-import { useState, useTransition, useCallback } from 'react';
+import { useState, useTransition, useCallback, useRef } from 'react';
 import { useTranslations } from 'next-intl';
 import { formatLabelValue } from '@/lib/_format';
 import {
@@ -30,6 +30,9 @@ import type { PageOpts, PageResult } from '@/lib/_pagination';
 import type { ActionFailure } from '@/lib/_errors';
 import { errorMessageKey } from '@/lib/_errors';
 import { AppAlert } from '@/components/ui';
+import ListQueryPanel from './ListQueryPanel';
+import { dateColumnProps } from './DataGridDatePickers';
+import { EMPTY_LIST_QUERY, toListQuery, type ListQuerySpec, type ListQueryState, type SortItem } from '@/lib/_list_query';
 
 interface BaseEntity {
   id: string;
@@ -45,6 +48,16 @@ interface DisplayFieldConfig<T> {
   showSeconds?: boolean;
   enumLabels?: Record<number, string>;
   uriKind?: 'image' | 'link';
+  /** MUI GridColDef.type -- the real filter control for this column (a
+   * value dropdown for enum, a date/datetime picker, a checkbox for
+   * boolean, a number box for number/decimal). Unset (plain text filter)
+   * for string columns and for FK relation display columns
+   * (app-generator#756). */
+  type?: 'singleSelect' | 'boolean' | 'date' | 'dateTime' | 'number';
+  /** Options for a 'singleSelect' column's filter dropdown -- built
+   * server-side from the same i18n label source as the cell's own
+   * displayed value, so the two can never drift apart. */
+  valueOptions?: { value: string | number; label: string }[];
 }
 
 interface DataGridClientProps<T extends BaseEntity> {
@@ -78,6 +91,14 @@ interface DataGridClientProps<T extends BaseEntity> {
    * without this, a role granted `update` (e.g. via grant-all-permissions.ts) sees an
    * edit icon that 404s when clicked. */
   allowEdit?: boolean;
+  /**
+   * What the list's multi-column sort / multi-field filter / search panel offers (server mode
+   * only). When set, the panel is shown above the grid and owns the sort: a click on a column
+   * header replaces the panel's sort with that one column. Filters from the panel and from the
+   * grid's own filter menu apply together; on a field both filter, the grid's filter wins.
+   * Unset, the grid sorts and filters one column at a time, as before.
+   */
+  listQuery?: ListQuerySpec;
 }
 
 export default function DataGridClient<T extends BaseEntity>({
@@ -97,6 +118,7 @@ export default function DataGridClient<T extends BaseEntity>({
   openLinksInNewTab,
   allowCreate = true,
   allowEdit = true,
+  listQuery,
 }: DataGridClientProps<T>) {
   const serverMode = typeof fetchPage === 'function';
   const initialItems: T[] = (serverMode ? initialRows : src) ?? [];
@@ -111,6 +133,7 @@ export default function DataGridClient<T extends BaseEntity>({
     page: serverMode ? (initialPage ?? 0) : 0,
   });
   const [sortModel, setSortModel] = useState<GridSortModel>([]);
+  const [query, setQuery] = useState<ListQueryState>(EMPTY_LIST_QUERY);
   const [filterModel, setFilterModel] = useState<GridFilterModel>({ items: [] });
   const [openDeleteDialog, setOpenDeleteDialog] = useState(false);
   const [openInvalidateDialog, setOpenInvalidateDialog] = useState(false);
@@ -123,23 +146,43 @@ export default function DataGridClient<T extends BaseEntity>({
   const tf = useTranslations('Fields');
   const terr = useTranslations('Errors');
 
-  const reload = useCallback((p: GridPaginationModel, s: GridSortModel, f: GridFilterModel) => {
+  // The latest reload; an answer to an earlier one (typing, a filter and a sort change in quick
+  // succession) must not overwrite the rows of a later request.
+  const latestReload = useRef(0);
+  const reload = useCallback((p: GridPaginationModel, s: GridSortModel, f: GridFilterModel, q: ListQueryState) => {
     if (!fetchPage) return;
+    const panelQuery = listQuery ? toListQuery(q, listQuery) : null;
+    const thisReload = ++latestReload.current;
     startTransition(async () => {
       const result = await fetchPage({
         page: p.page,
         pageSize: p.pageSize,
-        sort: s.map(x => ({ field: x.field, dir: x.sort === 'desc' ? 'desc' : 'asc' })),
-        filter: Object.fromEntries(
-          f.items
-            .filter(i => i.value !== undefined && i.value !== null && i.value !== '')
-            .map(i => [i.field, i.value as string | number | boolean]),
-        ),
+        sort: panelQuery
+          ? panelQuery.sort
+          : s.map((x): SortItem => ({ field: x.field, dir: x.sort === 'desc' ? 'desc' : 'asc' })),
+        ...(panelQuery?.search ? { search: panelQuery.search } : {}),
+        filter: {
+          ...(panelQuery?.filter ?? {}),
+          ...Object.fromEntries(
+            f.items
+              .filter(i => i.value !== undefined && i.value !== null && i.value !== '')
+              .map(i => [i.field, { operator: i.operator, value: i.value }]),
+          ),
+        },
       });
+      if (thisReload !== latestReload.current) return;
       setItems(result.rows as T[]);
       setRowCount(result.total);
     });
-  }, [fetchPage]);
+  }, [fetchPage, listQuery]);
+
+  const onQueryChange = (next: ListQueryState) => {
+    setQuery(next);
+    // A new search, sort or filter starts from the first page.
+    const first = { ...paginationModel, page: 0 };
+    setPaginationModel(first);
+    reload(first, sortModel, filterModel, next);
+  };
 
   const deleteSelected = () => {
     // Capture IDs now — before the Dialog opens and its focus trap causes
@@ -192,12 +235,35 @@ export default function DataGridClient<T extends BaseEntity>({
   ];
 
   const dataColumns: GridColDef<T>[] = defaultDisplayFields.map(fieldConfig => {
+    // MUI's own type-specific default valueFormatter is unsafe for the raw
+    // value shape our cells actually carry: 'date'/'dateTime' throws unless
+    // the resolved value is a real Date instance (ours is already a
+    // pre-formatted display string -- ISSUE#756), and 'singleSelect' tries
+    // to map the resolved value back to one of `valueOptions`' raw values
+    // to find its label -- but our resolved value IS already the label
+    // (formatting_entries replaces the row's raw enum value with its
+    // translated label server-side, before this component ever sees it),
+    // so that lookup always misses and silently renders blank text. An
+    // identity valueFormatter sidesteps both: it keeps exactly what our own
+    // valueGetter/pre-formatting already computed, safe and unchanged.
+    const needsIdentityValueFormatter = fieldConfig.type === 'singleSelect' || fieldConfig.type === 'date' || fieldConfig.type === 'dateTime';
+    const identityValueFormatter = (value: unknown) => (value ?? '') as string;
+    // Filter through MUI pickers, not the browser's native date input whose
+    // popup language follows the browser rather than the app locale.
+    const dateFilterProps = fieldConfig.type === 'date' || fieldConfig.type === 'dateTime'
+      ? { filterOperators: dateColumnProps(fieldConfig.type).filterOperators }
+      : {};
+
     // Special handling for primary field to include link to view page
     if (fieldConfig.field === primaryField) {
       return {
         field: fieldConfig.field as string,
         headerName: fieldConfig.headerName,
         width: fieldConfig.width || 150,
+        type: fieldConfig.type,
+        valueOptions: fieldConfig.valueOptions,
+        ...(needsIdentityValueFormatter ? { valueFormatter: identityValueFormatter } : {}),
+        ...dateFilterProps,
         renderCell: (params) => {
           const fieldValue = params.row[fieldConfig.field];
           // The link must stay within the cell's width. Without these styles
@@ -229,6 +295,10 @@ export default function DataGridClient<T extends BaseEntity>({
         field: fieldConfig.field as string,
         headerName: fieldConfig.headerName,
         width: fieldConfig.width || 200,
+        type: fieldConfig.type,
+        valueOptions: fieldConfig.valueOptions,
+        ...(needsIdentityValueFormatter ? { valueFormatter: identityValueFormatter } : {}),
+        ...dateFilterProps,
         renderCell: (params) => {
           const href = params.row[fieldConfig.field] as string | null | undefined;
           if (!href) return null;
@@ -245,8 +315,18 @@ export default function DataGridClient<T extends BaseEntity>({
       field: fieldConfig.field as string,
       headerName: fieldConfig.headerName,
       width: fieldConfig.width || 200,
+      type: fieldConfig.type,
+      valueOptions: fieldConfig.valueOptions,
+      ...(needsIdentityValueFormatter ? { valueFormatter: identityValueFormatter } : {}),
+      ...dateFilterProps,
       valueGetter: (value, row) => {
         const fieldValue = row[fieldConfig.field];
+        // 'boolean' must pass the raw boolean through unchanged -- MUI's
+        // boolean cell icon reads params.value directly (not
+        // formattedValue), so stringifying it here (as the generic
+        // fallback below does) would make every row's icon render "true"
+        // (a non-empty string is truthy) regardless of the real value.
+        if (fieldConfig.type === 'boolean') return fieldValue as boolean | null | undefined;
         if (fieldValue === null || fieldValue === undefined) return '';
         if (fieldConfig.format) return formatLabelValue(fieldValue, fieldConfig.format, fieldConfig.showSeconds);
         if (fieldConfig.enumLabels && typeof fieldValue === 'number') return fieldConfig.enumLabels[fieldValue] ?? String(fieldValue);
@@ -294,6 +374,13 @@ export default function DataGridClient<T extends BaseEntity>({
     },
   );
 
+  // The grid shows one sort column. With the panel, that is the first of the panel's sort columns
+  // the grid has a column for (the grid drops a sort model entry it cannot match to a column).
+  const gridColumnFields = new Set(columns.map(column => column.field));
+  const gridSortModel: GridSortModel = listQuery
+    ? query.sort.filter(item => gridColumnFields.has(item.field)).slice(0, 1).map(item => ({ field: item.field, sort: item.dir }))
+    : sortModel;
+
   return (
     <div>
       {deleteError && (
@@ -325,6 +412,9 @@ export default function DataGridClient<T extends BaseEntity>({
         </Tooltip>
         )}
       </div>
+      {listQuery && serverMode && (
+        <ListQueryPanel spec={listQuery} value={query} onChange={onQueryChange} />
+      )}
       <Paper sx={{ height: 500, width: '100%' }}>
         <DataGrid
           apiRef={apiRef}
@@ -337,22 +427,32 @@ export default function DataGridClient<T extends BaseEntity>({
                 paginationMode: 'server' as const,
                 sortingMode: 'server' as const,
                 filterMode: 'server' as const,
-                sortModel,
+                sortModel: gridSortModel,
                 onSortModelChange: (m: GridSortModel) => {
+                  if (listQuery) {
+                    // The grid reports the model it was just given (the panel's primary sort) back
+                    // as a change; only a header click, which differs from it, is the user's.
+                    if (m.length === gridSortModel.length && m.every((x, i) => x.field === gridSortModel[i].field && x.sort === gridSortModel[i].sort)) return;
+                    // A header click sorts by that one column and replaces the panel's sort.
+                    const next = { ...query, sort: m.map((x): SortItem => ({ field: x.field, dir: x.sort === 'desc' ? 'desc' : 'asc' })) };
+                    setQuery(next);
+                    reload(paginationModel, m, filterModel, next);
+                    return;
+                  }
                   setSortModel(m);
-                  reload(paginationModel, m, filterModel);
+                  reload(paginationModel, m, filterModel, query);
                 },
                 filterModel,
                 onFilterModelChange: (m: GridFilterModel) => {
                   setFilterModel(m);
-                  reload(paginationModel, sortModel, m);
+                  reload(paginationModel, sortModel, m, query);
                 },
               }
             : {})}
           paginationModel={paginationModel}
           onPaginationModelChange={(m) => {
             setPaginationModel(m);
-            if (serverMode) reload(m, sortModel, filterModel);
+            if (serverMode) reload(m, sortModel, filterModel, query);
           }}
           onRowSelectionModelChange={setSelectedRowIds}
           pageSizeOptions={[10, 20, 50]}

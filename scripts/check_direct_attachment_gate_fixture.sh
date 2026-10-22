@@ -75,6 +75,7 @@ npx prisma generate --schema="$OUT_DIR/prisma/schema.prisma" >/tmp/direct_attach
 # fixture's tsconfig.json paths entry points at.
 cp "$FIXTURE_DIR/shims/prisma.ts" "$OUT_DIR/lib/prisma.ts"
 cp "$FIXTURE_DIR/shims/authz.ts" "$OUT_DIR/lib/authz.ts"
+cp "$FIXTURE_DIR/shims/idempotency.ts" "$OUT_DIR/lib/idempotency.ts"
 cp "$FIXTURE_DIR/tsconfig.json" "$OUT_DIR/tsconfig.json"
 
 echo "-- tsc --noEmit (new/edit/view pages + getters.ts) --"

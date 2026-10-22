@@ -1,10 +1,15 @@
-const REQUIRED_FIELDS = [
+import { isValidDateValue, type DateValueFormat } from '@/lib/_date_value';
+
+// Explicit element type for the same reason as DECIMAL_FIELDS below: an entity with no required form
+// field (for example an identity entity whose content lives on its versions) would otherwise infer the empty
+// tuple type and fail to compile on `field.key`.
+const REQUIRED_FIELDS: { key: string; label: string }[] = [
 {% for field in client_required_fields %}
   { key: '{{ field.key }}', label: '{{ field.label }}' },
 {% endfor %}
-] as const;
+];
 
-// Explicit element type (not `as const`, unlike REQUIRED_FIELDS above): most
+// Explicit element type (not `as const`): most
 // entities have zero Decimal fields, so this array is empty far more often
 // than not -- `[] as const` infers as the empty tuple type `readonly []`,
 // which makes `for (const field of DECIMAL_FIELDS)` narrow `field` to
@@ -13,6 +18,12 @@ const REQUIRED_FIELDS = [
 const DECIMAL_FIELDS: { key: string; label: string }[] = [
 {% for field in decimal_fields %}
   { key: '{{ field.key }}', label: '{{ field.label }}' },
+{% endfor %}
+];
+
+const DATE_FIELDS: { key: string; label: string; format: DateValueFormat }[] = [
+{% for field in date_fields %}
+  { key: '{{ field.key }}', label: '{{ field.label }}', format: '{{ field.format }}' },
 {% endfor %}
 ];
 
@@ -50,6 +61,11 @@ export function validateForm(values: Record<string, unknown>): string | null {
   for (const field of DECIMAL_FIELDS) {
     if (isInvalidDecimal(values[field.key])) {
       return `${field.label} must be a valid decimal number`;
+    }
+  }
+  for (const field of DATE_FIELDS) {
+    if (!isValidDateValue(field.format, values[field.key])) {
+      return `${field.label} must be a valid ${field.format === 'date' ? 'date' : field.format === 'time' ? 'time' : 'date and time'}`;
     }
   }
   return null;

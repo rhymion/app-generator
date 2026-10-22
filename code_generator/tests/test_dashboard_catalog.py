@@ -51,6 +51,19 @@ def test_integer_with_enum_produces_enum_kind():
     assert field['enum_values'] == ['0', '1', '2']
 
 
+def test_enum_field_carries_the_namespace_of_its_translated_option_labels():
+    native = {'type': 'string', 'enum': ['InProgress', 'Done'], '_prisma_native_enum_type': 'TaskStatus'}
+    renamed = {'type': 'string', 'enum': ['A'], '_prisma_native_enum_type': 'Prio', 'x-enum-namespace': 'PrioLabels'}
+    legacy = {'type': 'integer', 'enum': [0, 1], 'x-enum-namespace': 'Level'}
+    bare = {'type': 'integer', 'enum': [0, 1]}
+    schema = _schema({'__task': _entity({'status': native, 'prio': renamed, 'level': legacy, 'plain': bare})})
+    fields = {f['name']: f for f in build_dashboard_catalog(schema)[0]['groupable_fields']}
+    assert fields['status']['enum_namespace'] == 'TaskStatus'
+    assert fields['prio']['enum_namespace'] == 'PrioLabels'
+    assert fields['level']['enum_namespace'] == 'Level'
+    assert fields['plain']['enum_namespace'] is None
+
+
 def test_fk_field_produces_fk_kind():
     schema = _schema({
         '__booking': _entity({
@@ -155,9 +168,10 @@ def test_view_and_input_variants_excluded():
     assert catalog[0]['name'] == 'task'
 
 
-def test_system_fields_excluded():
-    """id, created_at, updated_at are excluded from groupable fields.
-    creator_id/updater_id appear as audit FK entries (explicitly appended, not from schema props).
+def test_id_is_excluded_and_audit_fields_are_appended_once():
+    """`id` is never groupable. created_at/updated_at are appended as date-time fields (so a chart
+    can be bucketed by when records were created or last updated) and creator_id/updater_id as
+    audit FK entries, each exactly once even if the schema also declares them as properties.
     """
     schema = _schema({
         '__task': _entity({
@@ -169,16 +183,51 @@ def test_system_fields_excluded():
         }),
     })
     catalog = build_dashboard_catalog(schema)
-    field_names = [f['name'] for f in catalog[0]['groupable_fields']]
-    assert 'created_at' not in field_names
-    assert 'updated_at' not in field_names
-    assert 'is_done' in field_names
-    # Audit FK fields appear exactly once (appended explicitly, not from schema props).
-    assert field_names.count('creator_id') == 1
-    assert field_names.count('updater_id') == 1
-    fk_fields = {f['name']: f for f in catalog[0]['groupable_fields']}
-    assert fk_fields['creator_id']['kind'] == 'fk'
-    assert fk_fields['creator_id']['fk_target'] == 'user'
+    fields = {f['name']: f for f in catalog[0]['groupable_fields']}
+    names = [f['name'] for f in catalog[0]['groupable_fields']]
+    assert 'id' not in names
+    assert 'is_done' in names
+    for audit in ('created_at', 'updated_at', 'creator_id', 'updater_id'):
+        assert names.count(audit) == 1
+    assert fields['created_at']['kind'] == 'datetime'
+    assert fields['created_at']['datetime_format'] == 'date-time'
+    assert fields['created_at']['label'] == 'Created At'
+    assert fields['updated_at']['kind'] == 'datetime'
+    assert fields['updated_at']['datetime_format'] == 'date-time'
+    assert fields['creator_id']['kind'] == 'fk'
+    assert fields['creator_id']['fk_target'] == 'user'
+
+
+def test_every_dashboardable_entity_gets_the_audit_timestamps():
+    """Even an entity with no other groupable field is catalogued, with created_at/updated_at."""
+    schema = _schema({
+        '__note': _entity({'body': {'type': 'string'}}),
+        '__task': _entity({'is_done': {'type': 'boolean'}}),
+    })
+    catalog = build_dashboard_catalog(schema)
+    assert {e['name'] for e in catalog} == {'note', 'task'}
+    for entity in catalog:
+        by_name = {f['name']: f for f in entity['groupable_fields']}
+        assert by_name['created_at']['datetime_format'] == 'date-time'
+        assert by_name['updated_at']['datetime_format'] == 'date-time'
+
+
+def test_every_catalog_field_carries_a_label_and_a_kind_the_widget_editor_knows():
+    """The widget editor lists a data source's fields by label and kind (components/dashboard/widget-rules.ts)."""
+    schema = _schema({
+        '__task': _entity({
+            'is_done': {'type': 'boolean'},
+            'priority': {'type': 'integer', 'enum': [1, 2], 'x-enum-labels': ['Low', 'High']},
+            'points': {'type': 'integer'},
+            'due_on': {'type': 'string', 'format': 'date'},
+            'owner_id': {'type': 'string', 'x-relationship': {'type': 'many-to-one', 'target': 'user', 'labelField': 'name'}},
+        }),
+    })
+    fields = build_dashboard_catalog(schema)[0]['groupable_fields']
+    assert fields
+    for f in fields:
+        assert f['label']
+        assert f['kind'] in {'boolean', 'enum', 'fk', 'number', 'datetime'}
 
 
 # ---------------------------------------------------------------------------
@@ -245,7 +294,7 @@ def test_aggregate_route_enforces_api_key_auth():
     """Route must authenticate via API key, not session."""
     env = _make_env()
     result = env.get_template('dashboard_aggregate_route.ts.jinja2').render()
-    assert 'authenticateApiKey' in result
+    assert 'authenticate(request)' in result
     # Must NOT call getServerSession — the API-key path must be used.
     assert 'getServerSession' not in result
 
@@ -304,5 +353,90 @@ def test_aggregate_route_handles_401_403():
     result = env.get_template('dashboard_aggregate_route.ts.jinja2').render()
     # authenticateApiKey raises ApiError(401) for missing/invalid key.
     # requireApiPermission raises ApiError(403) for insufficient permissions.
-    assert 'authenticateApiKey' in result
+    assert 'authenticate(request)' in result
     assert 'requireApiPermission' in result
+
+
+def test_aggregate_route_accepts_the_timezone_enum_literal_and_passes_it_through():
+    env = Environment(loader=FileSystemLoader(str(TEMPLATES_DIR)))
+    result = env.get_template('dashboard_aggregate_route.ts.jinja2').render()
+    assert 'timezone?: string | null;' in result
+    assert 'group_by_bucket, timezone } = body;' in result
+    assert 'resolveBucketGranularity(group_by_bucket),\n      timezone,' in result
+
+
+# ---------------------------------------------------------------------------
+# Row-level read scope (Issue #910)
+# ---------------------------------------------------------------------------
+
+def test_aggregate_route_passes_the_caller_to_the_core():
+    """The core needs the acting user to apply permission and row-level scope."""
+    env = _make_env()
+    result = env.get_template('dashboard_aggregate_route.ts.jinja2').render()
+    assert 'aggregateForWidgetCore(\n      actorId,\n      entity_name,' in result
+
+
+def test_access_scope_template_renders_every_scope_fact():
+    env = _make_env()
+    result = env.get_template('dashboard_access_scope.ts.jinja2').render(scopes={
+        'ticket': {
+            'should_filter_by_org': True,
+            'org_relationship_optional': False,
+            'has_assignee_id': True,
+            'is_self_only': False,
+            'self_only_admin_bypass': False,
+            'filter_values': {'status': [0, 1]},
+        },
+    })
+    assert result.startswith('// AUTO-GENERATED')
+    assert "'ticket': {" in result
+    assert 'should_filter_by_org: true,' in result
+    assert 'is_self_only: false,' in result
+    assert 'filter_values: {"status": [0, 1]},' in result
+
+
+def test_access_scope_template_renders_with_no_entities():
+    env = _make_env()
+    result = env.get_template('dashboard_access_scope.ts.jinja2').render(scopes={})
+    assert 'DASHBOARD_ACCESS_SCOPES: Record<string, DashboardAccessScope> = {\n};' in result
+
+
+def test_aggregate_route_takes_group_by_bucket_as_an_enum_string_literal():
+    """Issue #912: the integer form is gone; the route validates through resolveBucketGranularity."""
+    env = _make_env()
+    result = env.get_template('dashboard_aggregate_route.ts.jinja2').render()
+    assert 'group_by_bucket?: string | null;' in result
+    assert "import { resolveBucketGranularity } from '@/lib/dashboard/time-bucket';" in result
+    assert 'BUCKET_LABELS' not in result
+    assert 'resolveBucket(' not in result
+    assert 'integer enum' not in result
+
+
+def test_aggregate_route_returns_the_typed_problem_as_400():
+    """A request the data source cannot answer is a 400 naming the setting, not a generic 500."""
+    result = _make_env().get_template('dashboard_aggregate_route.ts.jinja2').render()
+    assert 'error instanceof WidgetProblemError' in result
+    assert '{ error: error.message, code, setting, params }, { status: 400 }' in result
+
+
+# --- Generated dashboard UI spec: widget row values ---------------------------------------------
+
+def test_widget_test_values_are_none_for_an_empty_catalog():
+    from generators_test import _dashboard_widget_catalog_values
+    assert _dashboard_widget_catalog_values(_schema({'__plain': _entity({}, dashboard=False)})) is None
+
+
+def test_widget_test_values_name_a_catalog_entity_and_fit_the_validation_rules():
+    from generators_test import _apply_dashboard_widget_catalog_values, _dashboard_widget_catalog_values
+    schema = _schema({'__order': _entity({'done': {'type': 'boolean'}})})
+    values = _dashboard_widget_catalog_values(schema)
+    assert values['entity_name'] == 'order'
+    # created_at is a date-time field, so a time bucket and time zone are valid on the chosen group-by field.
+    assert values['group_by_field'] == 'created_at' and values['bucket'] is True
+    assert values['series_field'] and values['series_field'] != values['group_by_field']
+    entry = {'create_obj': 'x', 'full_create_obj': 'x', 'native_enum_full_calls': []}
+    _apply_dashboard_widget_catalog_values(entry, 'Widgets', schema)
+    assert "entity_name: 'order'" in entry['create_obj']
+    assert 'Test Entity Name' not in entry['full_create_obj']
+    assert any("'stack_mode'" in c for c in entry['native_enum_full_calls'])
+    assert any("'timezone'" in c for c in entry['native_enum_full_calls'])

@@ -1,0 +1,28 @@
+// GENERATED — do not edit (regenerated from every x-scheduled-task /
+// x-scheduled-tasks declaration on every `generate-code` run). Runtime copy
+// of the `depends_on` graph that validate.py builds and cycle-checks at
+// generate time (and otherwise throws away), so the completion-record guard
+// (run-guard.ts) and `task:run-all` (scripts/scheduled-task-run.ts) can read
+// it. Same task_id namespace as registry.ts.
+//
+// Key order is schema declaration order (entity-level x-scheduled-task
+// first, then top-level x-scheduled-tasks) — task:run-all uses it to break
+// ties between independent branches deterministically.
+
+/** task_id -> task_ids that must have succeeded first; [] if none declared. */
+export const TASK_DEPENDENCIES: Record<string, string[]> = {
+{% for e in scheduled_task_entities %}
+  '{{ e.task_id }}': [{% for d in (e.depends_on or []) %}'{{ d }}'{% if not loop.last %}, {% endif %}{% endfor %}],
+{% endfor %}
+};
+
+/**
+ * task_id -> declared `interval` cron string, or null when the task declares
+ * none. task:run-all reads it as "when is this task due" (5-field cron,
+ * evaluated in UTC), not as a literal invocation time.
+ */
+export const TASK_INTERVALS: Record<string, string | null> = {
+{% for e in scheduled_task_entities %}
+  '{{ e.task_id }}': {% if e.interval %}'{{ e.interval }}'{% else %}null{% endif %},
+{% endfor %}
+};

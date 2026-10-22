@@ -158,9 +158,22 @@ def test_audited_delete_wraps_in_transaction_and_logs_each_id():
     # Signature changes when audited: actorId comes first, then ids.
     assert "delete{}".format("Thing") in out
     assert "actorId: string | null, ids: string[]" in out
-    # Audit row per deleted id.
-    assert "for (const id of ids)" in out
+    # Audit row per row that was actually deleted.
+    assert "for (const { id } of _deleteRows)" in out
     assert "action: 'thing:delete'" in out
+
+
+def test_delete_of_already_missing_rows_has_no_side_effects():
+    # A repeated or racing delete of the same record must not write a second
+    # audit event or run afterDelete again: nothing deleted -> return early,
+    # before cleanups, audit and hook.
+    for audited in (True, False):
+        out = _render_service(_schema(audited=audited))
+        assert "const _deleted = await tx.thing.deleteMany" in out
+        guard = out.index("if (_deleted.count === 0) return;")
+        assert guard < out.index("await afterDelete(tx, id);")
+        if audited:
+            assert guard < out.index("action: 'thing:delete'")
 
 
 def test_unaudited_delete_keeps_original_signature():
@@ -175,7 +188,7 @@ def test_unaudited_delete_keeps_original_signature():
     # way it used to (that distinction is the recordAuditEvent call itself,
     # asserted by test_audited_delete_wraps_in_transaction_and_logs_each_id).
     assert "await prisma.$transaction(async (tx) => {" in out
-    assert "for (const id of ids)" in out
+    assert "for (const { id } of _deleteRows)" in out
     assert "await afterDelete(tx, id);" in out
     assert "action: 'thing:delete'" not in out
 

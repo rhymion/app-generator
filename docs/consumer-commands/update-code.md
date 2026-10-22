@@ -27,14 +27,15 @@ at merge time via CI.
 Required, in this order:
 
 1. `npm run test:e2e:build` — prj:sync + docker:up:test + generate-code + db:push + db:generate + db:seed-baseline + build
-2. `npm run check:generated` — must run after step 1 (needs the generated `lib/`/`app/` tree on disk); see below for why
-3. `npm run lint` — must run after step 1, not before (see below for why)
-4. `npm run test:e2e:cy:api` — API Cypress specs only (mandatory dev-time gate)
-5. `npm --prefix app-generator audit --omit=dev --audit-level=high` — production-dependency vulnerability scan
+2. `npm --prefix app-generator run test:vitest` — unit tests against the generated tree; must run after step 1 (see below for why)
+3. `npm run check:generated` — must run after step 1 (needs the generated `lib/`/`app/` tree on disk); see below for why
+4. `npm run lint` — must run after step 1, not before (see below for why)
+5. `npm run test:e2e:cy:api` — API Cypress specs only (mandatory dev-time gate)
+6. `npm --prefix app-generator audit --omit=dev --audit-level=high` — production-dependency vulnerability scan
 
 Not a local step — enforced by CI instead:
 
-6. `npm run test:e2e:cy:start` — full Cypress suite including UI specs.
+7. `npm run test:e2e:cy:start` — full Cypress suite including UI specs.
    Runs automatically on push/PR to this consumer's own default integration
    branch via this repo's own `.github/workflows/ci.yml` (`e2e-tests` job).
    Do not run this locally as a gate; it's covered before merge regardless.
@@ -56,25 +57,39 @@ relying solely on CI to catch it after the fact. The underlying risk is a
 property of any consumer built on this generator's `db_table` service-layer
 convention, not of app-template's own schema content specifically.
 
-### Why pytest and vitest are not required steps here
+### Why vitest is a required step here, and pytest is not
 
-`npm run test:pytest` and `npm run test:vitest` (both delegate to
-`app-generator/`) are **not** required steps for this task type in a
-consumer repo. app-generator already runs both against its own code in its
-own CI (`pytest`, `unit-tests` jobs in
-`app-generator/.github/workflows/ci.yml`) — and this task type's own scope
-rule already forbids touching `app-generator/`, so re-running them here
-against unmodified app-generator content is redundant.
+`npm run test:pytest` (delegates to `app-generator/`) is **not** a required
+step for this task type in a consumer repo: app-generator already runs it
+against its own code in its own CI (`pytest` job in
+`app-generator/.github/workflows/ci.yml`), and it does not inspect
+generated output.
 
-vitest specifically stays dropped even accounting for prj/-sourced content
-(see the lint section below for why lint is a different case): as long as
-none of the consumer's own `prj/` files is named `*.test.ts`/`*.spec.ts`,
-vitest's default test discovery has nothing new to execute against `prj/`
-regardless of gate ordering — it would only re-run app-generator's own
-existing suite, which is already covered by app-generator's own CI. **This
-repo's own current `prj/` file count and composition is a measured fact
-that changes over time — see this repo's own `.claude/commands/update-code.md`
-"## <this repo> specifics" section for the current number, not this file.**
+`npm --prefix app-generator run test:vitest` **is** required, because
+app-generator's own `unit-tests` CI job runs vitest on a checkout that has
+not been through `generate-code`. Any test that scans generated files
+(gitignored `app/`/`lib/` output, or `prj/`-synced stubs) therefore finds
+nothing to check there and passes vacuously, while the same test run
+inside a consumer, after `generate-code`, sees the real files. Two real
+defects were caught only this way: a static scanner test tripping over a
+dead branch in a generated import route, and a stale write-once
+`prj/scripts/grant-all-permissions.ts` stub that no longer matched its
+test. Neither was visible to app-generator's CI or to any earlier step of
+this gate.
+
+**Placement**: run it right after step 1. Step 1 already performs
+`generate-code` and `db:generate`, and vitest needs no running database
+(`test/flows/**` is excluded by `vitest.config.ts`). Running it before
+`check:generated`/`lint`/Cypress fails fast on a broken test before the
+slower steps. The absolute cheapest point would be inside step 1, between
+`db:generate` and `db:seed-baseline`, but that is an ordering inside
+app-generator's own `test:e2e:build` script rather than a gate step, so
+this gate does not depend on it.
+
+**Failures**: a failing vitest case here is a real defect to fix (in
+app-generator or in the consumer's `prj/`), not something to skip or
+loosen. Report the failing test's name and the result of re-running it
+individually.
 
 ### Why lint stays — and why step order matters
 

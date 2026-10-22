@@ -21,6 +21,52 @@ describe('FormWithChildGrid', () => {
     vi.clearAllMocks();
   });
 
+  describe('save and continue editing', () => {
+    it('renders exactly one submit button when continueButtonLabel is absent', () => {
+      const { container } = render(<FormWithChildGrid {...defaultProps} />);
+      expect(container.querySelectorAll('button[type="submit"]')).toHaveLength(1);
+      expect(screen.queryByLabelText('Save and continue editing')).not.toBeInTheDocument();
+    });
+
+    it('renders a second submit button with value "continue" when continueButtonLabel is given', () => {
+      const { container } = render(
+        <FormWithChildGrid {...defaultProps} continueButtonLabel="Save and continue editing" />,
+      );
+      expect(container.querySelectorAll('button[type="submit"]')).toHaveLength(2);
+      const continueButton = screen.getByLabelText('Save and continue editing');
+      expect(continueButton).toHaveAttribute('type', 'submit');
+      expect(continueButton).toHaveAttribute('value', 'continue');
+    });
+
+    it('keeps the plain Save button without a "continue" value', () => {
+      render(<FormWithChildGrid {...defaultProps} continueButtonLabel="Save and continue editing" />);
+      expect(screen.getByLabelText('Save').getAttribute('value')).not.toBe('continue');
+    });
+
+    it('submits the form through the continue button', async () => {
+      render(<FormWithChildGrid {...defaultProps} continueButtonLabel="Save and continue editing" />);
+      fireEvent.click(screen.getByLabelText('Save and continue editing'));
+      await waitFor(() => expect(defaultProps.onSubmit).toHaveBeenCalledTimes(1));
+    });
+  });
+
+  describe('shown in the create-in-place dialog (x-create-inline)', () => {
+    it('shows the usual back control with its confirmation on its own page', () => {
+      render(<FormWithChildGrid {...defaultProps} />);
+      fireEvent.click(screen.getByLabelText('Back to List'));
+      expect(defaultProps.onBack).not.toHaveBeenCalled();
+      expect(screen.getByText('backDialogTitle')).toBeInTheDocument();
+    });
+
+    it('cancels at once, with no return-to-list confirmation, when inDialog', () => {
+      render(<FormWithChildGrid {...defaultProps} inDialog />);
+      expect(screen.queryByLabelText('Back to List')).not.toBeInTheDocument();
+      fireEvent.click(screen.getByLabelText('cancel'));
+      expect(defaultProps.onBack).toHaveBeenCalledTimes(1);
+      expect(screen.queryByText('backDialogTitle')).not.toBeInTheDocument();
+    });
+  });
+
   describe('rendering', () => {
     it('renders title', () => {
       render(<FormWithChildGrid {...defaultProps} />);

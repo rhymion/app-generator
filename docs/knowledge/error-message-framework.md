@@ -508,7 +508,7 @@ generator wraps every create/update Server Action call in) mapped `ReservationMu
 `errorCode: 'CONFLICT'`, the same field-less code `assertNotStale` produces — merging the two
 causes onto one wire code. Fixed by giving `ReservationMutationError` its own errorCode,
 `RESERVATION_LOCKED`, with its own `reservationLocked` i18n key (en/ja) and its own
-`getErrorMessage` branch in `form_upsert.tsx.jinja2` — see the `ErrorCode` union and the
+`getEntityFormErrorMessage` branch in `use_entity_form.ts.jinja2` — see the `ErrorCode` union and the
 Server Action / client transport code samples above. This is a template-level, generator-wide
 fix: it applies to every entity with `x-reservation` configured, not just one entity, since
 `_wrap_call_with_catch` is the single generic wrapper used for all create/update actions.
@@ -521,7 +521,7 @@ than assuming each throw site maps to a distinct, already-correct user-facing me
 **Second lesson, caught by the mandatory `test:e2e:build` type-check, not by inspection**: adding
 `RESERVATION_LOCKED` to the `ErrorCode` union broke `next build`'s TypeScript pass —
 `lib/api-auth.ts`'s `APP_ERROR_STATUS_MAP: Record<ErrorCode, number>` is an *exhaustive* mapping
-(TS2741, "Property is missing"), unlike `form_upsert.tsx.jinja2`'s `getErrorMessage` `switch`,
+(TS2741, "Property is missing"), unlike `use_entity_form.ts.jinja2`'s `getEntityFormErrorMessage` `switch`,
 which has a `default` case and would have silently fallen through to `unknown` with no compiler
 error at all. Any future addition to `ErrorCode` must grep for every `Record<ErrorCode, ...>` in
 the repo (currently just this one map), not only the `switch` statements — the two fail
@@ -535,7 +535,7 @@ because a *child* row (`shipment_line`) referenced by that shipment did not sati
 (missing `inventory_id`, wrong item, or — the new rule added at the same time — not yet marked
 `packed`). The rejection reached the client as `errorCode: 'VALIDATION'`, `field: undefined` —
 because the throw site had no field on the *shipment* form to blame; the actual problem lives on a
-different row of a different entity. `getErrorMessage`'s `VALIDATION` branch falls back to
+different row of a different entity. `getEntityFormErrorMessage`'s `VALIDATION` branch falls back to
 `terr('unknown')` whenever `field` is absent, so the user saw the same generic "An unexpected
 error occurred" text this whole framework exists to eliminate.
 
@@ -559,6 +559,53 @@ inventing a new code or falling back to field-less `VALIDATION`.
 "a related record does not meet the required condition" says nothing about *which* row, *which*
 entity, or *what* condition. That is a harder, still-open problem: the parent form's error display
 has no vocabulary for "go look at row 3 of a different entity's list" — see the open question below.
+
+---
+
+## Hand-written rejections with a message key
+
+A hand-written rule (`service_validation_custom.ts`, or any code that throws `AppError`) can name
+the text the user sees instead of the generic "{field} has an invalid or disallowed value." It
+attaches an i18n key and optional interpolation values to the error:
+
+```ts
+throw new AppError(
+  'VALIDATION',
+  'order has lines',                  // internal message, never the UI text
+  'order_type',                            // field the message attaches to (optional)
+  undefined,                              // reason: the generated custom-rule wrapper sets 'invalid'
+  'ValidationMessages.orderHasLines', // namespace-qualified i18n key
+  { code: 'A-100' },                   // optional ICU arguments (strings and numbers only)
+);
+```
+
+- **AppError.** `messageKey?: string` and `messageArgs?: Record<string, string | number>` are
+  optional public fields, the fifth and sixth constructor arguments. Existing calls are unchanged.
+- **Server Action.** `ActionFailure` carries `messageKey` and `messageArgs` only when the caught
+  `AppError` had a key. The generated catch blocks read them inline, through a cast, so an app whose
+  write-once `lib/_errors.ts` predates these fields still compiles.
+- **REST.** `handleApiError` adds `messageKey` and `messageArgs` to the JSON error body only when
+  present; `error`, `code`, `field` and `reason` are unchanged. A response without a key is
+  byte-for-byte what it was.
+- **Form.** For a `VALIDATION` failure, the generated `FormUpsert` translates the key with the
+  arguments when the key starts with `ValidationMessages.` or `Errors.` and exists in the loaded
+  messages (`t.has`). The text shows on the form's error area, which is where every
+  generated error appears. Any other case shows the generic text below.
+- **Namespaces.** Keys for hand-written rules belong to the consumer, in the `ValidationMessages`
+  namespace of the consumer's `prj/messages/en.json` and `ja.json` (deep-merged by `prj_sync`). A key
+  must exist in both locales. Keys for behavior the generator itself emits belong to the
+  generator-owned `Errors` namespace.
+- **Fallback.** A missing or unknown key, or a key outside the two namespaces, shows the existing
+  `fieldInvalid` / `fieldRequired` text. It never throws and never prints the raw key.
+- **Not covered.** CSV import row errors keep the internal message text, the editable DataGrid cell
+  editor and bulk delete do not read the key, and `NOT_FOUND` / `PERMISSION_DENIED` never use one
+  (organization isolation stays masked as `NOT_FOUND`).
+
+**Leak rules.** The author of the message controls what it says, so the policy in *Disclosure Policy*
+applies to every key. A message states the rule that was broken, not counts, names or identifiers of
+records the user cannot read, and never confirms that a record exists in another organization. The
+internal `AppError` message is still forwarded to REST clients and shown in CSV rows, so it must be
+safe to show too.
 
 ---
 

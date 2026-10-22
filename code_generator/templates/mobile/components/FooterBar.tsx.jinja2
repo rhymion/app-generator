@@ -1,0 +1,81 @@
+import { useState } from 'react';
+import { router } from 'expo-router';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { NavIcon } from '@/components/NavIcon';
+import { SEARCH_TAB } from '@/lib/nav';
+import type { NavNode, SearchTab } from '@/lib/nav';
+import { useLocale } from '@/lib/locale';
+import { useNav } from '@/lib/nav-context';
+
+type Tab = NavNode | SearchTab;
+
+function tabId(tab: Tab): string {
+  if (tab.kind === 'group') return tab.slug;
+  if (tab.kind === 'link') return tab.entity;
+  return 'search';
+}
+
+function hrefOf(tab: Tab): string {
+  if (tab.kind === 'group') return `/section/${tab.slug}`;
+  if (tab.kind === 'link') return `/entity/${tab.entity}`;
+  return '/search';
+}
+
+/**
+ * Footer tab bar: icon first, small label below. The bar scrolls
+ * horizontally, so every tab stays reachable however many there are.
+ */
+export function FooterBar() {
+  const { tabs, failed } = useNav();
+  const { labelOf } = useLocale();
+  const insets = useSafeAreaInsets();
+  const [activeKey, setActiveKey] = useState<string | null>(null);
+  const allTabs: Tab[] = SEARCH_TAB ? [...tabs, SEARCH_TAB] : tabs;
+
+  return (
+    <View style={[styles.bar, { paddingBottom: insets.bottom }]} testID="footer-bar">
+      {failed ? (
+        <View style={styles.notice}>
+          <Text testID="nav-load-failed" style={styles.noticeText}>
+            Could not load the menu from the server, so it is hidden. This is not a permissions change; check the connection and reload.
+          </Text>
+        </View>
+      ) : null}
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.content}>
+        {allTabs.map((tab) => {
+          const active = activeKey === tab.key;
+          return (
+            <Pressable
+              key={tab.key}
+              testID={`footer-tab-${tabId(tab)}`}
+              accessibilityRole="button"
+              accessibilityLabel={labelOf(tab)}
+              style={[styles.tab, active ? styles.tabActive : null]}
+              onPress={() => {
+                setActiveKey(tab.key);
+                router.navigate(hrefOf(tab) as never);
+              }}
+            >
+              <NavIcon icon={tab.icon} color={active ? '#2563eb' : '#374151'} />
+              <Text numberOfLines={1} style={[styles.label, active ? styles.labelActive : null]}>
+                {labelOf(tab)}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </ScrollView>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  bar: { borderTopWidth: 1, borderTopColor: '#e5e7eb', backgroundColor: '#ffffff' },
+  notice: { paddingHorizontal: 12, paddingVertical: 8, backgroundColor: '#fffbeb', gap: 4 },
+  noticeText: { color: '#92400e', fontSize: 13 },
+  content: { paddingHorizontal: 4 },
+  tab: { width: 76, paddingVertical: 8, alignItems: 'center', gap: 2 },
+  tabActive: { borderTopWidth: 2, borderTopColor: '#2563eb' },
+  label: { fontSize: 10, color: '#374151', maxWidth: 70 },
+  labelActive: { color: '#2563eb' },
+});

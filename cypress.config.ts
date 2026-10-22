@@ -35,8 +35,10 @@ export default defineConfig({
         async 'db:reset'() {
           const { resetTestDatabase, prisma } = require('./cypress/support/db-helpers');
           await resetTestDatabase();
-          // Ensure search extensions exist after reset
-          await prisma.$executeRawUnsafe('CREATE EXTENSION IF NOT EXISTS pg_trgm');
+          // Ensure search extensions exist after reset. Tagged `$executeRaw`
+          // (not `$executeRawUnsafe`): the statement is a fixed literal with
+          // no runtime-supplied value at all (issue #737 raw SQL audit).
+          await prisma.$executeRaw`CREATE EXTENSION IF NOT EXISTS pg_trgm`;
           // Phase 1.2: re-seat the bootstrap tenant after the wipe so the
           // NOT NULL user.tenant_id constraint is satisfiable in subsequent
           // seeding. Removed when ticket 3.5 folds this into the generated
@@ -49,6 +51,10 @@ export default defineConfig({
           const { seedTestDatabase } = require('./cypress/support/db-helpers');
           await seedTestDatabase();
           return null;
+        },
+        async 'db:seedDashboardWithWidget'(params: { entityName: string; groupByField: string; widgetName: string }) {
+          const { seedDashboardWithWidget } = require('./cypress/support/dashboard-widget-seed');
+          return await seedDashboardWithWidget(params);
         },
         async 'db:grantAllPermissions'() {
           const { grantAllEntityPermissions } = require('./cypress/support/db-helpers');
@@ -143,6 +149,109 @@ export default defineConfig({
         async 'generateTotp'(secret: string) {
           const otplib = require('otplib');
           return otplib.generateSync({ secret });
+        },
+        // Hand-written fixtures for the mobile token-auth tests (not part of
+        // the generated entity-driven task set above).
+        async 'db:createPasswordlessUser'() {
+          // SSO-provisioned user (password === null) — must be rejected by
+          // POST /api/mobile/auth/token identically to an unknown email.
+          const { prisma } = require('./cypress/support/db-helpers');
+          const { createId } = require('@paralleldrive/cuid2');
+          const userId = createId();
+          const user = await prisma.user.create({
+            data: {
+              id: userId,
+              creator_id: userId,
+              updater_id: userId,
+              email: `sso-${userId}@example.com`,
+              name: 'SSO Only User',
+              password: null,
+            },
+          });
+          return JSON.parse(JSON.stringify({ email: user.email }));
+        },
+        async 'db:createSecondMobileUser'() {
+          // A second, distinct password-loginable user (unlike
+          // db:createSecondUser, which sets an unusable placeholder password)
+          // — for cross-user ownership checks on the mobile session endpoints.
+          const { prisma } = require('./cypress/support/db-helpers');
+          const { createId } = require('@paralleldrive/cuid2');
+          const bcrypt = require('bcryptjs');
+          const password = 'password123';
+          const userId = createId();
+          const user = await prisma.user.create({
+            data: {
+              id: userId,
+              creator_id: userId,
+              updater_id: userId,
+              email: `mobile-second-${userId}@example.com`,
+              name: 'Second Mobile User',
+              password: await bcrypt.hash(password, 10),
+            },
+          });
+          return JSON.parse(JSON.stringify({ email: user.email, password }));
+        },
+        async 'db:createAnonymizedMobileUser'() {
+          // GDPR-anonymized user that still carries a valid password hash, so
+          // the login flow reaches the explicit anonymized_at guard
+          // rather than being rejected earlier by the
+          // password-null guard.
+          const { prisma } = require('./cypress/support/db-helpers');
+          const { createId } = require('@paralleldrive/cuid2');
+          const bcrypt = require('bcryptjs');
+          const password = 'password123';
+          const userId = createId();
+          const user = await prisma.user.create({
+            data: {
+              id: userId,
+              creator_id: userId,
+              updater_id: userId,
+              email: `anon-${userId}@example.com`,
+              name: 'Anonymized User',
+              password: await bcrypt.hash(password, 10),
+              anonymized_at: new Date(),
+            },
+          });
+          return JSON.parse(JSON.stringify({ email: user.email, password }));
+        },
+        // Signs an arbitrary-payload HS256 JWT with the real AUTH_SECRET —
+        // used to construct a token that is well-formed and correctly signed
+        // but deliberately missing (or wrong on) the `type: "mobile_access"`
+        // claim, simulating what a NextAuth-style HS256 JWT would look like
+        // if it reached authenticate()/requireMobileAuth(). This is the
+        // precise code path that needs a test: the type
+        // claim is the ONLY discriminator, and every verification path must
+        // check it.
+        // Fires two POST /api/mobile/auth/refresh calls with the SAME
+        // refresh_token via Promise.all — genuine HTTP-level concurrency,
+        // which a sequential cy.request() chain cannot express. This is the
+        // only way to deterministically exercise the refresh compare-and-swap
+        // race branch (both requests read the same pre-rotation hash before
+        // either commits): a simple sequential reuse of an already-rotated
+        // token never reaches that branch.
+        async 'raceRefresh'(params: { baseUrl: string; refreshToken: string }) {
+          const [a, b] = await Promise.all(
+            [1, 2].map(async () => {
+              const res = await fetch(`${params.baseUrl}/api/mobile/auth/refresh`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ refresh_token: params.refreshToken }),
+              });
+              return { status: res.status, body: await res.json().catch(() => null) };
+            }),
+          );
+          return [a, b];
+        },
+        async 'signRawJwtWithAuthSecret'(payload: Record<string, unknown>) {
+          const { SignJWT } = require('jose');
+          const secret = process.env.AUTH_SECRET;
+          if (!secret) throw new Error('AUTH_SECRET not set in test env');
+          const jwt = await new SignJWT(payload)
+            .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
+            .setIssuedAt()
+            .setExpirationTime('15m')
+            .sign(new TextEncoder().encode(secret));
+          return jwt;
         },
         async 'db:createTestComment'() {
           const { prisma } = require('./cypress/support/db-helpers');
@@ -377,7 +486,7 @@ export default defineConfig({
         },
         async 'db:getAuditLogById'(rowId: string) {
           const { prisma } = require('./cypress/support/db-helpers');
-          const row = await prisma.audit_log.findUnique({ where: { id: rowId } });
+          const row = await prisma.audit_log.findFirst({ where: { id: rowId } });
           return JSON.parse(JSON.stringify(row));
         },
         async 'compliance:anonymizeUser'(userId: string) {

@@ -20,6 +20,7 @@
       "@/lib/prisma": ["./lib/prisma.ts"],
       "@/lib/authz": ["./lib/authz.ts"],
       "@/lib/api-auth": ["./lib/api-auth.ts"],
+      "@/lib/idempotency": ["./lib/idempotency.ts"],
       "@/app/generated/prisma/client": ["./prisma/.generated-client/client"],
       "@/*": ["../*"]
     }

@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from helpers.naming import to_pascal_case, to_camel_case
+from version_of import version_of_entities
 from helpers.type_mapping import get_ts_type
 from helpers.schema_helpers import (
     filter_fields,
@@ -550,7 +551,7 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
         c['name'] for c in children_raw
         if (c.get('output_type') == 'list'
             and (c.get('relationship') or {}).get('type') != 'many-to-many'
-            and is_optional_fk_to_parent(schema['definitions'].get(c['name'], {}), model))
+            and is_optional_fk_to_parent(_raw_def(c['name'], schema), model))
     ]
     # Exclude _locally_declared_child_names for the same reason import_targets
     # does above: a self-referencing child's own relation target (e.g.
@@ -652,6 +653,11 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
 
     # Custom view/edit components from x-custom-components config (entity-level, list).
     _xcc_list_raw = schema['definitions'].get(def_key, {}).get('x-custom-components') or []
+    # x-version-of identity: the standard VersionHistory section (mirrors build_context.py).
+    if 'x-custom-components' not in schema['definitions'].get(def_key, {}) and any(
+        v['identity'] == def_key for v in version_of_entities(schema)
+    ):
+        _xcc_list_raw = [{'name': 'VersionHistory', 'target': ['view']}]
     if not isinstance(_xcc_list_raw, list):
         raise ValueError(
             f"x-custom-components on '{def_key}' must be a list of component objects; "

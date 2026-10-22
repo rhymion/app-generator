@@ -1,0 +1,50 @@
+// Generated from the same navigation source as the desktop sidebar
+// (x-nav / x-nav-groups). Do not edit by hand.
+
+export type IconRef = {
+  family: 'MaterialIcons' | 'MaterialCommunityIcons';
+  name: string;
+};
+
+export type LinkNode = {
+  kind: 'link';
+  key: string;
+  href: string;
+  entity: string;
+  label: string;
+  labels: Record<string, string>;
+  order: number;
+  icon: IconRef;
+};
+
+export type GroupNode = {
+  kind: 'group';
+  key: string;
+  slug: string;
+  label: string;
+  labels: Record<string, string>;
+  order: number;
+  icon: IconRef;
+  children: NavNode[];
+};
+
+export type NavNode = LinkNode | GroupNode;
+
+export type SearchTab = {
+  kind: 'search';
+  key: string;
+  label: string;
+  labels: Record<string, string>;
+  icon: IconRef;
+};
+
+export const APP_TITLE = {{ app_title_json }};
+
+/** Footer tabs: the desktop sidebar's root level, in the same order. */
+export const NAV_TABS: NavNode[] = {{ tabs_json }};
+
+/** Fixed trailing tab, present only when the app generates a search route. */
+export const SEARCH_TAB: SearchTab | null = {{ search_tab_json }};
+
+/** Locales that carry navigation labels; the first is the default. */
+export const NAV_LOCALES: string[] = {{ locales_json }};

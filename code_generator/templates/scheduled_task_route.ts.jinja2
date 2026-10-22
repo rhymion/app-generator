@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireScheduledTaskRole, handleApiError, ApiError } from '@/lib/api-auth';
 import { TASK_REGISTRY } from '@/lib/scheduled-tasks/registry';
+import { runScheduledTask } from '@/lib/scheduled-tasks/run-guard';
 import { SCHEDULED_TASK_ACTOR_EMAIL } from '@/lib/scheduled-tasks/system-actor';
 import prisma from '@/lib/prisma';
 
@@ -68,8 +69,26 @@ async function handleScheduledTask(
       throw new ApiError(404, `Unknown scheduled task: ${task}`);
     }
 
-    await run(systemActor.id);
-    return NextResponse.json({ ok: true, task });
+    // Every run goes through the shared completion-record guard
+    // (lib/scheduled-tasks/run-guard.ts): duplicate deliveries for a business
+    // date that already succeeded are a no-op (200), a task whose declared
+    // `depends_on` predecessors have not succeeded yet is refused (409), and
+    // a handler failure is recorded, then surfaces as the same 500 as before.
+    const result = await runScheduledTask(task, systemActor.id);
+    if (result.outcome === 'failed') {
+      throw result.error;
+    }
+    if (result.outcome === 'blocked') {
+      throw new ApiError(
+        409,
+        `Scheduled task ${task} is blocked: predecessor(s) ${(result.blockedBy ?? []).join(', ')} ` +
+          `have no succeeded record for today.`,
+      );
+    }
+    if (result.outcome === 'already_running') {
+      throw new ApiError(409, `Scheduled task ${task} already has a run in progress for today.`);
+    }
+    return NextResponse.json({ ok: true, task, outcome: result.outcome });
   } catch (error) {
     return handleApiError(error);
   }

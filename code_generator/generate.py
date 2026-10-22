@@ -25,12 +25,25 @@ from helpers.bridge_direction import get_new_form_bridge
 from helpers.bridge_prisma import emit_bridge_model, emit_parent_bridge_fk, emit_child_bridge_fk
 from helpers.schema_helpers import get_flatten_rels
 from generate_types import extract_entities, extract_named_constants
+from mobile_e2e import FLOW_DIR as MOBILE_E2E_FLOW_DIR, build_flows as build_mobile_e2e_flows
+from mobile_nav import build_mobile_nav
+from nav_config import schema_declares_scheduled_tasks
+from mobile_entities import (
+    attachable_bridge_ready, build_mobile_entity_spec, ineligible_log_lines, ineligible_note, mobile_ineligible_reason,
+)
+from helpers.naming import to_title_case
 from context import build_entity_context
-from build_context import build_context, build_anonymize_user_context, _get_actual_type, set_prisma_models
+from build_context import (
+    build_context, build_anonymize_user_context, _get_actual_type, set_prisma_models,
+    select_filter_sort_representatives, _exclusive_parent_all_columns,
+)
 from helpers.label_field import build_label_expression
 from helpers.schema_helpers import derive_text_fields as _derive_text_fields
+from helpers.schema_helpers import resolve_trigram_search_fields as _resolve_trigram_search_fields
+from helpers.schema_helpers import trigram_filter_true_fields as _trigram_filter_true_fields
 from helpers.schema_helpers import get_splittable_bridge_field
 from helpers.schema_helpers import resolve_ledger_domain
+from helpers.timezones import TIMEZONES, DEFAULT_MEMBER
 from helpers.schema_helpers import get_entity_properties
 from helpers.schema_helpers import get_self_only_flags
 from helpers.schema_helpers import get_parent_relationships
@@ -40,10 +53,13 @@ from helpers.schema_helpers import get_parent_fk_props
 from helpers.schema_helpers import is_optional_fk_to_parent
 from helpers.schema_helpers import get_approval_lines_props
 from helpers.schema_helpers import child_has_own_write_capability
+from keys import x_approval as approval_key
+from version_of import version_of_entities, version_of_for, version_of_children, version_of_prefill_plan, version_diff_children
 from generators import (
     chart_context,
     page_list_context,
     actions_context,
+    can_save_and_continue,
     service_context,
     column_def_context,
     form_view_context,
@@ -51,6 +67,7 @@ from generators import (
     build_dashboard_catalog,
     build_attachable_owners,
     attachment_type_ts,
+    attachment_type_values,
     reaction_type_ts,
     _build_approval_create_block_for_entity,
     _build_split_approval_inherit_block,
@@ -58,6 +75,7 @@ from generators import (
     resolve_approval_submit_on,
     seed_entities_context,
     approval_lockdown_context,
+    capabilities_context,
 )
 from generators_i18n import (
     update_i18n_and_config,
@@ -66,16 +84,19 @@ from generators_i18n import (
     _collect_custom_component_sections,
     _merge_file_wins_messages,
 )
+from payment_config import payment_context
 from validate import (
     validate_schema, validate_prisma_indexes,
     validate_self_only_creator_id_columns, validate_defaults_cross_schema,
-    validate_submit_on_default_matches_prisma,
+    validate_submit_on_default_matches_prisma, validate_version_of_prisma,
     validate_direct_attachment_prerequisite,
     validate_direct_attachment_reverse_fields,
     validate_write_once_stub_asymmetry,
+    validate_generator_config, mobile_generation_enabled, audit_log_storage_enabled,
     SchemaValidationError,
 )
 from generators_doc import build_doc_entity_context, build_doc_index_context, convert_md_to_mdx
+from generators_openapi import build_entity_openapi, assemble_openapi_document
 from generators_test import (
     helper_context,
     spec_context,
@@ -84,6 +105,7 @@ from generators_test import (
     db_helpers_context,
     reservation_helper_context,
     reservation_spec_context,
+    set_entity_labels,
     set_messages_fields,
     set_messages_namespaces,
     set_prisma_uniques,
@@ -244,6 +266,108 @@ def inject_bridge_into_schema(schema_prisma_path: Path, bridges: dict) -> None:
     if modified != content:
         schema_prisma_path.write_text(modified)
         print(f'  Injected bridge models/FKs → prisma/schema.prisma')
+
+
+# (template, output path) for the scheduled-task admin page; see nav_config.EXTRA_NAV_PARENT.
+_SCHEDULED_TASK_ADMIN_FILES = [
+    ('scheduled_task_admin.ts.jinja2', 'lib/scheduled-tasks/admin.ts'),
+    ('scheduled_task_admin_actions.ts.jinja2', 'app/[locale]/scheduled_task_run/actions.ts'),
+    ('scheduled_task_admin_page.tsx.jinja2', 'app/[locale]/scheduled_task_run/page.tsx'),
+    ('scheduled_task_admin_table.tsx.jinja2', 'components/scheduled_task_run/ScheduledTaskRunTable.tsx'),
+    # REST form of the same overview and actions, for the native clients.
+    ('scheduled_task_runs_route.ts.jinja2', 'app/api/scheduled-task-runs/route.ts'),
+    ('scheduled_task_run_action_route.ts.jinja2', 'app/api/scheduled-task-runs/[task]/[action]/route.ts'),
+]
+
+_SCHEDULED_TASK_RUN_PRISMA = """// Scheduled-task completion records (generated when the schema declares any
+// x-scheduled-task / x-scheduled-tasks entry). One row per (task_id,
+// business_date): running -> succeeded | failed, or not_due (task:run-all
+// found the task's `interval` not yet due). See lib/scheduled-tasks/run-guard.ts.
+enum ScheduledTaskRunStatus {
+  running
+  succeeded
+  failed
+  not_due
+}
+
+model scheduled_task_run {
+  id            String                 @id @default(cuid())
+  task_id       String
+  business_date DateTime               @db.Date
+  status        ScheduledTaskRunStatus
+  started_at    DateTime               @default(now()) @db.Timestamptz(0)
+  finished_at   DateTime?              @db.Timestamptz(0)
+  error_message String?
+
+  @@unique([task_id, business_date])
+  @@index([status, business_date])
+}
+"""
+
+
+def inject_scheduled_task_run_into_schema(schema_prisma_path: Path) -> None:
+    """Append the `scheduled_task_run` completion-record model to schema.prisma
+    (idempotent), same injection pattern as `inject_bridge_into_schema`.
+
+    Emitted only when the schema declares at least one scheduled task, so a
+    consumer with none gets no table. Generated rather than hand-written into
+    the base schema.prisma on purpose: a hand-written base model is silently
+    dropped from a consumer's prj/prisma/schema.prisma snapshot by prj:sync.
+    """
+    if not schema_prisma_path.exists():
+        return
+    content = schema_prisma_path.read_text()
+    if 'model scheduled_task_run {' in content:
+        return
+    schema_prisma_path.write_text(content.rstrip('\n') + '\n\n' + _SCHEDULED_TASK_RUN_PRISMA)
+    print('  Injected scheduled_task_run model → prisma/schema.prisma')
+
+
+_PAYABLE_PRISMA = """// x-payment record lifecycle (generated when any entity declares
+// x-payment: true). One row per payable record: `pending` from the moment the
+// record is created until Stripe confirms payment, then `paid` (kept as the
+// permanent payment record). A record that is never paid is deleted together
+// with its row here. entity_name/record_id point at the paying entity's row by
+// value, deliberately without a foreign key, because the table serves every
+// x-payment entity at once. See lib/payment/.
+enum PayableStatus {
+  pending
+  paid
+}
+
+model payable {
+  id                         String        @id @default(cuid())
+  entity_name                String
+  record_id                  String
+  status                     PayableStatus @default(pending)
+  stripe_checkout_session_id String        @unique
+  amount                     Int?
+  currency                   String        @default("usd")
+  created_at                 DateTime      @default(now()) @db.Timestamptz(0)
+  paid_at                    DateTime?     @db.Timestamptz(0)
+
+  @@unique([entity_name, record_id])
+  @@index([status])
+}
+"""
+
+
+def inject_payable_into_schema(schema_prisma_path: Path) -> None:
+    """Append the `payable` model to schema.prisma (idempotent), same
+    injection pattern as `inject_scheduled_task_run_into_schema`.
+
+    Emitted only when at least one entity declares x-payment: true. Generated
+    rather than hand-written into the base schema.prisma on purpose: a
+    hand-written base model is silently dropped from a consumer's
+    prj/prisma/schema.prisma snapshot by prj:sync.
+    """
+    if not schema_prisma_path.exists():
+        return
+    content = schema_prisma_path.read_text()
+    if 'model payable {' in content:
+        return
+    schema_prisma_path.write_text(content.rstrip('\n') + '\n\n' + _PAYABLE_PRISMA)
+    print('  Injected payable model → prisma/schema.prisma')
 
 
 # ---------------------------------------------------------------------------
@@ -461,6 +585,17 @@ def _prefix_unused_then_callback_params(content: str) -> str:
 # Records every generated file for this run; reset at the top of generate().
 _manifest = ManifestRecorder()
 
+# Cross-entity search similarity threshold (Issue #725 fix, part (b)): shared
+# by the generated `%` operator predicate (pg_trgm.similarity_threshold reads
+# this from a session GUC, not a query argument — see search_helpers.ts.jinja2's
+# buildSearchQuery) and the rank scoring expression's GREATEST(similarity(...)).
+# A single constant keeps both in sync; there is currently no per-schema
+# override. This value (0.3) matches PostgreSQL's own out-of-the-box default
+# for the GUC (confirmed via `SHOW pg_trgm.similarity_threshold;`), which is
+# why buildSearchQuery does not need to SET it explicitly — see the fix (b)
+# regression note in search_helpers.ts.jinja2 (Issue #728 hotfix, P2028).
+_SEARCH_SIMILARITY_THRESHOLD = 0.3
+
 
 def _write(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -532,8 +667,11 @@ def _write_vercel_json_crons(path: Path, scheduled_task_entities: list) -> None:
         print(f'  Skipped (up to date) {path} (crons: {len(crons)})')
 
 
-def _write_stub(path: Path, content: str) -> None:
+def _write_stub(path: Path, content: str) -> bool:
     """Write stub only if file does not already exist (user may have customized).
+
+    Returns True only when the stub was newly created by this call (the caller's cue to
+    raise an ACTION REQUIRED notice); a skipped or refreshed stub returns False.
 
     Exception (cmd_413b): if the existing file's content matches a *past*
     pristine render of this same stub (recorded across manifest runs — see
@@ -550,16 +688,17 @@ def _write_stub(path: Path, content: str) -> None:
         existing_hash = sha256_file(path)
         if existing_hash == sha256_text(content):
             print(f'  Skipped (up to date) {path}')
-            return
+            return False
         if _manifest.is_stale_stub(path, existing_hash):
             path.write_text(content, encoding='utf-8')
             print(f'  Refreshed (stale stub, schema changed since it was first generated) {path}')
-            return
+            return False
         print(f'  Skipped (exists) {path}')
-        return
+        return False
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding='utf-8')
     print(f'  Wrote {path}')
+    return True
 
 
 # Collects reminders about write-once stubs the generator just created. These are
@@ -643,8 +782,16 @@ def _append_no_page_child(
     """
     ts_parts = " || ' ' || ".join(f"COALESCE(child.{f}, '')" for f in text_fields)
     sim_exprs = ', '.join(f"similarity(COALESCE(child.{f}, ''), ${{q}})" for f in text_fields)
+    # Issue #725 fix (b): the `%` operator (not the `similarity(a, b) >
+    # threshold` function-call form) is the only form pg_trgm's planner
+    # recognizes as trgm-GIN-index-optimizable — confirmed via EXPLAIN
+    # ANALYZE (cmd_1162 Phase 2). The threshold itself comes from the
+    # `pg_trgm.similarity_threshold` session GUC, which already defaults (at
+    # the PostgreSQL level) to _SEARCH_SIMILARITY_THRESHOLD — see
+    # search_helpers.ts.jinja2's buildSearchQuery for why no explicit SET is
+    # needed.
     sim_where = ' OR '.join(
-        f"similarity(COALESCE(child.{f}, ''), ${{q}}) > 0.3" for f in text_fields
+        f"COALESCE(child.{f}, '') % ${{q}}" for f in text_fields
     )
     bigm_fields = text_fields  # default: same as text_fields
     bigm_where = ' OR '.join(
@@ -903,8 +1050,453 @@ def _validate_x_approval_combinations(
 
 
 # ---------------------------------------------------------------------------
+# Mobile (Expo) target
+# ---------------------------------------------------------------------------
+# Renders the Expo Router project under <out>/mobile. Navigation (footer tabs
+# and the drill-down tree) is built from the same source as the desktop
+# sidebar -- see mobile_nav.py. Templates live under templates/mobile/.
+
+_MOBILE_STATIC_TEMPLATES = [
+    ('package.json.jinja2', 'package.json'),
+    ('app.json.jinja2', 'app.json'),
+    ('tsconfig.json.jinja2', 'tsconfig.json'),
+    ('babel.config.js.jinja2', 'babel.config.js'),
+    ('env.d.ts.jinja2', 'env.d.ts'),
+    ('lib/token-storage.ts.jinja2', 'lib/token-storage.ts'),
+    ('lib/api-base.ts.jinja2', 'lib/api-base.ts'),
+    ('lib/prefs.ts.jinja2', 'lib/prefs.ts'),
+    ('lib/locale.tsx.jinja2', 'lib/locale.tsx'),
+    ('lib/nav.ts.jinja2', 'lib/nav.ts'),
+    ('lib/nav-tree.ts.jinja2', 'lib/nav-tree.ts'),
+    ('lib/nav-context.tsx.jinja2', 'lib/nav-context.tsx'),
+    ('lib/_errors.ts.jinja2', 'lib/_errors.ts'),
+    ('lib/authz.ts.jinja2', 'lib/authz.ts'),
+    ('lib/entity-http.ts.jinja2', 'lib/entity-http.ts'),
+    ('lib/label-spec.ts.jinja2', 'lib/label-spec.ts'),
+    ('components/native/FieldInput.tsx.jinja2', 'components/native/FieldInput.tsx'),
+    ('components/native/RelationPicker.tsx.jinja2', 'components/native/RelationPicker.tsx'),
+    ('components/native/ApprovalSection.tsx.jinja2', 'components/native/ApprovalSection.tsx'),
+    ('components/native/SplitSection.tsx.jinja2', 'components/native/SplitSection.tsx'),
+    ('components/NavIcon.tsx.jinja2', 'components/NavIcon.tsx'),
+    ('components/FooterBar.tsx.jinja2', 'components/FooterBar.tsx'),
+    ('components/Header.tsx.jinja2', 'components/Header.tsx'),
+    ('app/_layout.tsx.jinja2', 'app/_layout.tsx'),
+    ('app/login.tsx.jinja2', 'app/login.tsx'),
+    ('app/(app)/_layout.tsx.jinja2', 'app/(app)/_layout.tsx'),
+    ('app/(app)/index.tsx.jinja2', 'app/(app)/index.tsx'),
+    ('app/(app)/section/[slug].tsx.jinja2', 'app/(app)/section/[slug].tsx'),
+    ('app/(app)/entity/[name].tsx.jinja2', 'app/(app)/entity/[name].tsx'),
+    ('app/(app)/entity/[name]/new.tsx.jinja2', 'app/(app)/entity/[name]/new.tsx'),
+    ('app/(app)/entity/[name]/[id].tsx.jinja2', 'app/(app)/entity/[name]/[id].tsx'),
+    ('app/(app)/entity/[name]/[id]/edit.tsx.jinja2', 'app/(app)/entity/[name]/[id]/edit.tsx'),
+    # Built-in audit log screens (read-only; reached from the nav link mobile_nav adds).
+    ('audit_log/mobile_client.ts.jinja2', 'lib/audit_log/mobile_client.ts'),
+    ('audit_log/format.ts.jinja2', 'components/audit_log/format.ts'),
+    ('audit_log/List.tsx.jinja2', 'components/audit_log/List.tsx'),
+    ('audit_log/View.tsx.jinja2', 'components/audit_log/View.tsx'),
+]
+
+# Direct attachment fields: written only when some mobile entity has one (it adds the file picker dependency).
+# The upload helpers are shared with the bridge attachment list, so they are written for either.
+_MOBILE_ATTACHMENT_TEMPLATES = [
+    ('lib/attachment-http.ts.jinja2', 'lib/attachment-http.ts', ('has_attachment', 'has_bridge_attachment')),
+    ('components/native/AttachmentInput.tsx.jinja2', 'components/native/AttachmentInput.tsx', ('has_attachment',)),
+    ('components/native/AttachmentList.tsx.jinja2', 'components/native/AttachmentList.tsx', ('has_bridge_attachment',)),
+    # The props the hand-written components receive; written only when some entity mounts one.
+    ('lib/custom-component.ts.jinja2', 'lib/custom-component.ts', ('has_custom_components',)),
+]
+
+# Scheduled task administration screens: written only when the schema declares a task.
+_MOBILE_SCHEDULED_TASK_TEMPLATES = [
+    ('scheduled_task_run/mobile_client.ts.jinja2', 'lib/scheduled_task_run/mobile_client.ts'),
+    ('scheduled_task_run/List.tsx.jinja2', 'components/scheduled_task_run/List.tsx'),
+]
+
+# Namespaces of messages/<locale>.json the native entity screens read.
+_MOBILE_MESSAGE_NAMESPACES = ('Common', 'Errors', 'ValidationMessages', 'Payment', 'ReactionType', 'ApprovalRequestStatus', 'ScheduledTaskRun', 'Search')
+
+# Single keys of the namespaces too large to ship whole (`Fields` holds every field label, `EntityLabel`
+# every entity name): the comment thread, the approval section and the built-in audit log screens read these.
+_MOBILE_MESSAGE_KEYS = {
+    'EntityLabel': ('auditLog',),
+    'Fields': (
+        'comments', 'approvalRequests', 'approve', 'reject', 'withdraw', 'message', 'images', 'attachments',
+        'action', 'actorUser', 'created_at', 'metadata', 'targetId', 'targetTable',
+    ),
+}
+
+
+def _render_timezone_ts(env: Environment) -> str:
+    """lib/_timezone.ts: the Timezone enum values and their IANA names (shared by Web and mobile)."""
+    return _render(env, 'timezone.ts.jinja2', {'timezones': TIMEZONES, 'default_member': DEFAULT_MEMBER})
+
+
+def _mobile_messages_json(messages: dict, entity_label_keys: tuple[str, ...] = ()) -> str:
+    """The messages the app ships. `entity_label_keys` adds the EntityLabel words of the entity names an
+    `x-entity-select` field offers, on top of the single keys every app reads."""
+    keys_by_ns = {**_MOBILE_MESSAGE_KEYS, 'EntityLabel': (*_MOBILE_MESSAGE_KEYS['EntityLabel'], *entity_label_keys)}
+    return json.dumps({
+        locale: {
+            **{ns: bundle[ns] for ns in _MOBILE_MESSAGE_NAMESPACES if isinstance(bundle.get(ns), dict)},
+            **{
+                ns: {k: bundle[ns][k] for k in keys if k in bundle[ns]}
+                for ns, keys in keys_by_ns.items() if isinstance(bundle.get(ns), dict)
+            },
+        }
+        for locale, bundle in messages.items()
+    }, indent=2, ensure_ascii=False)
+
+
+def resolve_mobile_create_forms(mobile_specs: list[dict]) -> None:
+    """Attach the target's create form to every `x-create-inline` field that can open one.
+
+    The "Create new" control opens the target's own native form, so it exists only when the
+    target has native screens with a create form; a field whose target keeps the placeholder
+    screen stays a plain picker (the Web form still offers the dialog).
+    """
+    by_name = {spec['name']: spec for spec in mobile_specs}
+    for spec in mobile_specs:
+        for field in spec['fields']:
+            if not field.get('create_inline'):
+                continue
+            target = by_name.get(field['target'])
+            if target and target['can_new']:
+                field['create_form'] = {'name': target['name'], 'pascal': target['pascal']}
+            else:
+                print(f"  Mobile: {spec['name']}.{field['key']} declares x-create-inline but "
+                      f"{field['target']} has no native create form; the picker offers no \"Create new\"")
+
+
+def resolve_mobile_view_links(mobile_specs: list[dict]) -> None:
+    """Mark every relation field whose target has a native detail screen, so its value links to the record.
+
+    A related record is reached at `/entity/<target>/<id>`, which exists only when the target is a mobile
+    entity with a view screen; a target that is not (embedded children, bridge internals, entities kept on
+    the placeholder screen) stays plain text. Like the Web reference field, the link is not hidden from a
+    reader who may not see the record: the target screen answers for itself.
+    """
+    viewable = {spec['name'] for spec in mobile_specs if spec['can_view']}
+    for spec in mobile_specs:
+        for field in spec['fields']:
+            if field['kind'] in ('relation', 'relation_many') and field.get('target') in viewable:
+                field['view_link'] = True
+
+
+def _mobile_field_json(f: dict) -> dict:
+    """A field entry of the mobile spec as the `FieldSpec` the app reads."""
+    return {
+        'key': f['key'], 'label': f['label'], 'kind': f['kind'], 'required': f['required'],
+        'readonly': f['readonly'], 'options': f['options'], 'optionLabels': f.get('option_labels', []), 'optionLabelKeys': f.get('option_label_keys', []), 'numericEnum': f.get('numeric_enum', False),
+        **(
+            {
+                'target': f['target'], 'labelField': f['label_field'], 'relationName': f['relation_name'],
+                'bodyKey': f['body_key'], 'contextFields': f['context_fields'],
+            }
+            if 'target' in f else {}
+        ),
+        # A direct attachment field names where the REST detail embeds the row and what the write body carries.
+        **({'relationName': f['relation_name'], 'bodyKey': f['body_key']} if f['kind'] == 'attachment' else {}),
+        **({'createInline': True} if f.get('create_form') else {}),
+        **({'viewLink': True} if f.get('view_link') else {}),
+        # A hand-written component draws the field (upsert: the input, view: the detail display).
+        **({'custom': f['custom']} if f.get('custom') else {}),
+        **({'writeOnly': True} if f.get('write_only') else {}),
+        **({'defaultValue': f['default_value']} if 'default_value' in f else {}),
+        # A one-to-many child collection: the row editor draws these fields for each row.
+        **(
+            {'relationName': f['relation_name'], 'bodyKey': f['body_key'], 'rowFields': [_mobile_field_json(r) for r in f['row_fields']]}
+            if f['kind'] == 'child_rows' else {}
+        ),
+    }
+
+
+def generate_mobile_entity(spec: dict, ctx: dict, schema: dict, mobile_dir: Path, env: Environment) -> None:
+    """Render one entity's native screens under mobile/.
+
+    The shared hooks (use_entity_form, use_entity_capabilities) and the pure
+    form_validation module are rendered from the same templates and contexts the
+    Web screens use, so the mobile screens call the same logic.
+    """
+    name = spec['name']
+    has_form_hook = spec['can_new'] or spec['can_edit']
+    split = spec.get('split')
+    spec_ctx = {
+        **spec,
+        'const_name': name.upper(),
+        'fields_json': json.dumps([_mobile_field_json(f) for f in spec['fields']], indent=2),
+        'split_json': json.dumps(
+            {
+                'quantityField': split['quantity_field'],
+                'quantityLabel': split['quantity_label'],
+                'parts': [_mobile_field_json(f) for f in split['parts']],
+                'contextFields': split['context_fields'],
+            },
+            indent=2,
+        ) if split else 'null',
+        'list_keys_json': json.dumps(spec['list_keys']),
+        'relation_columns_json': json.dumps([_mobile_field_json(f) for f in spec['relation_columns']], indent=2),
+        'sort_keys_json': json.dumps(spec['sort_keys']),
+        'filter_keys_json': json.dumps(spec['filter_keys']),
+        'search_keys_json': json.dumps(spec['search_keys']),
+        'reaction_types_json': json.dumps((spec.get('comments') or {}).get('reaction_types', [])),
+        'has_form_hook': has_form_hook,
+        # Fields whose picker offers "Create new" (x-create-inline), each with its target's create form.
+        'create_fields': [f for f in spec['fields'] if f.get('create_form')],
+        # Direct attachment fields: the form keeps each field's attachment row, the detail screen links to the file.
+        'attachment_fields': [f for f in spec['fields'] if f['kind'] == 'attachment'],
+        # One-to-many child collections: the form checks each row's required fields before it sends the rows.
+        'row_fields': [f for f in spec['fields'] if f['kind'] == 'child_rows'],
+    }
+    lib_dir = mobile_dir / 'lib' / name
+    components_dir = mobile_dir / 'components' / name
+    _write(lib_dir / 'use_entity_capabilities.ts', _render(env, 'use_entity_capabilities.ts.jinja2', ctx))
+    if has_form_hook:
+        ups_ctx = {**ctx, **form_upsert_context(ctx, schema)}
+        _write(lib_dir / 'use_entity_form.ts', _render(env, 'use_entity_form.ts.jinja2', ups_ctx))
+        val_ctx = {**ctx, **build_validation_context(ctx)}
+        _write(components_dir / 'form_validation.ts', _render(env, 'form_validation.ts.jinja2', val_ctx))
+        _write(components_dir / 'FormUpsert.tsx', _render(env, 'mobile/entity/FormUpsert.tsx.jinja2', spec_ctx))
+    _write(lib_dir / 'mobile_client.ts', _render(env, 'mobile/entity/mobile_client.ts.jinja2', spec_ctx))
+    if spec['has_approval'] and spec['can_view']:
+        # The approval wiring and predicates the Web view calls, rendered / copied unchanged.
+        fv_ctx = {**ctx, **form_view_context(ctx, schema)}
+        _write(lib_dir / 'use_entity_approval_actions.ts',
+               _render(env, 'use_entity_approval_actions.ts.jinja2', fv_ctx))
+        predicate = (Path(__file__).resolve().parent.parent / 'lib' / 'approval_request' / 'submit_predicate.ts').read_text(encoding='utf-8')
+        _write(mobile_dir / 'lib' / 'approval_request' / 'submit_predicate.ts', predicate)
+    _write(components_dir / 'List.tsx', _render(env, 'mobile/entity/List.tsx.jinja2', spec_ctx))
+    if spec['can_view']:
+        _write(components_dir / 'FormView.tsx', _render(env, 'mobile/entity/FormView.tsx.jinja2', spec_ctx))
+    _write_mobile_custom_stubs(spec, mobile_dir, env)
+
+
+def _write_mobile_custom_stubs(spec: dict, mobile_dir: Path, env: Environment) -> None:
+    """Write the native stub of each hand-written component the entity declares, once.
+
+    The stubs render nothing, are never overwritten after a developer edits them, and are announced in
+    the ACTION REQUIRED summary when first created. Entity components live in
+    `components/<entity>/custom/<Name>.tsx`, field components in `components/<entity>/custom/fields/<Field>.tsx`.
+    """
+    name = spec['name']
+    custom_dir = mobile_dir / 'components' / name / 'custom'
+    for comp in spec['custom_component_names']:
+        path = custom_dir / f'{comp}.tsx'
+        mounted = [screen for screen in ('list', 'view', 'edit') if any(c['name'] == comp for c in spec['custom_components'][screen])]
+        if _write_stub(path, _render(env, 'mobile/entity/custom_component_stub.tsx.jinja2', {'component': comp})):
+            _note_stub_created(
+                path,
+                f'Entity "{name}" declares the custom component {comp} (mobile: {", ".join(mounted)}); the native app mounts it but it draws nothing yet.',
+                'Implement the native component (props: see mobile/lib/custom-component.ts) and commit the file to '
+                'your project SoT so it survives cleanup and a fresh rebuild.',
+            )
+    for field in spec['custom_fields']:
+        comp = to_pascal_case(field['key'])
+        path = custom_dir / 'fields' / f'{comp}.tsx'
+        targets = [t for t in ('upsert', 'view') if field['custom'].get(t)]
+        if _write_stub(path, _render(env, 'mobile/entity/custom_field_stub.tsx.jinja2', {'component': comp})):
+            _note_stub_created(
+                path,
+                f'Field "{name}.{field["key"]}" is drawn by a custom component ({", ".join(targets)}); the native app mounts it but it draws nothing yet.',
+                'Implement the native field component (props: see mobile/lib/custom-component.ts) and commit the file to '
+                'your project SoT so it survives cleanup and a fresh rebuild.',
+            )
+
+
+def _read_messages(output_dir: Path) -> dict:
+    messages: dict = {}
+    for lang_file in sorted((output_dir / 'messages').glob('*.json')):
+        try:
+            messages[lang_file.stem] = json.loads(lang_file.read_text(encoding='utf-8'))
+        except (OSError, ValueError):
+            continue
+    return messages
+
+
+def generate_mobile_native_e2e(mobile_specs: list[dict], tabs: list[dict], mobile_dir: Path, env: Environment) -> None:
+    """Render the Maestro flows (mobile/e2e/generated/maestro/): one per entity that has native screens.
+
+    The flows come from the specs `build_mobile_entity_spec` admitted, so an entity has a flow exactly when it has
+    native screens. Nothing is written when no entity has screens.
+    """
+    flows = build_mobile_e2e_flows(mobile_specs, tabs)
+    if not flows:
+        return
+    flow_dir = mobile_dir / MOBILE_E2E_FLOW_DIR
+    _write(flow_dir / 'subflows' / 'sign_in.yaml', _render(env, 'mobile/e2e/sign_in.yaml.jinja2', {}))
+    for name, flow in flows.items():
+        _write(flow_dir / f'{name}.yaml', _render(env, 'mobile/e2e/entity_flow.yaml.jinja2', flow))
+    print(f'  Mobile native E2E: {len(flows)} Maestro flow(s) -> mobile/{MOBILE_E2E_FLOW_DIR}/')
+
+
+def generate_mobile_target(
+    entities: list, schema: dict, output_dir: Path, env: Environment, has_search: bool,
+    mobile_specs: list | None = None, has_mention: bool = False, search_entity_types: list | None = None,
+) -> None:
+    """Render the Expo Router mobile/ project (footer tabs + drill-down)."""
+    app_name = 'Generated App'
+    messages = _read_messages(output_dir)
+    has_scheduled_tasks = schema_declares_scheduled_tasks(schema)
+    nav = build_mobile_nav(
+        entities, schema, messages, include_audit_log=True, include_scheduled_tasks=has_scheduled_tasks,
+    )
+    search_label_keys = {t: to_camel_case(t) for t in search_entity_types or []}
+    locales = sorted(messages) or ['en']
+    if 'en' in locales:
+        locales = ['en'] + [loc for loc in locales if loc != 'en']
+    ctx = {
+        'app_name': app_name,
+        'app_slug': re.sub(r'[^a-z0-9]+', '-', app_name.lower()).strip('-'),
+        'app_title_json': json.dumps(app_name),
+        'tabs_json': json.dumps(nav['tabs'], indent=2, ensure_ascii=False),
+        'search_tab_json': json.dumps(nav['search_tab'], indent=2, ensure_ascii=False) if has_search else 'null',
+        'locales_json': json.dumps(locales),
+        'messages_json': _mobile_messages_json(messages, tuple(sorted({
+            key.removeprefix('EntityLabel.')
+            for spec in mobile_specs or [] for f in spec['fields'] for key in f.get('option_label_keys', [])
+        } | set(search_label_keys.values())))),
+        # Search result entity type -> the EntityLabel key naming it on the result row.
+        'search_labels_json': json.dumps(search_label_keys, indent=2),
+        'entities': mobile_specs or [],
+        'has_scheduled_tasks': has_scheduled_tasks,
+        'has_payment': any(spec.get('is_payment') for spec in mobile_specs or []),
+        # Some entity has a direct attachment field: the app needs the file picker and the upload helpers.
+        'has_attachment': any(f['kind'] == 'attachment' for spec in mobile_specs or [] for f in spec['fields']),
+        # Some entity owns attachments through the `attachable` bridge: the app needs the upload helper and the list.
+        'has_bridge_attachment': any(spec.get('attachments') for spec in mobile_specs or []),
+        # Some entity mounts a hand-written component: the app needs the props contract they are written against.
+        'has_custom_components': any(spec.get('custom_component_names') or spec.get('custom_fields') for spec in mobile_specs or []),
+        # The schema has an `x-mention` field, so the mention user search route exists.
+        'has_mention': has_mention,
+    }
+    mobile_dir = output_dir / 'mobile'
+    search_out = mobile_dir / 'app' / '(app)' / 'search.tsx'
+    if has_search:
+        _write(search_out, _render(env, 'mobile/app/(app)/search.tsx.jinja2', ctx))
+    elif search_out.exists():
+        search_out.unlink()
+    checkout_out = mobile_dir / 'lib' / 'checkout.ts'
+    if ctx['has_payment']:
+        _write(checkout_out, _render(env, 'mobile/lib/checkout.ts.jinja2', ctx))
+    elif checkout_out.exists():
+        checkout_out.unlink()
+    for tmpl_name, rel_out, needed_by in _MOBILE_ATTACHMENT_TEMPLATES:
+        target = mobile_dir / rel_out
+        if any(ctx[flag] for flag in needed_by):
+            _write(target, _render(env, f'mobile/{tmpl_name}', ctx))
+        elif target.exists():
+            target.unlink()
+    for tmpl_name, rel_out in _MOBILE_STATIC_TEMPLATES:
+        _write(mobile_dir / rel_out, _render(env, f'mobile/{tmpl_name}', ctx))
+    # The list panel's state and query logic is the Web's own module, copied unchanged so the
+    # Web and Expo lists cannot disagree on what a sort, a filter or the search box means.
+    _write(mobile_dir / 'lib' / '_list_query.ts',
+           (Path(__file__).resolve().parent.parent / 'lib' / '_list_query.ts').read_text(encoding='utf-8'))
+    # Date / date-time / time value rules: the Web form and the service guard import the same
+    # module, so the mobile inputs and the API agree on what a valid value is.
+    _write(mobile_dir / 'lib' / '_date_value.ts',
+           (Path(__file__).resolve().parent.parent / 'lib' / '_date_value.ts').read_text(encoding='utf-8'))
+    # The time zone enum's IANA mapping is likewise the Web's own module, copied unchanged.
+    _write(mobile_dir / 'lib' / '_timezone.ts',
+           (Path(__file__).resolve().parent.parent / 'lib' / '_timezone.ts').read_text(encoding='utf-8'))
+    for tmpl_name, rel_out in _MOBILE_SCHEDULED_TASK_TEMPLATES:
+        target = mobile_dir / rel_out
+        if has_scheduled_tasks:
+            _write(target, _render(env, f'mobile/{tmpl_name}', ctx))
+        elif target.exists():
+            target.unlink()
+    if any(e.get('comments') for e in ctx['entities']):
+        _write(mobile_dir / 'lib' / 'comment-http.ts', _render(env, 'mobile/lib/comment-http.ts.jinja2', ctx))
+        _write(mobile_dir / 'lib' / 'comment-composer.ts', _render(env, 'mobile/lib/comment-composer.ts.jinja2', ctx))
+        _write(mobile_dir / 'components' / 'native' / 'CommentThread.tsx',
+               _render(env, 'mobile/components/native/CommentThread.tsx.jinja2', ctx))
+    _write(mobile_dir / 'lib' / 'entity-registry.ts', _render(env, 'mobile/lib/entity-registry.ts.jinja2', ctx))
+    _write(mobile_dir / 'lib' / 'messages.ts', _render(env, 'mobile/lib/messages.ts.jinja2', ctx))
+    generate_mobile_native_e2e(mobile_specs or [], nav['tabs'], mobile_dir, env)
+    print(f'  Mobile: {len(nav["tabs"])} footer tab(s) + search={has_search}'
+          f' + {len(ctx["entities"])} entity screen set(s) → mobile/')
+
+
+# ---------------------------------------------------------------------------
 # Main orchestrator
 # ---------------------------------------------------------------------------
+
+def _raw_properties(entity: dict, schema: dict) -> dict:
+    """The raw entity's own properties (column annotations live here)."""
+    model = entity['model']
+    raw_def = schema['definitions'].get(f'__{model}', {}) or schema['definitions'].get(model, {}) or {}
+    return raw_def.get('properties', {}) if isinstance(raw_def, dict) else {}
+
+
+def _resolve_search_columns(entity: dict, schema: dict, search_default_scope: str,
+                            report: bool = False) -> dict | None:
+    """The cross-entity search target determination of one entity, or None.
+
+    An entity is a search target per `x-generator.search.default_scope` and
+    `x-generate.search` (an `x-audit: true` entity is excluded unless it opts in
+    explicitly). Its `text_fields` are the explicit `x-search.text_fields` or the
+    auto-derived text columns; `trgm_index_fields` is the union of `text_fields`
+    and `bigm_fields`, the columns carrying a `_v2` COALESCE trigram GIN index.
+    The list panel search box matches `trgm_index_fields` of the same entity.
+    """
+    model      = entity['model']
+    parent     = entity['parent']
+    def_key    = entity['definition_key']
+    detail_def = schema['definitions'].get(def_key, {}) or {}
+    # base_def: the raw entity backing `model` (properties/x-display/x-audit live here).
+    base_def   = schema['definitions'].get(f'__{model}', {}) or schema['definitions'].get(model, {}) or {}
+
+    x_generate_raw = detail_def.get('x-generate') or base_def.get('x-generate') or {}
+    explicit_search = x_generate_raw.get('search')  # True, False, or None
+    # DP-b: x-audit:true entities default to search=false; requires explicit search:true to opt in
+    is_audited = bool(
+        detail_def.get('x-audit') is True
+        or base_def.get('x-audit') is True
+    )
+    if search_default_scope == 'all':
+        if is_audited and explicit_search is None:
+            is_search = False
+        else:
+            is_search = explicit_search is not False
+    else:  # opt_in
+        is_search = explicit_search is True
+    if not is_search:
+        return None
+
+    xsearch = detail_def.get('x-search') or {}
+    if 'text_fields' in xsearch:
+        # Explicit curated list takes priority
+        text_fields = xsearch['text_fields']
+    else:
+        # DP-1: auto-derive from base entity string properties (noise + sensitive excluded)
+        base_props = (base_def if isinstance(base_def, dict) else {}).get('properties', {})
+        text_fields = _derive_text_fields(base_props)
+        if not text_fields:
+            if report:
+                print(f'  Search: {parent!r} has no suitable text_fields after exclusion — skipping from UNION')
+            return None
+
+    # bigm_fields: fields for Japanese 2-gram search (default: same as text_fields)
+    bigm_fields   = xsearch.get('bigm_fields', text_fields)
+
+    # trgm_index_fields: Issue #725 fix (d) — single shared derivation for
+    # BOTH GIN-index-provisioning templates (create_gin_indexes.sql.jinja2
+    # and db_init.ts.jinja2), which previously indexed two independently
+    # named/scoped field sets (text_fields vs. bigm_fields respectively —
+    # a drift unrelated to the COALESCE bug those templates share, found
+    # while designing this fix). The union of text_fields and bigm_fields
+    # guarantees every field either predicate (`%` over text_fields,
+    # `ILIKE` over bigm_fields) can reference is covered by an index,
+    # regardless of whether an entity overrides `x-search.bigm_fields`
+    # narrower OR wider than its `text_fields`. dict.fromkeys(...) dedupes
+    # while preserving first-seen order (bigm_fields defaults to the same
+    # list object as text_fields, so the common case adds nothing).
+    trgm_index_fields = list(dict.fromkeys(text_fields + bigm_fields))
+
+    return {
+        'xsearch': xsearch, 'text_fields': text_fields,
+        'bigm_fields': bigm_fields, 'trgm_index_fields': trgm_index_fields,
+    }
+
 
 def generate(schema_path: str, output_dir: str) -> None:
     with open(schema_path) as f:
@@ -920,11 +1512,13 @@ def generate(schema_path: str, output_dir: str) -> None:
     cloud_provider = x_cloud.get('provider', '') if x_cloud else ''
 
     try:
+        validate_generator_config(schema)
         validate_schema(schema)
-        validate_prisma_indexes(Path(output_dir) / 'prisma' / 'schema.prisma')
+        validate_prisma_indexes(Path(output_dir) / 'prisma' / 'schema.prisma', schema)
         validate_self_only_creator_id_columns(schema, Path(output_dir) / 'prisma' / 'schema.prisma')
         validate_defaults_cross_schema(schema, Path(output_dir) / 'prisma' / 'schema.prisma')
         validate_submit_on_default_matches_prisma(schema, Path(output_dir) / 'prisma' / 'schema.prisma')
+        validate_version_of_prisma(schema, Path(output_dir) / 'prisma' / 'schema.prisma')
         validate_direct_attachment_prerequisite(schema, Path(output_dir) / 'prisma' / 'schema.prisma')
         validate_direct_attachment_reverse_fields(schema, Path(output_dir) / 'prisma' / 'schema.prisma')
     except SchemaValidationError as exc:
@@ -970,6 +1564,7 @@ def generate(schema_path: str, output_dir: str) -> None:
     _merged_fields, _merged_ns = _merge_file_wins_messages(_schema_fields, _schema_ns, _file_msgs)
     set_messages_fields(_merged_fields)
     set_messages_namespaces(_merged_ns)
+    set_entity_labels((_file_msgs or {}).get('EntityLabel'))
 
     # --- Bridge Prisma schema emission ---
     bridges = _collect_bridges(schema)
@@ -998,7 +1593,42 @@ def generate(schema_path: str, output_dir: str) -> None:
 
     doc_dir = out / 'docs' / 'generated'
     entity_doc_summaries: list[dict] = []
+    # OpenAPI 3.1 build artifact (cmd_1154, ai-agent-integration-design.md
+    # §7 Stage 1(a)): one entry per entity, collected in the same
+    # per-entity loop below (each build_entity_openapi(ctx) call reuses
+    # that entity's already-built build_context() data, same convention
+    # as entity_doc_summaries just above) and merged into a single
+    # docs/generated/openapi.json after the loop finishes.
+    openapi_entity_specs: list[dict] = []
     self_only_admin_bypass_entities: list[str] = []
+    # Per-entity read-scope facts (organization isolation, x-self-only, x-filter-values) for the
+    # dashboard aggregate, which applies the same scope as the entity's own list getters.
+    dashboard_access_scopes: dict[str, dict] = {}
+    # State-transition gatekeeper table (Issue #696, lib/state_transitions.ts)
+    # -- collected across every model in the per-entity loop below (each
+    # ctx['state_machine_transitions'] entry already carries the parsed
+    # diagram/approval edges build_context() assembles per entity) and
+    # rendered once, after the loop, into the single model-unit file --
+    # mirrors self_only_admin_bypass_entities just above, not
+    # dashboard_catalog (build_dashboard_catalog() re-derives from the raw
+    # schema independently; the transition edge derivation is expensive
+    # enough, and already done per entity by build_context(), that
+    # re-deriving it a second time outside the loop would be wasteful).
+    state_transition_entries: list[dict] = []
+    # x-payment entities (Issue #775), collected across the loop for the shared
+    # lib/payment/ files emitted after it.
+    payment_entities: list[dict] = []
+    # x-generator.mobile.enabled (default false): the Expo app under mobile/ is opt-in.
+    mobile_enabled = mobile_generation_enabled(schema)
+    # Entities that get native list / detail / form screens in the Expo app.
+    mobile_specs: list[dict] = []
+    mobile_ctxs: dict[str, dict] = {}
+    # (entity, reason) for each entity that keeps the placeholder screen, reported once the loop ends.
+    mobile_ineligible: list[tuple[str, str]] = []
+    # Entities with REST routes, hence an options route a mobile relation picker can call.
+    api_entities = {e['parent'] for e in entities if (e.get('generate_config') or {}).get('api')}
+    # Entities whose get<Entity>Detail() takes a userId (organization scope or x-self-only).
+    detail_takes_user_id: dict[str, bool] = {}
 
     for entity in entities:
         parent     = entity['parent']
@@ -1037,13 +1667,65 @@ def generate(schema_path: str, output_dir: str) -> None:
 
         # Base context for all other generators
         ctx = build_context(entity, schema, has_reactions=bool(named_constants))
+        # List panel search box: the entity's search trigram columns (a search target)
+        # adjusted by per-column `x-trigram-filter: true/false`; none -> no search box.
+        _search_cols = _resolve_search_columns(
+            entity, schema, schema.get('x-generator', {}).get('search', {}).get('default_scope', 'opt_in'),
+        )
+        ctx['trigram_search_fields'] = _resolve_trigram_search_fields(
+            _raw_properties(entity, schema), _search_cols['trgm_index_fields'] if _search_cols else [],
+        )
         # cmd_846(c): post-approval edit/delete/invalidate lockdown --
         # merged into ctx (not just svc_ctx) so it's available regardless
         # of which downstream block (service.ts vs. the invalidate-only
         # write below) needs it.
         ctx = {**ctx, **approval_lockdown_context(ctx, schema)}
+        # Row-level capability endpoint (GET .../capabilities): merged the
+        # same way and at the same point as approval_lockdown_context above
+        # -- it depends on the same one_to_one_rels list build_context()
+        # already resolved, and api_capabilities_route.ts.jinja2 (written
+        # further below, alongside api_detail_route.ts.jinja2) needs
+        # has_edit_guard/has_delete_guard/lockdown_field from the merge
+        # just above as well.
+        ctx = {**ctx, **capabilities_context(ctx)}
+        # x-payment (Issue #775): merged here so service.ts, the REST route
+        # and the Server Action all read the same resolved values.
+        ctx = {**ctx, **payment_context(model, schema)}
+        # "Save and continue editing" (Issue #832): needs is_payment and
+        # has_edit_guard from the merges above, so it is derived last.
+        ctx = {**ctx, 'can_continue': can_save_and_continue(ctx)}
+        if ctx.get('is_payment') and can_new:
+            payment_entities.append({
+                'entity_name': parent,
+                'module': parent,
+                'model': model,
+                'pascal_name': ctx['parent_pascal'],
+                'price_kind': ctx['payment_price_kind'],
+                'price_field': ctx['payment_price_field'],
+                'price_fk_field': ctx['payment_price_fk_field'],
+                'price_relation': ctx['payment_price_relation'],
+                # delete{Entity}(actorId, ids) when audited, else (ids).
+                'is_audited': bool(ctx.get('is_audited')),
+            })
         if ctx.get('is_self_only') and ctx.get('self_only_admin_bypass'):
             self_only_admin_bypass_entities.append(parent)
+        dashboard_access_scopes[parent] = {
+            'should_filter_by_org': bool(ctx.get('should_filter_by_org')),
+            'org_relationship_optional': bool(ctx.get('org_relationship_optional')),
+            'has_assignee_id': bool(ctx.get('has_assignee_id')),
+            'is_self_only': bool(ctx.get('is_self_only')),
+            'self_only_admin_bypass': bool(ctx.get('self_only_admin_bypass')),
+            'filter_values': dict(ctx.get('filter_values') or {}),
+        }
+        # State-transition entries: gated on can_update the same way
+        # service.ts.jinja2/service_validation.ts.jinja2 gate their own
+        # transition-check codegen -- a governed field on a can_update=false
+        # entity has no update{{Parent}}() to check it from, so there is
+        # nothing for lib/state_transitions.ts to guard for this model.
+        if ctx.get('state_machine_transitions') and ctx.get('can_update'):
+            state_transition_entries.extend(
+                {**t, 'model': model} for t in ctx['state_machine_transitions']
+            )
 
         # --- docs/{parent}.md + app/[locale]/docs/{parent}/page.mdx ---
         doc_ctx = build_doc_entity_context(ctx)
@@ -1060,9 +1742,11 @@ def generate(schema_path: str, output_dir: str) -> None:
             'can_api':    doc_ctx['can_api'],
             'has_chart':  doc_ctx['has_chart'],
         })
+        openapi_entity_specs.append(build_entity_openapi(ctx))
 
         # --- getters.ts ---
         getters_ctx = {**ctx, 'named_constants': named_constants}
+        detail_takes_user_id[parent] = bool(ctx.get('should_filter_by_org') or ctx.get('is_self_only'))
         _write(lib_dir / 'getters.ts', _render(env, 'getters.ts.jinja2', getters_ctx))
 
         # --- autocomplete/list custom filter stubs (cmd_377/379 DP-1) ---
@@ -1314,8 +1998,50 @@ def generate(schema_path: str, output_dir: str) -> None:
                 _write(api_dir / 'route.ts', _render(env, 'api_route.ts.jinja2', ctx))
             if can_view or can_edit or can_delete:
                 _write(api_dir / '[id]' / 'route.ts', _render(env, 'api_detail_route.ts.jinja2', ctx))
+            # --- capabilities route (row-level "what can I do to this
+            # row right now", AI-agent-integration design doc Stage 1
+            # scope item (b)) --- gated on can_view alone: it answers a
+            # read-time question and reuses get{Parent}Detail (the same
+            # org-scoped/self-only-scoped getter the GET detail handler
+            # above already calls) as its own fetch, so it needs nothing
+            # can_edit/can_delete wouldn't already gate inside the
+            # response body itself.
+            if can_view:
+                _write(api_dir / '[id]' / 'capabilities' / 'route.ts',
+                       _render(env, 'api_capabilities_route.ts.jinja2', ctx))
             if can_new or can_edit or can_delete:
                 _write(api_dir / 'bulk' / 'route.ts', _render(env, 'api_bulk_route.ts.jinja2', ctx))
+            # --- options route: REST side of the FK / relation autocomplete ---
+            # Every entity with a REST surface can be the target of a relation,
+            # and its getters.ts always carries search{Parent}Options.
+            _write(api_dir / 'options' / 'route.ts', _render(env, 'api_options_route.ts.jinja2', ctx))
+            # --- comment write routes: REST side of the comment box ---
+            # Gated like the add/update/delete{Parent}Comment Server Actions they run
+            # (emitted into actions.ts) and on the detail getter they read the record with.
+            if (ctx.get('comment_actions_code') and can_view
+                    and (can_new or can_edit or can_delete or can_invalidate)):
+                _comment_children = ctx.get('comment_children') or []
+                _comment_ctx = {
+                    **ctx,
+                    'comment_model': 'comment' if ctx.get('has_commentable') else _comment_children[0]['name'],
+                    'comment_parent_fk': 'commentable_id' if ctx.get('has_commentable') else f"{ctx['model']}_id",
+                }
+                _write(api_dir / '[id]' / 'comments' / 'route.ts',
+                       _render(env, 'api_comments_route.ts.jinja2', _comment_ctx))
+                _write(api_dir / '[id]' / 'comments' / '[commentId]' / 'route.ts',
+                       _render(env, 'api_comment_item_route.ts.jinja2', _comment_ctx))
+                print(f'  Comment routes → app/api/{parent}/[id]/comments/')
+            # --- attachments route: REST side of the attachment panel ---
+            # Runs setAttachmentsForBridge (lib/attachment/bridge_actions.ts), the Server Action the
+            # AttachmentSection panel calls, for an owner that has the panel and an edit screen.
+            if attachable_bridge_ready(ctx) and can_view and can_edit:
+                _write(api_dir / '[id]' / 'attachments' / 'route.ts',
+                       _render(env, 'api_attachments_route.ts.jinja2', {
+                           **ctx,
+                           'type_ts': attachment_type_ts(schema),
+                           'type_values': attachment_type_values(schema),
+                       }))
+                print(f'  Attachments route → app/api/{parent}/[id]/attachments/')
             print(f'  API routes → app/api/{parent}/')
 
             # --- CSV Export route (Phase 1: can_api+can_list+can_export) ---
@@ -1356,13 +2082,78 @@ def generate(schema_path: str, output_dir: str) -> None:
         if can_new or can_edit:
             ups_ctx = {**ctx, **form_upsert_context(ctx, schema)}
             _write(components_dir / 'FormUpsert.tsx', _render(env, 'form_upsert.tsx.jinja2', ups_ctx))
+            # Framework-neutral state / submit orchestration FormUpsert calls
+            # (and any other client rendering this form can call too).
+            _write(lib_dir / 'use_entity_form.ts', _render(env, 'use_entity_form.ts.jinja2', ups_ctx))
             val_ctx = {**ctx, **build_validation_context(ctx)}
             _write(components_dir / 'form_validation.ts', _render(env, 'form_validation.ts.jinja2', val_ctx))
+
+        # --- x-create-inline target: dialog + the server actions behind it ---
+        # Only for an entity some many-to-one field offers to create in place. The
+        # dialog needs the entity's own create form (can_new) and an update-free save
+        # path; validate.py has already rejected targets that cannot be created this way.
+        if ctx.get('is_inline_create_target') and can_new:
+            _write(lib_dir / 'inline_create.ts', _render(env, 'inline_create_actions.ts.jinja2', ctx))
+            _write(components_dir / 'InlineCreateDialog.tsx', _render(env, 'inline_create_dialog.tsx.jinja2', ctx))
+
+        # --- use_entity_capabilities.ts (shared by FormUpsert and FormView) ---
+        if can_new or can_edit or can_view:
+            _write(lib_dir / 'use_entity_capabilities.ts', _render(env, 'use_entity_capabilities.ts.jinja2', ctx))
 
         # --- FormView.tsx ---
         if can_view:
             fv_ctx = {**ctx, **form_view_context(ctx, schema)}
             _write(components_dir / 'FormView.tsx', _render(env, 'form_view.tsx.jinja2', fv_ctx))
+            _vo_view = version_of_for(entity['definition_key'], schema)
+            if _vo_view:
+                # x-version-of: the identity's version list/diff, rendered with this
+                # version entity's own detail markup (see version_fields.tsx.jinja2).
+                _vo_jsx = '\n'.join(i['jsx'] for i in fv_ctx['ordered_field_jsx'])
+                _vo_dir = out / 'components' / _vo_view['identity']
+                _vo_fields_ctx = {
+                    'parent': parent, 'parent_pascal': ctx['parent_pascal'],
+                    'ordered_field_jsx': fv_ctx['ordered_field_jsx'],
+                    'field_names': [i['field'] for i in fv_ctx['ordered_field_jsx']],
+                    'enum_ns_hooks': fv_ctx['view_enum_ns_hooks'],
+                    'enum_opt_setups': fv_ctx['view_enum_opt_setups'],
+                    'uses_tf': 'tf(' in _vo_jsx or 'tf(' in fv_ctx['view_enum_opt_setups'],
+                    'uses_te': 'te(' in _vo_jsx or 'te(' in fv_ctx['view_enum_opt_setups'],
+                    'use_dayjs': 'dayjs' in _vo_jsx,
+                    'uses_format_label_value': 'formatLabelValue' in _vo_jsx,
+                    'uses_decimal_format': 'formatDecimalDisplay' in _vo_jsx,
+                    'needs_datetime_wrapper': '<DateTimeWrapper' in _vo_jsx,
+                    'needs_image_display': '<ImageDisplay' in _vo_jsx,
+                    'needs_link_display': '<AppFieldExternalLink' in _vo_jsx,
+                    'needs_single_attachment_display': '<SingleAttachmentDisplay' in _vo_jsx,
+                    'ui_imports': [c for c in ('AppFieldText', 'AppFieldBoolean', 'AppFieldRelation') if f'<{c}' in _vo_jsx],
+                }
+                _vo_fields_ctx['uses_t'] = _vo_fields_ctx['uses_tf'] or _vo_fields_ctx['uses_te'] or 'useTranslations' in (
+                    fv_ctx['view_enum_ns_hooks'] + fv_ctx['view_enum_opt_setups'])
+                _write(_vo_dir / 'VersionFields.tsx', _render(env, 'version_fields.tsx.jinja2', _vo_fields_ctx))
+                _vo_children = [
+                    {**c, 'title_key': to_camel_case(c['property_name'])}
+                    for c in version_diff_children(entity['definition_key'], schema, ctx['children_raw'])
+                ]
+                _write(_vo_dir / 'VersionHistory.tsx', _render(env, 'version_history.tsx.jinja2', {
+                    'parent': parent, 'parent_pascal': ctx['parent_pascal'],
+                    'identity': _vo_view['identity'], 'number': _vo_view['number'], 'children': _vo_children,
+                }))
+                print(f"  VersionHistory → components/{_vo_view['identity']}/")
+            if fv_ctx.get('has_approval_section'):
+                _write(lib_dir / 'use_entity_approval_actions.ts',
+                       _render(env, 'use_entity_approval_actions.ts.jinja2', fv_ctx))
+
+        # --- native mobile screens (Expo): plain CRUD plus relation pickers ---
+        # Rendered after the loop: a "Create new" control needs the target's own spec.
+        mobile_spec = (
+            build_mobile_entity_spec(ctx, build_validation_context(ctx), to_title_case, api_entities)
+            if mobile_enabled else None
+        )
+        if mobile_spec:
+            mobile_specs.append(mobile_spec)
+            mobile_ctxs[parent] = ctx
+        elif mobile_enabled:
+            mobile_ineligible.append((parent, mobile_ineligible_reason(ctx, api_entities)))
 
         # --- <Child>BridgeGrid.tsx (parent-embedded DataGrid, cmd_167 §4) ---
         # Emitted for bridge children (entities with new-form x-bridge); the
@@ -1429,7 +2220,9 @@ def generate(schema_path: str, output_dir: str) -> None:
         # parent-embedded grid (cmd_167 §4); the form binds the parent implicitly
         # and never shows a parent picker.
         if can_new or ctx.get('bridge_child_ir'):
-            _write(app_dir / 'new' / 'page.tsx', _render(env, 'page_new.tsx.jinja2', ctx))
+            _write(app_dir / 'new' / 'page.tsx', _render(
+                env, 'page_new.tsx.jinja2', {**ctx, 'version_of_new': version_of_for(parent, schema)},
+            ))
 
         # --- page edit ---
         if can_edit:
@@ -1502,7 +2295,7 @@ def generate(schema_path: str, output_dir: str) -> None:
         _bridge_field = get_splittable_bridge_field(_def_val)
         _has_inventory_bridge = bool(
             _bridge_field in _split_entity_props
-            and (_def_val.get('x-approval', {}) or {}).get('on_approved', {}).get('emit_hook')
+            and approval_key.get_or_empty(_def_val).get('on_approved', {}).get('emit_hook')
         )
 
         # cmd_307 FIX-β: entities whose x-ledger-source has event_type 'receive'
@@ -1722,6 +2515,11 @@ def generate(schema_path: str, output_dir: str) -> None:
             _render(env, 'dashboard_catalog.ts.jinja2', {'entities': dashboard_catalog}),
         )
         print(f'  Dashboard catalog → lib/dashboard/catalog.ts ({len(dashboard_catalog)} entities)')
+        _write(
+            out / 'lib' / 'dashboard' / 'access-scope.ts',
+            _render(env, 'dashboard_access_scope.ts.jinja2', {'scopes': dashboard_access_scopes}),
+        )
+        print(f'  Dashboard access scope → lib/dashboard/access-scope.ts ({len(dashboard_access_scopes)} entities)')
 
     # --- Dashboard aggregate REST endpoint (app/api/dashboard/aggregate/route.ts) ---
     # Emitted when at least one dashboardable entity exists so the endpoint
@@ -1781,6 +2579,15 @@ def generate(schema_path: str, output_dir: str) -> None:
             }),
         )
         print('  Direct-attachment FK action → lib/attachment/direct_actions.ts')
+        # The same function over REST, for callers that carry a mobile access token or API key.
+        _write(
+            out / 'app' / 'api' / 'attachment' / 'direct' / 'route.ts',
+            _render(env, 'api_direct_attachment_route.ts.jinja2', {
+                'type_ts': attachment_type_ts(schema),
+                'type_values': attachment_type_values(schema),
+            }),
+        )
+        print('  Direct-attachment FK REST route → app/api/attachment/direct/route.ts')
 
     # --- Named constants (lib/reaction_constants.ts) ---
     # named_constants was pre-computed before the entity loop
@@ -1790,6 +2597,12 @@ def generate(schema_path: str, output_dir: str) -> None:
             _render(env, 'reaction_constants.ts.jinja2', {'named_constants': named_constants}),
         )
         print(f'  Named constants → lib/reaction_constants.ts ({len(named_constants)} constant(s))')
+
+    # --- Time zone enum mapping (lib/_timezone.ts) ---
+    # Always written: the `Timezone` Prisma enum ships with the base schema, and the IANA spelling
+    # of each member exists only in this generated map.
+    _write(out / 'lib' / '_timezone.ts', _render_timezone_ts(env))
+    print(f'  Time zone mapping → lib/_timezone.ts ({len(TIMEZONES)} zones)')
 
     # --- Self-only admin-bypass entity list (lib/self_only_admin_bypass_entities.ts) ---
     # x-self-only entities with admin_bypass:true (cmd_536) — the privileged
@@ -1810,10 +2623,35 @@ def generate(schema_path: str, output_dir: str) -> None:
     )
     print(f'  Self-only admin-bypass entities → lib/self_only_admin_bypass_entities.ts ({len(self_only_admin_bypass_entities)} entities)')
 
+    # --- State-transition gatekeeper table (lib/state_transitions.ts) ---
+    # state_transition_entries was collected across every model in the
+    # entity loop above -- see its declaration comment. Unlike
+    # self_only_admin_bypass_entities.ts, this file's import is itself
+    # conditional: service_validation.ts.jinja2 only imports
+    # assertTransitionAllowed/assertInitialStateAllowed from here inside
+    # `{% if state_machine_transitions and can_update %}` -- the exact same
+    # condition that gates whether an entity contributes to
+    # state_transition_entries above. So a schema with zero governed fields
+    # produces zero entries AND zero importers, and this file can be
+    # skipped entirely rather than always emitted empty -- a schema with no
+    # x-state-machines usage must generate byte-identical output to before
+    # this feature existed (Issue #696).
+    if state_transition_entries:
+        _write(
+            out / 'lib' / 'state_transitions.ts',
+            _render(env, 'state_transitions.ts.jinja2', {
+                'entries': state_transition_entries,
+            }),
+        )
+        print(f'  State-transition gatekeeper table → lib/state_transitions.ts ({len(state_transition_entries)} governed field(s))')
+    else:
+        print('  State-transition gatekeeper table → skipped (no state-transition-governed fields in this schema)')
+
     # --- anonymize_user.ts (lib/compliance/anonymize_user.ts) ---
     # Emitted when the user entity has at least one x-pii annotated field.
     # Generates GDPR Art.17 right-to-erasure scrub function from x-pii annotations.
     anon_ctx = build_anonymize_user_context(schema)
+    anon_ctx['storage'] = 'gcs' if cloud_enabled and cloud_provider == 'gcp' else 'vercel'
     if anon_ctx['has_pii_user']:
         _write(
             out / 'lib' / 'compliance' / 'anonymize_user.ts',
@@ -1842,11 +2680,16 @@ def generate(schema_path: str, output_dir: str) -> None:
             _render(env, 'mention_search.ts.jinja2', {}),
         )
         print('  Mention candidate search → lib/mention/search.ts')
+        _write(
+            out / 'app' / 'api' / 'mention' / 'users' / 'route.ts',
+            _render(env, 'mention_users_api_route.ts.jinja2', {}),
+        )
+        print('  Mention candidate search route → app/api/mention/users/route.ts')
 
     # --- Stripe payment integration write-once stubs (cmd_706) ---
     # Emitted when at least one entity in any schema definition declares
     # x-payment: true. Same write-once convention as
-    # lib/<parent>/invalidate_handler.ts (cmd_583) -- these three files are
+    # lib/<parent>/invalidate_handler.ts (cmd_583) -- these files are
     # only written if they don't already exist, so a consumer's hand-written
     # implementation is never clobbered by regeneration.
     _has_any_payment = any(
@@ -1863,14 +2706,45 @@ def generate(schema_path: str, output_dir: str) -> None:
             'Set STRIPE_SECRET_KEY in your env (this stub fails closed if unset).',
         )
 
-        checkout_route_path = out / 'app' / 'api' / 'payment' / 'checkout' / 'route.ts'
-        _write_stub(checkout_route_path, _render(env, 'stripe_checkout_route_stub.ts.jinja2', {}))
-        print('  Checkout Session stub → app/api/payment/checkout/route.ts')
-        _note_stub_created(
-            checkout_route_path,
-            'x-payment: true is declared on at least one entity.',
-            'Fill in the price_id / line_items for what you are selling.',
-        )
+        # Checkout's success_url / cancel_url land on these two pages; without
+        # them the buyer gets a 404 right after paying or cancelling.
+        for _kind in ('success', 'cancel'):
+            _return_page_path = out / 'app' / '[locale]' / 'payment' / _kind / 'page.tsx'
+            _write_stub(_return_page_path, _render(env, f'stripe_payment_{_kind}_page.tsx.jinja2', {}))
+            print(f'  Checkout return page → app/[locale]/payment/{_kind}/page.tsx')
+            _note_stub_created(
+                _return_page_path,
+                'x-payment: true is declared on at least one entity.',
+                f'Adjust the Payment.{_kind}* copy in messages/*.json or replace the markup.',
+            )
+
+        # --- x-payment record lifecycle (Issue #775) --- always regenerated
+        # (not stubs): they depend on which entities declare x-payment.
+        # lib/payment/payment_source.ts is the one place that reads an
+        # entity's Price id and quantity.
+        _payment_ctx = {'payment_entities': payment_entities}
+        # One write-once quantity hook per x-payment entity: how many units of
+        # the resolved Price one record is charged for (default 1). Hand-edited
+        # for e.g. a per-night charge; never overwritten once it exists.
+        for _pay_e in payment_entities:
+            _qty_path = out / 'lib' / 'payment' / f"{_pay_e['entity_name']}_quantity.ts"
+            _write_stub(_qty_path, _render(env, 'payment_quantity_stub.ts.jinja2', _pay_e))
+            print(f"  Payment quantity hook → lib/payment/{_pay_e['entity_name']}_quantity.ts")
+            _note_stub_created(
+                _qty_path,
+                f"x-payment: true is declared on {_pay_e['entity_name']}.",
+                'Edit it if one record should be charged for more than one unit of the Price.',
+            )
+        for _pay_tpl, _pay_out in (
+            ('payment_source.ts.jinja2', 'payment_source.ts'),
+            ('payment_checkout.ts.jinja2', 'checkout.ts'),
+            ('payment_stripe_client.ts.jinja2', 'stripe_client.ts'),
+            ('payment_fake_stripe.ts.jinja2', 'fake_stripe.ts'),
+            ('payment_webhook_dispatch.ts.jinja2', 'payment_webhook_dispatch.ts'),
+        ):
+            _write(out / 'lib' / 'payment' / _pay_out, _render(env, _pay_tpl, _payment_ctx))
+        print(f'  Payment lifecycle → lib/payment/ ({len(payment_entities)} entities)')
+        inject_payable_into_schema(out / 'prisma' / 'schema.prisma')
 
         webhook_route_path = out / 'app' / 'api' / 'webhooks' / 'stripe' / 'route.ts'
         _write_stub(webhook_route_path, _render(env, 'stripe_webhook_route_stub.ts.jinja2', {}))
@@ -1878,8 +2752,20 @@ def generate(schema_path: str, output_dir: str) -> None:
         _note_stub_created(
             webhook_route_path,
             'x-payment: true is declared on at least one entity.',
-            'Set STRIPE_WEBHOOK_SECRET and implement checkout.session.completed handling.',
+            'Set STRIPE_WEBHOOK_SECRET (the payment lifecycle itself is handled in lib/payment/).',
         )
+
+    # --- audit_log storage factory and jobs (x-generator.audit-log-storage.enabled) ---
+    # Opt-in (default off). lib/audit-log-ops/ is the only entry point into the storage
+    # adapters (lib/audit-log-integrity/storage-{gcs,s3}.ts), so an app that leaves the flag
+    # off references neither adapter and neither storage SDK.
+    if audit_log_storage_enabled(schema):
+        for _als_tpl, _als_out in (
+            ('audit_log_storage_factory.ts.jinja2', 'storage-factory.ts'),
+            ('audit_log_jobs.ts.jinja2', 'jobs.ts'),
+        ):
+            _write(out / 'lib' / 'audit-log-ops' / _als_out, _render(env, _als_tpl, {}))
+        print('  audit_log storage factory and jobs → lib/audit-log-ops/')
 
     # --- Comment/reaction service layer (lib/comment/service.ts, lib/reaction/service.ts) ---
     # Emitted whenever x-internal enum entities exist (i.e., reactions are
@@ -1942,7 +2828,7 @@ def generate(schema_path: str, output_dir: str) -> None:
     for _val_def_key, _val_def_val in defs.items():
         if not _val_def_key.startswith('__'):
             continue
-        _val_x_approval = _val_def_val.get('x-approval')
+        _val_x_approval = approval_key.get(_val_def_val)
         if not _val_x_approval:
             continue
         _val_entity_name = _val_def_key[2:]
@@ -1957,11 +2843,32 @@ def generate(schema_path: str, output_dir: str) -> None:
             _val_entity_name, _val_x_approval, _val_def_val.get('properties', {}), _val_is_editable,
         )
 
+    # x-version-of: one lib/<version>/version_of.ts per version entity (number
+    # assignment, open-draft guard), called from service.ts and
+    # the approval dispatch modules below. Always regenerated, never a stub.
+    for _vo in version_of_entities(schema):
+        _write(
+            out / 'lib' / _vo['version'] / 'version_of.ts',
+            _render(env, 'version_of.ts.jinja2', _vo),
+        )
+        print(f"  Version helpers → lib/{_vo['version']}/version_of.ts")
+        # New-version screen: the prefill the create page reads (no record is
+        # created until the user saves).
+        _write(
+            out / 'lib' / _vo['version'] / 'version_of_prefill.ts',
+            _render(env, 'version_of_prefill.ts.jinja2', {
+                **_vo, 'pascal': to_pascal_case(_vo['version']),
+                'detail_takes_user_id': detail_takes_user_id.get(_vo['version'], False),
+                'plan': version_of_prefill_plan(_vo, schema, _prisma_models),
+            }),
+        )
+        print(f"  New-version prefill → lib/{_vo['version']}/version_of_prefill.ts")
+
     approvable_entities = []
     for def_key, def_val in defs.items():
         if not def_key.startswith('__'):
             continue
-        x_approval = def_val.get('x-approval')
+        x_approval = approval_key.get(def_val)
         if not x_approval:
             continue
         on_approved = x_approval.get('on_approved', {})
@@ -2016,6 +2923,8 @@ def generate(schema_path: str, output_dir: str) -> None:
             'pascal_name': to_pascal_case(def_key),
             'set_fields': resolved_sf,
             'emit_hook': bool(on_approved.get('emit_hook', False)),
+            'exclusive_check': bool(set(resolved_sf) & set(_exclusive_parent_all_columns(def_key, schema))),
+            'version_of': version_of_for(def_key, schema),
             'has_ledger_source': bool(x_ledger_source),
             'ledger_source': x_ledger_source,
             'is_ship_skeleton': False,
@@ -2026,6 +2935,21 @@ def generate(schema_path: str, output_dir: str) -> None:
         _render(env, 'on_approved_dispatch.ts.jinja2', {'approvable_entities': approvable_entities}),
     )
     print(f'  Approval dispatch → lib/approval_request/on_approved_dispatch.ts ({len(approvable_entities)} entities)')
+
+    # --- x-exclusive-parents helper (lib/<child>/exclusive_parents.ts) ---
+    #
+    # One helper per declared child, written whether or not the child has pages
+    # of its own: the parent's nested child writes import it even for a child
+    # with no x-generate. Nothing is written for a schema without the key.
+    for def_key in defs:
+        if def_key.startswith('__'):
+            continue
+        _excl_columns = _exclusive_parent_all_columns(def_key, schema)
+        if _excl_columns:
+            _write(
+                out / 'lib' / def_key / 'exclusive_parents.ts',
+                _render(env, 'exclusive_parents.ts.jinja2', {'child': def_key, 'columns': _excl_columns}),
+            )
 
     # --- Approvable target resolver (lib/approval_request/resolve_target.ts) ---
     #
@@ -2092,7 +3016,7 @@ def generate(schema_path: str, output_dir: str) -> None:
     for def_key, def_val in defs.items():
         if not def_key.startswith('__'):
             continue
-        x_approval = def_val.get('x-approval')
+        x_approval = approval_key.get(def_val)
         if not x_approval:
             continue
         on_rejected = x_approval.get('on_rejected', {})
@@ -2106,7 +3030,9 @@ def generate(schema_path: str, output_dir: str) -> None:
             'pascal_name': to_pascal_case(def_key),
             'set_fields': resolved_sf,
             'emit_hook': bool(on_rejected.get('emit_hook', False)),
+            'exclusive_check': bool(set(resolved_sf) & set(_exclusive_parent_all_columns(def_key, schema))),
             'terminal': bool(on_rejected.get('terminal', False)),
+            'version_of': version_of_for(def_key, schema),
         })
     # tx / approvableId are only read inside the per-entity `if (set_fields or
     # emit_hook)` body (see the template); rejectedByUserId only inside the
@@ -2144,7 +3070,7 @@ def generate(schema_path: str, output_dir: str) -> None:
     for def_key, def_val in defs.items():
         if not def_key.startswith('__'):
             continue
-        x_approval = def_val.get('x-approval')
+        x_approval = approval_key.get(def_val)
         if not x_approval:
             continue
         on_withdrawn = x_approval.get('on_withdrawn', {})
@@ -2158,6 +3084,8 @@ def generate(schema_path: str, output_dir: str) -> None:
             'pascal_name': to_pascal_case(def_key),
             'set_fields': resolved_sf,
             'emit_hook': bool(on_withdrawn.get('emit_hook', False)),
+            'exclusive_check': bool(set(resolved_sf) & set(_exclusive_parent_all_columns(def_key, schema))),
+            'version_of': version_of_for(def_key, schema),
         })
     # Always emitted (mirrors on_rejected_dispatch.ts above) — actions.ts
     # imports this unconditionally, so it must exist even with zero entities.
@@ -2194,7 +3122,7 @@ def generate(schema_path: str, output_dir: str) -> None:
     for def_key, def_val in defs.items():
         if not def_key.startswith('__'):
             continue
-        x_approval = def_val.get('x-approval')
+        x_approval = approval_key.get(def_val)
         if not x_approval:
             continue
         def_key = def_key[2:]
@@ -2282,6 +3210,7 @@ def generate(schema_path: str, output_dir: str) -> None:
             'task_id': task_id,
             'handler': x_scheduled['handler'],
             'interval': x_scheduled.get('interval', ''),
+            'depends_on': list(x_scheduled.get('depends_on') or []),
             'expires_at_before_now': bool(xfilter.get('expires_at_before_now', False)),
             'status_in': xfilter.get('status_in') or [],
             'module_path': def_key,
@@ -2317,6 +3246,7 @@ def generate(schema_path: str, output_dir: str) -> None:
             'task_id': task_id,
             'handler': x_scheduled_bulk['handler'],
             'interval': x_scheduled_bulk.get('interval', ''),
+            'depends_on': list(x_scheduled_bulk.get('depends_on') or []),
             'module_path': module_path,
             'run_name': to_camel_case(task_id) + 'Run',
         })
@@ -2343,6 +3273,23 @@ def generate(schema_path: str, output_dir: str) -> None:
         _render(env, 'scheduled_task_registry.ts.jinja2', {'scheduled_task_entities': all_scheduled_tasks}),
     )
     print(f'  Scheduled task registry → lib/scheduled-tasks/registry.ts ({len(all_scheduled_tasks)} task(s))')
+    _write(
+        out / 'lib' / 'scheduled-tasks' / 'run-guard.ts',
+        _render(env, 'scheduled_task_run_guard.ts.jinja2', {'has_tasks': bool(all_scheduled_tasks)}),
+    )
+    print('  Scheduled task completion-record guard → lib/scheduled-tasks/run-guard.ts')
+    if all_scheduled_tasks:
+        inject_scheduled_task_run_into_schema(out / 'prisma' / 'schema.prisma')
+        # Admin page over the completion records (run status, why a task did not
+        # run, rerun / mark resolved / skip). Emitted only with the table it reads.
+        for template, target in _SCHEDULED_TASK_ADMIN_FILES:
+            _write(out / target, _render(env, template, {}))
+        print('  Scheduled task admin page → app/[locale]/scheduled_task_run')
+    _write(
+        out / 'lib' / 'scheduled-tasks' / 'dependencies.ts',
+        _render(env, 'scheduled_task_dependencies.ts.jinja2', {'scheduled_task_entities': all_scheduled_tasks}),
+    )
+    print('  Scheduled task dependency graph → lib/scheduled-tasks/dependencies.ts')
     _write(
         out / 'app' / 'api' / 'scheduled-tasks' / '[task]' / 'route.ts',
         _render(env, 'scheduled_task_route.ts.jinja2', {}),
@@ -2376,46 +3323,19 @@ def generate(schema_path: str, output_dir: str) -> None:
         # proxies the 'user' view instead of having its own raw twin).
         base_def   = schema['definitions'].get(f'__{model}', {}) or schema['definitions'].get(model, {}) or {}
 
-        # Determine if this entity is search-enabled per DP-3 logic
-        # generate_config only contains the standard keys; read 'search' from raw x-generate
-        x_generate_raw = detail_def.get('x-generate') or base_def.get('x-generate') or {}
-        explicit_search = x_generate_raw.get('search')  # True, False, or None
-        # DP-b: x-audit:true entities default to search=false; requires explicit search:true to opt in
-        is_audited = bool(
-            detail_def.get('x-audit') is True
-            or base_def.get('x-audit') is True
-        )
-        if search_default_scope == 'all':
-            if is_audited and explicit_search is None:
-                is_search = False
-            else:
-                is_search = explicit_search is not False
-        else:  # opt_in
-            is_search = explicit_search is True
-
-        if not is_search:
+        resolved = _resolve_search_columns(entity, schema, search_default_scope, report=True)
+        if resolved is None:
             continue
-
-        xsearch = detail_def.get('x-search') or {}
-        if 'text_fields' in xsearch:
-            # Explicit curated list takes priority
-            text_fields = xsearch['text_fields']
-        else:
-            # DP-1: auto-derive from base entity string properties (noise + sensitive excluded)
-            base_props = (base_def if isinstance(base_def, dict) else {}).get('properties', {})
-            text_fields = _derive_text_fields(base_props)
-            if not text_fields:
-                print(f'  Search: {parent!r} has no suitable text_fields after exclusion — skipping from UNION')
-                continue
+        xsearch           = resolved['xsearch']
+        text_fields       = resolved['text_fields']
+        bigm_fields       = resolved['bigm_fields']
+        trgm_index_fields = resolved['trgm_index_fields']
 
         snippet_field = xsearch.get('snippet_field')
         if snippet_field is None:
             # Priority: x-display primary → first text_field
             primary = _get_primary_display_field([detail_def, base_def])
             snippet_field = primary if (primary and primary in text_fields) else text_fields[0]
-
-        # bigm_fields: fields for Japanese 2-gram search (default: same as text_fields)
-        bigm_fields   = xsearch.get('bigm_fields', text_fields)
 
         # Build SQL fragments used inside the Jinja2 template
         # ts_vector_fields_sql: concat of all text fields, COALESCE-wrapped
@@ -2424,10 +3344,16 @@ def generate(schema_path: str, output_dir: str) -> None:
         # similarity_fields_sql: GREATEST(similarity(f1, q), similarity(f2, q), ...)
         sim_exprs = ', '.join(f"similarity(COALESCE({f}, ''), ${{q}})" for f in text_fields)
 
-        # similarity_where_sql: each field comparison with > 0.3 threshold
-        # Used in WHERE: (sim_f1 > 0.3 OR sim_f2 > 0.3)
+        # similarity_where_sql: the `%` operator form, not `similarity(a, b) >
+        # threshold` — the function-call form is opaque to the planner and
+        # never uses the trgm GIN index, regardless of whether it exists
+        # (confirmed via EXPLAIN ANALYZE, cmd_1162 Phase 2 / Issue #725 fix
+        # (b)). `%` reads its threshold from the `pg_trgm.similarity_threshold`
+        # session GUC, which already defaults (at the PostgreSQL level) to
+        # _SEARCH_SIMILARITY_THRESHOLD — see search_helpers.ts.jinja2's
+        # buildSearchQuery for why no explicit SET is needed.
         sim_where_single = ' OR '.join(
-            f"similarity(COALESCE({f}, ''), ${{q}}) > 0.3" for f in text_fields
+            f"COALESCE({f}, '') % ${{q}}" for f in text_fields
         )
 
         # bigm_where_sql: ILIKE containment check (gin_trgm_ops accelerates ILIKE '%q%').
@@ -2580,7 +3506,34 @@ def generate(schema_path: str, output_dir: str) -> None:
             'parent_access_where_ts_var':   f'{parent}ParentAccessWhere',
             'parent_or_clauses_ts_var':     f'{parent}ParentOrClauses',
             'bigm_fields':               bigm_fields,
+            'trgm_index_fields':         trgm_index_fields,
         })
+
+    # --- Trigram GIN index plan (one entry per Prisma model) ---
+    # A column gets one `idx_<model>_<field>_gin_trgm_v2` COALESCE index however many features
+    # name it: the cross-entity search (`trgm_index_fields` of a search entity) and the list
+    # panel's `x-trigram-filter: true` columns share it. An entity that is not a search target
+    # is indexed only for its `x-trigram-filter: true` columns. The legacy bare-column indexes
+    # are left as they are.
+    declared_trigram: dict[str, list[str]] = {}
+    for entity in entities:
+        extra = _trigram_filter_true_fields(_raw_properties(entity, schema))
+        if extra:
+            declared_trigram[entity['model']] = list(dict.fromkeys(declared_trigram.get(entity['model'], []) + extra))
+
+    gin_index_entities: list[dict] = []
+    for se in search_entities:
+        gin_index_entities.append({
+            'model':             se['model'],
+            'trgm_index_fields': list(dict.fromkeys(se['trgm_index_fields'] + declared_trigram.get(se['model'], []))),
+        })
+    searched_models = {se['model'] for se in search_entities}
+    for model, declared in declared_trigram.items():
+        if model not in searched_models:
+            gin_index_entities.append({'model': model, 'trgm_index_fields': declared})
+    index_ctx_base = {
+        'search_entities': search_entities, 'gin_index_entities': gin_index_entities,
+    }
 
     if search_entities:
         # getAssociatedOrganizations/associatedOrgIds are only referenced
@@ -2594,6 +3547,7 @@ def generate(schema_path: str, output_dir: str) -> None:
         search_ctx = {
             'search_entities': search_entities,
             'has_org_filtered_search_entity': has_org_filtered_search_entity,
+            'similarity_threshold': _SEARCH_SIMILARITY_THRESHOLD,
         }
         _write(
             out / 'lib' / 'search' / 'helpers.ts',
@@ -2611,19 +3565,9 @@ def generate(schema_path: str, output_dir: str) -> None:
             out / 'app' / '[locale]' / 'search' / 'actions.ts',
             _render(env, 'search_actions.ts.jinja2', search_ctx),
         )
-        _write(
-            out / 'scripts' / 'create-gin-indexes.sql',
-            _render(env, 'create_gin_indexes.sql.jinja2', search_ctx),
-        )
         entity_names = ', '.join(e['entity_type'] for e in search_entities)
         print(f'  Search routes → lib/search/helpers.ts + app/api/search/route.ts ({entity_names})')
         print(f'  Search UI page → app/[locale]/search/page.tsx + actions.ts')
-        print(f'  Search GIN index script → scripts/create-gin-indexes.sql (apply with psql before test:e2e:cy:api)')
-        _write(
-            out / 'lib' / 'db-init.ts',
-            _render(env, 'db_init.ts.jinja2', search_ctx),
-        )
-        print(f'  DB init → lib/db-init.ts (GIN indexes for gin_trgm_ops)')
     else:
         # DP-2: no searchable entities — delete stale search files to prevent broken imports
         print('  Search: no searchable entities — skipping search route generation')
@@ -2632,9 +3576,38 @@ def generate(schema_path: str, output_dir: str) -> None:
             out / 'app' / 'api' / 'search' / 'route.ts',
             out / 'app' / '[locale]' / 'search' / 'page.tsx',
             out / 'app' / '[locale]' / 'search' / 'actions.ts',
-            out / 'scripts' / 'create-gin-indexes.sql',
         ]
         for _stale in _stale_search_files:
+            if _stale.exists():
+                _stale.unlink()
+                print(f'  Search: deleted stale {_stale.relative_to(out)}')
+
+    # --- Trigram GIN index provisioning (cross-entity search and list panel search) ---
+    # Issue #725 fix (a): wire ensureSearchIndexes() into Next.js's own instrumentation hook.
+    # Vercel and GCP/Cloud Run both bootstrap through this same Next.js mechanism, so one
+    # template reaches both deployment targets (unlike a provisioning-script hook, which GCP's
+    # gcp-seed.sh would need duplicating for Vercel). CREATE INDEX CONCURRENTLY IF NOT EXISTS
+    # makes ensureSearchIndexes() non-blocking and a fast no-op after the first successful
+    # cold start. scripts/create-gin-indexes.sql remains as a manual/migration-time fallback.
+    # Written whenever a search entity or an `x-trigram-filter` column exists.
+    if gin_index_entities:
+        _write(
+            out / 'scripts' / 'create-gin-indexes.sql',
+            _render(env, 'create_gin_indexes.sql.jinja2', index_ctx_base),
+        )
+        print(f'  Search GIN index script → scripts/create-gin-indexes.sql (apply with psql before test:e2e:cy:api)')
+        _write(
+            out / 'lib' / 'db-init.ts',
+            _render(env, 'db_init.ts.jinja2', index_ctx_base),
+        )
+        print(f'  DB init → lib/db-init.ts (GIN indexes for gin_trgm_ops)')
+        _write(
+            out / 'instrumentation.ts',
+            _render(env, 'instrumentation.ts.jinja2', index_ctx_base),
+        )
+        print(f'  Instrumentation hook → instrumentation.ts (calls ensureSearchIndexes() on cold start)')
+    else:
+        for _stale in (out / 'scripts' / 'create-gin-indexes.sql', out / 'instrumentation.ts'):
             if _stale.exists():
                 _stale.unlink()
                 print(f'  Search: deleted stale {_stale.relative_to(out)}')
@@ -2647,6 +3620,18 @@ def generate(schema_path: str, output_dir: str) -> None:
     _write(
         out / 'app' / '[locale]' / 'docs' / 'page.mdx',
         convert_md_to_mdx(index_md, link_prefix='docs/'),
+    )
+
+    # --- docs/generated/openapi.json (cmd_1154, ai-agent-integration-
+    # design.md §7 Stage 1(a)): build artifact only -- see
+    # generators_openapi.py's own header for why this is never served by
+    # a deployed app by default. Written via the same _write() helper (and
+    # therefore tracked in the same generate-code manifest) as every other
+    # generated file, not a bespoke file-write path.
+    openapi_document = assemble_openapi_document(openapi_entity_specs, mention_search=_has_any_mention)
+    _write(
+        doc_dir / 'openapi.json',
+        json.dumps(openapi_document, indent=2, sort_keys=True) + '\n',
     )
 
     # --- Cypress test generation ---
@@ -2683,14 +3668,20 @@ def generate(schema_path: str, output_dir: str) -> None:
             helper_ctx = helper_context(parent, children, schema, model, def_key, gen_cfg)
             _write(cypress_support / parent / 'helper.ts',
                    _render(env, 'test_helper.ts.jinja2', helper_ctx))
+            # Hand-written dependency values for helper.ts. Write-once, and no
+            # AUTO-GENERATED marker, so the orphan sweep never removes it.
+            _write_stub(cypress_support / parent / 'helper_custom.ts',
+                        _render(env, 'helper_custom_stub.ts.jinja2', {'parent': parent}))
 
             # e2e spec (desktop)
             spec_ctx = spec_context(parent, children, schema, model, def_key, gen_cfg, _test_entity_count)
-            # cmd_625 (Phase 3): reuse helper_ctx's already-resolved primary_fk_dep
-            # so both spec templates' beforeEach can guard the per-test-case
-            # callIndex reset task on the same condition test_helper.ts.jinja2
+            # Reuse helper_ctx's already-resolved primary_fk_dep and uses_call_seq
+            # so both spec templates' beforeEach guard the per-test-case
+            # callIndex reset task on the very predicate test_helper.ts.jinja2
             # used to decide whether _reset{{ pascal }}CallSeq() exists at all.
             spec_ctx['primary_fk_dep'] = helper_ctx.get('primary_fk_dep')
+            spec_ctx['uses_call_seq'] = helper_ctx.get('uses_call_seq', False)
+            spec_ctx['is_payment'] = payment_context(model, schema)['is_payment']
             _write(cypress_e2e / f'{parent}.cy.ts',
                    _prefix_unused_then_callback_params(_strip_unused_exact_re_helper(
                        _render(env, 'test_spec.cy.ts.jinja2', spec_ctx))))
@@ -2708,11 +3699,16 @@ def generate(schema_path: str, output_dir: str) -> None:
             # api spec (only if api: true)
             if gen_cfg.get('api'):
                 api_ctx = api_spec_context(parent, children, schema, model, def_key, gen_cfg, _test_entity_count)
-                # cmd_628 (Phase 3 follow-up): same primary_fk_dep threading as
-                # spec_ctx above — api_spec_context() never computes it either,
-                # so without this the reset guard in test_api_spec.cy.ts.jinja2
-                # would be permanently undefined/falsy.
+                # Same threading as spec_ctx above — api_spec_context() computes
+                # neither value, so without this the reset guard in
+                # test_api_spec.cy.ts.jinja2 would be permanently falsy.
                 api_ctx['primary_fk_dep'] = helper_ctx.get('primary_fk_dep')
+                api_ctx['uses_call_seq'] = helper_ctx.get('uses_call_seq', False)
+                # x-payment: POST answers { record, checkoutUrl } (api_route.ts.jinja2),
+                # so the created row is under `record`, not at the top of the body.
+                api_ctx['created_body'] = (
+                    '.body.record' if payment_context(model, schema)['is_payment'] else '.body'
+                )
                 _write(cypress_e2e / 'api' / f'{parent}.cy.ts',
                        _prefix_unused_then_callback_params(
                            _render(env, 'test_api_spec.cy.ts.jinja2', api_ctx)))
@@ -2732,7 +3728,20 @@ def generate(schema_path: str, output_dir: str) -> None:
                 'children': children,
                 'definition_key': def_key,
                 'primary_fk_dep': helper_ctx.get('primary_fk_dep'),
+                'uses_call_seq': helper_ctx.get('uses_call_seq', False),
             })
+
+        # Filter/sort wiring-check spec (cmd_1200(b)): one cross-entity spec,
+        # not per-entity — auto-selects one representative (entity, column)
+        # per ColumnFilterKind found among this schema's own (api:true,
+        # test:true, list:true) entities and exercises FIELD_KINDS ->
+        # buildFilter/buildOrderBy's real dispatch path via plain REST GET
+        # queries against each consumer repo's own actual data. No new x-*
+        # key. A kind absent from this schema is reported in the generated
+        # file's own header comment, never silently omitted.
+        filter_sort_matrix = select_filter_sort_representatives(entities, schema)
+        _write(cypress_e2e / 'api' / '_filter_sort_matrix_gen.cy.ts',
+               _render(env, 'test_filter_sort_matrix.cy.ts.jinja2', filter_sort_matrix))
 
     # Task registry (always generated — empty registry when test_entities is
     # empty is still valid TypeScript, keeping cypress.config.ts's import
@@ -2756,7 +3765,24 @@ def generate(schema_path: str, output_dir: str) -> None:
 
     # --- i18n / config updates ---
     print('\nUpdating i18n and navigation config...')
-    update_i18n_and_config(entities, schema, out)
+    update_i18n_and_config(entities, schema, out, has_search=bool(search_entities))
+
+    # --- Expo mobile app (footer tabs + drill-down from the same nav source) ---
+    if mobile_enabled:
+        print('\nGenerating mobile app...')
+        resolve_mobile_create_forms(mobile_specs)
+        resolve_mobile_view_links(mobile_specs)
+        for mobile_spec in mobile_specs:
+            generate_mobile_entity(mobile_spec, mobile_ctxs[mobile_spec['name']], schema, out / 'mobile', env)
+            print(f'  Mobile screens → mobile/ ({mobile_spec["name"]})')
+        generate_mobile_target(entities, schema, out, env, has_search=bool(search_entities), mobile_specs=mobile_specs,
+                               has_mention=_has_any_mention,
+                               search_entity_types=[e['entity_type'] for e in search_entities])
+        for line in ineligible_log_lines(mobile_ineligible):
+            print(line)
+        _write(out / 'mobile' / 'MOBILE_ENTITIES.md', ineligible_note(mobile_ineligible))
+    else:
+        print('\nSkipping mobile app (x-generator.mobile.enabled is not true)')
 
     # --- upload/route.ts (Vercel Blob, base default) ---
     # Always emitted so app/api/upload/route.ts is a full generated artifact
@@ -2768,17 +3794,22 @@ def generate(schema_path: str, output_dir: str) -> None:
     )
     print('  Upload route (Vercel Blob) → app/api/upload/route.ts')
 
-    # --- x-cloud opt-in: GCP Cloud Run artifacts ---
-    if cloud_enabled and cloud_provider == 'gcp':
-        print('\nGenerating GCP Cloud Run artifacts (x-cloud:gcp opt-in)...')
-
-        # Dockerfile
+    # --- Dockerfile + .dockerignore ---
+    # Emitted for x-cloud:gcp and for any schema that declares scheduled tasks,
+    # whatever the deployment provider: scripts/gcp-task-runner.sh builds the
+    # task-runner image from them, and an app hosted on Vercel can still run its
+    # nightly trigger there. Vercel ignores both files.
+    is_gcp = cloud_enabled and cloud_provider == 'gcp'
+    if is_gcp or schema_declares_scheduled_tasks(schema):
         _write(out / 'Dockerfile', _render(env, 'Dockerfile.jinja2', {}))
-        print('  Cloud: Dockerfile → Dockerfile')
+        print('  Container: Dockerfile → Dockerfile')
 
-        # .dockerignore
         _write(out / '.dockerignore', _render(env, '.dockerignore.jinja2', {}))
-        print('  Cloud: .dockerignore → .dockerignore')
+        print('  Container: .dockerignore → .dockerignore')
+
+    # --- x-cloud opt-in: GCP Cloud Run artifacts ---
+    if is_gcp:
+        print('\nGenerating GCP Cloud Run artifacts (x-cloud:gcp opt-in)...')
 
         # upload/route.ts — replace Vercel Blob with GCS
         _write(

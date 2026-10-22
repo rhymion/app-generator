@@ -1,0 +1,180 @@
+import { useState } from 'react';
+import { Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useMessages } from '@/lib/messages';
+import type { ActionFailure } from '@/lib/_errors';
+import { postApprovalAction, type ApprovalAction, type ApprovalState } from '@/lib/entity-http';
+
+/** One `approval_request` row as the REST detail embeds it (`approvable.approval_requests`). */
+export type ApprovalRequestRow = {
+  id: string;
+  status: string;
+  approval_flow?: { approver_role?: { name?: string } | null } | null;
+};
+
+type Props = {
+  /** Every row of the record's approvable, any round. */
+  requests: ApprovalRequestRow[];
+  /** The server's answer for this caller (`GET /api/<entity>/<id>/capabilities`, `approval`). */
+  state: ApprovalState | null;
+  /** The entity's `x-approval.on_withdrawn` declaration (`HAS_ON_WITHDRAWN` of the shared module). */
+  hasOnWithdrawn: boolean;
+  /** Maps a failed call to the user-facing text, through the entity's shared error mapping. */
+  describeError: (failure: ActionFailure) => string;
+  /** Called after an action succeeded, so the screen reloads the record. */
+  onChanged: () => void;
+};
+
+// The Web dialog's choices for a rejection reason, with the same labels.
+const REASON_KINDS: { value: number; label: string }[] = [
+  { value: 0, label: 'Customer' },
+  { value: 1, label: 'Internal' },
+];
+
+/**
+ * The approval section of the detail screen: the current round's requests with their status and,
+ * under the same conditions as the Web section, the approve / reject / withdraw buttons. Which
+ * buttons appear is the server's answer (`state`); this component evaluates no role, order or
+ * ownership rule of its own. Each action is a call to the approval REST route.
+ */
+export function ApprovalSection({ requests, state, hasOnWithdrawn, describeError, onChanged }: Props) {
+  const { t } = useMessages();
+  const [dialog, setDialog] = useState<{ requestId: string; action: ApprovalAction } | null>(null);
+  const [message, setMessage] = useState('');
+  const [reason, setReason] = useState('');
+  const [reasonKind, setReasonKind] = useState<number | undefined>(undefined);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  if (!state) return null;
+  const currentIds = new Set(state.current_round_request_ids);
+  const round = requests.filter((r) => currentIds.has(r.id));
+  const actionable = new Set(state.actionable_request_ids);
+  // Withdrawing closes the whole round, so any pending row of it names the action.
+  const withdrawTarget = round.find((r) => r.status === 'pending');
+  const canWithdraw = hasOnWithdrawn && state.can_withdraw && withdrawTarget !== undefined;
+  if (round.length === 0) return null;
+
+  const open = (requestId: string, action: ApprovalAction) => {
+    setMessage('');
+    setReason('');
+    setReasonKind(undefined);
+    setError(null);
+    setDialog({ requestId, action });
+  };
+
+  const confirm = async () => {
+    if (!dialog) return;
+    setBusy(true);
+    const result = await postApprovalAction(dialog.requestId, dialog.action, {
+      ...(message.trim() ? { message: message.trim() } : {}),
+      ...(dialog.action === 'reject' && reason.trim() ? { reason: reason.trim() } : {}),
+      ...(dialog.action === 'reject' && reasonKind !== undefined ? { reason_kind: reasonKind } : {}),
+    });
+    setBusy(false);
+    if (result.ok) {
+      setDialog(null);
+      onChanged();
+      return;
+    }
+    setError(describeError(result));
+  };
+
+  const title = dialog ? t(`Fields.${dialog.action}`) : '';
+
+  return (
+    <View style={styles.container} testID="approval-section">
+      <Text style={styles.heading}>{t('Fields.approvalRequests')}</Text>
+      {round.map((r) => (
+        <View key={r.id} style={styles.row} testID={`approval-row-${r.id}`}>
+          <View style={styles.rowText}>
+            <Text style={styles.role}>{r.approval_flow?.approver_role?.name ?? '-'}</Text>
+            <Text testID={`approval-status-${r.id}`}>{t(`ApprovalRequestStatus.${r.status}`)}</Text>
+          </View>
+          {actionable.has(r.id) ? (
+            <View style={styles.buttons}>
+              <Pressable style={styles.approve} onPress={() => open(r.id, 'approve')} testID={`approval-approve-${r.id}`}>
+                <Text style={styles.buttonText}>{t('Fields.approve')}</Text>
+              </Pressable>
+              <Pressable style={styles.reject} onPress={() => open(r.id, 'reject')} testID={`approval-reject-${r.id}`}>
+                <Text style={styles.buttonText}>{t('Fields.reject')}</Text>
+              </Pressable>
+            </View>
+          ) : null}
+        </View>
+      ))}
+      {canWithdraw ? (
+        <Pressable
+          style={styles.withdraw}
+          onPress={() => withdrawTarget && open(withdrawTarget.id, 'withdraw')}
+          testID="approval-withdraw"
+        >
+          <Text>{t('Fields.withdraw')}</Text>
+        </Pressable>
+      ) : null}
+      <Modal visible={dialog !== null} transparent animationType="fade" onRequestClose={() => setDialog(null)}>
+        <View style={styles.backdrop}>
+          <View style={styles.dialog} testID="approval-dialog">
+            <Text style={styles.heading}>{title}</Text>
+            <Text style={styles.label}>{t('Fields.message')}</Text>
+            <TextInput
+              style={styles.input}
+              value={message}
+              onChangeText={setMessage}
+              multiline
+              testID="approval-message"
+            />
+            {dialog?.action === 'reject' ? (
+              <>
+                <View style={styles.kinds}>
+                  {REASON_KINDS.map((kind) => (
+                    <Pressable
+                      key={kind.value}
+                      style={[styles.kind, reasonKind === kind.value ? styles.kindSelected : null]}
+                      onPress={() => setReasonKind(reasonKind === kind.value ? undefined : kind.value)}
+                      testID={`approval-reason-kind-${kind.value}`}
+                    >
+                      <Text>{kind.label}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+                <Text style={styles.label}>Rejection reason</Text>
+                <TextInput style={styles.input} value={reason} onChangeText={setReason} multiline testID="approval-reason" />
+              </>
+            ) : null}
+            {error ? <Text style={styles.error} testID="approval-error">{error}</Text> : null}
+            <View style={styles.buttons}>
+              <Pressable style={styles.approve} onPress={confirm} disabled={busy} testID="approval-confirm">
+                <Text style={styles.buttonText}>{title}</Text>
+              </Pressable>
+              <Pressable style={styles.cancel} onPress={() => setDialog(null)} disabled={busy} testID="approval-cancel">
+                <Text>{t('Common.cancel')}</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { marginTop: 20, gap: 8 },
+  heading: { fontSize: 16, fontWeight: '700' },
+  row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, paddingVertical: 6 },
+  rowText: { flex: 1, gap: 2 },
+  role: { fontWeight: '600' },
+  buttons: { flexDirection: 'row', gap: 8 },
+  approve: { backgroundColor: '#15803d', borderRadius: 6, paddingHorizontal: 12, paddingVertical: 8 },
+  reject: { backgroundColor: '#dc2626', borderRadius: 6, paddingHorizontal: 12, paddingVertical: 8 },
+  withdraw: { alignSelf: 'flex-start', borderWidth: 1, borderColor: '#d97706', borderRadius: 6, paddingHorizontal: 12, paddingVertical: 8 },
+  cancel: { borderWidth: 1, borderColor: '#d1d5db', borderRadius: 6, paddingHorizontal: 12, paddingVertical: 8 },
+  buttonText: { color: '#ffffff', fontWeight: '600' },
+  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', padding: 16 },
+  dialog: { backgroundColor: '#ffffff', borderRadius: 8, padding: 16, gap: 8 },
+  label: { fontSize: 13, fontWeight: '600', color: '#374151' },
+  input: { borderWidth: 1, borderColor: '#d1d5db', borderRadius: 6, padding: 8, minHeight: 60 },
+  kinds: { flexDirection: 'row', gap: 8 },
+  kind: { borderWidth: 1, borderColor: '#d1d5db', borderRadius: 6, paddingHorizontal: 10, paddingVertical: 6 },
+  kindSelected: { backgroundColor: '#dbeafe', borderColor: '#2563eb' },
+  error: { color: '#b91c1c' },
+});

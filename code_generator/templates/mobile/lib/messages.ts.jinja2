@@ -1,0 +1,36 @@
+// Generated from messages/<locale>.json: the namespaces the entity screens use.
+import { useLocale } from './locale';
+
+type Values = Record<string, string | number>;
+
+const MESSAGES: Record<string, Record<string, Record<string, string>>> = {{ messages_json }};
+
+function lookup(locale: string, key: string): string | undefined {
+  const dot = key.indexOf('.');
+  const namespace = key.slice(0, dot);
+  const name = key.slice(dot + 1);
+  return MESSAGES[locale]?.[namespace]?.[name] ?? MESSAGES['en']?.[namespace]?.[name];
+}
+
+function format(template: string, values?: Values): string {
+  if (!values) return template;
+  return template.replace(/\{(\w+)\}/g, (match, name: string) => (name in values ? String(values[name]) : match));
+}
+
+/**
+ * Translators with the shape the entity hooks take: `terr` is scoped to the
+ * `Errors` namespace, `tmsg` is the root translator (it also answers has()).
+ * `t` is the root translator for the screens' own strings.
+ */
+export function useMessages() {
+  const { locale } = useLocale();
+  const t = (key: string, values?: Values): string => {
+    const found = lookup(locale, key);
+    return found === undefined ? key : format(found, values);
+  };
+  const terr = (key: string, values?: Values): string => t(`Errors.${key}`, values);
+  const tmsg = Object.assign((key: string, values?: Values): string => t(key, values), {
+    has: (key: string): boolean => lookup(locale, key) !== undefined,
+  });
+  return { t, terr, tmsg };
+}

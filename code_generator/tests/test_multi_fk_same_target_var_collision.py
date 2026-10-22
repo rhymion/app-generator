@@ -100,19 +100,23 @@ def _party_def() -> dict:
 def _claim_def(multi_fk: bool) -> dict:
     properties = {
         'id': {'type': 'string', 'pattern': '^c[a-z0-9]{24,}$'},
+        'claim_no': {'type': 'string'},
         'insured_party_id': {
             'type': 'string',
             'x-relationship': {'type': 'many-to-one', 'target': 'party', 'labelField': 'name'},
         },
     }
-    required = ['id', 'insured_party_id']
+    required = ['id', 'claim_no', 'insured_party_id']
     if multi_fk:
         properties['insurer_party_id'] = {
             'type': 'string',
             'x-relationship': {'type': 'many-to-one', 'target': 'party', 'labelField': 'name'},
         }
         required.append('insurer_party_id')
-    return {'type': 'object', 'required': required, 'properties': properties}
+    return {
+        'type': 'object', 'required': required, 'properties': properties,
+        'x-display': {'table': [{'claim_no': {'primary': True}}]},
+    }
 
 
 def _schema(multi_fk: bool) -> dict:
@@ -236,10 +240,10 @@ class TestSpecContextFailCreateSectionsMultiFk:
         ctx = spec_context('claim', [], _schema(multi_fk=False), 'claim', 'claim_detail', _GEN_CFG, 0)
         all_fill_cmds = '\n'.join(ctx['all_fill_cmds'])
         assert 'deps.insuredParty.name' in all_fill_cmds
-        # Only one required field (the FK itself) -> it's the one skipped, so
-        # fail_create_5_1's fill_cmds end up empty rather than the section
-        # being absent entirely.
-        assert ctx['fail_create_5_1']['fill_cmds'] == []
+        # 5.1 skips the required non-autocomplete field (the primary `claim_no`),
+        # so the FK is the one required field it still fills.
+        fill_cmds_5_1 = '\n'.join(ctx['fail_create_5_1']['fill_cmds'])
+        assert 'deps.insuredParty.name' in fill_cmds_5_1
 
 
 def _indirect_schema() -> dict:
@@ -352,3 +356,62 @@ class TestHelperContextIndirectDepNoDanglingReference:
         declare_idx = code.index(f'const {used_var} =')
         use_idx = code.index(f'party_id: {used_var}.id')
         assert declare_idx < use_idx
+
+
+def _rel(target: str) -> dict:
+    return {'type': 'string', 'x-relationship': {'type': 'many-to-one', 'target': target, 'labelField': 'name'}}
+
+
+def _placement_schema(primary: str) -> dict:
+    """step_placement has two FKs to step; `primary` names the x-display
+    primary FK (reference name, without `_id`)."""
+    return {
+        'definitions': {
+            'step': _party_def(),
+            'step_placement': {
+                'type': 'object',
+                'required': ['id', 'placed_step_id', 'step_id'],
+                'x-display': {'table': [{primary: {'primary': True}}]},
+                'properties': {
+                    'id': {'type': 'string', 'pattern': '^c[a-z0-9]{24,}$'},
+                    'placed_step_id': _rel('step'),
+                    'step_id': _rel('step'),
+                },
+            },
+            'step_placement_detail': {'allOf': [{'$ref': '#/definitions/step_placement'}]},
+        },
+    }
+
+
+class TestPrimaryFkSecondInstanceAgreesWithApiSpec:
+    """The API spec reads `deps.<primaryVar>2` for the primary display FK
+    (PUT /:id, bulk PUT). The helper must return that second instance for a
+    multi-FK target too, with and without the `<var>Alias` fresh instance."""
+
+    def _rendered_return_and_spec_vars(self, primary: str):
+        schema = _placement_schema(primary)
+        h = helper_context('step_placement', [], schema, 'step_placement', 'step_placement_detail', _GEN_CFG)
+        code = _template_env().get_template('test_helper.ts.jinja2').render(**h)
+        returns = [ln for ln in code.splitlines() if ln.strip().startswith('return {')]
+        spec = api_spec_context('step_placement', [], schema, 'step_placement', 'step_placement_detail', _GEN_CFG)
+        import re
+        used = set(re.findall(r'deps\.(\w+2)\b', repr(spec)))
+        return returns, used
+
+    def test_primary_fk_with_alias_in_play(self):
+        """placed_step is primary, so the alias `placedStepAlias` is created
+        too; `placedStep2` must still be returned (3 spec examples: 4.1, 9.1, 9.2)."""
+        returns, used = self._rendered_return_and_spec_vars('placed_step')
+        assert used == {'placedStep2'}
+        assert any('placedStep2' in r for r in returns)
+
+    def test_primary_fk_without_alias(self):
+        returns, used = self._rendered_return_and_spec_vars('step')
+        assert used == {'step2'}
+        assert any('step2' in r for r in returns)
+
+    def test_helper_declares_second_instance(self):
+        schema = _placement_schema('placed_step')
+        h = helper_context('step_placement', [], schema, 'step_placement', 'step_placement_detail', _GEN_CFG)
+        code = _template_env().get_template('test_helper.ts.jinja2').render(**h)
+        assert 'const placedStep2 =' in code

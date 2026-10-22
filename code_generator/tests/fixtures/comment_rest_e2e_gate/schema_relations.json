@@ -1,0 +1,18 @@
+{
+  "user": [
+    "created_cr_tickets cr_ticket[] @relation(\"CrTicketCreator\")",
+    "updated_cr_tickets cr_ticket[] @relation(\"CrTicketUpdater\")",
+    "created_cr_assets cr_asset[] @relation(\"CrAssetCreator\")",
+    "updated_cr_assets cr_asset[] @relation(\"CrAssetUpdater\")"
+  ],
+  "organization": [
+    "cr_tickets cr_ticket[]",
+    "cr_assets cr_asset[]"
+  ],
+  "commentable": [
+    "cr_ticket cr_ticket?"
+  ],
+  "attachable": [
+    "cr_asset cr_asset?"
+  ]
+}

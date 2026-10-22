@@ -1,5 +1,3 @@
-import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
-import { AdapterDayjs } from '@mui/x-date-pickers/AdapterDayjs';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import type { Dayjs } from 'dayjs';
 
@@ -21,16 +19,14 @@ export function AppDatePicker({ label, value, onChange, disabled, minDate, maxDa
       : undefined;
 
   return (
-    <LocalizationProvider dateAdapter={AdapterDayjs}>
-      <DatePicker
-        label={label}
-        value={value}
-        onChange={onChange}
-        disabled={disabled}
-        minDate={minDate}
-        maxDate={maxDate}
-        slotProps={textFieldSlotProps}
-      />
-    </LocalizationProvider>
+    <DatePicker
+      label={label}
+      value={value}
+      onChange={onChange}
+      disabled={disabled}
+      minDate={minDate}
+      maxDate={maxDate}
+      slotProps={textFieldSlotProps}
+    />
   );
 }

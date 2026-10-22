@@ -78,12 +78,19 @@ from generate_types import extract_entities, extract_named_constants
 # Rules
 # ---------------------------------------------------------------------------
 
-# Patterns banned anywhere in generator-emitted code.
+# Patterns banned anywhere in generator-emitted code. Receiver is `\w+\.`,
+# not a literal `prisma.` — issue #737 found that PR #727's
+# `tx.$executeRawUnsafe(...)` (`tx` being the callback param of
+# `prisma.$transaction(async (tx) => ...)`) went undetected by a prior
+# `prisma\.` -anchored version of this pattern precisely because the
+# receiver wasn't the `prisma` identifier itself. The rule is about which
+# *method* is called, not which variable it happens to be called on, so the
+# receiver is intentionally unconstrained beyond "some identifier.".
 _RAW_PATTERNS = [
-    ('raw:queryRaw',         re.compile(r'\bprisma\.\$queryRaw\b')),
-    ('raw:executeRaw',       re.compile(r'\bprisma\.\$executeRaw\b')),
-    ('raw:queryRawUnsafe',   re.compile(r'\bprisma\.\$queryRawUnsafe\b')),
-    ('raw:executeRawUnsafe', re.compile(r'\bprisma\.\$executeRawUnsafe\b')),
+    ('raw:queryRaw',         re.compile(r'\b\w+\.\$queryRaw\b')),
+    ('raw:executeRaw',       re.compile(r'\b\w+\.\$executeRaw\b')),
+    ('raw:queryRawUnsafe',   re.compile(r'\b\w+\.\$queryRawUnsafe\b')),
+    ('raw:executeRawUnsafe', re.compile(r'\b\w+\.\$executeRawUnsafe\b')),
 ]
 
 # Mutating delegate methods. Matches `prisma.<model>.<method>(` so we don't
@@ -236,6 +243,24 @@ def _bespoke_reaction_files(schema: dict, root: Path) -> list[Path]:
     ]
 
 
+# issue #737: search (lib/search/helpers.ts) and DB bootstrap (lib/db-init.ts)
+# are schema-wide generated files -- like the reaction files above, they are
+# gated by a project-wide condition (generate.py's DP-3 `search_entities`
+# non-empty check), not scoped under a single entity's own directory, so
+# _generated_files_for_entity's per-entity walk never reaches them. This was
+# the actual reason PR #727's `tx.$executeRawUnsafe('SET LOCAL ...')` (inside
+# search_helpers.ts.jinja2) went unscanned -- not only the regex's `prisma.`
+# receiver anchor fixed above, but this scan never visiting the file at all.
+# Existence is checked by the caller (mirrors _bespoke_reaction_files'
+# p.exists() gate above) instead of re-deriving DP-3's exact opt_in/all
+# eligibility rule here, so this list can't drift out of sync with it.
+def _search_and_db_init_files(root: Path) -> list[Path]:
+    return [
+        root / 'lib' / 'search' / 'helpers.ts',
+        root / 'lib' / 'db-init.ts',
+    ]
+
+
 def _enumerate_generated_files(entities: list[dict], root: Path) -> list[Path]:
     out: list[Path] = []
     seen: set[Path] = set()
@@ -355,6 +380,9 @@ def check(schema_path: Path, root: Path,
     entities = _load_entities(schema, schema_path)
     files = _enumerate_generated_files(entities, root)
     for p in _bespoke_reaction_files(schema, root):
+        if p.exists() and p not in files:
+            files.append(p)
+    for p in _search_and_db_init_files(root):
         if p.exists() and p not in files:
             files.append(p)
     allowlist = _load_allowlist(allowlist_path)

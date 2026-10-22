@@ -1,0 +1,374 @@
+import { apiFetch, ApiError } from './api-base';
+import type { ActionFailure, ErrorCode, MessageArgs, ValidationReason } from './_errors';
+import type { ModelPermissions } from './authz';
+import type { SortItem } from './_list_query';
+import { timeOfDayToInstant } from './_date_value';
+
+export type { SortItem };
+
+// `page` is zero-based, like the REST list routes.
+// `sort`, `filter` and `search` use the REST list's own parameters: `sort=<field>:<dir>,...`, `f.<field>=<value>` and `search=<text>`.
+export type PageOpts = { page?: number; pageSize?: number; sort?: SortItem[]; filter?: Record<string, string>; search?: string };
+
+export type PageResult<T> = { rows: T[]; total: number; page: number; pageSize: number };
+
+export type RowCapabilities = { update: boolean; delete: boolean };
+
+const STATUS_CODE: Record<number, ErrorCode> = {
+  401: 'SESSION_EXPIRED',
+  403: 'PERMISSION_DENIED',
+  404: 'NOT_FOUND',
+  409: 'CONFLICT',
+  422: 'VALIDATION',
+};
+
+type ErrorBody = {
+  error?: string;
+  code?: ErrorCode;
+  field?: string;
+  reason?: ValidationReason;
+  messageKey?: string;
+  messageArgs?: MessageArgs;
+};
+
+/**
+ * Maps a failed REST call to the ActionFailure the entity hooks already map to
+ * user-facing text. The REST error body carries the same code / field / reason /
+ * messageKey fields the Server Action transport returns. A failure that never
+ * reached the server (no network) is UNKNOWN. Never throws: the form hook runs
+ * the save inside a transition, where a rejection would be unhandled.
+ */
+export function toActionFailure(err: unknown): ActionFailure {
+  if (!(err instanceof ApiError)) return { ok: false, errorCode: 'UNKNOWN' };
+  let body: ErrorBody = {};
+  try {
+    body = JSON.parse(err.message) as ErrorBody;
+  } catch {
+    // a non-JSON error body: fall back to the status alone
+  }
+  const failure: ActionFailure = { ok: false, errorCode: body.code ?? STATUS_CODE[err.status] ?? 'UNKNOWN' };
+  if (body.field) failure.field = body.field;
+  if (body.reason) failure.reason = body.reason;
+  if (body.messageKey) failure.messageKey = body.messageKey;
+  if (body.messageArgs) failure.messageArgs = body.messageArgs;
+  return failure;
+}
+
+export function buildQuery(opts: PageOpts = {}): string {
+  const params: string[] = [];
+  if (opts.page !== undefined) params.push(`page=${opts.page}`);
+  if (opts.pageSize) params.push(`pageSize=${opts.pageSize}`);
+  if (opts.sort && opts.sort.length > 0) {
+    params.push(`sort=${opts.sort.map((item) => `${encodeURIComponent(item.field)}:${item.dir}`).join(',')}`);
+  }
+  for (const [field, value] of Object.entries(opts.filter ?? {})) {
+    if (value !== '') params.push(`f.${encodeURIComponent(field)}=${encodeURIComponent(value)}`);
+  }
+  if (opts.search) params.push(`search=${encodeURIComponent(opts.search)}`);
+  return params.length ? `?${params.join('&')}` : '';
+}
+
+/** Outcome of a bulk delete: the ids removed, and a failure for each id the server refused. */
+export type BulkDeleteResult =
+  | { ok: true; deleted: string[]; failed: { id: string; failure: ActionFailure }[] }
+  | ActionFailure;
+
+type BulkResponse = { results: { index: number; success: boolean; error?: string }[] };
+
+/**
+ * `DELETE /api/<entity>/bulk`: the REST side of the Web list's multi-select delete. The route
+ * answers per record (permission and existence are checked for each); a failure of the whole
+ * call is mapped like any other REST failure. Never rejects.
+ */
+export async function bulkDelete(entity: string, ids: string[]): Promise<BulkDeleteResult> {
+  try {
+    const response = await apiFetch<BulkResponse>(`/api/${entity}/bulk`, {
+      method: 'DELETE',
+      body: JSON.stringify(ids.map((id) => ({ id }))),
+    });
+    const deleted: string[] = [];
+    const failed: { id: string; failure: ActionFailure }[] = [];
+    for (const result of response.results) {
+      const id = ids[result.index];
+      if (result.success) deleted.push(id);
+      else {
+        const message = result.error ?? '';
+        const errorCode: ErrorCode = message.startsWith('Access denied')
+          ? 'PERMISSION_DENIED'
+          : message.startsWith('Not found') ? 'NOT_FOUND' : 'UNKNOWN';
+        failed.push({ id, failure: { ok: false, errorCode } });
+      }
+    }
+    return { ok: true, deleted, failed };
+  } catch (err) {
+    return toActionFailure(err);
+  }
+}
+
+export type FieldKind =
+  | 'text' | 'number' | 'decimal' | 'boolean' | 'enum' | 'date' | 'datetime' | 'time'
+  // A foreign key or one-to-one selector (one record) and a many-to-many (a set of records).
+  | 'relation' | 'relation_many'
+  // A direct attachment: the form holds the id of an `attachment` row created for an uploaded file.
+  | 'attachment'
+  // An editable collection of new rows of a one-to-many child; the rows travel in the body as the property array.
+  | 'child_rows';
+
+/** One field of an entity's form, as described by the schema. */
+export type FieldSpec = {
+  key: string;
+  label: string;
+  kind: FieldKind;
+  required: boolean;
+  readonly: boolean;
+  options: string[];
+  /** Text shown for each option, by position; empty when the option is its own text. */
+  optionLabels: string[];
+  /** Dictionary key (`EntityLabel.<name>`) of each option's word, by position; set on an entity-name field only. */
+  optionLabelKeys?: string[];
+  numericEnum: boolean;
+  // The fields below are set on a relation field only (`relationName` and `bodyKey` also on an attachment field).
+  /** Entity whose records are offered. */
+  target?: string;
+  /** Column of the target that names a record; a list of columns (or dotted paths) joins them with a space. */
+  labelField?: string | string[];
+  /** Key under which the REST detail embeds the related record(s). */
+  relationName?: string;
+  /** Key the REST write routes read the selection from (an id, or a list of ids). */
+  bodyKey?: string;
+  /** Form fields forwarded to the target's autocomplete filter as the form's current values. */
+  contextFields?: string[];
+  /** The field declares x-create-inline and its target has a native create form. */
+  createInline?: boolean;
+  /** The target has a detail screen of its own: the detail screen links each related record to it. */
+  viewLink?: boolean;
+  /** A row field only: the schema default, which starts a new row and which the server applies when the field is left blank. */
+  defaultValue?: string;
+  /** A `child_rows` field only: the fields each row draws (`bodyKey` and `relationName` name the property array). */
+  rowFields?: FieldSpec[];
+  /** A hand-written component draws the field: on the form (`upsert`), on the detail screen (`view`), or both. */
+  custom?: { upsert: boolean; view: boolean };
+  /** A credential the API never returns (an upsert-only string such as a password): the detail screen does not list it. */
+  writeOnly?: boolean;
+};
+
+/** One row of a `child_rows` field as the form holds it: the saved row's id (absent on a new row) and the field values. */
+export type ChildRowState = { id?: string; values: Record<string, string | boolean | string[]> };
+
+/** The body value of one scalar or relation field from its form text; `undefined` leaves the key out. */
+function fieldBodyValue(spec: FieldSpec, text: string): unknown {
+  if (spec.kind === 'relation' || spec.kind === 'attachment') return text === '' ? null : text;
+  if (spec.kind === 'boolean') return text === 'true';
+  if (text === '') return null;
+  if (spec.kind === 'time') return timeOfDayToInstant(text) ?? text;
+  // The API hands the value to Prisma, which wants a full instant; the Web form reads a date as UTC midnight.
+  if (spec.kind === 'date') return /^\d{4}-\d{2}-\d{2}$/.test(text) ? `${text}T00:00:00.000Z` : text;
+  if (spec.kind === 'number' || (spec.kind === 'enum' && spec.numericEnum)) return Number(text);
+  return text;
+}
+
+/** The first required field of a `child_rows` field that a row leaves empty, as `{ row, field }` (row is 1-based). */
+export function firstMissingRowField(spec: FieldSpec, rows: ChildRowState[]): { row: number; field: FieldSpec } | null {
+  for (let index = 0; index < rows.length; index += 1) {
+    for (const field of spec.rowFields ?? []) {
+      const value = rows[index].values[field.key];
+      if (field.required && !field.readonly && field.kind !== 'boolean' && (value === undefined || value === '')) {
+        return { row: index + 1, field };
+      }
+    }
+  }
+  return null;
+}
+
+/** Reads a FormData into the JSON body the REST routes take. */
+export function formDataToBody(
+  formData: FormData,
+  fields: FieldSpec[],
+): Record<string, unknown> {
+  const body: Record<string, unknown> = {};
+  for (const spec of fields) {
+    if (spec.readonly) continue;
+    const key = spec.key;
+    if (spec.kind === 'relation_many') {
+      // An empty selection is sent as an empty list so an update clears the set.
+      body[spec.bodyKey ?? key] = formData.getAll(key).map(String);
+      continue;
+    }
+    if (spec.kind === 'child_rows') {
+      // The form sends the rows as one JSON entry; an update replaces the collection, so an empty list clears it.
+      const rows = JSON.parse(String(formData.get(key) ?? '[]')) as ChildRowState[];
+      body[spec.bodyKey ?? key] = rows.map((row) => {
+        const item: Record<string, unknown> = row.id ? { id: row.id } : {};
+        for (const field of spec.rowFields ?? []) {
+          if (field.readonly) continue;
+          const text = row.values[field.key] === undefined ? '' : String(row.values[field.key]);
+          // A blank field with a default is left out so the server applies the default.
+          if (text === '' && field.defaultValue !== undefined) continue;
+          item[field.bodyKey ?? field.key] = fieldBodyValue(field, text);
+        }
+        return item;
+      });
+      continue;
+    }
+    const raw = formData.get(key);
+    if (raw === null) continue;
+    body[spec.kind === 'relation' || spec.kind === 'attachment' ? spec.bodyKey ?? key : key] = fieldBodyValue(spec, String(raw));
+  }
+  return body;
+}
+
+/** What the approval section needs from the row-level capabilities answer. */
+export type ApprovalState = {
+  can_submit: boolean;
+  can_withdraw: boolean;
+  can_approve: boolean;
+  can_reject: boolean;
+  round_status: string[];
+  /** The `approval_request` rows of the latest round. */
+  current_round_request_ids: string[];
+  /** The pending rows among them this caller may approve or reject right now. */
+  actionable_request_ids: string[];
+};
+
+type RowCapabilitiesBody = {
+  operations: RowCapabilities;
+  write_locks?: { edit_locked: boolean | null; delete_locked: boolean | null };
+  approval?: ApprovalState | null;
+};
+
+function fetchRowCapabilities(entity: string, id: string): Promise<RowCapabilitiesBody> {
+  return apiFetch<RowCapabilitiesBody>(`/api/${entity}/${id}/capabilities`);
+}
+
+/**
+ * Model-level flags overlaid with the row-level answer when a record exists. A row the server
+ * reports as locked (an approval has decided it) is neither editable nor deletable.
+ */
+export async function fetchPermissions(entity: string, id?: string): Promise<ModelPermissions> {
+  const model = await apiFetch<ModelPermissions>(`/api/mobile/permissions?entity=${entity}`);
+  if (!id) return model;
+  const row = await fetchRowCapabilities(entity, id);
+  return {
+    ...model,
+    update: row.operations.update && !row.write_locks?.edit_locked,
+    delete: row.operations.delete && !row.write_locks?.delete_locked,
+  };
+}
+
+/** The approval state of one record, or null when the entity has no approval. */
+export async function fetchApprovalState(entity: string, id: string): Promise<ApprovalState | null> {
+  return (await fetchRowCapabilities(entity, id)).approval ?? null;
+}
+
+export type ApprovalAction = 'approve' | 'reject' | 'withdraw';
+
+export type ApprovalActionBody = {
+  message?: string;
+  /** Free text, reject only. */
+  reason?: string;
+  /** 0 = customer, 1 = internal, reject only. */
+  reason_kind?: number;
+};
+
+/**
+ * Approves, rejects or withdraws through `POST /api/approval_request/<id>/<action>`. Withdraw closes
+ * the whole current round whichever of its rows is named. Resolves to an ActionFailure or
+ * `{ ok: true }`; never rejects.
+ */
+export async function postApprovalAction(
+  requestId: string,
+  action: ApprovalAction,
+  body: ApprovalActionBody = {},
+): Promise<ActionFailure | { ok: true }> {
+  try {
+    await apiFetch(`/api/approval_request/${requestId}/${action}`, { method: 'POST', body: JSON.stringify(body) });
+    return { ok: true };
+  } catch (err) {
+    return toActionFailure(err);
+  }
+}
+
+/** The split section of an entity (`x-splittable`): the quantity that is redistributed and the fields each part names. */
+export type SplitConfig = {
+  quantityField: string;
+  quantityLabel: string;
+  /** Fields every part must specify: a relation field is a picker, any other a text input. */
+  parts: FieldSpec[];
+  /** Fields of the record forwarded to the part pickers' autocomplete filter. */
+  contextFields: string[];
+};
+
+export type SplitFailure = ActionFailure & {
+  /** The server's own text for a rejected split (for example a total that does not match). */
+  message?: string;
+};
+
+/**
+ * Splits the record through `POST /api/<entity>/<id>/actions/split`. The server re-checks the parts
+ * (at least two, the quantities positive and summing to the record's, the required fields named, and
+ * that the record may still be split). Resolves to a failure carrying the server's text or `{ ok: true }`;
+ * never rejects.
+ */
+export async function postSplit(
+  entity: string,
+  id: string,
+  parts: Record<string, unknown>[],
+): Promise<SplitFailure | { ok: true }> {
+  try {
+    await apiFetch(`/api/${entity}/${id}/actions/split`, { method: 'POST', body: JSON.stringify({ parts }) });
+    return { ok: true };
+  } catch (err) {
+    const failure: SplitFailure = toActionFailure(err);
+    if (err instanceof ApiError) {
+      try {
+        const text = (JSON.parse(err.message) as ErrorBody).error;
+        if (text) failure.message = text;
+      } catch {
+        // a non-JSON error body: the status alone
+      }
+    }
+    return failure;
+  }
+}
+
+/** A record offered by a relation picker: the related entity's own row. */
+export type RelationRow = { id: string } & Record<string, unknown>;
+
+export type RelationOptionsResult =
+  | { ok: true; rows: RelationRow[] }
+  // The caller cannot read the target: the picker is shown disabled (the Web does the same).
+  | { ok: false; permissionDenied: true };
+
+export type RelationOptionsQuery = {
+  q?: string;
+  /** Records that are returned even when they do not match `q` (the current selection). */
+  ids?: string[];
+  limit?: number;
+  /** Entity whose form hosts the picker. */
+  caller?: string;
+  /** The hosting form's current values, passed to the target's autocomplete filter. */
+  context?: Record<string, unknown>;
+};
+
+/**
+ * Candidates for a relation picker: `GET /api/<entity>/options`, the REST side of the
+ * `search<Entity>Options()` function the Web forms call. A 403 means the caller cannot read
+ * the target; any other failure rejects.
+ */
+export async function searchEntityOptions(entity: string, query: RelationOptionsQuery = {}): Promise<RelationOptionsResult> {
+  const params: string[] = [];
+  if (query.q) params.push(`q=${encodeURIComponent(query.q)}`);
+  if (query.ids && query.ids.length > 0) params.push(`ids=${query.ids.map(encodeURIComponent).join(',')}`);
+  if (query.limit) params.push(`limit=${query.limit}`);
+  if (query.caller) params.push(`caller=${encodeURIComponent(query.caller)}`);
+  if (query.context && Object.keys(query.context).length > 0) {
+    params.push(`context=${encodeURIComponent(JSON.stringify(query.context))}`);
+  }
+  try {
+    const rows = await apiFetch<RelationRow[]>(`/api/${entity}/options${params.length ? `?${params.join('&')}` : ''}`);
+    return { ok: true, rows };
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 403) return { ok: false, permissionDenied: true };
+    throw err;
+  }
+}

@@ -1,0 +1,730 @@
+"""Mobile entity screens.
+
+Decides which entities get native list / detail / form screens in the Expo app
+and derives the field description those screens render. The screens carry no
+validation, submit or permission logic of their own: they call the same
+generated modules the Web screens call (`use_entity_form`,
+`use_entity_capabilities`, `form_validation`), so this module only describes the
+fields to draw.
+
+An `x-entity-select` field (the name of one of the schema's entities) is drawn as enum chips labelled
+with the entity titles.
+A many-to-one foreign key, a one-to-one selector and a many-to-many declared with
+`x-outputType: list` are drawn as relation pickers whose candidates come from `GET /api/{target}/options`.
+A direct attachment field (`x-relationship: {target: attachment, type: direct}`) is drawn as a file
+input: the chosen file is uploaded, an `attachment` row is created for it, and the form submits that
+row's id, as the Web form does.
+A one-to-many child collection that the parent saves with its own record (the Web form's editable grid) is
+drawn as a row editor: each row has the child's own fields, the rows travel in the request body as the
+property array (`lines`), and the detail screen lists them.
+An entity with any other relation feature (other children, bridges, ...)
+keeps the placeholder screen. The exceptions are the approval bridge, the comment bridge and the
+polymorphic `attachable` bridge.
+
+An entity that declares `x-approval` (a one-to-one bridge to `approvable` and the `ApprovalSection` view
+component) gets the same screens plus the approval section, whose approve / reject /
+withdraw buttons call the approval REST routes.
+
+A many-to-one foreign key that declares `x-create-inline` also offers "Create new": the target's own
+native create form opens over the hosting form (see `generate.py`, which resolves the target once every
+entity's spec is known). An `x-payment` entity is created through the same form; the create response's
+`checkoutUrl` is opened in an in-app browser.
+
+An entity that is commentable through the shared `commentable` bridge keeps its screens: the detail screen
+lists the comment thread (read from the REST detail) and draws the reaction bar, which calls the comment
+reactions route. When the entity has the comment write routes, the thread also has a composer, edit and
+delete controls and, when the schema has an `x-mention` field, the `@` user lookup; otherwise it is read-only.
+
+An entity that owns attachments through the `attachable` bridge (`attachable_id` with
+`x-relationship: {type: one-to-one_bridge, target: attachable}` and the `AttachmentSection` view / edit
+component) keeps its screens too: the detail screen lists the attachments (read from the REST detail) and
+the edit form lets the user add, remove and reorder them, saving the whole set through
+`PUT /api/<entity>/<id>/attachments` after the record itself is saved. The `showImages` / `showFiles` props of the
+`AttachmentSection` entries decide which attachment types are listed and offered.
+
+Every other component the schema declares is hand-written, so the generator cannot port it. The screens
+instead leave an insertion point for it and generate a native stub once (write-once, like the other
+hand-maintained stubs) that renders nothing: `x-custom-components` (entity level, targets list / view /
+edit) and `x-custom-component` (field level, targets upsert / view) are read as they stand, with no
+further schema key. An entity is no longer left out of the mobile app only because it declares one.
+"""
+from __future__ import annotations
+
+from helpers.schema_helpers import _get_actual_type, is_write_only_prop
+
+# Field kinds the native form widgets know how to draw.
+KIND_TEXT = 'text'
+KIND_NUMBER = 'number'
+KIND_DECIMAL = 'decimal'
+KIND_BOOLEAN = 'boolean'
+KIND_ENUM = 'enum'
+KIND_DATE = 'date'
+KIND_DATETIME = 'datetime'
+KIND_TIME = 'time'
+# A foreign key or one-to-one selector (one record) and a many-to-many (a set).
+KIND_RELATION = 'relation'
+KIND_RELATION_MANY = 'relation_many'
+# A direct attachment field: one `attachment` row the form uploads a file for.
+KIND_ATTACHMENT = 'attachment'
+# An editable collection of new rows of a one-to-many child (`x-children` without `x-outputType`).
+KIND_CHILD_ROWS = 'child_rows'
+
+# Keys of the field categories (build_context._categorize_form_fields) that the
+# mobile form can draw, mapped to the widget kind.
+_CATEGORY_KIND = (
+    ('text', KIND_TEXT),
+    ('link_uri', KIND_TEXT),
+    ('number', KIND_NUMBER),
+    ('decimal', KIND_DECIMAL),
+    ('boolean', KIND_BOOLEAN),
+    ('enum_string', KIND_ENUM),
+    ('enum_integer', KIND_ENUM),
+    ('entity_select', KIND_ENUM),
+)
+
+# Categories that need a widget the mobile app does not have yet (file / image
+# upload); an entity with one is not eligible. A field replaced by a custom component
+# (`x-custom-component` with an `upsert` target) is not in this list: the component draws it.
+_UNSUPPORTED_CATEGORIES = ('image', 'file_uri')
+
+
+# Context keys whose presence means the entity carries a feature that lives
+# beyond plain CRUD (relations, children, comments, attachments, ...).
+_FEATURE_KEYS = (
+    'reverse_oto_rels',
+    'flatten_rels',
+    'virtual_columns',
+    'mention_fields',
+)
+
+# The component an approval entity mounts on its view screen.
+APPROVAL_SECTION = 'ApprovalSection'
+
+# The relation features that are served by something other than a form field. The
+# bridge to `commentable` is one of them: it is the comment thread, not a relation to draw.
+_COMMENTABLE_TARGET = 'commentable'
+# The polymorphic bridge to the shared `attachable` row that owns an entity's attachments.
+_ATTACHABLE_TARGET = 'attachable'
+# The component the Web screens mount to list and edit the bridge's attachments.
+ATTACHMENT_SECTION = 'AttachmentSection'
+
+_FEATURE_FLAGS = (
+    'has_attachable',
+    'state_machine_transitions',
+    'is_self_only',
+)
+
+# Kinds the list filter sheet can narrow by: the REST list's default clause for each is a
+# substring match (text), equality (number, decimal, boolean) or a member (enum).
+_FILTERABLE_KINDS = (KIND_TEXT, KIND_NUMBER, KIND_DECIMAL, KIND_BOOLEAN, KIND_ENUM)
+# Flags the approval lock-down sets on an entity that declares `x-approval`. The server enforces
+# them (edit / delete are refused once the approval has decided), so the screens only need the
+# row's answer; an entity that has them without an approval keeps the placeholder.
+_APPROVAL_LOCKDOWN_FLAGS = ('has_edit_guard', 'has_delete_guard', 'write_locked_values')
+
+# At most this many columns appear on a list row.
+MAX_LIST_COLUMNS = 3
+
+
+def _picker_children(ctx: dict) -> list[dict]:
+    """The children that are drawn as pickers: many-to-many lists and attachable one-to-many lists.
+
+    The Web form draws a many-to-many declared with `x-outputType: list` as an
+    autocomplete list of existing records; without it the child is an editable
+    grid of new rows, which is drawn as a row editor (see `_row_children`).
+    """
+    return [
+        c for c in (ctx.get('non_comment_ch') or [])
+        if c.get('output_type') == 'list' and (c.get('is_many_to_many') or c.get('attach_fk'))
+    ]
+
+
+def _picker_relationship(child: dict) -> dict:
+    """The relationship a picker child offers records of.
+
+    A one-to-many list child (`procedure.children`) has no `x-relationship`: it is the inverse of
+    the target's own nullable foreign key, so it offers records of the child's own entity.
+    """
+    return child.get('relationship') or {'target': child['name']}
+
+
+def _row_children(ctx: dict) -> list[dict]:
+    """The one-to-many children the parent saves with its own record, drawn as a row editor.
+
+    Only the plain editable grid qualifies: not a many-to-many, not a `list` or `comments` child, and the
+    child must be writable through the parent (an independent child with its own screens is not).
+    """
+    return [
+        c for c in (ctx.get('non_comment_ch') or [])
+        if not c.get('is_many_to_many') and c.get('output_type') is None
+        and c.get('nested_writable') and not c.get('is_independent') and c.get('child_prop_defs') is not None
+    ]
+
+
+def _row_field_kinds(child: dict) -> tuple[dict[str, str], str | None]:
+    """The kind of each field of a child row, or the first field the row editor cannot draw.
+
+    Returns `(kinds, None)` or `({}, field_name)`. A field the server fills in (readonly) is not drawn.
+    """
+    from build_context import _categorize_form_fields
+
+    # A readonly column is filled in by the server; so is a bridge foreign key without a relationship
+    # (`*able_id`, set by the approval or reservation flows), which the Web grid does not draw either.
+    props = {
+        k: v for k, v in (child.get('child_prop_defs') or {}).items()
+        if k not in (child.get('readonly_field_names') or ()) and not (k.endswith('able_id') and not v.get('x-relationship'))
+    }
+    kinds: dict[str, str] = {}
+    plain = {}
+    for name, defn in props.items():
+        relationship = defn.get('x-relationship')
+        if relationship:
+            if relationship.get('type') != 'many-to-one' or not relationship.get('target'):
+                return {}, name
+            kinds[name] = KIND_RELATION
+        else:
+            plain[name] = defn
+    cats = _categorize_form_fields(plain, [], {})
+    for key in _UNSUPPORTED_CATEGORIES:
+        if cats.get(key):
+            return {}, cats[key][0]
+    for category, kind in _CATEGORY_KIND:
+        for name in cats.get(category, []):
+            kinds[name] = kind
+    for name in cats.get('date_time', []):
+        kinds[name] = _date_kind(plain[name])
+    for name in plain:
+        if name not in kinds:
+            return {}, name
+    return kinds, None
+
+
+def has_approval_section(ctx: dict) -> bool:
+    """Whether the entity mounts the approval section: a bridge to `approvable` plus `ApprovalSection`."""
+    return any(c.get('name') == APPROVAL_SECTION for c in ctx.get('entity_view_components') or [])
+
+
+def _other_one_to_one(ctx: dict) -> list[dict]:
+    """One-to-one relations other than the approval, comment and attachable bridges (those keep the placeholder)."""
+    return [
+        r for r in (ctx.get('one_to_one_rels') or [])
+        if r.get('target') != 'approvable' and not _is_comment_bridge(r, ctx) and not _is_attachable_bridge(r, ctx)
+    ]
+
+
+def _unserved_builtin_components(ctx: dict, key: str) -> list[dict]:
+    """The built-in components of `key` that the screens do not serve for this entity.
+
+    `ApprovalSection` and `AttachmentSection` are native sections, not extension points: one declared
+    for an entity that is not shaped for it (no bridge) keeps the placeholder rather than silently
+    showing nothing where the Web shows the section.
+    """
+    served = {APPROVAL_SECTION}
+    if attachable_bridge_ready(ctx):
+        served.add(ATTACHMENT_SECTION)
+    return [c for c in (ctx.get(key) or []) if c.get('name') in (APPROVAL_SECTION, ATTACHMENT_SECTION) and c.get('name') not in served]
+
+
+def custom_component_slots(ctx: dict) -> dict[str, list[dict]]:
+    """The hand-written entity components to mount, by screen: `list`, `view` and `edit`.
+
+    Each entry is `{name, props}`, in declaration order; `props` are the static props of the schema
+    entry. The built-in sections the screens serve themselves (see `_unserved_builtin_components`) are
+    not slots.
+    """
+    served = {APPROVAL_SECTION}
+    if attachable_bridge_ready(ctx):
+        served.add(ATTACHMENT_SECTION)
+    return {
+        screen: [
+            {'name': c['name'], 'props': c.get('props') or {}}
+            for c in (ctx.get(key) or []) if c.get('name') not in served
+        ]
+        for screen, key in (('list', 'entity_custom_components'), ('view', 'entity_view_components'), ('edit', 'entity_edit_components'))
+    }
+
+
+def _is_comment_bridge(rel: dict, ctx: dict) -> bool:
+    """True for the one-to-one bridge to the shared `commentable` row of a commentable entity."""
+    return bool(ctx.get('has_commentable')) and rel.get('target') == _COMMENTABLE_TARGET
+
+
+def _is_attachable_bridge(rel: dict, ctx: dict) -> bool:
+    """True for the one-to-one bridge to the shared `attachable` row of an entity the screens serve (see below)."""
+    return rel.get('target') == _ATTACHABLE_TARGET and attachable_bridge_ready(ctx)
+
+
+def attachable_bridge_ready(ctx: dict) -> bool:
+    """Whether the entity owns attachments through the `attachable` bridge in the shape the screens serve.
+
+    The REST detail embeds `<attachable_rel_name>.<attachments_prop>` (decrypted) only when the bridge and its
+    `attachment` child are both resolved, which is what `has_attachable` records. As with the approval bridge,
+    the bridge and the `AttachmentSection` component come together: the Web shows no attachments without the
+    component, so a bridge without it keeps the placeholder.
+    """
+    return bool(
+        ctx.get('has_attachable') and ctx.get('attachable_rel_name') and ctx.get('attachable_attachments_prop')
+        and any(r.get('target') == _ATTACHABLE_TARGET for r in ctx.get('one_to_one_rels') or [])
+        and any(c.get('name') == ATTACHMENT_SECTION
+                for key in ('entity_view_components', 'entity_edit_components') for c in ctx.get(key) or [])
+    )
+
+
+def attachment_section_spec(ctx: dict) -> dict | None:
+    """The attachment list the detail screen draws and the edit form edits, or None.
+
+    `rel_name` / `prop` name where the REST detail embeds the list (`<rel_name>.<prop>`). `show_images` /
+    `show_files` come from the props of the `AttachmentSection` component entries (both default to true, as
+    on the Web). `can_edit` is the entity's own edit screen: attachments can only be added once the owner
+    exists, so there is no section on the create form. `types` are the `attachment.type` values the Web
+    section handles, restricted to the ones the props leave on.
+    """
+    if not (attachable_bridge_ready(ctx) and ctx.get('can_view')):
+        return None
+    entries = [c for key in ('entity_view_components', 'entity_edit_components') for c in ctx.get(key) or []
+               if c.get('name') == ATTACHMENT_SECTION]
+    show_images = all((c.get('props') or {}).get('showImages', True) is not False for c in entries)
+    show_files = all((c.get('props') or {}).get('showFiles', True) is not False for c in entries)
+    types = [t for t, shown in (('image', show_images), ('file', show_files)) if shown]
+    return {
+        'rel_name': ctx['attachable_rel_name'],
+        'prop': ctx['attachable_attachments_prop'],
+        'show_images': show_images,
+        'show_files': show_files,
+        'types': types,
+        'can_edit': bool(ctx.get('can_update')),
+    }
+
+
+def comment_thread_spec(ctx: dict) -> dict | None:
+    """The comment thread the detail screen draws, or None.
+
+    `rel_name` is the key under which the REST detail embeds the `commentable` row (its `comments`
+    array is the thread); `reaction_types` are the values the comment reactions route accepts.
+    """
+    if not (ctx.get('has_commentable') and ctx.get('can_view') and ctx.get('commentable_rel_name')):
+        return None
+    reactions = next((c for c in ctx.get('named_constants') or [] if c.get('const_name') == 'COMMENT_REACTION_TYPES'), None)
+    return {
+        'rel_name': ctx['commentable_rel_name'],
+        'reaction_types': [i['value'] for i in reactions['items']] if reactions else [],
+        # The comment write routes are written under the condition generate.py applies; without
+        # them the thread stays read-only.
+        'write': bool(
+            ctx.get('comment_actions_code')
+            and (ctx.get('can_create') or ctx.get('can_update') or ctx.get('can_delete') or ctx.get('can_invalidate'))
+        ),
+    }
+
+
+def mobile_ineligible_reason(ctx: dict, api_entities: set[str] | None = None) -> str | None:
+    """Return why the entity gets no mobile CRUD screens, or None when it does.
+
+    `api_entities` is the set of entities that have REST routes (and so an options
+    route); a relation to one outside it cannot be drawn. None skips that check.
+    """
+    if not ctx.get('can_api'):
+        return 'no REST routes (x-generate.api is off)'
+    if not ctx.get('can_list'):
+        return 'no list screen'
+    for key in _FEATURE_KEYS:
+        if ctx.get(key):
+            return f'declares {key}'
+    # A one-to-one bridge is served by something other than a form field only for the approval
+    # section and the comment thread; any other keeps the placeholder.
+    if _other_one_to_one(ctx):
+        return 'declares one_to_one_rels'
+    for key in ('entity_view_components', 'entity_edit_components'):
+        if _unserved_builtin_components(ctx, key):
+            return f'declares {key}'
+    # The approval bridge and its section come together; one without the other is not the approval shape.
+    has_approval_bridge = any(r.get('target') == 'approvable' for r in ctx.get('one_to_one_rels') or [])
+    if has_approval_bridge != has_approval_section(ctx):
+        return 'declares one_to_one_rels' if has_approval_bridge else 'declares entity_view_components'
+    pickers = _picker_children(ctx)
+    row_children = _row_children(ctx)
+    if len(pickers) + len(row_children) != len(ctx.get('children_raw') or []) or len(pickers) + len(row_children) != len(ctx.get('non_comment_ch') or []):
+        return 'declares children_raw'
+    for child in row_children:
+        kinds, unsupported = _row_field_kinds(child)
+        if unsupported is not None:
+            return f"has a {child['property_name']} row field ({unsupported}) the mobile form cannot draw"
+    if api_entities is not None:
+        targets = [r['target'] for r in (ctx.get('parent_rels_raw') or []) + (ctx.get('selector_oto_rels') or [])]
+        targets += [_picker_relationship(c)['target'] for c in pickers]
+        for child in row_children:
+            targets += [d['x-relationship']['target'] for d in child['child_prop_defs'].values()
+                        if d.get('x-relationship') and d['x-relationship'].get('target')
+                        and d['x-relationship']['target'] != ctx.get('parent')]
+        for target in targets:
+            if target not in api_entities:
+                return f'relates to {target}, which has no REST routes'
+    for key in _FEATURE_FLAGS:
+        if key == 'has_attachable' and attachable_bridge_ready(ctx):
+            continue
+        if ctx.get(key):
+            return f'declares {key}'
+    if not has_approval_section(ctx):
+        for key in _APPROVAL_LOCKDOWN_FLAGS:
+            if ctx.get(key):
+                return f'declares {key}'
+    # The split action is offered on the detail screen next to the approval section; a splittable
+    # entity without one keeps the placeholder.
+    if ctx.get('is_splittable') and not has_approval_section(ctx):
+        return 'declares is_splittable'
+    cats = ctx.get('field_categories') or {}
+    for key in _UNSUPPORTED_CATEGORIES:
+        if cats.get(key):
+            return f'has a {key} field'
+    return None
+
+
+def group_ineligible_by_reason(ineligible: list[tuple[str, str]]) -> dict[str, list[str]]:
+    """Group `(entity, reason)` pairs by reason; reasons and the entities under each are sorted."""
+    grouped: dict[str, list[str]] = {}
+    for name, reason in ineligible:
+        grouped.setdefault(reason, []).append(name)
+    return {reason: sorted(grouped[reason]) for reason in sorted(grouped)}
+
+
+def ineligible_log_lines(ineligible: list[tuple[str, str]]) -> list[str]:
+    """Generation-log lines naming the entities left out of the mobile app, grouped by reason."""
+    if not ineligible:
+        return []
+    lines = [f'  {len(ineligible)} entit{"y" if len(ineligible) == 1 else "ies"} left out of the mobile app (placeholder screen):']
+    for reason, names in group_ineligible_by_reason(ineligible).items():
+        lines.append(f'    {reason}: {", ".join(names)}')
+    return lines
+
+
+def ineligible_note(ineligible: list[tuple[str, str]]) -> str:
+    """Markdown note for `mobile/MOBILE_ENTITIES.md`: the same list the generation log prints."""
+    lines = [
+        '# Entities without a mobile screen',
+        '',
+        'Generated by `generate-code`; do not edit. An entity listed here shows "This screen is not available',
+        'in the mobile app yet." in the Expo app, whether or not it has data. The reason is the first check',
+        'in `mobile_ineligible_reason()` (`code_generator/mobile_entities.py`) that the entity fails.',
+        '',
+    ]
+    if not ineligible:
+        lines.append('Every entity has a mobile screen.')
+    else:
+        for reason, names in group_ineligible_by_reason(ineligible).items():
+            lines.append(f'## {reason}')
+            lines.append('')
+            lines.extend(f'- {name}' for name in names)
+            lines.append('')
+    return '\n'.join(lines).rstrip('\n') + '\n'
+
+
+def _field_entry(name: str, defn: dict, kind: str, ctx: dict, required: set[str],
+                 readonly: set[str], title) -> dict:
+    entry = {
+        'key': name,
+        'label': title(name),
+        'kind': kind,
+        'required': name in required,
+        'readonly': name in readonly,
+        'options': [],
+        'option_labels': [],
+    }
+    if name in (ctx.get('field_categories') or {}).get('entity_select', []):
+        # An `x-entity-select` field holds the name of one of the schema's entities. It is drawn as the
+        # enum chips, labelled as the Web select labels them, and the entity name is what is saved.
+        entities = ctx.get('entity_select_options') or []
+        entry['options'] = [str(o['value']) for o in entities]
+        entry['option_labels'] = [str(o['label']) for o in entities]
+        entry['option_label_keys'] = [f"EntityLabel.{o['key']}" for o in entities]
+        entry['numeric_enum'] = False
+    elif kind == KIND_ENUM:
+        # A value only the approval workflow may write is not offered, as the Web form disables it.
+        locked = {str(v) for v in ((ctx.get('write_locked_values') or {}).get(name) or [])}
+        entry['options'] = [str(v) for v in defn.get('enum', []) if str(v) not in locked]
+        entry['numeric_enum'] = defn.get('type') in ('integer', 'number')
+    return entry
+
+
+def _custom_targets(defn: dict) -> list[str]:
+    """The targets (`upsert`, `view`) of a field's `x-custom-component`, or none."""
+    xc = defn.get('x-custom-component')
+    targets = xc.get('target') if isinstance(xc, dict) else None
+    return [t for t in targets if t in ('upsert', 'view')] if isinstance(targets, list) else []
+
+
+def _custom_field_kind(defn: dict) -> str:
+    """The kind of value a field replaced by a custom component holds, which is what the form keeps for it."""
+    actual = _get_actual_type(defn)
+    if actual == 'boolean':
+        return KIND_BOOLEAN
+    if defn.get('format') in ('date', 'date-time', 'time'):
+        return _date_kind(defn)
+    if isinstance(defn.get('enum'), list):
+        return KIND_ENUM
+    if defn.get('_prisma_decimal_type'):
+        return KIND_DECIMAL
+    if actual in ('integer', 'number'):
+        return KIND_NUMBER
+    return KIND_TEXT
+
+
+def _date_kind(defn: dict) -> str:
+    return {'date': KIND_DATE, 'date-time': KIND_DATETIME, 'time': KIND_TIME}[defn.get('format')]
+
+
+def _relation_entry(rel: dict, ctx: dict, required: set[str], readonly: set[str], title,
+                    relation_name: str, many_to_one: bool = False) -> dict:
+    """Field entry for a foreign key or one-to-one selector."""
+    name = rel['prop_name']
+    return {
+        'key': name,
+        'label': title(name[:-3] if name.endswith('_id') else name),
+        'kind': KIND_RELATION,
+        'required': name in required,
+        'readonly': name in readonly,
+        'options': [],
+        'target': rel['target'],
+        'label_field': rel.get('label_field') or 'name',
+        'relation_name': relation_name,
+        'body_key': name,
+        'context_fields': list(rel.get('autocomplete_context_fields') or []),
+        # x-create-inline on a many-to-one foreign key; generate.py keeps it only when the target has a
+        # native create form (`create_form`), so a field whose target has none stays a plain picker.
+        'create_inline': many_to_one and bool(rel.get('create_inline')),
+    }
+
+
+def _attachment_entry(rel: dict, required: set[str], readonly: set[str], title) -> dict:
+    """Field entry for a direct attachment field.
+
+    The form submits the attachment row's id under the column name; the REST detail embeds the
+    row (name, path, type) under the relation name, which is the column name without `_id`.
+    """
+    name = rel['prop_name']
+    return {
+        'key': name,
+        'label': title(rel['relation_name']),
+        'kind': KIND_ATTACHMENT,
+        'required': name in required or bool(rel.get('required')),
+        'readonly': name in readonly,
+        'options': [],
+        'relation_name': rel['relation_name'],
+        'body_key': name,
+    }
+
+
+def _relation_many_entry(child: dict, readonly: set[str], title, parent: str | None = None) -> dict:
+    """Field entry for a many-to-many picker, or for a one-to-many list picker.
+
+    A one-to-many list child is attached by pointing the target's nullable foreign key at the record.
+    The target's options route already offers only unattached records, and, when the list is of the
+    entity's own kind, never the record itself or one of its ancestors; for that last rule the picker
+    sends the record's `id` as part of the form values the route may narrow by (`context_fields`).
+    """
+    name = child['property_name']
+    relationship = _picker_relationship(child)
+    own_kind = not child.get('is_many_to_many') and relationship['target'] == parent
+    return {
+        'key': name,
+        'label': title(name),
+        'kind': KIND_RELATION_MANY,
+        'required': False,
+        'readonly': name in readonly,
+        'options': [],
+        'target': relationship['target'],
+        'label_field': relationship.get('label_field') or 'name',
+        'relation_name': name,
+        'body_key': f"{child['child_var']}_ids",
+        'context_fields': ['id'] if own_kind else [],
+    }
+
+
+def _row_required(defn: dict) -> bool:
+    """Whether a child row must carry a value: a non-nullable column without a default."""
+    types = defn.get('type')
+    nullable = isinstance(types, list) and 'null' in types
+    return not nullable and 'default' not in defn
+
+
+def _child_rows_entry(child: dict, kinds: dict[str, str], title) -> dict:
+    """Field entry for a one-to-many child collection: the row editor and its per-row fields."""
+    rows = []
+    for name in child['props_no_id']:
+        if name not in kinds:
+            continue
+        defn = child['child_prop_defs'][name]
+        required = {name} if _row_required(defn) else set()
+        if kinds[name] == KIND_RELATION:
+            relationship = defn['x-relationship']
+            rel = {
+                'prop_name': name, 'target': relationship['target'],
+                'label_field': relationship.get('labelField') or relationship.get('label_field'),
+            }
+            rows.append(_relation_entry(rel, {}, required, set(), title, name[:-3] if name.endswith('_id') else name))
+        else:
+            rows.append(_field_entry(name, defn, kinds[name], {}, required, set(), title))
+        # A column with a schema default starts a new row at that value, and a blank one is left out of the
+        # body so the server applies the default (a null would be refused for a non-nullable column).
+        if 'default' in defn and kinds[name] != KIND_BOOLEAN and defn['default'] is not None:
+            rows[-1]['default_value'] = str(defn['default'])
+    name = child['property_name']
+    return {
+        'key': name,
+        'label': title(name),
+        'kind': KIND_CHILD_ROWS,
+        'required': False,
+        'readonly': False,
+        'options': [],
+        'relation_name': name,
+        'body_key': name,
+        'row_fields': rows,
+    }
+
+
+def _split_entry(ctx: dict, entries: dict[str, dict], required: set[str], title) -> dict | None:
+    """Description of the split section: the quantity field and the fields each part must specify.
+
+    A part field that is a foreign key of the entity is drawn as the relation picker the form uses
+    (same target, label column and autocomplete context); any other part field is a text input, as
+    on the Web section.
+    """
+    if not ctx.get('is_splittable') or not ctx.get('split_config'):
+        return None
+    config = (ctx.get('model_def') or {}).get('x-splittable') or {}
+    quantity = ctx['split_config']['quantity_field']
+    parts = []
+    for name in config.get('perPartRequired') or []:
+        entry = entries.get(name)
+        if entry is not None and entry['kind'] == KIND_RELATION:
+            parts.append({**entry, 'required': True, 'readonly': False})
+        else:
+            parts.append({
+                'key': name, 'label': title(name), 'kind': KIND_TEXT, 'required': name in required,
+                'readonly': False, 'options': [],
+            })
+    return {
+        'quantity_field': quantity,
+        'quantity_label': title(quantity),
+        'parts': parts,
+        'context_fields': list(ctx['split_config'].get('context_fields') or []),
+    }
+
+
+def build_mobile_entity_spec(ctx: dict, validation_ctx: dict, title, api_entities: set[str] | None = None) -> dict | None:
+    """Field description for an eligible entity, or None.
+
+    `validation_ctx` is `build_validation_context(ctx)`; `title` is `to_title_case`;
+    `api_entities` is the set of entities with REST routes (see `mobile_ineligible_reason`).
+    """
+    if mobile_ineligible_reason(ctx, api_entities) is not None:
+        return None
+    cats = ctx['field_categories']
+    props = ctx['filtered_props']
+    readonly = set(ctx.get('readonly_fields') or [])
+    required = {f['key'] for f in validation_ctx.get('client_required_fields', [])}
+
+    kind_by_field: dict[str, str] = {}
+    for category, kind in _CATEGORY_KIND:
+        for name in cats.get(category, []):
+            kind_by_field[name] = kind
+    for name in cats.get('date_time', []):
+        kind_by_field[name] = _date_kind(props[name])
+    # A field a custom component draws (`upsert` target) keeps the kind its value has; the component
+    # replaces the control, not the value the form saves.
+    for name in cats.get('custom_upsert', []):
+        kind_by_field[name] = _custom_field_kind(props[name])
+
+    # x-display.form, when declared, is the set (and order) of fields the form
+    # draws; otherwise every categorised field in schema order.
+    declared = (ctx.get('model_def', {}).get('x-display') or {}).get('form')
+    order = [n for n in declared if n in kind_by_field] if declared else [n for n in props if n in kind_by_field]
+
+    entries = {n: _field_entry(n, props[n], kind_by_field[n], ctx, required, readonly, title) for n in order}
+    for name, entry in entries.items():
+        targets = _custom_targets(props[name])
+        if targets:
+            entry['custom'] = {'upsert': 'upsert' in targets, 'view': 'view' in targets}
+        # A credential field (upsert-only string, e.g. a password) is never read back: the screens do not list it.
+        if is_write_only_prop(props[name]):
+            entry['write_only'] = True
+    # Foreign keys and one-to-one selectors are columns of the entity, so they take
+    # their place among the scalar fields; the Prisma relation field the REST detail
+    # embeds is the column name without `_id` (a selector carries its own name).
+    for rel in ctx.get('parent_rels_raw') or []:
+        name = rel['prop_name']
+        entries[name] = _relation_entry(rel, ctx, required, readonly, title, name[:-3] if name.endswith('_id') else name,
+                                        many_to_one=True)
+    for rel in ctx.get('selector_oto_rels') or []:
+        entries[rel['prop_name']] = _relation_entry(rel, ctx, required, readonly, title, rel['relation_name'])
+    for child in _picker_children(ctx):
+        entries[child['property_name']] = _relation_many_entry(child, readonly, title, ctx['parent'])
+    for rel in ctx.get('direct_attachment_rels') or []:
+        entries[rel['prop_name']] = _attachment_entry(rel, required, readonly, title)
+    for child in _row_children(ctx):
+        entries[child['property_name']] = _child_rows_entry(child, _row_field_kinds(child)[0], title)
+    if declared:
+        names = [n for n in declared if n in entries]
+    else:
+        names = [n for n in props if n in entries] + [n for n in entries if n not in props]
+    fields = [entries[n] for n in names]
+    if not fields:
+        return None
+
+    table = [next(iter(col)) for col in (ctx.get('xdisplay_table') or []) if isinstance(col, dict) and col]
+    # A list row shows scalar columns only: a relation column holds an id, and the
+    # REST list does not embed the related record's label.
+    scalar_keys = [f['key'] for f in fields
+                   if f['kind'] not in (KIND_RELATION, KIND_RELATION_MANY, KIND_ATTACHMENT, KIND_CHILD_ROWS) and not f.get('write_only')]
+    list_keys = [k for k in table if k in kind_by_field and k in scalar_keys] or scalar_keys or [fields[0]['key']]
+    list_keys = list_keys[:MAX_LIST_COLUMNS]
+    # The REST list sorts and filters on scalar columns, and on the relation display columns
+    # of getters.ts (`sort_filter_relation_fields`): a foreign key shown in x-display.table whose
+    # target has a single-column labelField sorts and filters by the related record's label, keyed by
+    # the relation name (`room_type`, not `room_type_id`). Those columns are list-only entries that
+    # the form never draws, and they take the same text control the Web list panel gives them.
+    # Internal bridge FK columns (`approvable_id`, `attachable_id`, ...) stay out of the panel, as on the Web.
+    panel_excluded = set(ctx.get('sort_filter_panel_excluded') or [])
+    sort_keys = [k for k in scalar_keys if k not in panel_excluded]
+    filter_keys = [f['key'] for f in fields
+                   if f['kind'] in _FILTERABLE_KINDS and not f.get('write_only') and f['key'] not in panel_excluded]
+    fk_names = {f['key'] for f in fields if f['kind'] == KIND_RELATION}
+    relation_columns = []
+    for relation, _label_column in ctx.get('sort_filter_relation_fields') or []:
+        if f'{relation}_id' not in fk_names:
+            continue
+        relation_columns.append({
+            'key': relation, 'label': title(relation), 'kind': KIND_TEXT, 'required': False,
+            'readonly': True, 'options': [],
+        })
+        sort_keys.append(relation)
+        filter_keys.append(relation)
+    # The search box matches the columns declared `x-trigram-filter: true`; an entity that
+    # declares none has no search box.
+    field_keys = {f['key'] for f in fields}
+    search_keys = [k for k in (ctx.get('trigram_search_fields') or []) if k in field_keys]
+    slots = custom_component_slots(ctx)
+    return {
+        'name': ctx['parent'],
+        'pascal': ctx['parent_pascal'],
+        'title': title(ctx['parent']),
+        'fields': fields,
+        'list_keys': list_keys,
+        'relation_columns': relation_columns,
+        'sort_keys': sort_keys,
+        'filter_keys': filter_keys,
+        'search_keys': search_keys,
+        'can_new': bool(ctx.get('can_create')),
+        'can_edit': bool(ctx.get('can_update')),
+        'can_view': bool(ctx.get('can_view')),
+        'can_delete': bool(ctx.get('can_delete')),
+        # x-payment: creating a record answers with a hosted checkout URL.
+        'is_payment': bool(ctx.get('is_payment')) and bool(ctx.get('can_create')),
+        'has_approval': has_approval_section(ctx),
+        'split': _split_entry(ctx, entries, required, title) if ctx.get('can_view') else None,
+        'comments': comment_thread_spec(ctx),
+        'attachments': attachment_section_spec(ctx),
+        'custom_components': slots,
+        # Each hand-written component once, wherever it is mounted: one stub file per name.
+        'custom_component_names': list(dict.fromkeys(c['name'] for screen in ('list', 'view', 'edit') for c in slots[screen])),
+        'custom_fields': [f for f in fields if f.get('custom')],
+    }

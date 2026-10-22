@@ -40,6 +40,10 @@ Authorization: Bearer <your-api-key>
 API keys are stored in `user.api_key` and prefixed with `mk_`.
 Obtain or regenerate a key from the User edit page.
 
+An API key may optionally expire (`user.api_key_expires_at`). A key with
+no expiry set (`null`) never expires. A request made with an expired key
+is rejected with `401 API key expired.`
+
 ## API Conventions
 
 ### Single-resource endpoints

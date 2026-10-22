@@ -1,0 +1,101 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { authenticate, requireApiPermission, withActor, handleApiError, ApiError } from '@/lib/api-auth';
+import { getRateLimiter } from '@/lib/rate-limit';
+import { resolvePermissions } from '@/lib/authz';
+import { get{{ parent_pascal }}Detail } from '@/lib/{{ parent }}/getters';
+import { setAttachmentsForBridge, type AttachmentItemInput } from '@/lib/attachment/bridge_actions';
+
+// PUT /api/{{ parent }}/[id]/attachments
+// Body: { type: {{ type_values | join(' | ') if type_values else 'an integer' }}, items: [{ id?, name, path }] }  ->  200 { ok: true }
+//
+// The REST side of the attachment panel on the {{ parent }} edit form. It runs the same
+// setAttachmentsForBridge Server Action the panel calls, as the authenticated caller (mobile access
+// token or API key), so the replace semantics (rows of this type that are not listed are deleted, listed
+// rows keep their order), the file name encryption and the revalidation are the web's own, not a copy.
+// The listed order is the stored order. `path` is the URL POST /api/upload answered with.
+//
+// Access: the caller must be able to update the {{ parent }} record, which is what the web form
+// requires before it offers the panel. The record is read through get{{ parent_pascal }}Detail, so a
+// record outside the caller's organizations (or, for a self-only entity, not the caller's own) is
+// "Not found". A listed `id` must be an attachment this record already holds, so another record's
+// (or organization's) attachment cannot be taken over by naming its id.
+
+const MAX_ITEMS = 100;
+{% if type_values %}
+const ATTACHMENT_TYPES: readonly string[] = {{ type_values | tojson }};
+{% endif %}
+
+type Params = { params: Promise<{ id: string }> };
+
+export async function PUT(request: NextRequest, { params }: Params) {
+  try {
+    const { id } = await params;
+    const { userId: actorId } = await authenticate(request);
+    const _rl = await getRateLimiter().check('api:write', actorId);
+    if (!_rl.allowed) {
+      return NextResponse.json(
+        { error: 'rate_limited', retryAfter: _rl.retryAfterSeconds },
+        { status: 429, headers: { 'Retry-After': String(_rl.retryAfterSeconds), 'X-RateLimit-Bucket': 'api:write' } },
+      );
+    }
+    // Coarse, item-independent gate before the record is read, so a caller with no access path at
+    // all never learns whether the record exists.
+    const basePerms = await requireApiPermission(actorId, '{{ parent }}', 'update');
+    const item = await get{{ parent_pascal }}Detail(id{% if should_filter_by_org or is_self_only %}, actorId{% endif %});
+    if (!item) {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    }
+    const resolved = await resolvePermissions(basePerms, item, actorId);
+    if (!resolved.update) {
+      throw new ApiError(403, `Access denied: {{ parent }}.update`);
+    }
+
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json({ error: 'Request body must be JSON' }, { status: 400 });
+    }
+    const { type, items } = (body ?? {}) as { type?: unknown; items?: unknown };
+{% if type_values %}
+    if (typeof type !== 'string' || !ATTACHMENT_TYPES.includes(type)) {
+      return NextResponse.json({ error: `type must be one of: ${ATTACHMENT_TYPES.join(', ')}` }, { status: 400 });
+    }
+{% else %}
+    if (typeof type !== 'number' || !Number.isInteger(type)) {
+      return NextResponse.json({ error: 'type must be an integer' }, { status: 400 });
+    }
+{% endif %}
+    if (!Array.isArray(items) || items.length > MAX_ITEMS) {
+      return NextResponse.json({ error: `items must be an array of at most ${MAX_ITEMS} entries` }, { status: 400 });
+    }
+
+    const attachableId = item.{{ attachable_rel_name }}?.id;
+    if (!attachableId) {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    }
+    const held = new Set<string>(
+      ((item.{{ attachable_rel_name }}?.{{ attachable_attachments_prop }} ?? []) as Array<{ id: string }>).map((a) => a.id),
+    );
+    const parsed: AttachmentItemInput[] = [];
+    for (const [index, raw] of items.entries()) {
+      const entry = (raw ?? {}) as Record<string, unknown>;
+      if (typeof entry.name !== 'string' || entry.name.trim() === '' || entry.name.length > 255) {
+        return NextResponse.json({ error: `items[${index}].name must be a non-empty string of at most 255 characters` }, { status: 400 });
+      }
+      // /api/upload answers with a site-relative path (local disk, GCS proxy) or an absolute http(s) blob URL.
+      if (typeof entry.path !== 'string' || !/^(\/(?!\/)|https?:\/\/)/.test(entry.path)) {
+        return NextResponse.json({ error: `items[${index}].path must be the URL returned by /api/upload` }, { status: 400 });
+      }
+      if (entry.id != null && (typeof entry.id !== 'string' || !held.has(entry.id))) {
+        return NextResponse.json({ error: `items[${index}].id is not an attachment of this record` }, { status: 400 });
+      }
+      parsed.push({ id: (entry.id as string | undefined) ?? null, order: index, name: entry.name, path: entry.path });
+    }
+
+    await withActor(actorId, () => setAttachmentsForBridge(attachableId, type as {{ type_ts }}, parsed));
+    return NextResponse.json({ ok: true });
+  } catch (error) {
+    return handleApiError(error);
+  }
+}

@@ -7,12 +7,29 @@ Builds Jinja2 template contexts for:
   - cypress/support/generated-tasks.ts  (task registry for cypress.config.ts)
   - cypress/e2e/api/{entity}.cy.ts      (API test spec)
 """
+import json
+import math
 import re
 from datetime import datetime
 
 # Messages Fields namespace for enum label translation.
 # Populated by set_messages_fields() before generating test specs.
 _messages_fields: dict = {}
+
+
+# The EntityLabel namespace of messages/en.json: the word the screens show for an entity name.
+_entity_labels: dict = {}
+
+
+def set_entity_labels(labels: dict) -> None:
+    """Register the EntityLabel namespace so a generated spec looks an entity-name option up by its shown word."""
+    global _entity_labels
+    _entity_labels = labels or {}
+
+
+def _shown_entity_options(options: list) -> list:
+    """The `x-entity-select` options with `label` set to the dictionary word the screens show (English title if absent)."""
+    return [{**o, 'label': _entity_labels.get(o['key'], o['label'])} if 'key' in o else o for o in options]
 
 
 def set_messages_fields(fields: dict) -> None:
@@ -149,9 +166,13 @@ from helpers.label_field import (
     build_label_expression, render_prisma_include, resolve_label_paths, relation_chain_targets,
     build_string_only_label_expression,
 )
-from build_context import _get_entity_options, _raw_def, is_forced_required_field, get_uri_kind
+from build_context import (
+    _get_entity_options, _raw_def, is_forced_required_field, get_uri_kind,
+    _exclusive_parent_columns, _exclusive_parent_all_columns, _model_has_audit_fields,
+)
 from generate_types import extract_entities
-from generators import resolve_approval_submit_on
+from version_of import version_of_identity_for
+from generators import build_dashboard_catalog, resolve_approval_submit_on, _seed_entity_grant_flags
 
 
 def _readonly_field_names(model_def: dict, view_def: dict | None = None) -> set[str]:
@@ -251,6 +272,63 @@ def _get_base_properties(defn: dict, schema: dict | None = None) -> dict:
     return defn['properties']
 
 
+# Rows a populate helper may seed per entity before the narrow-range rule may
+# repeat a value; a range wide enough for this many rows uses the row spacing.
+_NUMERIC_SEED_ROWS = 10
+_NUMERIC_SEED_SPACING = 100
+
+
+def _numeric_seed_plan(prop: dict) -> tuple[str, int | float, int]:
+    """Shared shape of the per-row numeric seed, derived from the column bounds.
+
+    Returns `(kind, start, span)`:
+    - `spaced`: row `n` is `start + (n - 1) * 100`. `start` is `max(minimum, 100)`
+      (just `100` without a minimum), so a column with `minimum: 500` seeds
+      500, 600, 700, ... and a column with `minimum: 1` or no bound seeds
+      100, 200, 300, ...
+    - `dense`: the declared range is too narrow for the spacing, so row `n` is
+      `start + (n - 1) % span`: consecutive values from the lower bound, distinct
+      for as many rows as the range has values.
+    """
+    mn = prop.get('minimum')
+    mx = prop.get('maximum')
+    start = _NUMERIC_SEED_SPACING if mn is None else max(mn, _NUMERIC_SEED_SPACING)
+    if mx is None or mx - start >= _NUMERIC_SEED_SPACING * (_NUMERIC_SEED_ROWS - 1):
+        return 'spaced', start, 0
+    low = mn if mn is not None else min(1, mx)
+    return 'dense', low, max(1, math.floor(mx - low) + 1)
+
+
+def _numeric_unique_seed(prop: dict, index: int) -> int:
+    """Value of the `index`-th (1-based) seeded row's integer/number column.
+
+    Single source of truth for the per-row numeric seed: the dependency
+    populate helpers emit it as a TypeScript expression (`_numeric_unique_expr`)
+    and the generated specs compute the label text a list shows for such a row
+    from this function, so both agree. Rows are spaced 100 apart from
+    `max(minimum, 100)`; when `maximum` leaves no room for that spacing the rows
+    take consecutive values from the lower bound instead (see
+    `_numeric_seed_plan`), so rows stay distinct while the range has values left.
+    This is not the rule of an entity's own populate helper (`prisma_value`,
+    'number' category), and not of `cypress_create_value`, which types a fixed
+    100 (clamped) into forms.
+    """
+    kind, start, span = _numeric_seed_plan(prop)
+    if kind == 'spaced':
+        return start + (index - 1) * _NUMERIC_SEED_SPACING
+    return start + (index - 1) % span
+
+
+def _numeric_unique_expr(prop: dict, index_expr: str) -> str:
+    """TypeScript counterpart of `_numeric_unique_seed` for a loop index variable."""
+    kind, start, span = _numeric_seed_plan(prop)
+    if kind == 'spaced':
+        if start == _NUMERIC_SEED_SPACING:
+            return f'{index_expr} * {_NUMERIC_SEED_SPACING}'
+        return f'{start} + ({index_expr} - 1) * {_NUMERIC_SEED_SPACING}'
+    return f'{start} + (({index_expr} - 1) % {span})'
+
+
 def _seed_relation_label_value(
     target: str,
     label_field,
@@ -258,8 +336,14 @@ def _seed_relation_label_value(
     schema: dict,
     *,
     unique_index: int | None = None,
+    name_title: str | None = None,
 ) -> str:
     """Expected UI label for a populated FK target.
+
+    `name_title` overrides the title used for a bare `name` label field. The
+    populate helper names a dependency row after the foreign-key stem, which
+    differs from the target model title when the FK is aliased (e.g.
+    `placed_step_id` -> `step` seeds `Test Placed Step ...`).
 
     `label_field` may be a single field name, a dotted path through outbound
     m2o / one-to-one relations, or a list of either — mirroring what the UI
@@ -280,7 +364,11 @@ def _seed_relation_label_value(
     if resolved:
         parts = []
         for r in resolved:
-            parts.append(_seed_path_part(target, r, schema, unique_index=unique_index))
+            parts.append(_seed_path_part(target, r, schema, unique_index=unique_index, name_title=name_title))
+        if _exclusive_dropped_owner_columns(target, schema):
+            # A row of an x-exclusive-parents entity leaves the other owners empty:
+            # their label segments are skipped and the gap is closed.
+            parts = [p for p in parts if p]
         return ' '.join(parts)
 
     # Fallback for callers that pass a missing/unknown label_field — keep the
@@ -303,6 +391,7 @@ def _seed_path_part(
     schema: dict,
     *,
     unique_index: int | None,
+    name_title: str | None = None,
 ) -> str:
     """Expected UI value of a single resolved labelField path on the target row.
 
@@ -312,6 +401,11 @@ def _seed_path_part(
     """
     segments = resolved_path['segments']
     final_format = resolved_path['final_format']
+
+    # A relation through an owner column the generated row leaves empty (the
+    # other parents of an x-exclusive-parents entity) shows nothing.
+    if len(segments) > 1 and f'{segments[0]}_id' in _exclusive_dropped_owner_columns(target, schema):
+        return ''
 
     # Walk the relation chain FIRST — needed for nullable check below.
     cursor_entity = target
@@ -355,7 +449,7 @@ def _seed_path_part(
     prop_type = next((t for t in prop_type_raw if t != 'null'), None) if isinstance(prop_type_raw, list) else prop_type_raw
 
     if final_field == 'name':
-        title = to_title_case(cursor_entity)
+        title = name_title if (name_title and cursor_entity == target) else to_title_case(cursor_entity)
         if cursor_entity == 'user':
             # is_user_account targets are excluded from Phase2's per-call
             # callIndex namespace (test_helper.ts.jinja2 §4.2/cmd614) — the
@@ -386,7 +480,9 @@ def _seed_path_part(
         title = to_title_case(final_field)
         return f'Test {title} 0_{unique_index}' if unique_index is not None else f'Test {title} A'
     if prop_type in ('integer', 'number'):
-        return str(unique_index * 100) if unique_index is not None else str(label_prop.get('minimum', 0))
+        if unique_index is None:
+            return str(label_prop.get('minimum', 0))
+        return str(_numeric_unique_seed(label_prop, unique_index))
     if prop_type == 'boolean':
         return 'false'
     title = to_title_case(final_field)
@@ -584,8 +680,8 @@ def _get_dep_populate_fields(target: str, var_name: str, title: str, schema: dic
             val_second = f"'Test {field_title} B'"
         elif actual in ('integer', 'number'):
             mn = prop.get('minimum', 0)
-            val = val_unique = str(mn)
-            val_second = str(mn)
+            val = val_second = str(mn)
+            val_unique = _numeric_unique_expr(prop, 'i')
         elif actual == 'boolean':
             # Booleans must emit a literal `false` / `true`, not a string. The
             # previous fall-through produced `TEST-FOO-${Date.now()}` which
@@ -732,7 +828,7 @@ def _get_dep_extra_required_fields(dep_target: str, schema: dict) -> list[dict]:
         elif actual in ('integer', 'number'):
             mn = prop.get('minimum', 0)
             val = str(mn)
-            val_unique = val
+            val_unique = _numeric_unique_expr(prop, 'i')
             val_second = val
         else:
             val = f'`TEST-{prop_name.upper()}-${{Date.now()}}`'
@@ -740,6 +836,58 @@ def _get_dep_extra_required_fields(dep_target: str, schema: dict) -> list[dict]:
             val_second = f'`TEST-{prop_name.upper()}-${{Date.now()}}-2`'
         result.append({'prop_name': prop_name, 'prisma_val': val, 'prisma_val_unique': val_unique, 'prisma_val_second': val_second})
     return result
+
+
+def _closes_required_cycle(rel: dict, model: str, schema: dict) -> bool:
+    """True for an optional FK of `model` whose target has a required FK back to `model`.
+
+    Such an edge (e.g. an identity's nullable `current_version_id` to its version
+    entity, where the version requires the identity) cannot be satisfied as a
+    pre-created dependency: the target would be created before `model` exists, so
+    its required parent FK would be missing. The row of `model` is created first
+    with the optional column empty instead.
+    """
+    if rel['required']:
+        return False
+    target_def = _raw_def(rel['target'], schema)
+    if not target_def or not target_def.get('properties'):
+        return False
+    return any(
+        back['target'] == model and back['required']
+        for back in get_parent_relationships(target_def)
+    )
+
+
+def _identity_version_for_virtual_primary(model_name: str, prim: str | None, schema: dict) -> dict | None:
+    """Pairing data for an `x-version-of` identity whose primary column is virtual.
+
+    The identity row carries no content: its list shows the same-named column of the
+    version its `current_version_id` points to. Returns None unless `model_name` is such
+    an identity and `prim` is a string column of its version entity. The populate helper
+    then creates one version per identity row and points `current_version_id` at it.
+    """
+    vo = version_of_identity_for(model_name, schema)
+    if not vo or not prim:
+        return None
+    identity_props = (_raw_def(model_name, schema) or {}).get('properties') or {}
+    if prim in identity_props or f'{prim}_id' in identity_props:
+        return None
+    version_def = _raw_def(vo['version'], schema) or {}
+    prim_prop = (version_def.get('properties') or {}).get(prim)
+    if not isinstance(prim_prop, dict) or prim_prop.get('type') != 'string':
+        return None
+    extra_required = [
+        f for f in _get_dep_populate_fields(vo['version'], 'version', to_title_case(vo['version']), schema)
+        if f['prop_name'] not in (prim, vo['identity_fk'])
+    ]
+    return {
+        'version': vo['version'],
+        'identity_fk': vo['identity_fk'],
+        'prim': prim,
+        'internal_fk_deps': get_all_internal_fk_deps(vo['version'], schema),
+        'extra_required_fields': extra_required,
+        'has_updater_id': _entity_has_updater_id(vo['version'], schema),
+    }
 
 
 def resolve_dependencies(model_name: str, schema: dict) -> list[dict]:
@@ -767,6 +915,7 @@ def resolve_dependencies(model_name: str, schema: dict) -> list[dict]:
             and r['target'] != model
             and r['prop_name'] != 'updater_id'
             and r['prop_name'] != 'assignee_id'
+            and not _closes_required_cycle(r, model, schema)
         ]
 
         for rel in relevant:
@@ -868,7 +1017,10 @@ def split_same_target_fk_deps(
     target_to_fk_rels: dict[str, list] = {}
     for r in relationships:
         if (r['target'] not in ('user', model_name)
-                and r['prop_name'] not in ('updater_id', 'assignee_id')):
+                and r['prop_name'] not in ('updater_id', 'assignee_id')
+                # An FK skipped by resolve_dependencies (optional edge closing a required
+                # cycle) has no dep to split or alias.
+                and any(d['target'] == r['target'] for d in deps)):
             target_to_fk_rels.setdefault(r['target'], []).append(r)
     multi_fk_targets = {t: rels for t, rels in target_to_fk_rels.items() if len(rels) > 1}
     for target, fk_rels in multi_fk_targets.items():
@@ -892,7 +1044,7 @@ def split_same_target_fk_deps(
             var_name = to_camel_case(prop_stem)
             dep_title = to_title_case(prop_stem)
             if not any(d['var_name'] == var_name for d in deps) and not any(d['var_name'] == var_name for d in new_deps):
-                new_deps.append({'target': target, 'var_name': var_name, 'title': dep_title, 'fk_deps': _orig_fk_deps})
+                new_deps.append({'target': target, 'var_name': var_name, 'title': dep_title, 'fk_deps': _orig_fk_deps, 'is_split_fk_dep': True})
             entity_fk_deps.append({'prop_name': r['prop_name'], 'dep_var_name': var_name})
             new_var_names.append(var_name)
         insert_at = min(orig_index, len(deps))
@@ -1222,7 +1374,7 @@ def get_field_metas(
                 'label': to_title_case(prop_name),
                 'category': 'entity_select',
                 'required': prop_name in required_fields,
-                'entity_options': entity_options,
+                'entity_options': _shown_entity_options(entity_options),
             })
         elif prop_type == 'string' and prop.get('enum'):
             metas.append({
@@ -1286,6 +1438,13 @@ def get_child_render_type(child: dict, schema: dict = None, parent_model_name: s
         return 'editable-list-text'
     if child.get('output_type') == 'comments':
         return 'comments'
+    # A grid child whose array property declares `x-custom-component` with an `upsert`
+    # target is drawn by a hand-written editor, not the generated grid. The generated
+    # UI tests do not know that editor's layout, so they do not drive it (the API tests
+    # still send the child rows).
+    _xc = child.get('custom_component')
+    if isinstance(_xc, dict) and 'upsert' in (_xc.get('target') or []):
+        return 'custom-component'
     # issue #538 (a follow-up to the read-only embed decision, issue
     # #520/PR#528/PR#530): an independent child -- one that can create,
     # edit, or delete its own rows through its own new/edit/delete pages,
@@ -1432,6 +1591,12 @@ def _ts_literal_for_python_value(value) -> str:
     return "'" + str(value).replace("\\", "\\\\").replace("'", "\\'") + "'"
 
 
+def _is_iso_date_text(field: dict) -> bool:
+    """A plain text column named `*_date` holds a `YYYY-MM-DD` string (e.g. app_setting.business_date), so its
+    sample values must be real dates: a custom validation rule may parse them."""
+    return field.get('category') == 'text' and not field.get('format') and field['prop_name'].endswith('_date')
+
+
 def prisma_value(field: dict, index: str, entity_title: str) -> str:
     """Generate a TypeScript expression for Prisma test data."""
     cat = field['category']
@@ -1452,6 +1617,8 @@ def prisma_value(field: dict, index: str, entity_title: str) -> str:
             # `Date.now()` covers cross-run uniqueness; `${index}` covers
             # in-loop uniqueness.
             return f'`test-${{{index}}}-${{Date.now()}}@example.com`'
+        if _is_iso_date_text(field):
+            return "'2026-01-15'"
         if field.get('enum_values'):
             return f"'{field['enum_values'][0]}'"
         return f'`Test {field["label"]} ${{{index}}}`'
@@ -1518,6 +1685,8 @@ def cypress_create_value(field: dict, entity_title: str) -> str:
             return f'https://example.com/test-{prop_name}-1'
         if prop_name == 'name':
             val = f'Test {entity_title}'
+        elif _is_iso_date_text(field):
+            val = '2026-01-15'
         elif field.get('enum_values'):
             val = field['enum_values'][0]
         else:
@@ -1592,7 +1761,9 @@ def cypress_edit_value(field: dict, entity_title: str, write_locked_values: dict
             val = f'Updated {entity_title}'
         else:
             enum_values = [v for v in (field.get('enum_values') or []) if v not in _locked]
-            if enum_values:
+            if _is_iso_date_text(field):
+                val = '2026-01-16'
+            elif enum_values:
                 val = enum_values[1] if len(enum_values) > 1 else enum_values[0]
             else:
                 val = f'Updated {field["label"]}'
@@ -1660,6 +1831,8 @@ def api_value(field: dict, entity_title: str) -> str:
             return f"'https://example.com/test-{prop_name}'"
         if prop_name == 'name':
             return f"'Test {entity_title}'"
+        if _is_iso_date_text(field):
+            return "'2026-01-15'"
         if field.get('enum_values'):
             return f"'{field['enum_values'][0]}'"
         return f"'Test {field['label']}'"
@@ -1829,15 +2002,19 @@ def gen_assert_commands(
                 dep_label_field = field.get('dep_label_field')
                 # Prefer the rich resolver (handles list-form labelField, dotted
                 # paths, and the YYYY-MM-DD date format produced by formatLabelValue).
+                prop_stem = re.sub(r'_id$', '', field['prop_name'])
                 if dep_label_field and dep_label_field != 'name' and schema is not None:
+                    # The populate helper names the dependency row after the
+                    # foreign-key stem, so a second foreign key to the same
+                    # target must expect its own row's label, not the first's.
                     dep_title = _seed_relation_label_value(
                         dep_target,
                         dep_label_field,
                         field.get('dep_label_field_is_date', False),
                         schema,
+                        name_title=to_title_case(prop_stem) if dep_var else None,
                     )
                 elif dep_var:
-                    prop_stem = re.sub(r'_id$', '', field['prop_name'])
                     dep_title = f'Test {to_title_case(prop_stem)} A'
                 else:
                     dep_title = f'Test {to_title_case(dep_target)} A'
@@ -1850,6 +2027,10 @@ def gen_assert_commands(
                     inner_label = to_title_case(str(inner_label_field).split('.')[-1])
                     lines.append(f"{indent}cy.openAccordion('{field['label']}');")
                     lines.append(f"{indent}cy.checkField('{inner_label}', '{dep_title}');")
+                elif dep_label_field == 'id' and dep_var:
+                    # The row id is generated by the database, so no fixed title can match;
+                    # expect the same value the autocomplete was filled with.
+                    lines.append(f"{indent}cy.checkField('{field['label']}', deps.{dep_var}.name);")
                 else:
                     lines.append(f"{indent}cy.checkField('{field['label']}', '{dep_title}');")
         else:
@@ -1868,8 +2049,10 @@ def _child_datetime_iso_value(value: str, fmt: str | None) -> str:
 
     DataGrid-child date/date-time/time columns (generators.py's column_def
     codegen, issue #540) render two different native input types depending
-    on `fmt`: a `date`-format column gets MUI's dedicated `type: 'date'`
-    GridColDef (native `<input type="date">`, `YYYY-MM-DD`); `date-time`
+    on `fmt` (issue #764: both are edited through MUI pickers now, and
+    cypress/support/datagrid-helpers.ts types the ISO value into them): a
+    `date`-format column gets MUI's dedicated `type: 'date'`
+    GridColDef (`YYYY-MM-DD`); `date-time`
     and `time` columns have no dedicated MUI type and keep `type:
     'dateTime'` (native `<input type="datetime-local">`,
     `YYYY-MM-DDThh:mm`) — unlike the top-level form, whose DateTimeWrapper
@@ -1940,6 +2123,51 @@ def _child_native_enum_singleselect_calls(fields: list, title: str, value_fn) ->
     return calls
 
 
+def _dashboard_widget_catalog_values(schema: dict) -> dict | None:
+    """Values for a dashboard widget row that the save-time validation accepts, or None.
+
+    The dashboard validates every new widget against the catalog of entities that opted in with
+    `x-display.dashboard`. With an empty catalog nothing is validated, so the free-text placeholders
+    are fine; with a non-empty catalog the data source and every field must name catalog members,
+    and chart settings must fit the chosen fields (a time bucket or time zone needs a date-time
+    group-by field, a stack mode needs a series field).
+    """
+    catalog = build_dashboard_catalog(schema)
+    if not catalog:
+        return None
+    entity = catalog[0]
+    fields = entity['groupable_fields']
+    datetime_field = next((f for f in fields if f['kind'] == 'datetime' and f.get('datetime_format') == 'date-time'), None)
+    group = datetime_field or fields[0]
+    series = next((f for f in fields if f['name'] != group['name']), None)
+    return {
+        'entity_name': entity['name'],
+        'group_by_field': group['name'],
+        'series_field': series['name'] if series else None,
+        'bucket': datetime_field is not None,
+    }
+
+
+def _apply_dashboard_widget_catalog_values(child_entry: dict, title: str, schema: dict) -> None:
+    """Make the dashboard widget child's generated rows valid for a schema with dashboard data sources."""
+    values = _dashboard_widget_catalog_values(schema)
+    if values is None:
+        return
+    base = f"name: '{'Test ' + title}', entity_name: '{values['entity_name']}', group_by_field: '{values['group_by_field']}'"
+    child_entry['create_obj'] = '{ ' + base + ' }'
+    full = base + (f", series_field: '{values['series_field']}'" if values['series_field'] else '')
+    child_entry['full_create_obj'] = '{ ' + full + ' }'
+    calls = [
+        f"selectDataGridSingleSelect(0, 'chart_type', 'Pie', 'pie', '{title}');",
+    ]
+    if values['series_field']:
+        calls.append(f"selectDataGridSingleSelect(0, 'stack_mode', 'Grouped', 'grouped', '{title}');")
+    if values['bucket']:
+        calls.append(f"selectDataGridSingleSelect(0, 'group_by_bucket', 'Day', 'day', '{title}');")
+        calls.append(f"selectDataGridSingleSelect(0, 'timezone', 'Pago Pago', 'pacific_pago_pago', '{title}');")
+    child_entry['native_enum_full_calls'] = calls
+
+
 def gen_child_datagrid_object(child_meta: dict, action: str) -> str:
     """Generate fillDataGridRow object (scalar fields only; FK fields use selectDataGridSingleSelect)."""
     fields = child_meta['required_fields'] if action == 'create' else child_meta['fields']
@@ -1947,6 +2175,31 @@ def gen_child_datagrid_object(child_meta: dict, action: str) -> str:
     value_fn = cypress_create_value if action == 'create' else cypress_edit_value
     entries = _child_scalar_entries(fields, title, value_fn)
     return '{ ' + ', '.join(entries) + ' }'
+
+
+def _drop_hidden_exclusive_parent_columns(child_metas: list, model_name: str, schema: dict) -> list:
+    """Remove from each child meta the FK columns that `model_name`'s form hides.
+
+    An `x-exclusive-parents` child's grid on a listed parent's screen has no
+    column for the other listed parents (build_context._exclusive_parent_fks), so
+    that parent's UI spec must not select or fill one. Children without the
+    declaration, and parents not listed in it, are returned unchanged.
+    """
+    result = []
+    for meta in child_metas:
+        by_parent = _exclusive_parent_columns(meta['child']['name'], schema)
+        hidden = {c for p, cols in by_parent.items() if p != model_name for c in cols} if model_name in by_parent else set()
+        if not hidden:
+            result.append(meta)
+            continue
+        keep = lambda fs: [f for f in fs if f['prop_name'] not in hidden]  # noqa: E731
+        result.append({
+            **meta,
+            'fields': keep(meta['fields']),
+            'required_fields': keep(meta['required_fields']),
+            'optional_fields': keep(meta['optional_fields']),
+        })
+    return result
 
 
 def gen_child_full_datagrid_object(child_meta: dict) -> str:
@@ -2195,6 +2448,89 @@ def _resolve_pool_extra_deps(
     return pool_extra_fk_props, pool_extra_deps
 
 
+_SYSTEM_DEP_COLUMNS = ('id', 'creator_id', 'updater_id', 'created_at', 'updated_at')
+
+
+def _dependency_columns(model: str, schema: dict) -> dict:
+    """Columns of a dependency model for the helper's dependency-value hook.
+
+    `scalars` are the plain columns a hand-written hook may set. Everything
+    carrying `x-relationship` (foreign keys and relation properties) and the
+    system columns are `protected`: the hook may not reassign them.
+    """
+    props = (_raw_def(model, schema) or {}).get('properties') or {}
+    scalars, protected = [], list(_SYSTEM_DEP_COLUMNS)
+    for name, prop in props.items():
+        if name in _SYSTEM_DEP_COLUMNS:
+            continue
+        if prop.get('x-relationship') or prop.get('type') in ('array', 'object') or '$ref' in prop:
+            protected.append(name)
+        else:
+            scalars.append(name)
+    return {
+        'model': model,
+        'scalars_ts': json.dumps(sorted(scalars)),
+        'protected_ts': json.dumps(sorted(protected)),
+    }
+
+
+def _exclusive_owner_fields(fields: list, model_name: str, schema: dict) -> list:
+    """Field metas of an `x-exclusive-parents` child as the generated tests use them.
+
+    The save-time validator requires exactly one owner column, so the generated
+    helper rows, API bodies and form fills write the owner of the first declared
+    parent that has a resolvable column (as a required field) and none of the
+    other owner columns. A child without the declaration gets `fields` back
+    unchanged.
+    """
+    by_parent = _exclusive_parent_columns(model_name, schema)
+    all_cols = {c for cols in by_parent.values() for c in cols}
+    if not all_cols:
+        return fields
+    owner = next((cols[0] for cols in by_parent.values() if cols), None)
+    result = []
+    for f in fields:
+        if f['prop_name'] in all_cols - {owner}:
+            continue
+        if f['prop_name'] == owner and f['category'] == 'autocomplete':
+            f = {**f, 'required': True}
+        result.append(f)
+    return result
+
+
+def _exclusive_dropped_owner_columns(target: str, schema: dict) -> set[str]:
+    """Owner columns of an `x-exclusive-parents` entity that generated rows leave empty.
+
+    Every listed owner column except the first declared parent's. Empty for an
+    entity without the declaration.
+    """
+    by_parent = _exclusive_parent_columns(target, schema)
+    all_cols = {c for cols in by_parent.values() for c in cols}
+    owner = next((cols[0] for cols in by_parent.values() if cols), None)
+    return all_cols - {owner} if owner else set()
+
+
+def _exclusive_owner_fk_deps(target: str, fk_deps: list | None, schema: dict) -> list:
+    """`fk_deps` of a dependency row, reduced to one owner when `target` declares
+    `x-exclusive-parents`.
+
+    A dependency row (for example the parameter another entity's helper creates)
+    is written straight through Prisma, so it must already satisfy the rule the
+    save-time validator enforces: exactly one listed owner column. The owner is
+    the column of the first declared parent that is present in `fk_deps`; every
+    other listed owner column is dropped. A target without the declaration, or
+    with none of its owner columns in `fk_deps`, gets `fk_deps` back unchanged.
+    """
+    fk_deps = list(fk_deps or [])
+    by_parent = _exclusive_parent_columns(target, schema)
+    all_cols = {c for cols in by_parent.values() for c in cols}
+    present = {fk['prop_name'] for fk in fk_deps}
+    owner = next((c for cols in by_parent.values() for c in cols if c in present), None)
+    if owner is None:
+        return fk_deps
+    return [fk for fk in fk_deps if fk['prop_name'] not in all_cols - {owner}]
+
+
 def helper_context(
     parent: str,
     children: list,
@@ -2218,6 +2554,7 @@ def helper_context(
         properties, required_fields, relationships, generate_config.get('fields'), entity_options,
         range_end_field=_date_range['end'] if _date_range else None,
     )
+    fields = _exclusive_owner_fields(fields, model_name, schema)
     # Detect outbound one-to-one FK fields (e.g. approvable_id on leave_request).
     # These are internal bridge records the service creates automatically — not user-facing.
     # Exclude from fill/assert commands and from prisma data field lists; handle separately.
@@ -2392,11 +2729,18 @@ def helper_context(
 
     # Note: read-only fields stay in these lists so seed/prisma create data includes
     # their required values; the fill/clear/assert command builders skip them.
+    # The list's primary column may be a defaulted (hence non-required) scalar: the specs read it back from the
+    # list, so populate and the minimal create must set it like a required column.
+    _primary_scalar_name = _get_primary_display_field_name(parent_def)
+    if _primary_scalar_name and f'{_primary_scalar_name}_id' in (parent_def.get('properties') or {}):
+        _primary_scalar_name = None
     required_field_metas = [
-        f for f in fields if f['required'] or f['prop_name'] in _filter_values_for_populate
+        f for f in fields
+        if f['required'] or f['prop_name'] in _filter_values_for_populate or f['prop_name'] == _primary_scalar_name
     ]
     optional_field_metas = [
-        f for f in fields if not f['required'] and f['prop_name'] not in _filter_values_for_populate
+        f for f in fields
+        if not f['required'] and f['prop_name'] not in _filter_values_for_populate and f['prop_name'] != _primary_scalar_name
     ]
 
     child_metas = analyze_children(children, schema, model_name)
@@ -2573,7 +2917,12 @@ def helper_context(
     }
     enriched_deps = []
     for dep in deps:
-        is_direct = 'title' in dep  # UA / self-ref / m2m deps added directly
+        dep = {**dep, 'fk_deps': _exclusive_owner_fk_deps(dep['target'], dep.get('fk_deps'), schema)}
+        # UA / self-ref / m2m deps are added directly (pre-set 'title'). A
+        # prop-stem dep split off a multi-FK target is a regular FK dep that
+        # merely carries a title, so it still qualifies for needs_second --
+        # the spec reads `deps.<primaryVar>2` for the primary display FK.
+        is_direct = 'title' in dep and not dep.get('is_split_fk_dep')
         title_str = dep.get('_title_override') or dep.get('title') or to_title_case(dep['target'])
         dep_def = schema['definitions'].get(dep['target'], {})
         x_rels = dep_def.get('x-relationships', {})
@@ -2642,6 +2991,16 @@ def helper_context(
             search_label_expression_second = build_string_only_label_expression(
                 f'{dep["var_name"]}2Record', label_field, dep['target'], schema,
             ) or label_expression_second
+        if _exclusive_dropped_owner_columns(dep['target'], schema):
+            # The row's other owner relations are empty, so their label segments are
+            # empty too; close the gap the join leaves, as the UI text is matched
+            # with collapsed whitespace.
+            def _close_gaps(expr: str) -> str:
+                return f"({expr}).replace(/\\s+/g, ' ').trim()" if expr else expr
+            label_expression = _close_gaps(label_expression)
+            label_expression_second = _close_gaps(label_expression_second)
+            search_label_expression = _close_gaps(search_label_expression)
+            search_label_expression_second = _close_gaps(search_label_expression_second)
         enriched_deps.append({
             **dep,
             'title': title_str,
@@ -3035,7 +3394,13 @@ def helper_context(
         child_def = _raw_def(child_name, schema)
         has_fk_deps = False
         child_fields_prisma = []
+        # An x-exclusive-parents child is owned by the parent being populated alone:
+        # the other listed owner columns are not written (the validator counts them).
+        _excl_cols = set(_exclusive_parent_all_columns(child_name, schema))
+        _other_owners = _excl_cols - {child_meta['parent_fk_prop']} if child_meta['parent_fk_prop'] in _excl_cols else set()
         for f in child_meta['fields']:
+            if f['prop_name'] in _other_owners:
+                continue
             target = f.get('dep_target')
             if f['category'] == 'autocomplete' and target and target != 'user':
                 # A self-referencing FK on the datagrid child's OWN
@@ -3063,6 +3428,9 @@ def helper_context(
         # same nested-create pattern as populate{{pascal}}Data's own internal_fk_deps,
         # otherwise this "add child to existing parent" helper omits a required column.
         child_internal_fk_deps = get_all_internal_fk_deps(child_name, schema)
+        # A child that is also a full entity carries required creator_id /
+        # updater_id columns; embedded-only children (no audit columns) do not.
+        child_has_audit_fields = _model_has_audit_fields(child_name)
         enriched_datagrid_children.append({
             'model_name': child_name,
             'pascal': child_pascal,
@@ -3071,7 +3439,8 @@ def helper_context(
             'fields_prisma': child_fields_prisma,
             'has_fk_deps': has_fk_deps,
             'internal_fk_deps': child_internal_fk_deps,
-            'needs_test_user': any(d['target'] == 'user' for d in child_internal_fk_deps),
+            'has_audit_fields': child_has_audit_fields,
+            'needs_test_user': child_has_audit_fields or any(d['target'] == 'user' for d in child_internal_fk_deps),
         })
 
     enriched_comment_children = []
@@ -3149,6 +3518,7 @@ def helper_context(
                     'target': _nested_dep['target'],
                     'extra_required_fields': _nested_efs,
                     'fk_deps': _nested_dep.get('fk_deps') or [],
+                    'internal_fk_deps': _nested_dep.get('internal_fk_deps') or [],
                 })
         primary_fk_dep['nested_fk_deps'] = _nested_fk_deps
 
@@ -3203,7 +3573,65 @@ def helper_context(
             continue
         _seen_oto_vars.add(_var)
         extra_oto_fk_deps.append(_dep)
+
+    # Composite @@unique made only of required FKs: the populate loop would write
+    # the same FK pair on every iteration (every FK reads the single shared
+    # `deps.<var>` row), so the 2nd create() fails with P2002 as soon as length>=2
+    # (e.g. step_argument's @@unique([step_placement_id, parameter_id])). Unless one
+    # FK of the group already gets a fresh row per iteration (the primary display
+    # FK, or a one-to-one FK above), give ONE of them its own fresh row per loop
+    # iteration, reusing the one-to-one per-iteration create. The FK picked is the
+    # one whose target is cheapest and safest to duplicate: fewest FK deps, and
+    # never a target with a composite @@unique of its own over FKs (a fresh copy
+    # sharing the same parents would collide on that). Groups holding a scalar column are left
+    # alone (the scalar may already vary per row), as are self-referencing deps.
+    _fresh_vars = {_pv for _pv in (primary_fk_dep['var_name'] if primary_fk_dep else None, *_seen_oto_vars) if _pv}
+    _required_fk_by_prop = {
+        f['prop_name']: f['dep_var_name'] for f in required_fields_prisma
+        if f['category'] == 'autocomplete' and f.get('dep_var_name')
+    }
+    for _group in (_prisma_uniques.get(model_name) or {}).get('composite', []):
+        if len(_group) < 2 or not all(_c in _required_fk_by_prop for _c in _group):
+            continue
+        _group_vars = [_required_fk_by_prop[_c] for _c in _group]
+        if len(set(_group_vars)) < len(_group_vars) or any(_v in _fresh_vars for _v in _group_vars):
+            continue
+        _cands = []
+        for _v in _group_vars:
+            _cd = next((d for d in enriched_deps if d['var_name'] == _v), None)
+            if _cd is None or _cd['target'] == 'user' or _cd.get('is_self_ref_dep'):
+                continue
+            _own_fk_props = {fk['prop_name'] for fk in (_cd.get('fk_deps') or [])}
+            _own_composite = any(
+                len(_g) > 1 and set(_g) <= _own_fk_props
+                for _g in (_prisma_uniques.get(_cd['target']) or {}).get('composite', [])
+            )
+            if _own_composite:
+                continue
+            _cands.append((len(_cd.get('fk_deps') or []), len(_cands), _cd))
+        if not _cands:
+            continue
+        _pick = min(_cands, key=lambda c: c[:2])[2]
+        _seen_oto_vars.add(_pick['var_name'])
+        _fresh_vars.add(_pick['var_name'])
+        extra_oto_fk_deps.append({**_pick, 'composite_unique_member': True})
     extra_oto_fk_dep_vars = {d['var_name'] for d in extra_oto_fk_deps}
+
+    # Whether the helper numbers its per-iteration rows with a module-level call
+    # counter (`_<Entity>CallSeq`). One predicate, shared by the helper (declares
+    # and increments the counter), the three spec templates (reset it in
+    # beforeEach) and the tasks registry (exposes the reset task): if any of
+    # them used a narrower condition, rows would be numbered from a counter that
+    # is never reset and the specs' first-call labels (`..._0_1`) would only
+    # match when the spec happens to run first in the Cypress process.
+    uses_call_seq = bool(
+        (
+            primary_fk_dep is not None
+            and not primary_fk_dep.get('is_user_account')
+            and (primary_fk_dep.get('extra_required_fields') or primary_fk_dep.get('nested_fk_deps'))
+        )
+        or any(d.get('extra_required_fields') for d in extra_oto_fk_deps)
+    )
 
     # x-ledger-source pool FK(s) (poolIdField / fromPoolIdField / toPoolIdField)
     # are usually schema-optional — the real pool target is often resolved after
@@ -3392,6 +3820,20 @@ def helper_context(
                 'pool_extra_deps': _pool_extra_deps_nolines,
             }
 
+    # Hand-written dependency-value hook (helper_custom.ts): one key per
+    # dependency the helper can create, and the plain / protected columns of
+    # each dependency's model so the runtime can fail closed.
+    _hook_deps = list(non_self_deps) + list(self_ref_deps)
+    _hook_pairs = [(d['target'], d['var_name']) for d in _hook_deps]
+    if primary_fk_dep and not primary_fk_dep.get('is_user_account'):
+        _hook_pairs.append((primary_fk_dep['target'], primary_fk_dep['var_name']))
+        _hook_pairs += [(n['target'], n['dep_var_name']) for n in primary_fk_dep.get('nested_fk_deps') or []]
+    _hook_pairs += [(o['target'], o['var_name']) for o in extra_oto_fk_deps]
+    dependency_hook_keys = sorted({f'{t}.{v}' for t, v in _hook_pairs})
+    dependency_hook_columns = [
+        _dependency_columns(t, schema) for t in sorted({t for t, _ in _hook_pairs})
+    ]
+
     return {
         'parent': parent,
         'pascal': pascal,
@@ -3404,6 +3846,8 @@ def helper_context(
         'has_self_ref_deps': has_self_ref_deps,
         'non_self_deps_return': non_self_deps_return,
         'has_parent_deps': bool(entity_fk_deps) or bool(ua_dep_fields),
+        'dependency_hook_keys_ts': ' | '.join(f"'{k}'" for k in dependency_hook_keys) or 'never',
+        'dependency_hook_columns': dependency_hook_columns,
         'needs_deps_in_populate': needs_deps_in_populate,
         'needs_deps_in_populate_full': needs_deps_in_populate_full,
         'ua_dep_fields': ua_dep_fields,
@@ -3414,10 +3858,14 @@ def helper_context(
         'all_fields_prisma': all_fields_prisma,
         'extra_prisma_fields': extra_prisma_fields,
         'has_optional': bool(optional_field_metas),
+        'identity_version': _identity_version_for_virtual_primary(
+            model_name, _get_primary_display_field_name(parent_def), schema,
+        ),
         'datagrid_children': enriched_datagrid_children,
         'comment_children': enriched_comment_children,
         'primary_fk_dep': primary_fk_dep,
         'extra_oto_fk_deps': extra_oto_fk_deps,
+        'uses_call_seq': uses_call_seq,
         'extra_oto_fk_dep_vars': sorted(extra_oto_fk_dep_vars),
         'internal_fk_deps': internal_fk_deps,
         'has_approvable': has_approvable,
@@ -3467,6 +3915,7 @@ def spec_context(
         properties, required_fields, relationships, generate_config.get('fields'), entity_options,
         range_end_field=_date_range['end'] if _date_range else None,
     )
+    fields = _exclusive_owner_fields(fields, model_name, schema)
     # Exclude outbound one-to-one FK fields (internal bridge records, not user-facing).
     _internal_fk_prop_names = {d['prop_name'] for d in get_internal_one_to_one_fks(model_name, schema)}
     fields = [f for f in fields if f['prop_name'] not in _internal_fk_prop_names]
@@ -3478,6 +3927,14 @@ def spec_context(
     # direct_attachment_and_uri_kind_file.cy.ts spec.
     _direct_attachment_prop_names = {d['prop_name'] for d in get_direct_attachment_fk_props(parent_def)}
     fields = [f for f in fields if f['prop_name'] not in _direct_attachment_prop_names]
+    # Exclude an optional FK that closes a required cycle (an identity's
+    # nullable current_version_id): resolve_dependencies() leaves its target out
+    # of the pre-created set, so there is no `deps` entry to pick and the spec
+    # must not reference one.
+    _cycle_prop_names = {
+        r['prop_name'] for r in relationships if _closes_required_cycle(r, model_name, schema)
+    }
+    fields = [f for f in fields if f['prop_name'] not in _cycle_prop_names]
     # Exclude fields left off x-display.form the same way (cmd_897/subtask_886a
     # scope-expansion). generators.py's FormUpsert/FormView builders treat a
     # declared x-display.form as a strict allowlist -- a field with a real jsx
@@ -3571,7 +4028,9 @@ def spec_context(
             search_differs = bool(search_expr and search_expr != label_expr)
         dep_search_info[r['prop_name']] = {'search_differs': search_differs}
 
-    child_metas = analyze_children(children, schema, model_name)
+    child_metas = _drop_hidden_exclusive_parent_columns(
+        analyze_children(children, schema, model_name), model_name, schema,
+    )
     list_autocomplete_children = [c for c in child_metas if c['render_type'] == 'editable-list-autocomplete']
 
     # Include self-referential FK deps and m2m self-ref children in has_deps
@@ -3685,6 +4144,16 @@ def spec_context(
         if r['is_m2o']
     }
     required_fill_cmds = gen_fill_commands(required_field_metas, title, I, fk_dep_vars, dep_search_info)
+    # A defaulted (non-required) scalar primary column is read back from the list by the create tests, so the
+    # minimal create fills it too.
+    _ui_primary = _get_primary_display_field_name(parent_def)
+    _ui_primary_meta = next(
+        (f for f in optional_field_metas
+         if f['prop_name'] == _ui_primary and f'{_ui_primary}_id' not in (parent_def.get('properties') or {})),
+        None,
+    )
+    if _ui_primary_meta is not None:
+        required_fill_cmds += gen_fill_commands([_ui_primary_meta], title, I, fk_dep_vars, dep_search_info)
     all_fill_cmds = gen_fill_commands(fields, title, I, fk_dep_vars, dep_search_info)
     # cmd_846(c): 7.1/7.2 create a record via the UI form and expect the
     # create-time edge trigger to have fired (approval_request rows to
@@ -3721,7 +4190,7 @@ def spec_context(
         all_assert_cmds_no_bool.append(f"{I}cy.checkField('{ua['label']}', '{ua['dep_name']}');")
 
     # Compute list identifiers based on primary display field.
-    # Priority: FK primary → explicit non-name primary → name → fallback.
+    # Priority: FK primary → explicit non-name primary → name primary.
     prim = _get_primary_display_field_name(parent_def)
     prim_is_fk = bool(prim and f'{prim}_id' in (parent_def.get('properties') or {}))
     # cmd_611/612: a primary FK that is also x-server-value is never rendered
@@ -3739,6 +4208,7 @@ def spec_context(
     check_field_use_accordion = False
     check_field_inner_label = None
     check_field_skip = False
+    after_create_blank = False
 
     if prim_is_fk:
         primary_rel = next((r for r in relationships if r['prop_name'] == f'{prim}_id'), None)
@@ -3749,6 +4219,7 @@ def spec_context(
             primary_rel.get('label_field_is_date', False),
             schema,
             unique_index=1,
+            name_title=dep_title,
         ) if primary_rel else f'Test {dep_title} 1'
         list_id_is_unique = True
         after_create_id = None
@@ -3779,6 +4250,7 @@ def spec_context(
             primary_rel.get('label_field', 'name'),
             primary_rel.get('label_field_is_date', False),
             schema,
+            name_title=dep_title,
         ) if primary_rel else list_id_1) if not prim_is_server_value else list_id_1
         has_edit_primary = not prim_is_server_value
         edit_field_label = dep_title
@@ -3815,12 +4287,13 @@ def spec_context(
             safe_excl_first = [o for o in safe if o['value'] != first_val]
             second_val   = safe_excl_first[0]['value'] if safe_excl_first else (opts[1]['value'] if len(opts) > 1 else first_val)
             second_label = safe_excl_first[0]['label'] if safe_excl_first else (opts[1]['label'] if len(opts) > 1 else first_label)
-            list_id_1 = first_val
+            # The list shows the entity's dictionary word, not the stored entity name.
+            list_id_1 = first_label
             list_id_is_unique = False
-            after_create_id = first_val
+            after_create_id = first_label
             after_create_id_is_expr = False
             primary_dep_var_for_list = None
-            list_id_updated = second_val
+            list_id_updated = second_label
             has_edit_primary = True
             edit_field_label = lbl
             edit_update_value = second_label
@@ -3915,7 +4388,7 @@ def spec_context(
             check_field_label = lbl
             check_field_value_1 = list_id_1
             check_field_updated = list_id_updated
-    elif has_name:
+    elif prim == 'name' and has_name:
         name_meta = next((f for f in fields if f['prop_name'] == 'name'), None)
         if name_meta and name_meta.get('category') == 'entity_select':
             opts = name_meta.get('entity_options') or []
@@ -3927,12 +4400,13 @@ def spec_context(
             safe_excl_first = [o for o in safe if o['value'] != first_val]
             second_val   = safe_excl_first[0]['value'] if safe_excl_first else (opts[1]['value'] if len(opts) > 1 else first_val)
             second_label = safe_excl_first[0]['label'] if safe_excl_first else (opts[1]['label'] if len(opts) > 1 else first_label)
-            list_id_1 = first_val
+            # The list shows the entity's dictionary word, not the stored entity name.
+            list_id_1 = first_label
             list_id_is_unique = False
-            after_create_id = first_val
+            after_create_id = first_label
             after_create_id_is_expr = False
             primary_dep_var_for_list = None
-            list_id_updated = second_val
+            list_id_updated = second_label
             has_edit_primary = True
             edit_field_label = 'Name'
             edit_update_value = second_label
@@ -3958,7 +4432,28 @@ def spec_context(
         _prim_is_virtual = (prim and prim_meta is None and not prim_is_fk
                             and prim not in _props_vc and f'{prim}_id' not in _props_vc)
         _is_creator_virtual = prim == 'created_by' or 'creator_id' in _props_vc
-        if _prim_is_virtual and _is_creator_virtual:
+        _identity_version = _identity_version_for_virtual_primary(model_name, prim, schema) if _prim_is_virtual else None
+        if _identity_version:
+            # Virtual primary of an x-version-of identity: the list shows the
+            # paired version's column. populate<Entity>Data() creates that
+            # version as "<Title> <n>", but a row created through the form has
+            # no version yet, so its name cell stays blank and the identity form
+            # carries no field for the name.
+            list_id_1 = f'{title} 1'
+            list_id_is_unique = False
+            after_create_id = None
+            after_create_id_is_expr = False
+            after_create_blank = True
+            primary_dep_var_for_list = None
+            list_id_updated = f'{title} 1'
+            has_edit_primary = False
+            edit_field_label = None
+            edit_update_value = None
+            check_field_label = None
+            check_field_value_1 = None
+            check_field_updated = None
+            check_field_skip = True
+        elif _prim_is_virtual and _is_creator_virtual:
             # Virtual column resolved from creator (testUser.name = 'Test User')
             list_id_1 = 'Test User'
             list_id_is_unique = False
@@ -3974,18 +4469,47 @@ def spec_context(
             check_field_updated = 'Test User'
             check_field_skip = True  # created_by is list-only virtual; not in FormView
         else:
-            list_id_1 = f'{title} 1'
-            list_id_is_unique = True
-            after_create_id = f'Test {title}'
-            after_create_id_is_expr = False
-            primary_dep_var_for_list = None
-            list_id_updated = f'Updated {title}'
-            has_edit_primary = True
-            edit_field_label = 'Name'
-            edit_update_value = f'Updated {title}'
-            check_field_label = 'Name'
-            check_field_value_1 = f'{title} 1'
-            check_field_updated = f'Updated {title}'
+            if not prim and can_list:
+                # No declared primary column: a list-view entity is rejected by
+                # validate.py before generation, so only an entity with no list
+                # view should reach here. An entity with `x-generate.list: false`
+                # has no list step in its spec (every list assertion and
+                # navigation is guarded by `can_list`), so it needs no primary.
+                raise ValueError(
+                    f"Entity '{parent}': cannot generate a UI spec without a primary "
+                    f"column. Declare an x-display.table column with 'primary: true'."
+                )
+            if not prim:
+                # No list view and no primary: nothing to rename or to look up
+                # in the list, so the spec skips the primary edit and check steps.
+                list_id_1 = f'{title} 1'
+                list_id_is_unique = True
+                after_create_id = f'Test {title}'
+                after_create_id_is_expr = False
+                primary_dep_var_for_list = None
+                list_id_updated = f'Updated {title}'
+                has_edit_primary = False
+                edit_field_label = None
+                edit_update_value = None
+                check_field_label = None
+                check_field_value_1 = None
+                check_field_updated = None
+                check_field_skip = True
+            else:
+                # A declared primary that is not a form field: the list shows it, but
+                # no form input carries it, so the spec asserts the generic placeholder.
+                list_id_1 = f'{title} 1'
+                list_id_is_unique = True
+                after_create_id = f'Test {title}'
+                after_create_id_is_expr = False
+                primary_dep_var_for_list = None
+                list_id_updated = f'Updated {title}'
+                has_edit_primary = True
+                edit_field_label = 'Name'
+                edit_update_value = f'Updated {title}'
+                check_field_label = 'Name'
+                check_field_value_1 = f'{title} 1'
+                check_field_updated = f'Updated {title}'
 
     # detail_required: which children are required in the parent form
     detail_def = schema['definitions'].get(definition_key, {})
@@ -4007,7 +4531,7 @@ def spec_context(
         native_enum_full_calls = _child_native_enum_singleselect_calls(
             child_meta['fields'], child_title, cypress_create_value
         )
-        datagrid_children_data.append({
+        child_entry = {
             'title': child_title,
             'pascal': to_pascal_case(child_name),
             'is_required_in_parent': child_meta['child']['property_name'] in detail_required,
@@ -4017,7 +4541,10 @@ def spec_context(
             'fk_full_fields': fk_full_fields,
             'native_enum_create_calls': native_enum_create_calls,
             'native_enum_full_calls': native_enum_full_calls,
-        })
+        }
+        if child_name == 'dashboard_widget':
+            _apply_dashboard_widget_catalog_values(child_entry, child_title, schema)
+        datagrid_children_data.append(child_entry)
 
     # Read-only independent grid children data (issue #538): only
     # a title is needed -- the generated assertion is a single negative
@@ -4304,6 +4831,7 @@ def spec_context(
     else:
         seed_count = 0
 
+    _name_meta = next((f for f in fields if f['prop_name'] == 'name'), None)
     return {
         'parent': parent,
         'pascal': pascal,
@@ -4352,9 +4880,15 @@ def spec_context(
         'fail_edit_6_2': fail_edit_6_2,
         # List identifiers
         'list_id_1': list_id_1,
+        # A `name` column that is an x-entity-select shows the entity's dictionary word, so the delete tests
+        # (which find the populated row by its `name`) look the word up from the stored entity name.
+        'name_label_map': json.dumps(
+            {o['value']: o['label'] for o in (_name_meta.get('entity_options') or [])}
+        ) if _name_meta and _name_meta.get('category') == 'entity_select' else '',
         'list_id_is_unique': list_id_is_unique,
         'after_create_id': after_create_id,
         'after_create_id_is_expr': after_create_id_is_expr,
+        'after_create_blank': after_create_blank,
         'primary_dep_var_for_list': primary_dep_var_for_list,
         'list_id_updated': list_id_updated,
         'has_edit_primary': has_edit_primary,
@@ -4385,9 +4919,9 @@ def tasks_registry_context(entities: list, schema: dict) -> dict:
     """Build context for the generated-tasks.ts registry template.
 
     `entities` is a list of dicts: {parent, model_name, children,
-    primary_fk_dep} — primary_fk_dep is threaded through from the same
-    entity's helper_context() result (cmd_625) so the reset-task guard here
-    matches the one that decided whether _reset{{ pascal }}CallSeq() exists.
+    primary_fk_dep, uses_call_seq} — uses_call_seq is threaded through from the
+    same entity's helper_context() result so the reset-task guard here matches
+    the one that decided whether _reset{{ pascal }}CallSeq() exists.
     """
     enriched_entities = []
     # The fallback `db:populateUser` task at the bottom of the registry only
@@ -4434,6 +4968,7 @@ def tasks_registry_context(entities: list, schema: dict) -> dict:
             'helper_path': f'./{parent}/helper',
             'reservation_helper_path': f'./{parent}/reservation_gen_helper',
             'primary_fk_dep': entity.get('primary_fk_dep'),
+            'uses_call_seq': entity.get('uses_call_seq', False),
             'datagrid_children': [
                 {'pascal': to_pascal_case(c['child']['name'])}
                 for c in datagrid_children
@@ -4531,6 +5066,13 @@ def api_spec_context(
             # search feature working correctly — N10 would fail by
             # construction rather than signal a real coverage gap.
             is_searchable = False
+        elif not _seed_entity_grant_flags(parent, schema['definitions'], True)['read']:
+            # The test API user follows SEED_ENTITY_GRANTS (see
+            # seed_entities_context), and /api/search applies the normal read
+            # authorization. An entity whose seed read grant is false (neither
+            # x-generate.list nor x-generate.view) can therefore never surface
+            # rows for that user — N10 would fail by construction here too.
+            is_searchable = False
         else:
             search_sample_field = _api_text_fields[0]
             # db:populate<Entity> (the base task, used everywhere else in this
@@ -4556,8 +5098,9 @@ def api_spec_context(
     # cmd_421 N11-N13: import eligibility gate for the CSV import round-trip
     # tests. Mirrors build_context.py's "single place" gate (cmd_328 design decision)
     # exactly — is_primary_entity AND has_import_key AND import:true AND
-    # (new:true OR edit:true) — since this test context is built by a
-    # separate function and must re-derive the flag rather than reuse it.
+    # (new:true OR edit:true) AND not a new-form x-bridge child — since this
+    # test context is built by a separate function and must re-derive the
+    # flag rather than reuse it.
     # import_can_update alone (not import_eligible) gates N11-N13 because the
     # round-trip technique (export an existing row, re-import it) always
     # re-matches that row by its natural key and so always exercises the
@@ -4571,6 +5114,7 @@ def api_spec_context(
     import_eligible = (
         _api_is_primary_entity and has_import_key and _api_import_flag
         and (_api_can_create or _api_can_update)
+        and not get_new_form_bridge(model_def)
     )
     import_can_update = import_eligible and _api_can_update
 
@@ -4695,6 +5239,7 @@ def api_spec_context(
         filtered_props, required_fields_list, relationships, gen_cfg.get('fields'), _api_entity_options,
         range_end_field=_api_date_range['end'] if _api_date_range else None,
     )
+    all_field_metas = _exclusive_owner_fields(all_field_metas, model, schema)
     # Exclude outbound one-to-one FK fields (internal bridge records — service creates them automatically).
     _api_internal_fk_prop_names = {d['prop_name'] for d in get_internal_one_to_one_fks(model, schema)}
     all_field_metas = [f for f in all_field_metas if f['prop_name'] not in _api_internal_fk_prop_names]
@@ -4811,9 +5356,8 @@ def api_spec_context(
             ua_update_field = candidates[0]
             ua_update_expr = f'records[0].{candidates[0]["prop_name"]} + 100'
 
-    # Compute assertions for 3.1 and 4.1 based on primary display field
-    # Fallback: use 'name' field if no x-display primary is set
-    has_name_field = any(f['prop_name'] == 'name' for f in all_field_metas)
+    # Compute assertions for 3.1 and 4.1 from the declared primary display field.
+    # An entity with no declared primary column only asserts its id.
     if primary_fk_is_ua and ua_update_field:
         assert_create = f'expect(getRes.body.{primary_field_name}.id).to.eq(deps.{primary_dep_var}.id);'
         assert_update = f'expect(getRes.body.{ua_update_field["prop_name"]}).to.eq({ua_update_expr});'
@@ -4847,23 +5391,9 @@ def api_spec_context(
         else:
             assert_create = 'expect(getRes.body.id).to.exist;'
             assert_update = 'expect(getRes.body.id).to.eq(records[0].id);'
-    elif has_name_field:
-        name_meta_api = next((f for f in all_field_metas if f['prop_name'] == 'name'), None)
-        if name_meta_api and name_meta_api.get('category') == 'entity_select':
-            _opts = name_meta_api.get('entity_options') or []
-            _create_val = api_value(name_meta_api, title)
-            _update_val = f"'{_opts[1]['value']}'" if len(_opts) > 1 else _create_val
-            assert_create = f"expect(getRes.body.name).to.eq({_create_val});"
-            assert_update = f"expect(getRes.body.name).to.eq({_update_val});"
-        else:
-            assert_create = f"expect(getRes.body.name).to.eq('Test {title}');"
-            assert_update = f"expect(getRes.body.name).to.eq('Updated {title}');"
     else:
         assert_create = 'expect(getRes.body.id).to.exist;'
         assert_update = 'expect(getRes.body.id).to.eq(records[0].id);'
-
-    # For the name-fallback case, _put_body_impl also needs to change 'name'
-    has_name_fallback = has_name_field and not primary_field_name and not primary_is_fk
 
     # 5.1: choose which required non-autocomplete field to omit
     non_ac_required = [f for f in all_field_metas if f['required'] and f['category'] != 'autocomplete']
@@ -4909,6 +5439,12 @@ def api_spec_context(
                 _pfk_dep = next((d for d in entity_fk_deps if d['prop_name'] == _pfk_prop), None)
                 if _pfk_dep:
                     out.append(f"{indent}{_pfk_prop}: deps.{primary_dep_var}.id,")
+        # A scalar primary column that has a default is not required, but assert_create reads it back,
+        # so the create body must send it.
+        if primary_field_name and not primary_is_fk and skip_field != primary_field_name:
+            _ppm = next((f for f in all_field_metas if f['prop_name'] == primary_field_name), None)
+            if _ppm and not _ppm['required'] and not any(ln.strip().startswith(f'{primary_field_name}:') for ln in out):
+                out.append(f"{indent}{primary_field_name}: {api_value(_ppm, title)},")
         for ua in ua_fk_fields_for_api:
             if ua['prop_name'] != skip_field:
                 out.append(f"{indent}{ua['prop_name']}: deps.{ua['var_name']}.id,")
@@ -4919,10 +5455,16 @@ def api_spec_context(
             out.append(f"{indent}{c['child']['property_name']}: [],")
         return out
 
-    def _put_body_impl(indent: str, skip_field: str | None = None, record_var: str = 'records[0]') -> list[str]:
+    def _put_body_impl(indent: str, skip_field: str | None = None, record_var: str = 'records[0]',
+                       skip_readonly: bool = False) -> list[str]:
+        # skip_readonly (#1046): the resubmit examples PUT a record read before
+        # approval; a read-only field the server assigns on approval (for
+        # example a version number) would be sent with its stale value, and
+        # the route answers 400 before the lockdown can answer 403.
         out = []
+        _ro_skip = set(readonly_fields) if skip_readonly else set()
         for prop in put_body_props:
-            if prop == skip_field:
+            if prop == skip_field or prop in _ro_skip:
                 continue
             if primary_is_fk and not primary_fk_is_ua and prop == f'{primary_field_name}_id':
                 if record_var == 'records[0]':
@@ -4949,14 +5491,6 @@ def api_spec_context(
                 else:
                     update_label = primary_meta.get('label', to_title_case(prop)) if primary_meta else to_title_case(prop)
                     out.append(f"{indent}{prop}: 'Updated {update_label}',")
-            elif has_name_fallback and prop == 'name':
-                nm = next((f for f in all_field_metas if f['prop_name'] == 'name'), None)
-                if nm and nm.get('category') == 'entity_select':
-                    _opts = nm.get('entity_options') or []
-                    _v = f"'{_opts[1]['value']}'" if len(_opts) > 1 else api_value(nm, title)
-                    out.append(f"{indent}name: {_v},")
-                else:
-                    out.append(f"{indent}name: 'Updated {title}',")
             else:
                 out.append(f"{indent}{prop}: {record_var}.{prop},")
         for c in api_child_metas:
@@ -5306,6 +5840,9 @@ def api_spec_context(
         'assert_create': assert_create,
         'assert_update': assert_update,
         'post_body_create': _post_body_impl(None, f'{I}    '),
+        # #1031: 5.1 and 8.2 omit one required field; with none to omit the
+        # request is valid and the API correctly answers 201.
+        'has_required_field_to_omit': field_to_skip_5_1 is not None,
         'post_body_missing_field': _post_body_impl(field_to_skip_5_1, f'{I}    '),
         'date_range_boundary': date_range_boundary,
         'post_body_daterange_boundary': post_body_daterange_boundary,
@@ -5345,7 +5882,7 @@ def api_spec_context(
         'has_on_withdrawn': has_on_withdrawn,
         'lockdown_write_locked_sample_value_literal': lockdown_write_locked_sample_value_literal,
         'put_body_resubmit': (
-            _put_body_impl('              ', skip_field=resubmit_target_field, record_var='data.record')
+            _put_body_impl('              ', skip_field=resubmit_target_field, record_var='data.record', skip_readonly=True)
             if resubmit_target_field else None
         ),
         # cmd_867: 14.5 alone has no `data` in scope -- it POSTs the record
@@ -5361,7 +5898,7 @@ def api_spec_context(
         # 14.5 nests its PUT inside two .then() blocks, the other resubmit
         # tests inside one).
         'put_body_resubmit_created': (
-            _put_body_impl('                  ', skip_field=resubmit_target_field, record_var='getRes1.body')
+            _put_body_impl('                  ', skip_field=resubmit_target_field, record_var='getRes1.body', skip_readonly=True)
             if resubmit_target_field else None
         ),
         'reservation_count_pool_pascal': _reservation_count_pool_pascal,

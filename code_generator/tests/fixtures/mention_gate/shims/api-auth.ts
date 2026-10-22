@@ -14,6 +14,10 @@ export async function authenticateApiKey(_request: NextRequest): Promise<{ userI
   throw new Error('fixture stub');
 }
 
+export async function authenticate(_request: NextRequest): Promise<{ userId: string }> {
+  throw new Error('fixture stub');
+}
+
 export async function requireApiPermission(
   _userId: string,
   _model: string,
@@ -25,4 +29,8 @@ export async function requireApiPermission(
 
 export function handleApiError(_error: unknown): NextResponse {
   throw new Error('fixture stub');
+}
+
+export function withActor<T>(_userId: string, fn: () => Promise<T>): Promise<T> {
+  return fn();
 }

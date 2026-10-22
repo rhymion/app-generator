@@ -51,7 +51,7 @@ definitions:
       invalidate: false
       api: false
       test: false
-    fields:
+    properties:
       name: {}
       email: {}
       image:
@@ -75,7 +75,7 @@ definitions:
         items:
           $ref: "#/definitions/comment"
   comment:
-    fields:
+    properties:
       message:
         x-mention: true
       commentable_id: {}
@@ -84,7 +84,7 @@ definitions:
       page: false
       embed: false
       api: custom
-    fields:
+    properties:
       type:
         enum:
           - like
@@ -113,13 +113,12 @@ definitions:
       invalidate: false
       api: true
       test: false
-    fields:
+    properties:
       name: {}
       commentable_id:
         x-relationship:
           type: one-to-one_bridge
           target: commentable
           labelField: id
-    properties:
       commentable:
         $ref: "#/definitions/commentable"

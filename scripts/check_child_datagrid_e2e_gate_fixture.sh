@@ -1,0 +1,181 @@
+#!/bin/bash
+# Child-DataGrid E2E gate fixture check.
+#
+# Unlike the other fixture gates (generate -> tsc), this one builds and RUNS a
+# whole app: it generates an app from the default schema plus a dedicated
+# fixture schema, builds it, starts it against its own database and runs the
+# Cypress specs in code_generator/tests/fixtures/child_datagrid_e2e_gate/. They
+# cover what a generated type check cannot: an embedded child DataGrid created,
+# edited and deleted from the parent's new/edit screens (UI, Server Action,
+# service and REST route), FK label display and selection for every label form,
+# required vs nullable columns left empty, a child with its own writable pages
+# staying read-only on the parent screens, and sibling children not removing
+# each other's form props.
+# Also covers x-exclusive-parents save-time validation (REST, nested parent writes and the
+# standalone and parent forms); the fixture's cypress/support/project-tasks.ts is copied into
+# the build copy for the one state the application can no longer create (a row holding both owners).
+# Also checks the generated parent UI specs of excl_alpha/excl_beta for the hidden owner column.
+# Also covers x-create-inline (inline_note/inline_topic): the dialog that creates the referenced record in
+# place, at desktop and phone width, including a save for another organisation refused with the request altered.
+# Also runs the generated specs of excl_owned (the generated test helper writes exactly one owner)
+# and hook_slot (the hand-written helper_custom.ts dependency values, fixture dir custom_helper/).
+#
+# Isolation (the repository's own schema, generated output, database and other
+# fixtures are never touched):
+#   * everything happens in a disposable copy of the working tree,
+#     .generated-child-datagrid-e2e-gate/ (tracked + untracked-not-ignored
+#     files, node_modules symlinked), into which the fixture entities are merged
+#     (scripts/compose_child_datagrid_e2e_fixture.py);
+#   * the copy gets its own .env.test (docker compose project name and three
+#     ports derived from the repository's absolute path, so two checkouts never
+#     collide) and a throwaway .env.test.local with a random AUTH_SECRET;
+#   * docker cleanup is `docker compose -p <that project> down -v`, scoped to
+#     the project name above; no other project, container or volume is touched;
+#   * a port that is already in use fails the run instead of taking it over.
+#
+# Reuses the repository's own e2e machinery inside the copy:
+# `npm run test:e2e:build` (docker up, generate-code, db:push, seed, next build)
+# and scripts/run-e2e.js (start-server-and-test + cypress).
+#
+# Usage: bash scripts/check_child_datagrid_e2e_gate_fixture.sh
+# Environment: GATE_KEEP_BUILD_DIR=1 keeps the copy for inspection;
+#              GATE_SPEC='<cypress spec glob>' narrows the specs (default: all of them).
+# Exit code: 0 = pass, non-zero = fail (generation/build error or a failing spec).
+
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPO_ROOT"
+
+FIXTURE_DIR="code_generator/tests/fixtures/child_datagrid_e2e_gate"
+BUILD_DIR="$REPO_ROOT/.generated-child-datagrid-e2e-gate"
+
+if [ ! -f "$FIXTURE_DIR/json_schema.yaml" ] || [ ! -f "$FIXTURE_DIR/schema_additions.prisma" ]; then
+  echo "child-datagrid-e2e-gate: fixture files not found under $FIXTURE_DIR" >&2
+  exit 1
+fi
+
+# Names and ports derived from the absolute path of this checkout.
+HASH=$(printf '%s' "$REPO_ROOT" | cksum | cut -d' ' -f1)
+# Ports sit below the Linux ephemeral range (32768+) and apart from the 20000-27999
+# band that per-worktree test environments commonly use.
+SLOT=$((HASH % 900))
+PROJECT="child_datagrid_e2e_${HASH}"
+APP_PORT=$((29000 + SLOT))
+POSTGRES_PORT=$((30000 + SLOT))
+REDIS_PORT=$((31000 + SLOT))
+
+compose_down() {
+  if [ -f "$BUILD_DIR/docker-compose.test.yml" ]; then
+    (cd "$BUILD_DIR" && docker compose -p "$PROJECT" -f docker-compose.test.yml down -v) >/dev/null 2>&1 || true
+  fi
+}
+
+cleanup() {
+  compose_down
+  if [ "${GATE_KEEP_BUILD_DIR:-0}" != "1" ]; then
+    rm -rf "$BUILD_DIR"
+  fi
+}
+trap cleanup EXIT
+
+echo "== child-datagrid-e2e-gate (project $PROJECT, ports app=$APP_PORT postgres=$POSTGRES_PORT redis=$REDIS_PORT) =="
+t0=$(date +%s)
+
+# A previous interrupted run of THIS checkout's project may still hold the ports.
+compose_down
+rm -rf "$BUILD_DIR"
+
+for port in "$APP_PORT" "$POSTGRES_PORT" "$REDIS_PORT"; do
+  if (exec 3<>"/dev/tcp/127.0.0.1/$port") 2>/dev/null; then
+    echo "child-datagrid-e2e-gate: port $port is already in use; not taking it over." >&2
+    exit 1
+  fi
+done
+
+echo "-- copying the working tree --"
+mkdir -p "$BUILD_DIR"
+git ls-files -z --cached --others --exclude-standard \
+  | tar --null --ignore-failed-read -T - -cf - 2>/dev/null \
+  | tar -xf - -C "$BUILD_DIR"
+# Next/Turbopack needs node_modules inside the project root it infers, so this checkout
+# must hold a real node_modules directory (not a symlink to another checkout).
+ln -s "$REPO_ROOT/node_modules" "$BUILD_DIR/node_modules"
+
+echo "-- merging the fixture schema into the copy --"
+python3 scripts/compose_child_datagrid_e2e_fixture.py "$FIXTURE_DIR" "$BUILD_DIR"
+mkdir -p "$BUILD_DIR/cypress/e2e/child_datagrid_e2e_gate"
+cp -r "$FIXTURE_DIR/cypress/e2e/." "$BUILD_DIR/cypress/e2e/child_datagrid_e2e_gate/"
+# Fixture-specific Cypress tasks (cypress.config.ts loads cypress/support/project-tasks.ts when present).
+if [ -f "$FIXTURE_DIR/cypress/support/project-tasks.ts" ]; then
+  cp "$FIXTURE_DIR/cypress/support/project-tasks.ts" "$BUILD_DIR/cypress/support/project-tasks.ts"
+fi
+
+echo "-- writing the copy's own environment --"
+python3 - "$BUILD_DIR/.env.test" "$PROJECT" "$APP_PORT" "$POSTGRES_PORT" "$REDIS_PORT" <<'PY'
+import re
+import sys
+
+path, project, app, pg, redis = sys.argv[1:]
+values = {
+    "PORT": app,
+    "POSTGRES_PORT": pg,
+    "REDIS_PORT": redis,
+    "DATABASE_URL": f'"postgresql://postgres:postgres@localhost:{pg}/my_next_test"',
+    "NEXTAUTH_URL": f'"http://localhost:{app}"',
+    "REDIS_URL": f'"redis://localhost:{redis}"',
+    "COMPOSE_PROJECT_NAME": project,
+}
+text = open(path, encoding="utf-8").read()
+for key, value in values.items():
+    line = f"{key}={value}"
+    if re.search(rf"^{key}=.*$", text, re.M):
+        text = re.sub(rf"^{key}=.*$", line, text, flags=re.M)
+    else:
+        text = text.rstrip("\n") + "\n" + line + "\n"
+open(path, "w", encoding="utf-8").write(text)
+PY
+{
+  echo "AUTH_SECRET=$(openssl rand -base64 32)"
+  echo "MOCK_GOOGLE_OAUTH_TEST=true"
+} > "$BUILD_DIR/.env.test.local"
+
+cd "$BUILD_DIR"
+
+echo "-- npm run test:e2e:build (docker up, generate-code, db:push, seed, next build) --"
+NODE_ENV=test npm run test:e2e:build
+
+# x-exclusive-parents: a parent's generated UI spec must not select the child grid column the
+# parent's form hides (excl_alpha's grid has no excl_beta_id column, excl_beta's none for
+# excl_alpha_id). Checked on the generated text; the examples that fill the grid ("creates with
+# full data", the child-removal examples) are not run here because the generated child-seed
+# helper (db:populate<Parent><Child>) has a separate, known gap that keeps "Edit 3.2" and
+# "Fail edit 6.2" red for any child with a required creator relation.
+echo "-- generated parent UI specs skip the hidden exclusive-parent column --"
+for pair in "excl_alpha:excl_beta_id" "excl_beta:excl_alpha_id"; do
+  spec="cypress/e2e/${pair%%:*}.cy.ts"
+  column="${pair##*:}"
+  if [ ! -f "$spec" ]; then
+    echo "child-datagrid-e2e-gate: generated spec $spec not found" >&2
+    exit 1
+  fi
+  if grep -q "'$column'" "$spec"; then
+    echo "child-datagrid-e2e-gate: $spec selects the hidden column $column" >&2
+    exit 1
+  fi
+done
+
+# The fixture's own specs, plus the GENERATED specs of the two fixture entities that exist to
+# prove the generated test helper: excl_owned (exactly one owner under x-exclusive-parents) and
+# hook_slot (hand-written dependency values).
+DEFAULT_SPECS="cypress/e2e/child_datagrid_e2e_gate/**/*.cy.ts,cypress/e2e/excl_owned.cy.ts,cypress/e2e/api/excl_owned.cy.ts,cypress/e2e/hook_slot.cy.ts,cypress/e2e/api/hook_slot.cy.ts"
+echo "-- cypress: fixture specs --"
+set +e
+NODE_ENV=test PAYMENT_FAKE_STRIPE=1 node scripts/run-e2e.js test:e2e:start \
+  "cypress run --browser chromium --spec \"${GATE_SPEC:-$DEFAULT_SPECS}\""
+status=$?
+set -e
+
+t1=$(date +%s)
+echo "== child-datagrid-e2e-gate: $((t1 - t0))s, cypress exit=$status =="
+exit "$status"

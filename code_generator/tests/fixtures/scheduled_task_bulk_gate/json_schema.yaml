@@ -11,6 +11,11 @@ x-scheduled-tasks:
   - task_id: demo_reset
     handler: resetDemo
     interval: "0 3 * * *"
+  # cmd_1208: no `interval` (reached only through task:run-all) and a
+  # `depends_on` chain demo_reset -> widget_timeout -> nightly_rollup.
+  - task_id: nightly_rollup
+    handler: runRollup
+    depends_on: [widget_timeout]
 
 definitions:
   user:
@@ -23,7 +28,7 @@ definitions:
       invalidate: false
       api: false
       test: false
-    fields:
+    properties:
       name: {}
       email: {}
 
@@ -45,7 +50,12 @@ definitions:
         status_in: ["pending"]
       handler: afterTimeout
       interval: "0 * * * *"
-    fields:
+      depends_on: [demo_reset]
+    x-display:
+      table:
+        - name:
+            primary: true
+    properties:
       name: {}
       status:
         type: string

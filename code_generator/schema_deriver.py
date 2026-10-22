@@ -56,6 +56,8 @@ _FIELD_HEAD_RE = re.compile(
     r'^(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s+(?P<type>[A-Za-z_][A-Za-z0-9_]*)(?P<list>\[\])?(?P<opt>\?)?'
 )
 _RELATION_FIELDS_RE = re.compile(r'fields\s*:\s*\[([^\]]*)\]')
+# `@relation("name", ...)` or `@relation(name: "name", ...)`
+_RELATION_NAME_RE = re.compile(r'^\s*(?:name\s*:\s*)?"([^"]*)"')
 _BLOCK_UNIQUE_RE = re.compile(r'@@unique\(\s*\[([^\]]*)\]')
 # `@db.Decimal(precision, scale)` -- not matched by _ATTR_RE (its `@(\w+)`
 # group can't cross the `.`). Only `scale` is consumed downstream (max
@@ -82,6 +84,7 @@ class PrismaField:
     default_is_dynamic: bool = False  # now(), cuid(), uuid() -- not a literal
     is_relation_object: bool = False
     relation_fk_fields: tuple = ()  # local scalar FK column names, for relation-object fields
+    relation_name: str | None = None  # @relation("name", ...) -- pairs the two sides of a relation
     decimal_precision: int | None = None  # @db.Decimal(p, s) -- p
     decimal_scale: int | None = None  # @db.Decimal(p, s) -- s
 
@@ -142,6 +145,7 @@ def _parse_field_line(line: str) -> PrismaField | None:
     default_is_dynamic = False
     is_relation_object = False
     relation_fk_fields: tuple = ()
+    relation_name = None
     decimal_precision = None
     decimal_scale = None
 
@@ -162,6 +166,9 @@ def _parse_field_line(line: str) -> PrismaField | None:
             default_value, default_is_dynamic = _parse_default(attr_args)
         elif attr_name == "relation":
             is_relation_object = True
+            m_name = _RELATION_NAME_RE.match(attr_args or "")
+            if m_name:
+                relation_name = m_name.group(1)
             m = _RELATION_FIELDS_RE.search(attr_args or "")
             if m:
                 relation_fk_fields = tuple(
@@ -182,6 +189,7 @@ def _parse_field_line(line: str) -> PrismaField | None:
         default_is_dynamic=default_is_dynamic,
         is_relation_object=is_relation_object,
         relation_fk_fields=relation_fk_fields,
+        relation_name=relation_name,
         decimal_precision=decimal_precision,
         decimal_scale=decimal_scale,
     )

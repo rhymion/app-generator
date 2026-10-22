@@ -1,6 +1,13 @@
 import prisma from '@/lib/prisma';
 import { validateCustomRules } from '@/lib/{{ model }}/service_validation_custom';
 import { AppError } from '@/lib/_errors';
+import { isValidDateValue, type DateValueFormat } from '@/lib/_date_value';
+{% if exclusive_parent_columns %}
+import { EXCLUSIVE_PARENT_COLUMNS, validateExclusiveParents } from '@/lib/{{ model }}/exclusive_parents';
+{% endif %}
+{% if state_machine_transitions and can_update %}
+import { assertTransitionAllowed, assertInitialStateAllowed } from '@/lib/state_transitions';
+{% endif %}
 
 type TransactionClient = Pick<typeof prisma, '{{ model }}'{% for check in one_to_one_checks %} | '{{ check.target }}'{% endfor %}>;
 type RequiredField = { key: string; label: string };
@@ -29,6 +36,12 @@ function isInvalidDecimal(value: unknown): boolean {
   if (typeof value !== 'string' || value.trim() === '') return false;
   return !DECIMAL_PATTERN.test(value.trim());
 }
+
+const DATE_FIELDS: (RequiredField & { format: DateValueFormat })[] = [
+{% for field in date_fields %}
+  { key: '{{ field.key }}', label: '{{ field.label }}', format: '{{ field.format }}' },
+{% endfor %}
+] ;
 
 const ONE_TO_ONE_RELATIONS: OneToOneRelation[] = [
 {% for check in one_to_one_checks %}
@@ -110,6 +123,13 @@ async function validateSchemaRules(tx: TransactionClient, data: Record<string, u
     }
   }
 
+  // An unparseable date / time would reach Prisma and fail as a 500.
+  for (const field of DATE_FIELDS) {
+    if (!isValidDateValue(field.format, data[field.key])) {
+      throw new AppError('VALIDATION', `${field.label} must be a valid ${field.format === 'date' ? 'date' : field.format === 'time' ? 'time' : 'date and time'}`, field.key, 'invalid');
+    }
+  }
+
   for (const relation of ONE_TO_ONE_RELATIONS) {
     const value = data[relation.key];
     if (isMissingValue(value)) {
@@ -139,6 +159,21 @@ async function validateSchemaRules(tx: TransactionClient, data: Record<string, u
       throw new AppError('CONFLICT', `${relation.label} is already linked`, relation.key);
     }
   }
+{% if exclusive_parent_columns %}
+
+  // x-exclusive-parents: judge the row as it will be after the save. A column
+  // the caller leaves out (undefined) keeps the existing row's value, so a
+  // partial update that adds a second owner, or clears the only one, is
+  // rejected.
+  validateExclusiveParents(
+    Object.fromEntries(
+      EXCLUSIVE_PARENT_COLUMNS.map((column) => [
+        column,
+        data[column] !== undefined ? data[column] : prevRow?.[column],
+      ]),
+    ),
+  );
+{% endif %}
 {% if write_locked_fields %}
 
   {
@@ -167,6 +202,69 @@ async function validateSchemaRules(tx: TransactionClient, data: Record<string, u
     }
   }
 {% endif %}
+{% if state_machine_transitions and can_update %}
+
+  // State-transition gatekeeper(s) (Issue #696; cmd_1132/cmd_1133 design
+  // correction from an earlier dedicated-entry-point shape; cmd_1139
+  // extends coverage to the create path below). Checked here, at the
+  // update{{ parent_pascal }}/add{{ parent_pascal }} convergence point
+  // every entry point (UI Server Action, REST route, CSV import) funnels
+  // through -- the same discipline x-approval's own guard above follows,
+  // and the reason a state-transition field needs no write-lock of its
+  // own (see derive_write_locked_values()'s docstring).
+  //
+  // Update (currentId !== null): the transition itself (the prevRow value
+  // -> the toState below) must be a legal diagram edge.
+  //
+  // Issue #710/cmd_1145: an update is never required to touch a governed
+  // field -- when the client omits it, `data.<field>` is `undefined`
+  // (validation_data_obj/build_context.py always emits an explicit
+  // `<prop>: <var_name>,` entry for every client-writable prop, so the
+  // KEY is present even when the client never supplied a value; checking
+  // key presence alone, as this used to, misreads that omission as "the
+  // client explicitly set this field to undefined" and wrongly rejects
+  // the write). The fix is not a second "field omitted" branch: an
+  // omitted field means "leave it unchanged," which IS the current row
+  // value (prevRow.<field>) -- and assertTransitionAllowed's own
+  // fromState === toState rule (see state_transitions.ts.jinja2) always
+  // permits a same-state transition regardless of what the diagram
+  // declares. Falling back to prevRow.<field> below therefore makes an
+  // omitted field a no-op through the SAME call every explicit value goes
+  // through, with no default-value reference anywhere in this path
+  // (defaults are a create-time-only concept -- see the create guard
+  // below) and no separate branch to keep in sync.
+  if (currentId !== null && prevRow) {
+{% for t in state_machine_transitions %}
+    {
+      const {{ t.field }}ToState = data.{{ t.field }} !== undefined ? data.{{ t.field }} : prevRow.{{ t.field }};
+      assertTransitionAllowed('{{ model }}', '{{ t.field }}', String(prevRow.{{ t.field }}), String({{ t.field }}ToState));
+    }
+{% endfor %}
+  }
+
+  // Create (currentId === null): there is no prevRow/fromState to
+  // evaluate an edge against, so the submitted value is checked against
+  // the diagram's own declared initial state(s) (a `[*] --> state` node)
+  // instead. A data migration/import that needs to land a new row
+  // directly in a later, non-initial diagram state resolves this by
+  // declaring that state as an additional initial state (another
+  // `[*] --> state` node) -- multiple initial-state declarations are
+  // valid, and no separate bypass mechanism exists or is needed.
+  //
+  // Issue #710: same value-presence-not-key-presence reasoning as the
+  // update guard above -- a client that omits this field on create must
+  // fall through here and rely on the column's DB/Prisma default rather
+  // than being rejected for an implicit `String(undefined)`. Same
+  // dependency on validate.py's generation-time default-value guarantee
+  // described there.
+  if (currentId === null) {
+{% for t in state_machine_transitions %}
+    if (data.{{ t.field }} !== undefined) {
+      assertInitialStateAllowed('{{ model }}', '{{ t.field }}', String(data.{{ t.field }}));
+    }
+{% endfor %}
+  }
+{% endif %}
 
   // cmd_652: hand-written entity-specific business rules (e.g. a
   // self-referential relation that must only link same-"chain" rows) live
@@ -186,7 +284,11 @@ async function validateSchemaRules(tx: TransactionClient, data: Record<string, u
     await (validateCustomRules as CustomRulesFn)(tx, data, currentId, prevRow, actorId);
   } catch (e) {
     if (e instanceof AppError && e.code === 'VALIDATION' && !e.reason) {
-      throw new AppError('VALIDATION', e.message, e.field, 'invalid');
+      // Keep a message key the hand-written rule attached (read through a cast so
+      // an older write-once lib/_errors.ts without these fields still compiles).
+      const m = e as { messageKey?: string; messageArgs?: Record<string, string | number> };
+      const retagged = new AppError('VALIDATION', e.message, e.field, 'invalid');
+      throw m.messageKey ? Object.assign(retagged, { messageKey: m.messageKey, messageArgs: m.messageArgs }) : retagged;
     }
     throw e;
   }

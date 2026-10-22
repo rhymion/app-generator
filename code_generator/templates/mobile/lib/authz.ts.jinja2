@@ -1,0 +1,7 @@
+// Type-only mirror of the Web app's lib/authz.ts, so the generated entity hooks
+// (lib/<entity>/use_entity_capabilities.ts) compile unchanged. The mobile app
+// never resolves permissions itself: the server answers
+// GET /api/mobile/permissions and GET /api/<entity>/<id>/capabilities.
+export type Operation = 'create' | 'read' | 'update' | 'delete' | 'import';
+export type OperationFlags = Record<Operation, boolean>;
+export type ModelPermissions = OperationFlags;

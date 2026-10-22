@@ -1,0 +1,63 @@
+{
+  "user": [
+    "created_mobile_notes mobile_note[] @relation(\"MobileNoteCreator\")",
+    "updated_mobile_notes mobile_note[] @relation(\"MobileNoteUpdater\")",
+    "created_mobile_logs mobile_log[] @relation(\"MobileLogCreator\")",
+    "updated_mobile_logs mobile_log[] @relation(\"MobileLogUpdater\")",
+    "created_mobile_groups mobile_group[] @relation(\"MobileGroupCreator\")",
+    "updated_mobile_groups mobile_group[] @relation(\"MobileGroupUpdater\")",
+    "created_mobile_tags mobile_tag[] @relation(\"MobileTagCreator\")",
+    "updated_mobile_tags mobile_tag[] @relation(\"MobileTagUpdater\")",
+    "created_mobile_profiles mobile_profile[] @relation(\"MobileProfileCreator\")",
+    "updated_mobile_profiles mobile_profile[] @relation(\"MobileProfileUpdater\")",
+    "created_mobile_tasks mobile_task[] @relation(\"MobileTaskCreator\")",
+    "updated_mobile_tasks mobile_task[] @relation(\"MobileTaskUpdater\")",
+    "created_mobile_org_items mobile_org_item[] @relation(\"MobileOrgItemCreator\")",
+    "updated_mobile_org_items mobile_org_item[] @relation(\"MobileOrgItemUpdater\")",
+    "created_mobile_categories mobile_category[] @relation(\"MobileCategoryCreator\")",
+    "updated_mobile_categories mobile_category[] @relation(\"MobileCategoryUpdater\")",
+    "created_mobile_tickets mobile_ticket[] @relation(\"MobileTicketCreator\")",
+    "updated_mobile_tickets mobile_ticket[] @relation(\"MobileTicketUpdater\")",
+    "created_mobile_orders mobile_order[] @relation(\"MobileOrderCreator\")",
+    "updated_mobile_orders mobile_order[] @relation(\"MobileOrderUpdater\")",
+    "created_mobile_requests mobile_request[] @relation(\"MobileRequestCreator\")",
+    "updated_mobile_requests mobile_request[] @relation(\"MobileRequestUpdater\")",
+    "created_mobile_shipments mobile_shipment[] @relation(\"MobileShipmentCreator\")",
+    "updated_mobile_shipments mobile_shipment[] @relation(\"MobileShipmentUpdater\")",
+    "created_mobile_threads mobile_thread[] @relation(\"MobileThreadCreator\")",
+    "updated_mobile_threads mobile_thread[] @relation(\"MobileThreadUpdater\")",
+    "created_mobile_documents mobile_document[] @relation(\"MobileDocumentCreator\")",
+    "updated_mobile_documents mobile_document[] @relation(\"MobileDocumentUpdater\")",
+    "created_mobile_rooms mobile_room[] @relation(\"MobileRoomCreator\")",
+    "updated_mobile_rooms mobile_room[] @relation(\"MobileRoomUpdater\")",
+    "created_mobile_stays mobile_stay[] @relation(\"MobileStayCreator\")",
+    "updated_mobile_stays mobile_stay[] @relation(\"MobileStayUpdater\")",
+    "created_mobile_invoices mobile_invoice[] @relation(\"MobileInvoiceCreator\")",
+    "updated_mobile_invoices mobile_invoice[] @relation(\"MobileInvoiceUpdater\")",
+    "created_mobile_rules mobile_rule[] @relation(\"MobileRuleCreator\")",
+    "updated_mobile_rules mobile_rule[] @relation(\"MobileRuleUpdater\")",
+    "created_mobile_steps mobile_step[] @relation(\"MobileStepCreator\")",
+    "updated_mobile_steps mobile_step[] @relation(\"MobileStepUpdater\")",
+    "created_mobile_assets mobile_asset[] @relation(\"MobileAssetCreator\")",
+    "updated_mobile_assets mobile_asset[] @relation(\"MobileAssetUpdater\")",
+    "created_mobile_gadgets mobile_gadget[] @relation(\"MobileGadgetCreator\")",
+    "updated_mobile_gadgets mobile_gadget[] @relation(\"MobileGadgetUpdater\")"
+  ],
+  "organization": [
+    "mobile_org_items mobile_org_item[]"
+  ],
+  "approvable": [
+    "mobile_request mobile_request?",
+    "mobile_shipment mobile_shipment?"
+  ],
+  "commentable": [
+    "mobile_thread mobile_thread?"
+  ],
+  "attachment": [
+    "mobile_document_file mobile_document? @relation(\"MobileDocumentFile\")",
+    "mobile_document_contract mobile_document? @relation(\"MobileDocumentContract\")"
+  ],
+  "attachable": [
+    "mobile_asset mobile_asset?"
+  ]
+}

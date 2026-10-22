@@ -20,7 +20,7 @@ function exactRe(text: string): RegExp {
 
 describe('Testing {{ title }} pages and their behavior', () => {
   beforeEach(() => {
-{% if primary_fk_dep and not primary_fk_dep.is_user_account and primary_fk_dep.extra_required_fields %}
+{% if uses_call_seq %}
     cy.task('db:reset{{ pascal }}CallSeq');
 {% endif %}
     cy.task('db:reset');
@@ -103,11 +103,22 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% endif %}
 {% endfor %}
 {{ I }}cy.clickButton('Save');
+{% if is_payment %}
+{{ I }}// x-payment: a create ends at the checkout URL; under the fake Stripe client
+{{ I }}// (PAYMENT_FAKE_STRIPE=1, set by the test:e2e:cy:* scripts) that is the success page.
+{{ I }}cy.url().should('include', '/payment/success');
+{% if can_list %}
+{{ I }}cy.visit('/en/{{ parent }}');
+{% endif %}
+{% endif %}
 {{ I }}cy.url().should('include', '/{{ parent }}');
 {{ I }}cy.url().should('not.include', '/{{ parent }}/');
 {% if can_list %}
 {{ I }}cy.get('.MuiDataGrid-virtualScroller').scrollTo('bottom', { ensureScrollable: false });
-{% if after_create_id_is_expr %}
+{% if after_create_blank %}
+{{ I }}// The new identity has no version yet, so its name cell is blank: assert the row itself.
+{{ I }}getDataGridTotalRowCount().should('eq', 1);
+{% elif after_create_id_is_expr %}
 {{ I }}cy.contains('.MuiDataGrid-cell', exactRe(deps.{{ primary_dep_var_for_list }}.name)).scrollIntoView().should('be.visible');
 {% else %}
 {{ I }}cy.contains(exactRe('{{ after_create_id }}')).scrollIntoView().should('be.visible');
@@ -194,11 +205,22 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% endif %}
 {% endfor %}
 {{ I }}cy.clickButton('Save');
+{% if is_payment %}
+{{ I }}// x-payment: a create ends at the checkout URL; under the fake Stripe client
+{{ I }}// (PAYMENT_FAKE_STRIPE=1, set by the test:e2e:cy:* scripts) that is the success page.
+{{ I }}cy.url().should('include', '/payment/success');
+{% if can_list %}
+{{ I }}cy.visit('/en/{{ parent }}');
+{% endif %}
+{% endif %}
 {{ I }}cy.url().should('include', '/{{ parent }}');
 {{ I }}cy.url().should('not.include', '/{{ parent }}/');
 {% if can_list %}
 {{ I }}cy.get('.MuiDataGrid-virtualScroller').scrollTo('bottom', { ensureScrollable: false });
-{% if after_create_id_is_expr %}
+{% if after_create_blank %}
+{{ I }}// The new identity has no version yet, so its name cell is blank: assert the row itself.
+{{ I }}getDataGridTotalRowCount().should('eq', 1);
+{% elif after_create_id_is_expr %}
 {{ I }}cy.contains('.MuiDataGrid-cell', exactRe(deps.{{ primary_dep_var_for_list }}.name)).scrollIntoView().should('be.visible');
 {% else %}
 {{ I }}cy.contains(exactRe('{{ after_create_id }}')).scrollIntoView().should('be.visible');
@@ -542,6 +564,16 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% if seed_count == 0 %}
       cy.task('db:populate{{ pascal }}', 2);
       cy.visit('/en/{{ parent }}');
+{% if list_id_is_unique %}
+      // Confirm the row is present before deleting, so the closing
+      // `not.exist` assertion below can only pass because of the delete.
+      cy.contains(exactRe('{{ list_id_1 }}')).should('be.visible');
+{% else %}
+      // No unique primary link to target: confirm the populated rows are
+      // present before deleting, so the closing row-count check can only
+      // pass because of the delete.
+      getDataGridTotalRowCount().should('eq', 2);
+{% endif %}
       cy.selectDataGridRows([0]);
       cy.get('div').find('button[aria-label="Delete Selected"]').first().click();
       cy.get('div[role="dialog"]').find('button').contains('Delete').first().click();
@@ -555,7 +587,10 @@ describe('Testing {{ title }} pages and their behavior', () => {
       cy.task<any[]>('db:populate{{ pascal }}', 2).then((records) => {
         cy.visit('/en/{{ parent }}');
         cy.get('.MuiDataGrid-virtualScroller').scrollTo('bottom', { ensureScrollable: false });
-        const name = records[0].name as string;
+{% if name_label_map %}
+        const nameLabels: Record<string, string> = {{ name_label_map }};
+{% endif %}
+        const name = {% if name_label_map %}nameLabels[records[0].name as string] ?? {% endif %}(records[0].name as string);
         cy.contains('[role="row"]', name).find('input[type="checkbox"]').check();
         cy.get('div').find('button[aria-label="Delete Selected"]').first().click();
         cy.get('div[role="dialog"]').find('button').contains('Delete').first().click();
@@ -568,6 +603,16 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% if seed_count == 0 %}
       cy.task('db:populate{{ pascal }}', 3);
       cy.visit('/en/{{ parent }}');
+{% if list_id_is_unique %}
+      // Confirm the row is present before deleting, so the closing
+      // `not.exist` assertion below can only pass because of the delete.
+      cy.contains(exactRe('{{ list_id_1 }}')).should('be.visible');
+{% else %}
+      // No unique primary link to target: confirm the populated rows are
+      // present before deleting, so the closing row-count check can only
+      // pass because of the delete.
+      getDataGridTotalRowCount().should('eq', 3);
+{% endif %}
       cy.selectDataGridRows([0, 1]);
       cy.get('div').find('button[aria-label="Delete Selected"]').first().click();
       cy.get('div[role="dialog"]').find('button').contains('Delete').first().click();
@@ -580,8 +625,11 @@ describe('Testing {{ title }} pages and their behavior', () => {
       // avoiding seed rows (e.g. the logged-in admin) that cannot be self-deleted.
       cy.task<any[]>('db:populate{{ pascal }}', 3).then((records) => {
         cy.visit('/en/{{ parent }}');
-        const firstName = records[0].name as string;
-        const secondName = records[1].name as string;
+{% if name_label_map %}
+        const nameLabels: Record<string, string> = {{ name_label_map }};
+{% endif %}
+        const firstName = {% if name_label_map %}nameLabels[records[0].name as string] ?? {% endif %}(records[0].name as string);
+        const secondName = {% if name_label_map %}nameLabels[records[1].name as string] ?? {% endif %}(records[1].name as string);
         if (firstName !== secondName) {
           cy.contains('[role="row"]', firstName).find('input[type="checkbox"]').check();
           cy.contains('[role="row"]', secondName).find('input[type="checkbox"]').check();
@@ -606,6 +654,8 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% if list_id_is_unique %}
       cy.contains(exactRe('{{ list_id_1 }}')).click();
 {% else %}
+      // Confirm the populated row is present before opening and deleting it.
+      getDataGridTotalRowCount().should('eq', {{ seed_count + 1 }});
       cy.contains('.MuiDataGrid-cell', exactRe('{{ list_id_1 }}')).find('a').first().click();
 {% endif %}
       cy.get('a[aria-label="Edit"]').click();

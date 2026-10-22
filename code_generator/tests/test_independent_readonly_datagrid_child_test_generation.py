@@ -226,6 +226,7 @@ def _spec_ctx_schema(child_has_x_generate: bool) -> dict:
                     "name": {"type": "string"},
                     "lines": {"type": "array", "items": {"$ref": "#/definitions/line"}},
                 },
+                "x-display": {"table": [{"name": {"primary": True}}]},
             },
             "parent1_detail": {
                 "x-generate": _generate_config(),

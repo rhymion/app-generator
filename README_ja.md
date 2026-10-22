@@ -17,11 +17,16 @@ YAML スキーマ定義から本番対応の Web アプリケーションを生�
 ### コード生成
 
 - **スキーマ駆動生成** — YAML スキーマ (`code_generator/json_schema.yaml`) + Prisma スキーマ → Python パイプラインによる TypeScript、React、Cypress ファイルの生成
+- **フレームワーク非依存の UI フック** — 各エンティティのフォーム状態・送信処理・エラーメッセージ変換・権限に基づく表示制御・承認連携を、Next.js・`next-intl`・DOM・UI ライブラリに依存しない `lib/{entity}/use_entity_*.ts` として生成し、Web 以外のクライアントからも再利用可能 — [`docs/knowledge/shared-ui-hooks.md`](docs/knowledge/shared-ui-hooks.md) 参照
 - **CRUD ページ一式** — エンティティごとに一覧、詳細、作成、編集、削除ページを生成
 - **ガントチャートビュー** — エンティティ単位でオプトインできるガントチャートページ
-- **REST API** — エンティティごとに API キー認証付き JSON エンドポイントを生成
+- **REST API** — エンティティごとに API キー認証付き JSON エンドポイントを生成。加えて、その行について現在許される操作・書き込み・遷移を返す行単位の `GET /api/{entity}/[id]/capabilities` エンドポイントを生成。リレーション項目で選択できるレコードを検索・ID 参照する `GET /api/{entity}/options` エンドポイントも生成（Web のピッカーの REST 版で、権限と組織の範囲は同一）。コメントスレッドを持つエンティティには、コメントの追加・編集・削除の `POST` / `PATCH` / `DELETE` ルートと、`@` メンション候補を検索する `GET /api/mention/users` も生成（コメント欄の REST 版で、同じアクションを実行）— 詳細は [`docs/knowledge/comment-and-mention-rest-routes.md`](docs/knowledge/comment-and-mention-rest-routes.md) を参照
+- **API 冪等性キー + API キー単位の流量制限** — 単一レコード作成エンドポイントで任意の `Idempotency-Key` ヘッダーを送ると、`POST` の再送が安全になる（同じキー＋同じ本文なら元の結果を再送、同じキー＋異なる本文なら競合として拒否）。保持期間1日のDBテーブルに、対象レコードと同一トランザクションで書き込む。加えて `authenticateApiKey()` のみで認証する REST route はすべて、呼び出し元ごとの `api:read`/`api:write` 流量制限（いずれも環境変数で上書き可）を強制する — 詳細は [`docs/knowledge/api-idempotency-and-rate-limiting.md`](docs/knowledge/api-idempotency-and-rate-limiting.md) を参照
+- **API キーの有効期限** — 任意設定のnullable列 `user.api_key_expires_at`（`null` は無期限、既存の全キーの挙動を変えない）を、唯一の共通検証点 `authenticateApiKey()` でチェックする。期限切れのキーによるリクエストは `401 API key expired.` で拒否される — 詳細は [`docs/knowledge/api-key-expiry.md`](docs/knowledge/api-key-expiry.md) を参照
+- **生成ドキュメント + OpenAPI 3.1 仕様** — エンティティごとの人間可読ドキュメント（`docs/generated/{entity}.md`、`/en/docs` 配下にも反映）。承認フロー・書き込みロックを持つエンティティには「Constraints」節を含む。加えて機械可読な統合仕様 `docs/generated/openapi.json` をビルド成果物として生成し、`GET /api/openapi.json`（APIキーまたはセッション必須、全環境）で配信。`SWAGGER_UI_ENABLED` で有効化する対話的な `/swagger` 画面も用意（開発・ステージング限定、本番では有効化しない）— 詳細は [`docs/knowledge/generated-documentation-and-openapi-spec.md`](docs/knowledge/generated-documentation-and-openapi-spec.md) を参照
+- **エンティティごとに `properties:` 一つ** — スカラー列とリレーションオブジェクトを JSON Schema 標準の `properties:` にまとめて書きます。ビルダーが各エントリを、Prisma上でその名前が何であるかで振り分けます。モデル上のプロキシビューは `allOf` ラッパーではなく `x-view-of: <model>` で書きます。エンティティ直下の `fields:` キーが残る旧スキーマは `code_generator/migrate_fields_into_properties.py` で書き換えます — [`docs/knowledge/schema-yaml-configuration.md`](docs/knowledge/schema-yaml-configuration.md) を参照
 - **Cypress テスト生成** — アプリケーションコードと並行して UI および API テストスイートを生成
-- **ダッシュボードチャート** (`x-display.dashboard: true`) — カラム・バー・ライン・パイチャートのレンダリングを生成；スタッキングモード・タイムスタンプバケット・型付きフィルター・CSV/Excel エクスポート・REST アグリゲートエンドポイント（`/api/{entity}/aggregate`）をエンティティごとに生成
+- **ダッシュボードチャート** (`x-display.dashboard: true`) — カラム・バー・ライン・パイチャートのレンダリングを生成；スタッキングモード・タイムスタンプバケット（タイムゾーン選択可）・ウィジェットの単一フィールドフィルター・CSV エクスポート・スキーマ全体で一つの REST アグリゲートエンドポイント（`POST /api/dashboard/aggregate`）を生成。[`docs/knowledge/dashboard-guide.md`](docs/knowledge/dashboard-guide.md) を参照
 - **インベントリ予約** (`x-reservation`) — 容量・在庫管理のためのスキーマレベルのオプトイン；`count` モードは数値カウンターカラムを条件付き UPDATE で予約し、`item` モードは `inventory_allocation` ブリッジテーブルで行ロックを実施
 - **ラッパーコンポーネントアーキテクチャ** — エンティティごとに生成されたコンポーネントが `components/_standard/` の共有ラッパーを使用（静的提供；`generate-code` 再実行で上書きされない）、生成コンポーネントは `@mui/*` の代わりに `components/ui/` の共有 `App*` ラッパーを import するため、自動生成コードが MUI に直接依存しなくなりました（プロバイダー設定を除く）
 - **エンティティ横断全文検索** (`x-generate.search: true`) — 検索可能なエンティティが存在する場合に `GET /api/search` REST エンドポイントとグローバル検索 UI ページ（`app/[locale]/search/page.tsx`）を生成；オプトインしたエンティティ全体への UNION ALL クエリで、エンティティごとにテナント・権限フィルターを適用；pg_bigm による日本語 2-gram 検索；ファセット（エンティティタイプ別ヒット件数）と XSS セーフなスニペットハイライト
@@ -34,6 +39,7 @@ YAML スキーマ定義から本番対応の Web アプリケーションを生�
 - 多対1、多対多、1対1、自己参照リレーションシップ
 - インライン DataGrid による子エンティティと埋め込みリスト
 - 独立した子エンティティ（専用ページ付き）
+- **参照先レコードをその場で作成**（多対1の FK フィールドに `x-create-inline: true`） — フィールドのオートコンプリートに「新規作成」が加わり、参照先エンティティ自身の生成済みフォームをダイアログで開いて、保存したレコードを選択状態にします。先に別画面で作成する必要がなくなり、参照先の権限・バリデーション・組織スコープはそのまま適用されます。[`docs/knowledge/create-fk-record-in-place.md`](docs/knowledge/create-fk-record-in-place.md) を参照
 - **ブリッジパターンの汎用化** — 実 1対1・ポリモーフィックリレーションを内部スルーテーブル（`<model>able`）で実現する再利用可能なスキーマレベルのブリッジ。親に余分な FK カラムを追加せず親オートコンプリートも維持、内部ブリッジテーブルは JSON スキーマ出力から除外
 
 ### 認証・認可
@@ -57,12 +63,13 @@ YAML スキーマ定義から本番対応の Web アプリケーションを生�
 - **インベントリ予約** — スキーマレベルの `x-reservation` による容量・在庫管理（count モードと item モード）；予約元エンティティのライフサイクル遷移は独自の予約ライフサイクル機構ではなく承認フローシステムの承認/（terminal）却下を経由
 - **インベントリ台帳**（`x-ledger-source`） — スキーマにledgerトップレベル宣言がある場合に生成される `inventory_transaction` 台帳エンティティと `transactionable` ブリッジ；入荷伝票や請求明細エンティティに `x-ledger-source` を付与すると write/adjust/move のスタブテンプレートを生成
 - **分割アクション**（`x-splittable`） — エンティティに付与すると、一覧・編集ページからロット単位の分割操作を行う分割アクション UI セクションと API ルートを生成
-- **ダッシュボードチャート** — スキーマから生成されるエンティティごとのチャートウィジェット（カラム・バー・ライン・パイ）；スタッキング・時間バケット・型付きフィルター・CSV/Excel エクスポート・REST アグリゲートエンドポイント
+- **ダッシュボードチャート** — スキーマから生成されるエンティティごとのチャートウィジェット（カラム・バー・ライン・パイ）；スタッキング・時間バケット（タイムゾーン選択可）・ウィジェットフィルター・CSV エクスポート・スキーマ全体で一つの REST アグリゲートエンドポイント
 - **エンティティ横断検索** — オプトインしたエンティティへの UNION ALL による `GET /api/search`；ファセット・ハイライト・日本語 pg_bigm 対応；ヘッダー検索アイコンと検索ページを生成
 - **承認後イベント発火** — `x-approval.on_approved.set_fields`（フィールド更新）および `x-approval.on_approved.emit_hook`（生成 `service_after_approve.ts` による カスタムロジック）；`approvable.approved_at` による冪等性保証。`x-approval-lines` は承認明細エンティティをインベントリ台帳操作に接続する作成前後のヘルパーを生成
 - **宣言的な書き込みロック値**（`x-write-locked-values`） — エンティティに `{field_name: [value, ...]}` 形式で注釈すると、通常の作成・更新がその値を直接書き込もうとした際に拒否される（画面・REST API・Server Action・CSV インポートすべてで強制）。値自体は選択肢として表示されたまま選択不可（disabled）になり、非表示にはならない；`x-approval` 由来のロック値との和集合として合成されるため、両方の仕組みが依存関係なく同一フィールドを同時に保護できる。詳細は [`docs/knowledge/x-write-locked-values-field-lockdown.md`](docs/knowledge/x-write-locked-values-field-lockdown.md) を参照してください
+- **版管理された履歴**（`x-version-of`、オプトイン） — 識別エンティティと `x-approval` を持つ版エンティティの組の版側に宣言する。版番号は承認時に採番（識別ごとに一意）、識別ごとの未決の下書きは最大1件、識別の `current_version_id` は承認ごとに更新、却下・取下げされた下書きは子行ごと削除、新版は初期値入りの新規作成画面で開く（保存するまで何も書き込まない）、承認済みの版を持つ識別は削除不可。詳細は [`docs/knowledge/schema-yaml-configuration.md`](docs/knowledge/schema-yaml-configuration.md) の 7.8 節を参照してください
 - **終端却下**（`x-readonly-fields`） — エンティティが終端の却下状態に達した後にフィールドをロックするための注釈；却下時は `on_rejected_dispatch` 経由でワンスタブ（`service_after_reject_stub.ts`）を発火し、通知や在庫調整などのカスタムロジックに対応
-- **Stripe 決済**（`x-payment`、オプトイン） — 任意のエンティティへ `x-payment: true` を宣言すると、Stripe Checkout Session 作成と Webhook 処理の write-once スタブ（`lib/stripe.ts`、`app/api/payment/checkout/route.ts`、`app/api/webhooks/stripe/route.ts`）を生成、鍵未設定時は fail-closed；対応は一回払いのみで、エンティティ・認可・UI は生成しない — 詳細は後述の[決済](#決済stripeオプトイン)を参照
+- **Stripe 決済**（`x-payment`、オプトイン） — エンティティへ `x-payment: true` を宣言すると、新規レコードは Stripe Checkout の支払いが確認されるまで仮の状態になり(フォームまたは REST API で作成、Webhook が確定または削除)、課金は Stripe Price(`stripe_price_id`。エンティティ自身または関連エンティティが持つ)とサーバー側で決める数量で行い、プロモーションコードに対応；あわせて write-once の Stripe スタブと戻り先ページ `/payment/success`・`/payment/cancel` を生成、鍵未設定時は fail-closed；対応は一回払いのみ — 詳細は後述の[決済](#決済stripeオプトイン)を参照
 
 ### パフォーマンス
 
@@ -83,16 +90,19 @@ YAML スキーマ定義から本番対応の Web アプリケーションを生�
 
 - **GCP Cloud Run**（`x-cloud` アノテーション、オプトイン） — マルチステージ `Dockerfile`、GCS バックエンドのアップロード（Signed URL アップロード + プロキシルート）、冪等な環境自動化スクリプト（`gcp-env.sh`、`gcp-setup.sh`、`gcp-deploy.sh`、`gcp-seed.sh`、`gcp-teardown.sh`）；`x-cloud` 未指定時は Vercel がデフォルトのまま
 
+- **スケジュールタスク**（`x-scheduled-task` / `x-scheduled-tasks`） — 任意の `depends_on` による実行順序、日次の完了記録、実行状況の確認と再実行・解決済み・スキップのための管理画面（`/scheduled_task_run`）と REST ルート（`/api/scheduled-task-runs`）、データベースに対して直接実行する `npm run task:run` / `task:run-all`（`gcp-task-runner.sh` による夜間 Cloud Run Job + Cloud Scheduler のプロビジョニング）；[docs/knowledge/scheduled-task-operations.md](docs/knowledge/scheduled-task-operations.md) を参照
+
 ### 監査・コンプライアンス
 
 - **監査ログ** — 全エンティティの作成・更新・削除操作を横断表示する、スキーマ非依存の read-only ビューア（`app/[locale]/audit_log/page.tsx`）
-- **GDPR / データ保護** — `x-pii` フィールド分類（`direct`/`sensitive`/`indirect`）、`anonymizeUser()` 消去関数、`x-gdpr-mode` によるデータ主体区分の分類（`internal`/`consumer`/`both`。スキーマ検証のみで生成コードへの反映は未実装）、添付ファイル名の AES-256-GCM at-rest 暗号化、コメント内の `x-mention` ユーザーメンション解析
+- **GDPR / データ保護** — `x-pii` フィールド分類（`direct`/`sensitive`/`indirect`）、`anonymizeUser()` 消去関数、`x-gdpr-mode` によるデータ主体区分の分類（`internal`/`consumer`/`both`。スキーマ検証のみで生成コードへの影響なし）、添付ファイル名の AES-256-GCM at-rest 暗号化、コメント内の `x-mention` ユーザーメンション解析
 - **利用規約 / プライバシーポリシー**（`/[locale]/legal/terms`、`/[locale]/legal/privacy`）— 登録画面から導線を張ったMarkdown雛形文書。文書の言語追加は `content/legal/<doc>.<locale>.md` ファイルを追加するのみで、サイトUIの言語一覧とは独立（詳細は `docs/knowledge/legal-documents.md`）
 
 ### その他
 
 - 国際化（英語・日本語、next-intl v4）
 - ダークモード（システム連動、SSR セーフ）
+- スキーマで `x-generator.mobile.enabled: true` を設定したときに `mobile/` へ生成される Expo（React Native）モバイルアプリ（既定は無効）。デスクトップのサイドバーと同じ `x-nav` / `x-nav-groups` からフッターのタブと下位階層の一覧を構成。外部キー・1対1セレクタ・多対多・1対多リストにはネイティブのピッカーを、直接添付フィールドにはファイル入力を、`attachable` ブリッジを持つエンティティには添付ファイル一覧（追加・削除・並べ替え）を、エンティティ選択フィールドにはチップを、編集可能な1対多の子コレクションには行エディタを（参照先レコードのその場作成と決済チェックアウトにも対応）、承認対象のエンティティには承認・却下・取り下げのボタンと分割操作を、コメント可能なエンティティにはコメントスレッド・リアクション・コメント欄（`@` メンション候補検索付き）・コメントの編集と削除を備え、手書きのネイティブコンポーネント（`x-custom-components`・`x-custom-component`）の差し込み口（スタブは一度だけ生成され、何も描画しない）を備え、フォーム・検証・権限のロジックを Web 画面と共有するネイティブの一覧（並べ替え・絞り込み・検索・一括削除）・詳細・フォーム画面を生成。読み取り専用の監査ログの一覧・詳細と、定期タスクの管理画面も生成。未対応のままのエンティティは理由付きで生成ログと `mobile/MOBILE_ENTITIES.md` に列挙
 - 生成コードを上書きせずにカスタマイズできる 5 つの拡張ポイント
 
 ---
@@ -291,11 +301,11 @@ npm run docker:down:dev  # 作業終了時にデータベースを停止
 
 ## 監査・コンプライアンス
 
-**監査ログ** — `audit_log` モデル上に構築された、スキーマ非依存の read-only ビューア（`app/[locale]/audit_log/page.tsx`）で、全生成エンティティの作成・更新・削除操作を横断表示します。`lib/audit_log/getters.ts` が FK JOIN でアクター（実行ユーザー）を解決し、`CardListPagination` でページネーションします。生JSONの `metadata` は admin 専用の詳細ページでのみ表示されます。`audit_log` モデルのカラム自体は2.0.0以前から存在しますが、JOIN先である `actor_user` リレーション（`onDelete: Restrict` の外部キー制約含む）は3.0の新規追加です — 詳細は [docs/UPGRADE-3.0.md](docs/UPGRADE-3.0.md) を参照。
+**監査ログ** — `audit_log` モデル上に構築された、スキーマ非依存の read-only ビューア（`app/[locale]/audit_log/page.tsx`）で、全生成エンティティの作成・更新・削除操作を横断表示します。`lib/audit_log/getters.ts` が FK JOIN でアクター（実行ユーザー）を解決し、`CardListPagination` でページネーションします。生JSONの `metadata` は admin 専用の詳細ページでのみ表示されます。`audit_log` モデルのカラム自体は2.0.0以前から存在しますが、JOIN先である `actor_user` リレーション（`onDelete: Restrict` の外部キー制約含む）は3.0の新規追加です — 詳細は [docs/UPGRADE-3.0.md](docs/UPGRADE-3.0.md) を参照。 テーブルは追記専用（クライアントガード・行トリガー・権限を絞ったアプリ用ロール）で、改ざん検知用にダイジェストを連鎖させます — [docs/knowledge/audit-log-append-only.md](docs/knowledge/audit-log-append-only.md) を参照（アプリケーションを制限付きデータベースロールへ切り替える手順を含む）。利用側の配備手順書は `docs/knowledge/audit-log-operations.md` に置く。
 
 **GDPR / データ保護**:
-- `x-pii` フィールド分類（`direct`/`sensitive`/`indirect`）が、消去（GDPR第17条・忘れられる権利）時に `anonymizeUser()` がスクラブするフィールドを決定します。このスクラブはトランザクション内で不可逆的に実行され、参照整合性を保つためユーザー行自体は削除せず、`user` モデルに `anonymized_at` を記録します。
-- `x-gdpr-mode`（`internal`/`consumer`/`both`）はモデル/フィールド単位のデータ主体区分（対象が従業員データか一般消費者データか）を分類する注釈です。`code_generator/validate.py` でスキーマ検証はされますが、コード生成テンプレート側では未参照のため、3.0時点で生成コードへの影響はありません。
+- `x-pii` フィールド分類（`direct`/`sensitive`/`indirect`）が、消去（GDPR第17条・忘れられる権利）時に `anonymizeUser()` がスクラブするフィールドを決定します（対象は `user` エンティティのフィールドのみ）。このスクラブはトランザクション内で不可逆的に実行され、参照整合性を保つためユーザー行自体は削除せず、`user` モデルに `anonymized_at` を記録します。実行契機は可逆な無効化ではなく `user` の `invalidate` アクションです。詳細は [docs/knowledge/x-pii.md](docs/knowledge/x-pii.md) を参照。
+- `x-gdpr-mode`（`internal`/`consumer`/`both`）はモデル/フィールド単位のデータ主体区分（対象が従業員データか一般消費者データか）を分類するラベルです。`code_generator/validate.py` でスキーマ検証はされますが、コード生成テンプレートは参照しないため、生成コードへの影響はありません。`x-retention` も参照されません。 詳細は [docs/knowledge/x-gdpr-mode.md](docs/knowledge/x-gdpr-mode.md) を参照。
 - 添付ファイル名は AES-256-GCM で at-rest 暗号化されます（`lib/compliance/attachment_name_crypto.ts`）。
 - `x-mention` によりコメント内で `@[user_id:uuid]` メンション構文が有効になり、メンションパーサーが生成されます。
 
@@ -303,17 +313,31 @@ npm run docker:down:dev  # 作業終了時にデータベースを停止
 
 ## 決済（Stripe、オプトイン）
 
-既定スキーマの機能ではありません。`json_schema.yaml` の任意のエンティティに
-`x-payment: true` を宣言すると、`generate-code` の初回実行時に 3 本の
-write-once スタブファイルが書き込まれます(`lib/<parent>/invalidate_handler.ts`
-と同じ規約 — 編集内容は再生成後も保持されます): `lib/stripe.ts`(SDK 初期化、
-`STRIPE_SECRET_KEY` 未設定時は fail-closed)、`app/api/payment/checkout/route.ts`
-(Checkout Session 作成)、`app/api/webhooks/stripe/route.ts`(Webhook 受信、
-署名検証あり、`STRIPE_WEBHOOK_SECRET` 未設定時は fail-closed)。生成器は
-`Plan`/`Product`/`Purchase` 相当のエンティティ・認可/権限レイヤー・決済 UI は
-一切生成しません — それらは通常のスキーマエンティティとして自前でモデル化し、
-上記スタブへ接続してください。対応範囲は一回払いのみ(Checkout Session
-`mode: payment`)で、サブスクリプションは対象外(必要であれば自前で追加)です。
+既定スキーマの機能ではありません。エンティティへ `x-payment: true` を宣言すると、
+そのレコードの作成が Stripe Checkout の支払いに結び付きます。レコードを作成する
+(フォームまたは `POST /api/{entity}`)と、レコードは仮の状態で保存され、Checkout
+Session が開かれます。フォームは購入者を Stripe のホスト画面へ遷移させ、API は
+`{ "record": ..., "checkoutUrl": ... }` を返します。その後、署名検証済みの Webhook が、
+支払い成功でレコードを確定し、セッション期限切れ・支払い失敗でレコードを削除します。
+複数のエンティティが `x-payment` を宣言でき、Webhook は 1 本で全てを受けます。
+課金対象は作成済みの Stripe Price で、必須の `stripe_price_id` フィールドからサーバー側で
+決まります。エンティティ自身が持つ場合(`default:` で固定、クライアント入力は不可)と、
+それを宣言している関連エンティティがちょうど 1 つある場合(例: `room_reservation` は
+`room` の Price で課金)があり、無い場合や複数ある場合は `generate-code` が失敗します。
+数量は write-once のフック `lib/payment/<entity>_quantity.ts`(既定は `1`)で決まり、
+Checkout では Stripe のプロモーションコードを入力できます。生成器は `prisma/schema.prisma` へ
+`payable` モデルを追加します。マイグレーションは配備時に書いてください。
+
+`generate-code` は初回実行時に 4 本の write-once スタブファイルも書き込みます
+(`lib/<parent>/invalidate_handler.ts` と同じ規約 — 編集内容は再生成後も保持されます):
+`lib/stripe.ts`(SDK 初期化、`STRIPE_SECRET_KEY` 未設定時は fail-closed)、
+`app/[locale]/payment/success/page.tsx` と
+`app/[locale]/payment/cancel/page.tsx`(Checkout からの戻り先)、
+`app/api/webhooks/stripe/route.ts`(Webhook 受信、署名検証あり、
+`STRIPE_WEBHOOK_SECRET` 未設定時は fail-closed)。`x-payment` エンティティの生成 spec は
+Stripe 鍵なしで通ります(`test:e2e:cy:*` スクリプトが `PAYMENT_FAKE_STRIPE=1` を立て、メモリ上の偽
+client に差し替えます。本番相当の環境では決して有効にならず、変数が無ければ実 client を使います)。対応範囲は一回払いのみ
+(Checkout Session `mode: payment`)で、サブスクリプションは対象外(必要であれば自前で追加)です。
 詳細は
 [docs/knowledge/stripe-payment-integration.md](docs/knowledge/stripe-payment-integration.md)
 を参照してください。
@@ -327,7 +351,8 @@ write-once スタブファイルが書き込まれます(`lib/<parent>/invalidat
 - **並列フェッチ**: データと権限チェックを `Promise.all` で並列フェッチし、サーバーへのラウンドトリップを最小化します。
 - **クエリタイムアウト**（`lib/prisma.ts`）: 直結接続（PrismaPg）パスにはデフォルト30秒の `statement_timeout` が適用されます。`STATEMENT_TIMEOUT_MS` で設定変更可能（`0` で無効化）。この直結パスが全環境のデフォルトです — Accelerate（`PRISMA_DATABASE_URL`）はオプトインでデフォルト無効、有効化した場合は `statement_timeout` を転送しないため対象外です。
 - **FK インデックス網羅**: `scripts/add_required_indexes.py` が `@relation` の FK カラムを自動検出し `@@index` を追加します（ジェネレーターのデモスキーマは18本から36本へ増加）。
-- **検索用 pg_trgm GIN インデックス**: `generate-code` が `scripts/create-gin-indexes.sql` を生成し、`psql` で手動適用します — `gin_trgm_ops` による `prisma migrate dev` のドリフトループを避けるため `prisma/schema.prisma` の外に置いています。
+- **検索用 pg_trgm + tsvector GIN インデックス**: `generate-code` が `instrumentation.ts` を生成し、サーバーのcold start毎（Vercel・GCP/Cloud Run いずれも）に `lib/db-init.ts` の `ensureSearchIndexes()` を呼んで自動作成します。`scripts/create-gin-indexes.sql` は手動/migration時のfallbackです — `gin_trgm_ops` による `prisma migrate dev` のドリフトループを避けるため `prisma/schema.prisma` の外に置いています。
+- **一覧の検索ボックス**: 横断検索の対象エンティティは、一覧にtrigram検索列を対象とする検索ボックスを持ち、検索と同じGINインデックスを共有します。列単位の `x-trigram-filter: true` / `false`（列の `properties:` エントリ上）で列を追加・除外できます — [`docs/knowledge/list-panel-trigram-filter.md`](docs/knowledge/list-panel-trigram-filter.md) を参照。
 - **検索の `COUNT(*)` オプトアウト**: `SearchOpts.count: false` でエンティティ横断検索の2本の `COUNT(*)` クエリをスキップできます（`total: -1` を返却）。
 
 [docs/knowledge/performance-improvements.md](docs/knowledge/performance-improvements.md) を参照してください。
@@ -444,6 +469,8 @@ preview デプロイと異なり自動的なクローラー保護を受けませ
 | `gcp-deploy.sh` | イメージビルド・マイグレーション実行・Cloud Run へのデプロイ |
 | `gcp-seed.sh` | データベースのシード |
 | `gcp-teardown.sh` | GCP リソースの削除（2段階確認付き） |
+| `gcp-task-runner.sh` | `task:run-all` を実行する夜間 Cloud Run Job + Cloud Scheduler ジョブのプロビジョニング（`DRY_RUN=true` でプレビュー） |
+| `gcp-task-runner-teardown.sh` | `gcp-task-runner.sh` が作成したリソースのみを削除（プロジェクトは削除しない）。監査ログ用バケットは `DELETE_AUDIT_LOG_BUCKET=true` の場合のみ（`DRY_RUN=true` でプレビュー）。`docs/knowledge/gcp-task-runner-operations.md` を参照 |
 
 `gcp-deploy.sh` は `generate-code` が生成する `Dockerfile` を要します —
 `x-cloud` を有効化した**後**に `generate-code` を実行し、`gcp-deploy.sh`
@@ -515,6 +542,7 @@ app-generator/
 |------|---------|
 | [architecture-overview.md](docs/knowledge/architecture-overview.md) | コード生成パイプライン、プロジェクト構成、生成コードと手書きコードの境界、技術スタック、環境設定 |
 | [schema-yaml-configuration.md](docs/knowledge/schema-yaml-configuration.md) | `code_generator/json_schema.yaml` の全リファレンス |
+| [dashboard-guide.md](docs/knowledge/dashboard-guide.md) | ダッシュボードの使い方：エンティティの登録、ウィジェットエディタ、エラーメッセージ、利用者向け設定、`POST /api/dashboard/aggregate` |
 | [prisma-schema-conventions.md](docs/knowledge/prisma-schema-conventions.md) | Prisma モデルの命名、インデックス、リレーション規約 |
 | [code-generation-custom-extensions.md](docs/knowledge/code-generation-custom-extensions.md) | 拡張ポイント: 生成ファイルを上書きせずにカスタムコードを追加する場所 |
 | [testing-cypress.md](docs/knowledge/testing-cypress.md) | 生成された Cypress パターン、MUI インタラクションヘルパー、CI/CD 設定 |
@@ -524,9 +552,14 @@ app-generator/
 | [troubleshooting.md](docs/knowledge/troubleshooting.md) | ビルド、テスト、コード生成、データベースの一般的な障害パターンと段階的な修正手順 |
 | [i18n-locale-routing.md](docs/knowledge/i18n-locale-routing.md) | next-intl v4 セットアップ、ロケールルーティング、翻訳ファイル規約 |
 | [dark-mode-and-hydration.md](docs/knowledge/dark-mode-and-hydration.md) | システム連動ダークモード、SSR セーフなテーマ初期化 |
-| [timezone-handling.md](docs/knowledge/timezone-handling.md) | サーバー/クライアントのタイムゾーン規約 |
+| [timezone-handling.md](docs/knowledge/timezone-handling.md) | サーバー/クライアントのタイムゾーン規約、`app_setting.timezone` の `Timezone` enum |
 | [child-datagrid-reference-columns.md](docs/knowledge/child-datagrid-reference-columns.md) | インライン DataGrid 子エンティティ、参照列のレンダリング |
 | [mobile-responsive-layout.md](docs/knowledge/mobile-responsive-layout.md) | レスポンシブレイアウト規約、検索ヘッダーアイコン、モバイルアカウントセクション |
+| [relation-picker-rest-route.md](docs/knowledge/relation-picker-rest-route.md) | `GET /api/{entity}/options`：リレーションピッカー用の REST 検索と ID 参照。Web のオートコンプリートと同じ関数を実行し、認証・権限・組織分離を共有 |
+| [comment-and-mention-rest-routes.md](docs/knowledge/comment-and-mention-rest-routes.md) | コメントの追加・編集・削除と `@` メンション候補検索の REST ルート。編集フォームと同じアクションを認証済み呼び出し元として実行。アクセス検査・入力検証・テスト |
+| [x-autocomplete-context.md](docs/knowledge/x-autocomplete-context.md) | FK フィールドの `x-autocomplete-context`：対象の `autocomplete_filter.ts` に渡るフォーム値、生成されるフォームと分割アクションの経路、検証 |
+| [mobile-app.md](docs/knowledge/mobile-app.md) | 生成される Expo モバイルアプリ：`x-nav` からのフッタータブと下位階層、エンティティ画面、ヘッダー、トークン認証、Playwright 検証 |
+| [list-search-panel.md](docs/knowledge/list-search-panel.md) | デスクトップ／モバイル Web の一覧の検索ボックス・複数列ソート・複数項目フィルタ：一覧ページが渡す仕様、Expo 一覧と共有するロジック（`lib/_list_query.ts`）、グリッド自身のヘッダ操作との併用、テスト |
 | [search.md](docs/knowledge/search.md) | エンティティ横断全文検索：スキーマオプトイン・pg_bigm・認可・生成 API と UI |
 | [appendix/approval-flow.md](docs/knowledge/appendix/approval-flow.md) | 承認フローシステムの詳細、承認後イベント発火（`on_approved`） |
 | [appendix/comment-bridge.md](docs/knowledge/appendix/comment-bridge.md) | コメントブリッジシステムの詳細 |
@@ -535,6 +568,9 @@ app-generator/
 | [gcp-automation-design.md](docs/knowledge/gcp-automation-design.md) | GCP Cloud Run デプロイ: `x-cloud` オプトイン、Dockerfile、GCS アップロード、環境自動化スクリプト |
 | [claude-code-settings-consumer-side.md](docs/knowledge/claude-code-settings-consumer-side.md) | `.claude/settings.json` の読み込みルール、OS非依存な権限記法、複合コマンドのマッチングの罠、設定ファイルが実際に読み込まれたかの確認方法 — 本リポジトリまたは `app-template` の `.claude/settings.json` を編集する前に読むこと |
 | [legal-documents.md](docs/knowledge/legal-documents.md) | 利用規約・プライバシーポリシー画面: 文書の言語がサイトUIの言語一覧から独立している理由、Markdown採用（JSON/MDX不採用）の理由、文書の言語追加手順 |
+| [generated-documentation-and-openapi-spec.md](docs/knowledge/generated-documentation-and-openapi-spec.md) | 生成される各エンティティのドキュメントの「Constraints」節（承認フロー・書き込みロック）と `docs/generated/openapi.json`（OpenAPI 3.1 ビルド成果物）— 一覧クエリパラメータ、`readOnly`、bulkのrequestBody、操作別4xx応答、import/exportパス。加えて `GET /api/openapi.json`（認証付き配信route、全環境）と `SWAGGER_UI_ENABLED` で有効化する `/swagger` 画面（開発・ステージング限定） |
+| [api-idempotency-and-rate-limiting.md](docs/knowledge/api-idempotency-and-rate-limiting.md) | 単一レコード作成エンドポイントの `Idempotency-Key` 対応（対象レコードと同一トランザクションのDBテーブル・保持期間1日）と `api:read`/`api:write` の API キー単位流量制限 |
+| [api-key-expiry.md](docs/knowledge/api-key-expiry.md) | `authenticateApiKey()` でチェックする任意設定の `user.api_key_expires_at`。`null` は無期限、期限切れは `401 API key expired.` で拒否 |
 
 ---
 
@@ -579,7 +615,8 @@ app-generator/
 | スキーマ駆動テキストエリア行数（x-ui.rows） | ✅ 実装済み |
 | GCP Cloud Run デプロイ（x-cloud） | ✅ 実装済み |
 | 監査ログビューア | ✅ 実装済み |
-| GDPR / データ保護（x-pii, anonymizeUser, x-gdpr-mode） | ✅ 実装済み |
+| GDPR / データ保護（x-pii, anonymizeUser） | ✅ 実装済み |
+| `x-gdpr-mode`・`x-retention` 注釈 | スキーマ検証のみのラベル。生成物への効果なし |
 | 添付ファイル表示オプトアウト（showImages/showFiles） | ✅ 実装済み |
 | 性能ハードニング（statement_timeout, FK インデックス, GIN インデックス, COUNT オプトアウト） | ✅ 実装済み |
 | 宣言的な書き込みロック値（x-write-locked-values） | ✅ 実装済み |

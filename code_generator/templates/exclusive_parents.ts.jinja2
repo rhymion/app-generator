@@ -1,0 +1,37 @@
+import { AppError } from '@/lib/_errors';
+
+// Generated for `{{ child }}`, which declares x-exclusive-parents. Every listed
+// parent owns a row through its own nullable FK column, and a saved row must
+// hold exactly one of them.
+export const EXCLUSIVE_PARENT_COLUMNS = [
+{% for column in columns %}
+  '{{ column }}',
+{% endfor %}
+] as const;
+
+function isEmptyOwner(value: unknown): boolean {
+  return value === null || value === undefined || (typeof value === 'string' && value.trim() === '');
+}
+
+// `values` is the row as it will be after the save: the submitted value for each
+// column the caller supplies, the existing row's value for each it does not.
+// Zero owners is 'missing'; two or more is 'invalid'. The error names the first
+// listed column so a standalone form can attach it to a real field.
+export function validateExclusiveParents(values: Record<string, unknown>): void {
+  const filled = EXCLUSIVE_PARENT_COLUMNS.filter((column) => !isEmptyOwner(values[column]));
+  if (filled.length === 1) return;
+  if (filled.length === 0) {
+    throw new AppError(
+      'VALIDATION',
+      `Exactly one of ${EXCLUSIVE_PARENT_COLUMNS.join(', ')} must be set, but none is`,
+      EXCLUSIVE_PARENT_COLUMNS[0],
+      'missing',
+    );
+  }
+  throw new AppError(
+    'VALIDATION',
+    `Exactly one of ${EXCLUSIVE_PARENT_COLUMNS.join(', ')} must be set, but ${filled.join(', ')} are`,
+    EXCLUSIVE_PARENT_COLUMNS[0],
+    'invalid',
+  );
+}

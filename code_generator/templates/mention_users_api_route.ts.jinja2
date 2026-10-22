@@ -1,0 +1,35 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { authenticate, withActor, handleApiError } from '@/lib/api-auth';
+import { getRateLimiter } from '@/lib/rate-limit';
+import { searchMentionUserOptions } from '@/lib/mention/search';
+
+// GET /api/mention/users?q=<text>  ->  200 { options: [{ id, name, email }], permissionDenied }
+//
+// The REST side of the @-mention picker in the comment box. It runs the same
+// searchMentionUserOptions the web picker calls, as the authenticated caller (mobile access token
+// or API key), so the candidates are the web's own: only users in the caller's organizations, at
+// most 20, ordered by name. A caller who may not read users gets an empty list with
+// permissionDenied: true, exactly as the picker does, instead of an error.
+
+const MAX_QUERY_LENGTH = 200;
+
+export async function GET(request: NextRequest) {
+  try {
+    const { userId: actorId } = await authenticate(request);
+    const _rl = await getRateLimiter().check('api:read', actorId);
+    if (!_rl.allowed) {
+      return NextResponse.json(
+        { error: 'rate_limited', retryAfter: _rl.retryAfterSeconds },
+        { status: 429, headers: { 'Retry-After': String(_rl.retryAfterSeconds), 'X-RateLimit-Bucket': 'api:read' } },
+      );
+    }
+    const query = request.nextUrl.searchParams.get('q') ?? '';
+    if (query.length > MAX_QUERY_LENGTH) {
+      return NextResponse.json({ error: `q exceeds maximum length of ${MAX_QUERY_LENGTH}` }, { status: 400 });
+    }
+    const result = await withActor(actorId, () => searchMentionUserOptions(query));
+    return NextResponse.json(result);
+  } catch (error) {
+    return handleApiError(error);
+  }
+}

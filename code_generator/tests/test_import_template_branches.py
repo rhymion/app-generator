@@ -365,68 +365,16 @@ def test_composite_fk_written_to_fkdata_and_updatedata(env):
 
 
 # ---------------------------------------------------------------------------
-# cmd_614: commit-time CREATE must route through the same auto-create OTO
-# (internal bridge FK, e.g. approvable_id) mechanism service.ts.jinja2 uses —
-# not build a bare `tx.<model>.create({ data: action.data as any })` that
-# skips the bridge row pre-create entirely.
+# cmd_614 introduced commit-time CREATE routing through the same auto-create
+# OTO (internal bridge FK, e.g. approvable_id) mechanism service.ts.jinja2
+# uses, inside this route's own raw-tx fallback. cmd_1127 removed that
+# fallback entirely (every import_eligible entity now converges through
+# add/update{{parent_pascal}} unconditionally, which already invokes
+# service.ts's own one_to_one_pre_creates/parent_data_obj wiring) — the
+# three tests that lived here asserted on the fallback's rendering and were
+# removed along with it, not adapted, since the branch they covered no
+# longer exists.
 # ---------------------------------------------------------------------------
-
-def test_create_without_oto_rels_uses_plain_form_unchanged(env):
-    """No auto_create_oto_rels on this entity (the common case, e.g. `item`)
-    → commit-time create is the original bare form, byte for byte. Guard:
-    non-bridge entities must render identically to before cmd_614."""
-    ctx = _ctx()  # _BASE_CTX carries no one_to_one_pre_creates/fk_data_lines
-    rendered = env.get_template('api_import_route.ts.jinja2').render(**ctx)
-    assert "await tx.test_entity.create({ data: action.data as any });" in rendered
-    assert "tx.approvable.create" not in rendered
-
-
-def test_create_with_auto_create_oto_rels_prepends_bridge_pre_create(env):
-    """Entity with an internal bridge FK (e.g. goods_receipt_line +
-    x-approval → approvable_id) → commit-time create must (1) pre-create the
-    bridge row inside the same transaction and (2) merge its FK into the
-    create data alongside the dry-run-computed action.data — mirroring
-    service.ts.jinja2's one_to_one_pre_creates / parent_data_obj wiring via
-    the same shared context vars (build_context.py), not a hand-listed
-    entity name. Guard: x-approval import create must populate
-    approvable_id instead of failing commit-time with a missing-FK error."""
-    ctx = _ctx(
-        one_to_one_pre_creates=(
-            "    const approvable = await tx.approvable.create({ data: {} });"
-        ),
-        one_to_one_fk_data_lines="        approvable_id: approvable.id,",
-    )
-    rendered = env.get_template('api_import_route.ts.jinja2').render(**ctx)
-    assert "const approvable = await tx.approvable.create({ data: {} });" in rendered
-    assert "...(action.data as any)," in rendered
-    assert "approvable_id: approvable.id," in rendered
-    # The bare pre-cmd_614 form (which drops the bridge FK) must not survive
-    # alongside the fix on this entity.
-    assert "await tx.test_entity.create({ data: action.data as any });" not in rendered
-    # Pre-create statement must precede the create() call it feeds.
-    assert rendered.index("tx.approvable.create") < rendered.index("tx.test_entity.create({")
-
-
-def test_bridge_create_eslint_disable_immediately_precedes_as_any(env):
-    """cmd_620 QC finding (proj_c PR consolidation review, fixed here
-    alongside cmd_621 since both touch api_import_route.ts.jinja2):
-    eslint-disable-next-line only suppresses a lint rule on the line
-    immediately following it. On the one_to_one_pre_creates branch, the
-    comment previously sat above `await tx.{{ model }}.create({` — two
-    lines above the actual `as any` on `data: { ...(action.data as any), `
-    — so it silently failed to suppress anything. Must be directly above
-    the `as any` line, not merely somewhere above the statement."""
-    ctx = _ctx(
-        one_to_one_pre_creates=(
-            "    const approvable = await tx.approvable.create({ data: {} });"
-        ),
-        one_to_one_fk_data_lines="        approvable_id: approvable.id,",
-    )
-    rendered = env.get_template('api_import_route.ts.jinja2').render(**ctx)
-    lines = rendered.splitlines()
-    as_any_idx = next(i for i, l in enumerate(lines) if '...(action.data as any)' in l)
-    assert '// eslint-disable-next-line @typescript-eslint/no-explicit-any' in lines[as_any_idx - 1]
-
 
 # cmd_611/612: organization-typed lookup targets need a SELF-id filter
 # (candidate.id in the actor's associated-org list), not an organization_id

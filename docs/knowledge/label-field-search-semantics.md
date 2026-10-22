@@ -13,7 +13,7 @@ coverage that stays invisible until someone tries to search by it.
 
 `code_generator/helpers/schema_helpers.py`'s `derive_searchable_relation_fields()` is what decides
 which FK relations get cross-relation substring search wired into the generated
-`searchXxxOptions()` getter (the one-hop Prisma nested `where` that lets a picker match by, e.g.,
+`searchXxxOptions()` getter (the Prisma nested `where` — one hop, or two for a dotted path — that lets a picker match by, e.g.,
 an inventory row's product name). For each element of a relation's `labelField` (single string or
 composite list), it does:
 
@@ -63,11 +63,16 @@ to compensate.
 `derive_searchable_relation_fields()` walks each path in the relation's `labelField` (a single
 string is treated as a one-element list) and keeps a path only if **all** of the following hold:
 
-- **Not a dotted path** (`approver_role.name`) — resolving a second hop (the target's own FK to
-  yet another entity) would need a second nested `where`, which `getters.ts.jinja2` does not
-  render within `derive_searchable_relation_fields()` itself. One-hop only *for this function*.
+- **At most one extra hop** — a plain path (`sku`) is a column of the target. A dotted path
+  (`test_case_version.title`) goes through one of the *target's own* FKs (`test_case_version_id`) to a
+  column of that FK's entity, and renders a two-level nested `where`
+  (`{ test_plan_case: { test_case_version: { title: { contains } } } }`); the entry carries a `via` key
+  next to `relation` and `field`. A path with more than one extra hop, or whose first segment is not an
+  FK of the target (`approver_role.name` where the target has no `approver_role_id`), is excluded.
+  This is the usual shape after an `x-version-of` split, where a name that used to sit on the entity
+  itself now sits on its version.
 
-  **Update**: a second, additive function closes part of this gap from the other direction.
+  A second, additive function covers dotted paths declared on a *different* entity.
   `derive_cross_entity_searchable_fields()` (`code_generator/helpers/schema_helpers.py:395`)
   scans *other* entities' composite `labelField` declarations for dotted paths that target the
   current entity through one of the current entity's own relations — e.g.
@@ -95,6 +100,20 @@ Each qualifying path in a composite `labelField` contributes its own independent
 `{relation, field}` entry — a composite `labelField` can be partially searchable (some elements
 qualify, others don't) without that being an error; it just means search coverage on that relation
 is narrower than its display label.
+
+## Integer segments of a label
+
+A plain (non-dotted) `labelField` segment that is an **integer** property of the target (for
+example `step_no` in `[test_case.title, step.name, step_no]`) is part of the on-screen label but
+cannot be matched with `contains`, which is string-only. `derive_searchable_integer_fields()`
+(`code_generator/helpers/schema_helpers.py`) collects these from every FK that targets the
+entity, and the generated `search<Entity>Options()` adds an equality clause to the per-token OR
+for any token made of 1-9 digits (`{ step_no: { equals: Number(token) } }`). The string clauses
+stay, so a token such as `1` still matches names containing `1`; only entities whose label has an
+integer segment change. Typing the label exactly as displayed (`Title Step 1`) now finds the row.
+
+Not covered: integer or decimal segments reached through a dotted path, and number/decimal/date
+segments. Those still match nothing in the search.
 
 ## Practical takeaway for schema authors
 

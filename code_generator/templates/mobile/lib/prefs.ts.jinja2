@@ -1,0 +1,24 @@
+import { Platform } from 'react-native';
+import * as SecureStore from 'expo-secure-store';
+
+/** Small key/value preference store: localStorage on web, SecureStore on native. */
+export async function getPref(key: string): Promise<string | null> {
+  try {
+    if (Platform.OS === 'web') return localStorage.getItem(key);
+    return await SecureStore.getItemAsync(key);
+  } catch {
+    return null;
+  }
+}
+
+export async function setPref(key: string, value: string): Promise<void> {
+  try {
+    if (Platform.OS === 'web') {
+      localStorage.setItem(key, value);
+      return;
+    }
+    await SecureStore.setItemAsync(key, value);
+  } catch {
+    // A preference that cannot be saved is not worth failing the screen for.
+  }
+}

@@ -84,7 +84,7 @@ formValues: { ...(src as unknown as Record<string, unknown>), <every live field>
 The generator does not pick which field matters — it makes every live value
 visible and lets `lib/{entity}/autocomplete_filter.ts`'s
 `filterAutocompleteOptions()` read whichever one its own business rule
-needs from `context.formValues`.
+needs from `context.formValues`. A field can instead name the values to send with `x-autocomplete-context`: see [x-autocomplete-context.md](x-autocomplete-context.md).
 
 ## Applying this to `approval_flow`'s preceded_by/followed_by (the worked example)
 

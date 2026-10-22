@@ -79,14 +79,14 @@ upsert_secret() {
   local name="$1" value="$2"
   if gcloud secrets describe "$name" --quiet 2>/dev/null; then
     if [[ "$DRY_RUN" == "true" ]]; then
-      echo "[DRY-RUN] gcloud secrets versions add ${name} --data-file=- (value prefix: ${value:0:20}...)"
+      echo "[DRY-RUN] gcloud secrets versions add ${name} --data-file=- (value not shown)"
     else
       printf '%s' "$value" | gcloud secrets versions add "$name" --data-file=-
       echo "  Updated secret: ${name}"
     fi
   else
     if [[ "$DRY_RUN" == "true" ]]; then
-      echo "[DRY-RUN] gcloud secrets create ${name} --data-file=- (value prefix: ${value:0:20}...)"
+      echo "[DRY-RUN] gcloud secrets create ${name} --data-file=- (value not shown)"
     else
       printf '%s' "$value" | gcloud secrets create "$name" \
         --data-file=- --replication-policy=automatic
@@ -111,6 +111,7 @@ echo ""
 echo "=== Step 1: Enable GCP APIs ==="
 run gcloud services enable \
   run.googleapis.com \
+  cloudscheduler.googleapis.com \
   sqladmin.googleapis.com \
   secretmanager.googleapis.com \
   artifactregistry.googleapis.com \
@@ -277,6 +278,14 @@ upsert_secret "app-auth-secret"         "$AUTH_SECRET"
 upsert_secret "app-gcs-bucket-name"     "$GCS_BUCKET"
 upsert_secret "app-seed-admin-email"    "$SEED_ADMIN_EMAIL"
 upsert_secret "app-seed-admin-password" "$SEED_ADMIN_PASSWORD"
+
+# CRON_SECRET (optional): bearer token the scheduled-task route checks. Not
+# generated here; set it in .env.production.local to have it registered.
+if [[ -n "${CRON_SECRET:-}" ]]; then
+  upsert_secret "app-cron-secret" "$CRON_SECRET"
+else
+  echo "  WARN: CRON_SECRET not set — app-cron-secret secret skipped"
+fi
 
 if [[ -n "${REDIS_URL:-}" && "$REDIS_URL" != "rediss://<DRY_RUN_PLACEHOLDER>" ]]; then
   upsert_secret "app-redis-url" "$REDIS_URL"

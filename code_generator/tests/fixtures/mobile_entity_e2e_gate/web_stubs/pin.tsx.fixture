@@ -1,0 +1,4 @@
+// Web-side placeholder for the mobile_gadget fixture field component.
+export default function Pin(_props: Record<string, unknown>) {
+  return null;
+}

@@ -1,0 +1,20 @@
+// x-payment: how many units of the resolved Stripe Price one {{ entity_name }}
+// record is charged for. Write-once: generated when absent, never overwritten
+// once you edit it.
+//
+// Called on the server only, after the record's own create transaction has
+// committed, with the just-created row -- never with a client-submitted value.
+// The default (1) is right for "one record = one unit"; change the body when
+// the count depends on the record, for example a per-night charge computed
+// from a check-in / check-out date range.
+//
+// The return type is a single quantity today. A charge made of several line
+// items (for example a weekday rate and a weekend rate) would widen it to a
+// list of { priceId, quantity } and widen `line_items` in lib/payment/checkout.ts
+// to match; nothing else in the payment flow depends on there being one line.
+
+import type { {{ model }} } from '@/app/generated/prisma/client';
+
+export async function resolve{{ pascal_name }}Quantity(_record: {{ model }}): Promise<number> {
+  return 1;
+}

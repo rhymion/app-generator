@@ -1,0 +1,98 @@
+// Framework-neutral form state and submit orchestration for {{ parent }}.
+//
+// Imported by the Web FormUpsert and by any other client that renders this
+// entity's form. This module must stay free of next/*, next-intl and DOM / UI
+// library imports: everything platform-specific (routing, translation lookup,
+// the transport behind `save`) is handed in by the caller.
+import { useState, useTransition } from 'react';
+import type { ActionCreated, ActionFailure } from '@/lib/_errors';
+
+export type EntityFormTranslate = (key: string, values?: Record<string, string | number>) => string;
+
+export type EntityFormTranslators = {
+  // Translator scoped to the `Errors` namespace.
+  terr: EntityFormTranslate;
+  // Root translator: resolves a hand-written rejection's namespace-qualified messageKey.
+  tmsg: EntityFormTranslate & { has: (key: string) => boolean };
+};
+
+export type EntityFormSaveResult = ActionFailure | ActionCreated | void;
+
+{% if exclusive_parent_error_fields %}
+// x-exclusive-parents: the error names the first listed FK column; show
+// all of the listed columns instead of that one alone.
+const EXCLUSIVE_PARENT_FIELDS: Record<string, string> = {
+{% for first, label in exclusive_parent_error_fields.items() %}
+  '{{ first }}': '{{ label }}',
+{% endfor %}
+};
+
+{% endif %}
+export function getEntityFormErrorMessage(err: ActionFailure, { terr, tmsg }: EntityFormTranslators): string {
+  switch (err.errorCode) {
+    case 'SESSION_EXPIRED':   return terr('sessionExpired');
+    case 'PERMISSION_DENIED': return terr('permissionDenied');
+    case 'NOT_FOUND':         return terr('notFound');
+    case 'VALIDATION': {
+      // A hand-written rejection may carry an i18n key. Only a key under an allowed
+      // namespace that exists in the loaded messages is shown; anything else falls
+      // back to the generic text below (never an exception, never the raw key).
+      const { messageKey, messageArgs } = err as { messageKey?: string; messageArgs?: Record<string, string | number> };
+      if (messageKey && /^(ValidationMessages|Errors)\./.test(messageKey) && tmsg.has(messageKey)) {
+        return tmsg(messageKey, messageArgs);
+      }
+{% if exclusive_parent_error_fields %}
+      const listed = err.field ? EXCLUSIVE_PARENT_FIELDS[err.field] : undefined;
+      if (listed) return terr(err.reason === 'invalid' ? 'exclusiveParentsInvalid' : 'exclusiveParentsMissing', { fields: listed });
+{% endif %}
+      return err.field ? (err.reason === 'invalid' ? terr('fieldInvalid', { field: err.field }) : terr('fieldRequired', { field: err.field })) : terr('unknown');
+    }
+    case 'CONFLICT':          return err.field ? terr('fieldAlreadyLinked', { field: err.field }) : terr('staleMutation');
+    case 'RESERVATION_LOCKED': return terr('reservationLocked');
+    case 'RELATED_RECORD_INVALID': return terr('relatedRecordInvalid');
+    case 'CAPACITY':          return terr('capacityExhausted');
+    default:                  return terr('unknown');
+  }
+}
+
+export type UseEntityFormOptions = {
+  translators: EntityFormTranslators;
+  // Persists the form. On the Web this is the entity's Server Action; another
+  // client passes a function with the same signature backed by its own transport.
+  save: (formData: FormData) => Promise<EntityFormSaveResult>;
+};
+
+export function useEntityForm({ translators, save }: UseEntityFormOptions) {
+  const [isPending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  const [validationError, setValidationError] = useState<string | null>(null);
+
+  const getErrorMessage = (err: ActionFailure): string => getEntityFormErrorMessage(err, translators);
+
+  // Runs the caller's validator, records its message and reports whether the
+  // form may be submitted.
+  const validate = (run: () => string | null): boolean => {
+    const message = run();
+    setValidationError(message);
+    return !message;
+  };
+
+  // Saves inside a transition. A failure result becomes the form-level error;
+  // a created-record result is handed to `onCreated` (x-create-inline).
+  const submit = (formData: FormData, onCreated?: (id: string) => Promise<void> | void) => {
+    try {
+      startTransition(async () => {
+        const result = await save(formData);
+        if (result && !result.ok) {
+          setError(getErrorMessage(result));
+        } else if (onCreated && result && 'id' in result) {
+          await onCreated(result.id);
+        }
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'An error occurred');
+    }
+  };
+
+  return { isPending, error, setError, validationError, getErrorMessage, validate, submit };
+}

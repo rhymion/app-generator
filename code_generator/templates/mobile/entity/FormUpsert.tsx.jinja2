@@ -1,0 +1,342 @@
+import { {% if custom_fields | selectattr('custom.upsert') | list %}createElement, {% endif %}useEffect, useRef, useState{% if create_fields or (custom_fields | selectattr('custom.upsert') | list) %}, type ComponentType{% endif %} } from 'react';
+import { router } from 'expo-router';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useMessages } from '@/lib/messages';
+import type { ModelPermissions } from '@/lib/authz';
+import { validateForm } from '@/components/{{ name }}/form_validation';
+import { useEntityCapabilities } from '@/lib/{{ name }}/use_entity_capabilities';
+import { useEntityForm{% if attachments and attachments.can_edit %}, getEntityFormErrorMessage{% endif %} } from '@/lib/{{ name }}/use_entity_form';
+import {
+{% if can_edit %}
+  get{{ pascal }}Detail,
+{% endif %}
+  get{{ pascal }}Permissions,
+  upsert{{ pascal }},
+  {{ const_name }}_FIELDS as FIELDS,
+} from '@/lib/{{ name }}/mobile_client';
+import { FieldInput, toFieldState, type FieldValueState } from '@/components/native/FieldInput';
+{% if row_fields %}
+import { firstMissingRowField, type ChildRowState } from '@/lib/entity-http';
+{% endif %}
+{% if attachment_fields %}
+import type { AttachmentRow } from '@/lib/attachment-http';
+{% endif %}
+{% if attachments and attachments.can_edit %}
+import { AttachmentList, attachmentsChanged } from '@/components/native/AttachmentList';
+import { setBridgeAttachments, type BridgeAttachment } from '@/lib/attachment-http';
+{% endif %}
+{% if create_fields %}
+import type { InlineCreateProps } from '@/components/native/RelationPicker';
+{% for f in create_fields %}
+import { {{ f.create_form.pascal }}FormUpsert } from '@/components/{{ f.create_form.name }}/FormUpsert';
+{% endfor %}
+{% endif %}
+{% if is_payment %}
+import { isCheckoutUrl, openCheckout } from '@/lib/checkout';
+{% endif %}
+{% for comp in custom_components.edit | map(attribute='name') | unique %}
+import {{ comp }} from '@/components/{{ name }}/custom/{{ comp }}';
+{% endfor %}
+{% if custom_fields | selectattr('custom.upsert') | list %}
+import type { FieldUpsertProps } from '@/lib/custom-component';
+{% for f in custom_fields if f.custom.upsert %}
+import Field{{ f.key | pascal_case }} from '@/components/{{ name }}/custom/fields/{{ f.key | pascal_case }}';
+{% endfor %}
+
+// Fields a hand-written component draws (x-custom-component, target upsert): it replaces the whole input.
+const CUSTOM_UPSERT: Record<string, ComponentType<FieldUpsertProps>> = {
+{% for f in custom_fields if f.custom.upsert %}
+  {{ f.key }}: Field{{ f.key | pascal_case }},
+{% endfor %}
+};
+{% endif %}
+{% if attachments and attachments.can_edit %}
+
+// The types the entity's AttachmentSection lists (its showImages / showFiles props).
+const ATTACHMENT_TYPES: string[] = {{ attachments.types | tojson }};
+{% endif %}
+{% if create_fields %}
+
+// x-create-inline: the create form of each field's target, opened over this form by the field's picker.
+const CREATE_FORMS: Record<string, ComponentType<InlineCreateProps>> = {
+{% for f in create_fields %}
+  {{ f.key }}: {{ f.create_form.pascal }}FormUpsert,
+{% endfor %}
+};
+{% endif %}
+
+type Props = {
+  id?: string;
+  /** Set when the form is shown over another form (x-create-inline): called instead of navigating after a create. */
+  onCreated?: (id: string) => void;
+  /** Set with `onCreated`: called instead of navigating back. */
+  onCancel?: () => void;
+};
+
+/**
+ * Create (no id) and edit (id) form for {{ pascal }}. Form state, validation,
+ * submit and error-message mapping come from the generated hooks the Web form
+ * also calls; this component only draws native controls and wires them in.
+ */
+export function {{ pascal }}FormUpsert({ id, onCreated, onCancel }: Props) {
+  const isEdit = Boolean(id);
+  const { t, terr, tmsg } = useMessages();
+  const [values, setValues] = useState<Record<string, FieldValueState>>(() =>
+    Object.fromEntries(FIELDS.map((spec) => [spec.key, toFieldState(spec, null)])),
+  );
+{% if attachment_fields %}
+  // A direct attachment field's value is the attachment row's id; the whole row is kept to show its name.
+  const [attachments, setAttachments] = useState<Record<string, AttachmentRow | null>>({});
+{% endif %}
+{% if attachments and attachments.can_edit %}
+  // The `attachable` bridge's attachments: the saved set and the one being edited. They are saved after the
+  // record itself, and only once it exists (as on the Web, the create form has no attachment section).
+  const [savedBridge, setSavedBridge] = useState<BridgeAttachment[]>([]);
+  const [bridgeItems, setBridgeItems] = useState<BridgeAttachment[]>([]);
+  const [bridgeError, setBridgeError] = useState<string | null>(null);
+{% endif %}
+  const [permissions, setPermissions] = useState<ModelPermissions | undefined>(undefined);
+  const [state, setState] = useState<'loading' | 'ready' | 'missing'>('loading');
+  const [busy, setBusy] = useState(false);
+{% if custom_components.edit %}
+  // The saved record the edit components receive (`null` on the create form), and a counter their `reload` bumps.
+  const [record, setRecord] = useState<{ id: string } & Record<string, unknown> | null>(null);
+  const [reloads, setReloads] = useState(0);
+{% endif %}
+{% if custom_fields | selectattr('custom.upsert') | list %}
+  // What a custom field started with: a field its component left untouched is not sent, so a value the
+  // screen never held (a password, for example) is not overwritten by a blank.
+  const initialValues = useRef<Record<string, FieldValueState>>({});
+{% endif %}
+{% if is_payment %}
+  const checkoutUrl = useRef<string | null>(null);
+  const [checkoutNotice, setCheckoutNotice] = useState<string | null>(null);
+{% endif %}
+
+  // React Native ships React 18, where a transition does not track an async
+  // callback, so the hook's isPending is not meaningful here: the in-flight
+  // flag wraps the transport call instead.
+  const save = async (formData: FormData) => {
+    setBusy(true);
+    try {
+{% if is_payment %}
+      const result = await upsert{{ pascal }}(formData);
+      // x-payment: the create response carries the hosted checkout URL.
+      checkoutUrl.current = result.ok && 'checkoutUrl' in result && isCheckoutUrl(result.checkoutUrl) ? result.checkoutUrl : null;
+      return result;
+{% else %}
+      return await upsert{{ pascal }}(formData);
+{% endif %}
+    } finally {
+      setBusy(false);
+    }
+  };
+  const { error, validationError, validate, submit } = useEntityForm({ translators: { terr, tmsg }, save });
+  const { canEdit } = useEntityCapabilities({ permissions, isEdit });
+
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const perms = await get{{ pascal }}Permissions(id);
+        setPermissions(perms);
+{% if can_edit %}
+        if (id) {
+          const record = await get{{ pascal }}Detail(id);
+          if (!record) {
+            setState('missing');
+            return;
+          }
+          setValues(Object.fromEntries(FIELDS.map((spec) => [spec.key, toFieldState(spec, record[spec.key])])));
+{% if custom_components.edit %}
+          setRecord(record);
+{% endif %}
+{% if custom_fields | selectattr('custom.upsert') | list %}
+          initialValues.current = Object.fromEntries(FIELDS.map((spec) => [spec.key, toFieldState(spec, record[spec.key])]));
+{% endif %}
+{% if attachment_fields %}
+          setAttachments(Object.fromEntries(
+            FIELDS.filter((spec) => spec.kind === 'attachment')
+              .map((spec) => [spec.key, (record[spec.relationName ?? spec.key] as AttachmentRow | null | undefined) ?? null]),
+          ));
+{% endif %}
+{% if attachments and attachments.can_edit %}
+          const embedded = ((record[{{ attachments.rel_name | tojson }}] as { {{ attachments.prop }}?: BridgeAttachment[] } | null)?.{{ attachments.prop }}) ?? [];
+          setSavedBridge(embedded);
+          setBridgeItems(embedded);
+{% endif %}
+        }
+{% endif %}
+        setState('ready');
+      } catch {
+        setState('missing');
+      }
+    };
+    void load();
+  }, [id{% if custom_components.edit %}, reloads{% endif %}]);
+
+  const allowed = isEdit ? canEdit : Boolean(permissions?.create);
+
+  const onSave = () => {
+    const typed: Record<string, unknown> = {};
+    for (const spec of FIELDS) {
+      const value = values[spec.key];
+      if (spec.kind === 'boolean') typed[spec.key] = value === true;
+      else if (spec.kind === 'number') typed[spec.key] = value === '' ? null : Number(value);
+      else typed[spec.key] = value;
+    }
+    if (!validate(() => validateForm(typed))) return;
+{% if row_fields %}
+    // A child row must carry its required fields; the server checks the rest, as for the Web grid.
+    const missing = FIELDS.filter((spec) => spec.kind === 'child_rows')
+      .map((spec) => ({ spec, found: firstMissingRowField(spec, values[spec.key] as ChildRowState[]) }))
+      .find((entry) => entry.found !== null);
+    if (missing?.found && !validate(() => `${missing.spec.label} ${missing.found!.row}: ${missing.found!.field.label} is required`)) return;
+{% endif %}
+    const formData = new FormData();
+    if (id) formData.append('id', id);
+    for (const spec of FIELDS) {
+      if (spec.readonly) continue;
+      const value = values[spec.key];
+{% if custom_fields | selectattr('custom.upsert') | list %}
+      // A field a custom component draws is sent only once the component has changed it.
+      if (CUSTOM_UPSERT[spec.key] && value === (spec.key in initialValues.current ? initialValues.current[spec.key] : toFieldState(spec, null))) continue;
+{% endif %}
+      // The rows of a child collection travel as one JSON entry.
+      if (spec.kind === 'child_rows') formData.append(spec.key, JSON.stringify(value));
+      // A many-to-many travels as one entry per selected id.
+      else if (Array.isArray(value)) (value as string[]).forEach((id) => formData.append(spec.key, id));
+      else formData.append(spec.key, String(value));
+    }
+    submit(formData, async (savedId) => {
+{% if attachments and attachments.can_edit %}
+      // The record is saved; its attachments go in a second request, one per type that changed. A refusal
+      // is shown on the section and the form stays (the record's own changes are already saved).
+      if (id) {
+        setBusy(true);
+        try {
+          for (const type of ATTACHMENT_TYPES) {
+            if (!attachmentsChanged(savedBridge, bridgeItems, type)) continue;
+            const result = await setBridgeAttachments('{{ name }}', id, type, bridgeItems.filter((item) => item.type === type).sort((a, b) => (a.order ?? 0) - (b.order ?? 0)));
+            if (!result.ok) {
+              setBridgeError(getEntityFormErrorMessage(result, { terr, tmsg }));
+              return;
+            }
+          }
+        } finally {
+          setBusy(false);
+        }
+      }
+{% endif %}
+      if (onCreated) {
+        onCreated(savedId);
+        return;
+      }
+{% if is_payment %}
+      const url = checkoutUrl.current;
+      checkoutUrl.current = null;
+      if (url) {
+        await openCheckout(url);
+{% if can_view or can_edit %}
+        // The buyer is back. A record whose checkout was cancelled or expired has been removed by the
+        // server; one that is kept is either paid or still waiting for the provider's confirmation.
+        const kept = await get{{ pascal }}Detail(savedId).catch(() => undefined);
+        if (kept === null) {
+          setCheckoutNotice(t('Payment.cancelMessage'));
+          return;
+        }
+{% endif %}
+{% if can_view %}
+        router.replace(`/entity/{{ name }}/${savedId}?payment=returned` as never);
+{% else %}
+        router.replace('/entity/{{ name }}' as never);
+{% endif %}
+        return;
+      }
+{% endif %}
+{% if can_view %}
+      router.replace(`/entity/{{ name }}/${savedId}` as never);
+{% else %}
+      router.replace('/entity/{{ name }}' as never);
+{% endif %}
+    });
+  };
+
+  if (state === 'loading') return <ActivityIndicator testID="form-loading" />;
+  if (state === 'missing') {
+    return (
+      <View style={styles.container} testID="form-missing">
+        <Text>{t('Errors.notFound')}</Text>
+        {onCancel ? <Pressable onPress={onCancel} testID="form-cancel"><Text>{t('Common.cancel')}</Text></Pressable> : null}
+      </View>
+    );
+  }
+  if (!allowed) {
+    return (
+      <View style={styles.container} testID="form-forbidden">
+        <Text>{t('Errors.permissionDenied')}</Text>
+        {onCancel ? <Pressable onPress={onCancel} testID="form-cancel"><Text>{t('Common.cancel')}</Text></Pressable> : null}
+      </View>
+    );
+  }
+
+  return (
+    <ScrollView style={styles.container} testID={isEdit ? 'form-edit-{{ name }}' : 'form-new-{{ name }}'}>
+      {FIELDS.map((spec) => {% if custom_fields | selectattr('custom.upsert') | list %}CUSTOM_UPSERT[spec.key] ? createElement(CUSTOM_UPSERT[spec.key], {
+        key: spec.key,
+        value: values[spec.key] as string | boolean,
+        onChange: (next: string | boolean) => setValues((current) => ({ ...current, [spec.key]: next })),
+        isEdit,
+      }) : {% endif %}(
+        <FieldInput
+          key={spec.key}
+          spec={spec}
+          value={values[spec.key]}
+          onChange={(next) => setValues((current) => ({ ...current, [spec.key]: next }))}
+          disabled={busy}
+          caller="{{ name }}"
+          formValues={id ? { ...values, id } : values}
+{% if create_fields %}
+          createForm={CREATE_FORMS[spec.key]}
+{% endif %}
+{% if attachment_fields %}
+          attachment={attachments[spec.key] ?? null}
+          onAttachmentChange={(row) => setAttachments((current) => ({ ...current, [spec.key]: row }))}
+{% endif %}
+        />
+      ))}
+{% if attachments and attachments.can_edit %}
+      {isEdit ? <AttachmentList types={ATTACHMENT_TYPES} items={bridgeItems} onChange={(next) => { setBridgeError(null); setBridgeItems(next); }} disabled={busy} error={bridgeError} /> : null}
+{% endif %}
+{% for comp in custom_components.edit %}
+      <{{ comp.name }} record={record} permissions={permissions} reload={() => setReloads((n) => n + 1)}{% for k, v in comp.props.items() %} {{ k }}={ {{ v | tojson }} }{% endfor %} />
+{% endfor %}
+      {validationError ? <Text style={styles.error} testID="form-validation-error">{validationError}</Text> : null}
+      {error ? <Text style={styles.error} testID="form-error">{error}</Text> : null}
+{% if is_payment %}
+      {checkoutNotice ? <Text style={styles.error} testID="form-checkout-notice">{checkoutNotice}</Text> : null}
+{% endif %}
+      <View style={styles.actions}>
+        <Pressable style={styles.primary} disabled={busy} onPress={onSave} testID="form-save">
+          <Text style={styles.primaryText}>{busy ? '...' : t('Common.save')}</Text>
+        </Pressable>
+        <Pressable
+          style={styles.secondary}
+          disabled={busy}
+          onPress={() => (onCancel ? onCancel() : router.canGoBack() ? router.back() : router.replace('/entity/{{ name }}' as never))}
+          testID="form-cancel"
+        >
+          <Text>{t('Common.cancel')}</Text>
+        </Pressable>
+      </View>
+    </ScrollView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, padding: 16 },
+  error: { color: '#b91c1c', marginVertical: 8 },
+  actions: { flexDirection: 'row', gap: 12, marginTop: 8, marginBottom: 24 },
+  primary: { backgroundColor: '#2563eb', borderRadius: 6, paddingHorizontal: 14, paddingVertical: 10 },
+  primaryText: { color: '#ffffff', fontWeight: '600' },
+  secondary: { borderWidth: 1, borderColor: '#d1d5db', borderRadius: 6, paddingHorizontal: 14, paddingVertical: 10 },
+});

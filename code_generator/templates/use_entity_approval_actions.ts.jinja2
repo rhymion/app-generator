@@ -1,0 +1,34 @@
+// Framework-neutral approval wiring for {{ parent }}.
+//
+// Binds this entity's submit-for-approval action and its on_withdrawn
+// declaration to the shared approval UI, and re-exports the pure predicates
+// that decide which approval buttons appear. No next/*, next-intl or UI
+// library imports: the transport behind `submit` is handed in by the caller.
+{% if submit_for_approval_needed %}
+import type { ActionFailure } from '@/lib/_errors';
+{% endif %}
+export { canSubmitForApproval, canWithdrawApproval, canActOnApprovalRequest } from '@/lib/approval_request/submit_predicate';
+
+// Whether this entity declares x-approval.on_withdrawn. The server-side
+// withdraw lockout rejects a withdrawal for any entity where this is false, so
+// the shared UI hides the button instead of leaving it to fail.
+export const HAS_ON_WITHDRAWN = {{ 'true' if has_on_withdrawn else 'false' }};
+
+{% if submit_for_approval_needed %}
+export type UseEntityApprovalActionsOptions = {
+  recordId: string;
+  // Submits the record for approval. On the Web this is the entity's Server Action.
+  submit: (id: string) => Promise<ActionFailure | void>;
+};
+
+export function useEntityApprovalActions({ recordId, submit }: UseEntityApprovalActionsOptions) {
+  return {
+    onSubmitForApproval: () => submit(recordId),
+    hasOnWithdrawn: HAS_ON_WITHDRAWN,
+  };
+}
+{% else %}
+export function useEntityApprovalActions() {
+  return { hasOnWithdrawn: HAS_ON_WITHDRAWN };
+}
+{% endif %}

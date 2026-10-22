@@ -1,0 +1,106 @@
+'use client';
+
+// x-create-inline: the "Create new" dialog of another entity's foreign-key field.
+// It shows this entity's own generated form with the options /{{ parent }}/new would
+// load (lib/{{ parent }}/inline_create.ts). The form saves through its normal
+// upsert{{ parent_pascal }} action, so nothing it enforces is bypassed; the dialog only
+// receives the new record's id.
+import { useEffect, useMemo, useState } from 'react';
+import { useTranslations } from 'next-intl';
+import { AppAlert, AppCircularProgress, AppDialog } from '@/components/ui';
+import { InlineCreateProvider } from '@/components/_standard/InlineCreate';
+import { get{{ parent_pascal }}InlineCreateInit } from '@/lib/{{ parent }}/inline_create';
+{% for target in selection_targets %}
+{% if target == 'organization' %}
+import { searchAssociatedOrganizationOptions } from '@/lib/organization/getters_associated';
+{% else %}
+import { search{{ target | pascal_case }}Options } from '@/lib/{{ target }}/getters';
+{% endif %}
+{% endfor %}
+{% for oto in selector_oto_rels %}
+{% if oto.target == 'organization' %}
+import { searchAssociatedOrganizationOptions } from '@/lib/organization/getters_associated';
+{% else %}
+import { search{{ oto.target | pascal_case }}Options } from '@/lib/{{ oto.target }}/getters';
+{% endif %}
+{% endfor %}
+import FormUpsert from './FormUpsert';
+
+type Init = Awaited<ReturnType<typeof get{{ parent_pascal }}InlineCreateInit>>;
+
+interface {{ parent_pascal }}InlineCreateDialogProps {
+  open: boolean;
+  onClose: () => void;
+  /** Called with the new record's id once it is saved. */
+  onCreated: (id: string) => void | Promise<void>;
+}
+
+export default function {{ parent_pascal }}InlineCreateDialog({ open, onClose, onCreated }: {{ parent_pascal }}InlineCreateDialogProps) {
+  const te = useTranslations('Errors');
+  const tc = useTranslations('Common');
+{% if required_relation_fields %}
+  const tf = useTranslations('Fields');
+{% endif %}
+  const [init, setInit] = useState<Init | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  // The options are read again on every opening, so the form always starts fresh.
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    setInit(null);
+    setFailed(false);
+    get{{ parent_pascal }}InlineCreateInit()
+      .then((result) => { if (!cancelled) setInit(result); })
+      .catch(() => { if (!cancelled) setFailed(true); });
+    return () => { cancelled = true; };
+  }, [open]);
+
+  const src = useMemo(() => ({
+    id: '',
+{{ parent_default_props }}
+{% for child in children_raw %}
+    {{ child.property_name }}: [],
+{% endfor %}
+  }), [open]);
+
+  const contextValue = useMemo(() => ({ onCreated, onCancel: onClose }), [onCreated, onClose]);
+
+{% if required_relation_fields %}
+  const blockedLabels = init ? init.blockedRelationFieldKeys.map((k) => tf(k)).join(', ') : '';
+{% endif %}
+  return (
+    <AppDialog open={open} onClose={onClose} maxWidth="md" title={tc('createNew')}>
+        {failed && <AppAlert severity="warning">{te('permissionDenied')}</AppAlert>}
+        {!failed && !init && <AppCircularProgress />}
+{% if required_relation_fields %}
+        {init && init.blockedRelationFieldKeys.length > 0 && (
+          <AppAlert severity="warning">
+            {te('fkPermissionDenied', { entity: blockedLabels })} {te('fkPermissionDeniedHint', { entity: blockedLabels })}
+          </AppAlert>
+        )}
+        {init && init.blockedRelationFieldKeys.length === 0 && (
+{% else %}
+        {init && (
+{% endif %}
+          <InlineCreateProvider value={contextValue}>
+            <FormUpsert
+              src={src}
+              isEdit={false}
+              permissions={init.permissions}
+{% for target in selection_targets %}
+              initial{{ target | pascal_case }}s={init.initial{{ target | pascal_case }}s}
+              initial{{ target | pascal_case }}sPermissionDenied={init.initial{{ target | pascal_case }}sPermissionDenied}
+              search{{ target | pascal_case }}Options={ {% if target == 'organization' %}searchAssociatedOrganizationOptions{% else %}search{{ target | pascal_case }}Options{% endif %} }
+{% endfor %}
+{% for oto in selector_oto_rels %}
+              initial{{ oto.target | pascal_case }}s={init.initial{{ oto.target | pascal_case }}s}
+              initial{{ oto.target | pascal_case }}sPermissionDenied={init.initial{{ oto.target | pascal_case }}sPermissionDenied}
+              search{{ oto.target | pascal_case }}Options={ {% if oto.target == 'organization' %}searchAssociatedOrganizationOptions{% else %}search{{ oto.target | pascal_case }}Options{% endif %} }
+{% endfor %}
+            />
+          </InlineCreateProvider>
+        )}
+    </AppDialog>
+  );
+}

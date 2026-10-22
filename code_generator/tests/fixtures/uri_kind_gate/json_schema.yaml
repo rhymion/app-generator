@@ -33,7 +33,7 @@ definitions:
       invalidate: false
       api: false
       test: false
-    fields:
+    properties:
       name: {}
       email: {}
 
@@ -46,7 +46,7 @@ definitions:
   # "own pages, shown embedded" path decimal_gate_item/decimal_gate_wrapper
   # use for the relation-embed getters.ts coverage.
   uri_kind_gate_item:
-    fields:
+    properties:
       name: {}
       link_field:
         format: uri
@@ -83,16 +83,15 @@ definitions:
             width: 150
         - link_field:
             width: 200
-    fields:
+    properties:
       name: {}
       link_field:
         format: uri
         x-uri-kind: link
-    required:
-      - lines
-    properties:
       lines:
         type: array
         x-outputType: list
         items:
           $ref: "#/definitions/uri_kind_gate_item"
+    required:
+      - lines

@@ -138,6 +138,7 @@ def test_spec_and_mobile_spec_call_reset_task_in_before_each():
     helper_ctx = helper_context("checkup", [], schema, "checkup", "checkup_detail", _entity("checkup")["generate_config"])
     spec_ctx = spec_context("checkup", [], schema, "checkup", "checkup_detail", _entity("checkup")["generate_config"])
     spec_ctx["primary_fk_dep"] = helper_ctx["primary_fk_dep"]
+    spec_ctx["uses_call_seq"] = helper_ctx["uses_call_seq"]
 
     env = _make_env()
     desktop = env.get_template("test_spec.cy.ts.jinja2").render(**spec_ctx)
@@ -167,6 +168,7 @@ def test_registry_emits_reset_task_matching_helper_export():
             "children": [],
             "definition_key": "checkup_detail",
             "primary_fk_dep": helper_ctx["primary_fk_dep"],
+            "uses_call_seq": helper_ctx["uses_call_seq"],
         }],
         schema,
     )
@@ -190,6 +192,7 @@ def test_entity_without_extra_required_fk_gets_no_reset_plumbing():
 
     spec_ctx = spec_context("clinic", [], schema, "clinic", "clinic_detail", entity_cfg)
     spec_ctx["primary_fk_dep"] = helper_ctx["primary_fk_dep"]
+    spec_ctx["uses_call_seq"] = helper_ctx["uses_call_seq"]
     spec_out = env.get_template("test_spec.cy.ts.jinja2").render(**spec_ctx)
     assert "db:resetClinicCallSeq" not in spec_out
 
@@ -200,6 +203,7 @@ def test_entity_without_extra_required_fk_gets_no_reset_plumbing():
             "children": [],
             "definition_key": "clinic_detail",
             "primary_fk_dep": helper_ctx["primary_fk_dep"],
+            "uses_call_seq": helper_ctx["uses_call_seq"],
         }],
         schema,
     )
@@ -208,6 +212,7 @@ def test_entity_without_extra_required_fk_gets_no_reset_plumbing():
 
     api_ctx = api_spec_context("clinic", [], schema, "clinic", "clinic_detail", {**entity_cfg, "api": True})
     api_ctx["primary_fk_dep"] = helper_ctx["primary_fk_dep"]
+    api_ctx["uses_call_seq"] = helper_ctx["uses_call_seq"]
     api_out = env.get_template("test_api_spec.cy.ts.jinja2").render(**api_ctx)
     assert "db:resetClinicCallSeq" not in api_out
 
@@ -228,6 +233,7 @@ def test_api_spec_calls_reset_task_in_before_each():
     helper_ctx = helper_context("checkup", [], schema, "checkup", "checkup_detail", entity_cfg)
     api_ctx = api_spec_context("checkup", [], schema, "checkup", "checkup_detail", entity_cfg)
     api_ctx["primary_fk_dep"] = helper_ctx["primary_fk_dep"]
+    api_ctx["uses_call_seq"] = helper_ctx["uses_call_seq"]
 
     out = _make_env().get_template("test_api_spec.cy.ts.jinja2").render(**api_ctx)
 
@@ -242,3 +248,93 @@ def test_api_spec_calls_reset_task_in_before_each():
         "api spec must reset the callIndex counter before db:reset, "
         "so a fresh DB and a fresh counter start together"
     )
+
+
+def _schema_with_nested_fk_primary() -> dict:
+    """run_status -> snapshot -> plan. The primary FK's label is built from the
+    nested FK's own field (`plan.name`), so the helper creates a fresh `plan`
+    row per iteration, while `snapshot` has no extra required scalar beyond its
+    FK: primary_fk_dep.extra_required_fields is empty and nested_fk_deps is not.
+    """
+    return {
+        "definitions": {
+            "plan": {
+                "type": "object",
+                "required": ["id", "name"],
+                "properties": {"id": {"type": "string"}, "name": {"type": "string"}},
+            },
+            "snapshot": {
+                "type": "object",
+                "required": ["id", "plan_id"],
+                "properties": {
+                    "id": {"type": "string"},
+                    "plan_id": {
+                        "type": "string",
+                        "x-relationship": {"type": "many-to-one", "target": "plan", "labelField": "name"},
+                    },
+                },
+                "x-display": {"table": [{"plan": {"primary": True}}]},
+            },
+            "run_status": {
+                "type": "object",
+                "required": ["id", "snapshot_id"],
+                "properties": {
+                    "id": {"type": "string"},
+                    "snapshot_id": {
+                        "type": "string",
+                        "x-relationship": {"type": "many-to-one", "target": "snapshot", "labelField": "plan.name"},
+                    },
+                },
+                "x-display": {"table": [{"snapshot": {"primary": True}}]},
+            },
+            "run_status_detail": {"allOf": [{"$ref": "#/definitions/run_status"}]},
+        },
+    }
+
+
+def test_nested_fk_primary_resets_the_counter_the_helper_increments():
+    schema = _schema_with_nested_fk_primary()
+    cfg = _entity("run_status")["generate_config"]
+    helper_ctx = helper_context("run_status", [], schema, "run_status", "run_status_detail", cfg)
+    pfk = helper_ctx["primary_fk_dep"]
+    assert pfk is not None and not pfk["is_user_account"]
+    assert not pfk["extra_required_fields"], "fixture must isolate the nested-FK trigger"
+    assert pfk["nested_fk_deps"], "fixture must produce a nested FK dep on the primary FK"
+    assert helper_ctx["uses_call_seq"] is True
+
+    env = _make_env()
+    helper_out = env.get_template("test_helper.ts.jinja2").render(**helper_ctx)
+    assert "let _RunStatusCallSeq = 0;" in helper_out
+    assert "const callIndex = _RunStatusCallSeq++;" in helper_out
+
+    spec_ctx = spec_context("run_status", [], schema, "run_status", "run_status_detail", cfg)
+    spec_ctx["primary_fk_dep"] = pfk
+    spec_ctx["uses_call_seq"] = helper_ctx["uses_call_seq"]
+    for label, template in [("desktop", "test_spec.cy.ts.jinja2"), ("mobile", "test_spec_mobile.cy.ts.jinja2")]:
+        out = env.get_template(template).render(**spec_ctx)
+        _, _, rest = out.partition("beforeEach(() => {")
+        body, _, _ = rest.partition("});")
+        assert "cy.task('db:resetRunStatusCallSeq');" in body, (
+            f"{label} spec must reset the counter the helper increments"
+        )
+
+    registry_ctx = tasks_registry_context(
+        [{
+            "parent": "run_status",
+            "model_name": "run_status",
+            "children": [],
+            "definition_key": "run_status_detail",
+            "primary_fk_dep": pfk,
+            "uses_call_seq": helper_ctx["uses_call_seq"],
+        }],
+        schema,
+    )
+    registry_out = env.get_template("test_tasks_registry.ts.jinja2").render(**registry_ctx)
+    assert "'db:resetRunStatusCallSeq'() {" in registry_out
+
+
+def test_helper_counter_and_spec_reset_never_disagree_in_the_dependency_free_case():
+    schema = _schema_without_extra_required_fk()
+    cfg = _entity("clinic")["generate_config"]
+    helper_ctx = helper_context("clinic", [], schema, "clinic", "clinic_detail", cfg)
+    assert helper_ctx["uses_call_seq"] is False

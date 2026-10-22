@@ -12,7 +12,7 @@ definitions:
       invalidate: false
       api: false
       test: false
-    fields:
+    properties:
       name: {}
       email: {}
 
@@ -32,7 +32,11 @@ definitions:
         handler: invalidateWidget
       api: true
       test: false
-    fields:
+    x-display:
+      table:
+        - name:
+            primary: true
+    properties:
       name: {}
 
   # Negative control: no invalidate config at all -- must NOT gain the
@@ -47,7 +51,11 @@ definitions:
       invalidate: false
       api: true
       test: false
-    fields:
+    x-display:
+      table:
+        - name:
+            primary: true
+    properties:
       name: {}
 
   # cmd_583: invalidate enabled via bare bool shorthand (no handler/module) --
@@ -67,7 +75,11 @@ definitions:
       invalidate: true
       api: true
       test: false
-    fields:
+    x-display:
+      table:
+        - name:
+            primary: true
+    properties:
       name: {}
 
   # cmd_587: same no-handler/module shorthand as sprocket, but this Prisma
@@ -84,5 +96,9 @@ definitions:
       invalidate: true
       api: true
       test: false
-    fields:
+    x-display:
+      table:
+        - name:
+            primary: true
+    properties:
       name: {}

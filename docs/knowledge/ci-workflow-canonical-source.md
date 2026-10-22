@@ -41,20 +41,16 @@ header comment pointing back to this file, and updates are distributed
 by copying the changed content into each consumer, same as any
 copy-distributed (not reference-form) file.
 
-## Distribution status (2026-08-16)
+## Concurrency
 
-The `concurrency:` block (group by `${{ github.workflow }}-${{
-github.ref }}`, `cancel-in-progress: true`) was added here and
-distributed to app-template (public). Verified on app-template: a
-push that supersedes an already-running `pull_request` run for the
-same PR now gets that prior run auto-cancelled by GitHub within
-seconds, instead of running to completion uncancelled.
-
-inventory-app and insurance-app (both private) have **not** been
-updated with this copy yet — left as a follow-up so as not to trigger
-additional Actions runs against those repos' limited/newly-enabled
-allotments as a side effect of a documentation task. The change itself
-is a two-line addition; copying it in is mechanical once picked up.
+The `concurrency:` block in the canonical `ci.yml` is identical to the one in
+this repo's own `.github/workflows/ci.yml`. `pull_request` runs share one group
+per head branch and a newer push cancels the superseded run. `push` runs use a
+per-commit group and are never cancelled, so every commit that lands on an
+integration branch gets a completed run (Issue #882, Issue #605). A consumer's
+`Verify ci.yml` job compares its copy against the canonical file at the
+submodule commit it pins, so a consumer's copy must be updated in the same
+change as the pointer bump past a canonical edit.
 
 ## Docs-only E2E skip
 
@@ -296,6 +292,14 @@ hole for that one file — not proven impossible, just not observed
 today.
 
 ## Docs-only E2E skip — app-generator's own CI
+
+**Concurrency of this repo's own workflow.** `pull_request` runs share one
+group per head branch and a newer push cancels the superseded run. `push`
+runs (integration branches only) use a per-commit group and are never
+cancelled, so every commit that lands gets a completed run. Reason: the
+docs-only check diffs against `github.event.before`, so a docs-only push that
+cancelled the in-progress run of the preceding code push also skipped E2E for
+itself, and the code commit never got a completed E2E run (Issue #882).
 
 Separate from the consumer-side gate documented above: this repo's own
 `.github/workflows/ci.yml` gained the same `concurrency` +

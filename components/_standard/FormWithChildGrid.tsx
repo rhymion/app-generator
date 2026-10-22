@@ -10,6 +10,7 @@ import DialogContent from '@mui/material/DialogContent';
 import DialogContentText from '@mui/material/DialogContentText';
 import DialogActions from '@mui/material/DialogActions';
 import SaveIcon from '@mui/icons-material/Save';
+import SaveAsIcon from '@mui/icons-material/SaveAs';
 import DeleteIcon from '@mui/icons-material/Delete';
 import BlockIcon from '@mui/icons-material/Block';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
@@ -25,7 +26,11 @@ interface FormWithChildGridProps {
   onBack: () => void;
   deleteEntityLabel?: string;
   submitButtonLabel?: string;
+  /** When set, a second submit button (value "continue") is shown beside Save. The form's onSubmit tells the two apart through the submitter. */
+  continueButtonLabel?: string;
   error?: string | null;
+  /** The form is shown in the "Create new" dialog of a foreign-key field (x-create-inline): the back control is a plain cancel, with no "return to the list" confirmation. */
+  inDialog?: boolean;
 }
 
 export default function FormWithChildGrid({
@@ -38,7 +43,9 @@ export default function FormWithChildGrid({
   onBack,
   deleteEntityLabel = 'Item',
   submitButtonLabel = 'Save',
+  continueButtonLabel,
   error,
+  inDialog = false,
 }: FormWithChildGridProps) {
   const [openDeleteEntityDialog, setOpenDeleteEntityDialog] = useState(false);
   const [openInvalidateDialog, setOpenInvalidateDialog] = useState(false);
@@ -68,8 +75,8 @@ export default function FormWithChildGrid({
     <div>
       <div className="flex justify-between items-center mb-4">
         <h1>{title}</h1>
-        <Tooltip title="Back to List">
-          <IconButton onClick={() => setOpenBackDialog(true)} aria-label="Back to List">
+        <Tooltip title={inDialog ? tc('cancel') : 'Back to List'}>
+          <IconButton onClick={() => (inDialog ? onBack() : setOpenBackDialog(true))} aria-label={inDialog ? tc('cancel') : 'Back to List'}>
             <ArrowBackIcon />
           </IconButton>
         </Tooltip>
@@ -86,6 +93,13 @@ export default function FormWithChildGrid({
             <SaveIcon />
           </IconButton>
         </Tooltip>
+        {continueButtonLabel && (
+          <Tooltip title={continueButtonLabel}>
+            <IconButton type="submit" name="intent" value="continue" color="primary" aria-label={continueButtonLabel} sx={{ mt: 2, mr: 2 }}>
+              <SaveAsIcon />
+            </IconButton>
+          </Tooltip>
+        )}
         {isEdit && onDelete && (
           <Tooltip title={`Delete ${deleteEntityLabel}`}>
             <IconButton

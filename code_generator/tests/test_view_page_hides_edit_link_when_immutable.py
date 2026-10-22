@@ -79,14 +79,30 @@ def _render_form_view(can_update: bool) -> str:
     return env.get_template('form_view.tsx.jinja2').render(**fv_ctx)
 
 
+def _render_capabilities(can_update: bool) -> str:
+    schema = _schema(can_update)
+    ctx = build_context(_entity(can_update), schema)
+    env = Environment(
+        loader=FileSystemLoader(TEMPLATES_DIR),
+        trim_blocks=True,
+        lstrip_blocks=True,
+    )
+    return env.get_template('use_entity_capabilities.ts.jinja2').render(**ctx, can_continue=False)
+
+
 def test_immutable_entity_view_page_hardcodes_no_edit():
     """edit:false entity: canEdit must be a hardcoded `false`, never
     derived from permissions -- an orphaned edit screen that still calls
     this FormView.tsx's editHref can no longer be reached, no matter what
     permissions.update evaluates to at runtime."""
-    rendered = _render_form_view(can_update=False)
+    # FormView takes canEdit from the shared capabilities module; the
+    # module is where the hardcoded `false` lives for an edit: false entity.
+    view = _render_form_view(can_update=False)
+    assert 'permissions?.update' not in view
+    assert 'useEntityCapabilities({})' in view
+    rendered = _render_capabilities(can_update=False)
 
-    assert 'const canEdit = false;' in rendered, (
+    assert 'canEdit: false,' in rendered, (
         f'Expected the create-only view page to hardcode canEdit = false. '
         f'Got the canEdit line(s): '
         f'{[l for l in rendered.splitlines() if "canEdit" in l]}'
@@ -105,7 +121,9 @@ def test_editable_entity_view_page_unaffected():
     unchanged from the pre-fix template (golden-diff against HEAD's
     form_view.tsx.jinja2, verified out-of-band; this test pins the
     invariant going forward: canEdit still derives from permissions)."""
-    rendered = _render_form_view(can_update=True)
+    view = _render_form_view(can_update=True)
+    assert 'useEntityCapabilities({ permissions })' in view
+    rendered = _render_capabilities(can_update=True)
 
-    assert 'const canEdit = permissions?.update ?? true;' in rendered
-    assert 'const canEdit = false;' not in rendered
+    assert 'canEdit: permissions?.update ?? true,' in rendered
+    assert 'canEdit: false,' not in rendered

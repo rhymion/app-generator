@@ -1,0 +1,378 @@
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { router } from 'expo-router';
+import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useMessages } from '@/lib/messages';
+import type { PageOpts, SortItem } from '@/lib/entity-http';
+import { toListFieldSpec } from '@/lib/label-spec';
+import {
+  countActiveFilters,
+  cycleSort,
+  filterChoices,
+  setFilterValue,
+  sortArrow,
+  toListQuery,
+  type ListQuerySpec,
+} from '@/lib/_list_query';
+{% if can_delete or custom_components.list %}
+import type { ModelPermissions } from '@/lib/authz';
+{% endif %}
+{% if can_delete %}
+import type { ActionFailure } from '@/lib/_errors';
+import { useEntityCapabilities } from '@/lib/{{ name }}/use_entity_capabilities';
+{% endif %}
+{% for comp in custom_components.list | map(attribute='name') | unique %}
+import {{ comp }} from '@/components/{{ name }}/custom/{{ comp }}';
+{% endfor %}
+import {
+  fetch{{ pascal }}Page,
+  get{{ pascal }}Permissions,
+{% if can_delete %}
+  bulkRemove{{ pascal }},
+{% endif %}
+  {{ const_name }}_QUERY_FIELDS,
+  {{ const_name }}_FILTER_KEYS,
+  {{ const_name }}_SEARCH_KEYS,
+  {{ const_name }}_SORT_KEYS,
+  {{ const_name }}_LIST_KEYS,
+  type {{ pascal }},
+} from '@/lib/{{ name }}/mobile_client';
+{% if can_delete and has_form_hook %}
+import { getEntityFormErrorMessage } from '@/lib/{{ name }}/use_entity_form';
+{% endif %}
+import { toDisplayText } from '@/components/native/FieldInput';
+
+const PAGE_SIZE = 20;
+
+// What the panel offers; the sort, filter and search logic is lib/_list_query.ts, shared with the Web list.
+const LIST_QUERY_SPEC: ListQuerySpec = {
+  fields: {{ const_name }}_QUERY_FIELDS.map(toListFieldSpec),
+  sortKeys: {{ const_name }}_SORT_KEYS,
+  filterKeys: {{ const_name }}_FILTER_KEYS,
+  searchKeys: {{ const_name }}_SEARCH_KEYS,
+};
+
+export function {{ pascal }}List() {
+  const { t, terr{% if can_delete and has_form_hook %}, tmsg{% endif %} } = useMessages();
+  const [rows, setRows] = useState<{{ pascal }}[]>([]);
+  const [total, setTotal] = useState(0);
+  // The REST list is zero-based: page 0 is the first page.
+  const [page, setPage] = useState(0);
+  const [canCreate, setCanCreate] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [failed, setFailed] = useState(false);
+  const [search, setSearch] = useState('');
+  const [sort, setSort] = useState<SortItem[]>([]);
+  const [filters, setFilters] = useState<Record<string, string>>({});
+  const [panel, setPanel] = useState<'sort' | 'filter' | null>(null);
+  const latest = useRef(0);
+{% if can_delete or custom_components.list %}
+  const [permissions, setPermissions] = useState<ModelPermissions | undefined>(undefined);
+{% endif %}
+{% if can_delete %}
+  const [selected, setSelected] = useState<string[] | null>(null);
+  const [confirming, setConfirming] = useState(false);
+  const [bulkError, setBulkError] = useState<string | null>(null);
+{% endif %}
+
+  // The search box matches the `x-trigram-filter` columns, through the `search` parameter.
+  const queryOf = useCallback((): Pick<PageOpts, 'sort' | 'filter' | 'search'> => toListQuery({ search, sort, filters }, LIST_QUERY_SPEC), [filters, search, sort]);
+
+  const load = useCallback(async (target: number) => {
+    // A slower, older response must not replace a newer one.
+    const ticket = ++latest.current;
+    setLoading(true);
+    try {
+      const result = await fetch{{ pascal }}Page({ page: target, pageSize: PAGE_SIZE, ...queryOf() });
+      if (ticket !== latest.current) return;
+      setRows(result.rows);
+      setTotal(result.total);
+      setPage(target);
+      setFailed(false);
+    } catch {
+      if (ticket === latest.current) setFailed(true);
+    } finally {
+      if (ticket === latest.current) setLoading(false);
+    }
+  }, [queryOf]);
+
+  // Any change of sort, filter or search restarts from the first page; typing is debounced.
+  useEffect(() => {
+    const timer = setTimeout(() => void load(0), 250);
+    return () => clearTimeout(timer);
+  }, [load]);
+
+  useEffect(() => {
+    get{{ pascal }}Permissions()
+      .then((permissions) => {
+        setCanCreate(permissions.create);
+{% if can_delete or custom_components.list %}
+        setPermissions(permissions);
+{% endif %}
+      })
+      .catch(() => {
+        setCanCreate(false);
+{% if can_delete %}
+{% endif %}
+      });
+  }, []);
+
+  // The native list sorts by one column at a time; the Web list lets the sort span several.
+  const cycleSortKey = (key: string) => setSort((prev) => cycleSort(prev, key, false));
+  const setFilter = (key: string, value: string) => setFilters((prev) => setFilterValue(prev, key, value));
+  const activeFilters = countActiveFilters(filters);
+{% if can_delete %}
+
+  // Show / hide decisions come from the shared capabilities module; the server checks each record.
+  const capabilities = useEntityCapabilities({ permissions });
+  const canDelete = permissions !== undefined && capabilities.canDelete;
+  const toggleSelected = (id: string) =>
+    setSelected((prev) => (prev === null ? prev : prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  const leaveSelection = () => {
+    setSelected(null);
+    setConfirming(false);
+    setBulkError(null);
+  };
+  const failureText = (failure: ActionFailure) =>
+{% if has_form_hook %}
+    getEntityFormErrorMessage(failure, { terr, tmsg });
+{% else %}
+    terr(failure.errorCode === 'PERMISSION_DENIED' ? 'permissionDenied' : failure.errorCode === 'NOT_FOUND' ? 'notFound' : 'unknown');
+{% endif %}
+  const confirmBulkDelete = async () => {
+    const ids = selected ?? [];
+    const result = await bulkRemove{{ pascal }}(ids);
+    setConfirming(false);
+    if (!result.ok) {
+      setBulkError(failureText(result));
+      return;
+    }
+    // Refused records stay selected, with the message the single delete would show for each.
+    setSelected(result.failed.length > 0 ? result.failed.map((item) => item.id) : null);
+    setBulkError(result.failed.length > 0 ? Array.from(new Set(result.failed.map((item) => failureText(item.failure)))).join(' ') : null);
+    // The page may have emptied: step back one.
+    await load(result.deleted.length >= rows.length && page > 0 ? page - 1 : page);
+  };
+{% endif %}
+
+  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const keys = {{ const_name }}_LIST_KEYS;
+  const open = (id: string) => {
+{% if can_view %}
+    router.push(`/entity/{{ name }}/${id}` as never);
+{% elif can_edit %}
+    router.push(`/entity/{{ name }}/${id}/edit` as never);
+{% endif %}
+  };
+  const fieldOf = (key: string) => {{ const_name }}_QUERY_FIELDS.find((f) => f.key === key);
+
+  return (
+    <View style={styles.container} testID="list-{{ name }}">
+      <View style={styles.titleRow}>
+        <Text style={styles.title} testID="list-title">
+          {{ title }}
+        </Text>
+{% if can_new %}
+        {canCreate ? (
+          <Pressable style={styles.primary} onPress={() => router.push('/entity/{{ name }}/new' as never)} testID="list-new">
+            <Text style={styles.primaryText}>{t('Common.createNew')}</Text>
+          </Pressable>
+        ) : null}
+{% endif %}
+      </View>
+{% if search_keys %}
+      <TextInput
+        style={styles.search}
+        value={search}
+        onChangeText={setSearch}
+        placeholder={t('Common.search')}
+        autoCapitalize="none"
+        testID="list-search"
+      />
+{% endif %}
+      <View style={styles.toolbar}>
+        { {{ const_name }}_SORT_KEYS.length > 0 ? (
+          <Pressable style={styles.tool} onPress={() => setPanel(panel === 'sort' ? null : 'sort')} testID="list-sort-toggle">
+            <Text style={styles.toolText}>{sort.length > 0 ? `${t('Common.sort')}: ${fieldOf(sort[0].field)?.label ?? sort[0].field} ${sortArrow(sort[0].dir)}` : t('Common.sort')}</Text>
+          </Pressable>
+        ) : null}
+        { {{ const_name }}_FILTER_KEYS.length > 0 ? (
+          <Pressable style={styles.tool} onPress={() => setPanel(panel === 'filter' ? null : 'filter')} testID="list-filter-toggle">
+            <Text style={styles.toolText}>{activeFilters > 0 ? `${t('Common.filter')} (${activeFilters})` : t('Common.filter')}</Text>
+          </Pressable>
+        ) : null}
+{% for comp in custom_components.list %}
+        <{{ comp.name }} permissions={permissions} reload={() => void load(page)}{% for k, v in comp.props.items() %} {{ k }}={ {{ v | tojson }} }{% endfor %} />
+{% endfor %}
+      </View>
+      {panel === 'sort' ? (
+        <View style={styles.panel} testID="list-sort-panel">
+          { {{ const_name }}_SORT_KEYS.map((key) => {
+            const current = sort.find((item) => item.field === key);
+            return (
+              <Pressable key={key} style={styles.panelRow} onPress={() => cycleSortKey(key)} testID={`list-sort-${key}`}>
+                <Text style={current ? styles.panelActive : styles.panelText}>
+                  {`${fieldOf(key)?.label ?? key}${current ? ` ${sortArrow(current.dir)}` : ''}`}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      ) : null}
+      {panel === 'filter' ? (
+        <View style={styles.panel} testID="list-filter-panel">
+          { {{ const_name }}_FILTER_KEYS.map((key) => {
+            const spec = fieldOf(key);
+            if (!spec) return null;
+            const choices = filterChoices(toListFieldSpec(spec), (value) => toDisplayText(spec, value, t));
+            return (
+              <View key={key} style={styles.filterField}>
+                <Text style={styles.panelText}>{spec.label}</Text>
+                {choices ? (
+                  <View style={styles.chips}>
+                    {choices.map((choice) => {
+                      const on = filters[key] === choice.value;
+                      return (
+                        <Pressable
+                          key={choice.value}
+                          style={[styles.chip, on ? styles.chipOn : null]}
+                          onPress={() => setFilter(key, on ? '' : choice.value)}
+                          testID={`list-filter-${key}-${choice.value}`}
+                        >
+                          <Text style={on ? styles.chipTextOn : styles.panelText}>{choice.label}</Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                ) : (
+                  <TextInput
+                    style={styles.search}
+                    value={filters[key] ?? ''}
+                    onChangeText={(value) => setFilter(key, value)}
+                    keyboardType={spec.kind === 'number' ? 'number-pad' : spec.kind === 'decimal' ? 'decimal-pad' : 'default'}
+                    autoCapitalize="none"
+                    testID={`list-filter-${key}`}
+                  />
+                )}
+              </View>
+            );
+          })}
+          <Pressable onPress={() => setFilters({})} testID="list-filter-clear">
+            <Text style={styles.pagerText}>{t('Common.clear')}</Text>
+          </Pressable>
+        </View>
+      ) : null}
+{% if can_delete %}
+      {selected !== null ? (
+        <View style={styles.selectionBar} testID="list-selection-bar">
+          <Text testID="list-selected-count">{t('Common.selectedCount', { count: selected.length })}</Text>
+          <View style={styles.toolbar}>
+            <Pressable
+              disabled={selected.length === 0}
+              style={selected.length === 0 ? styles.dangerDisabled : styles.danger}
+              onPress={() => setConfirming(true)}
+              testID="list-bulk-delete"
+            >
+              <Text style={styles.primaryText}>{t('Common.delete')}</Text>
+            </Pressable>
+            <Pressable style={styles.tool} onPress={leaveSelection} testID="list-select-cancel">
+              <Text style={styles.toolText}>{t('Common.cancel')}</Text>
+            </Pressable>
+          </View>
+        </View>
+      ) : null}
+      {confirming ? (
+        <View style={styles.confirm} testID="list-bulk-confirm">
+          <Text>{t('Common.deleteMessage', { entity: {{ title | tojson }} })}</Text>
+          <View style={styles.toolbar}>
+            <Pressable style={styles.danger} onPress={confirmBulkDelete} testID="list-bulk-confirm-yes">
+              <Text style={styles.primaryText}>{t('Common.delete')}</Text>
+            </Pressable>
+            <Pressable style={styles.tool} onPress={() => setConfirming(false)} testID="list-bulk-confirm-no">
+              <Text style={styles.toolText}>{t('Common.cancel')}</Text>
+            </Pressable>
+          </View>
+        </View>
+      ) : null}
+      {bulkError ? <Text style={styles.error} testID="list-bulk-error">{bulkError}</Text> : null}
+{% endif %}
+      {loading && rows.length === 0 ? <ActivityIndicator testID="list-loading" /> : null}
+      {failed ? <Text style={styles.error} testID="list-error">{t('Errors.unknown')}</Text> : null}
+      <FlatList
+        data={rows}
+        keyExtractor={(row) => row.id}
+        renderItem={({ item }) => (
+          <Pressable
+            style={styles.row}
+{% if can_delete %}
+            onLongPress={canDelete && selected === null ? () => setSelected([item.id]) : undefined}
+            onPress={selected !== null ? () => toggleSelected(item.id) : () => open(item.id)}
+{% else %}
+            onPress={() => open(item.id)}
+{% endif %}
+            testID={`list-row-${item.id}`}
+          >
+{% if can_delete %}
+            {selected !== null ? (
+              <Text testID={`list-select-${item.id}`} accessibilityState={ { checked: selected.includes(item.id) } }>
+                {selected.includes(item.id) ? '\u2611' : '\u2610'}
+              </Text>
+            ) : null}
+{% endif %}
+            {keys.map((key, index) => {
+              const spec = fieldOf(key);
+              const text = spec ? toDisplayText(spec, item[key], t) : String(item[key] ?? '-');
+              return (
+                <Text key={key} style={index === 0 ? styles.rowTitle : styles.rowDetail} testID={`list-cell-${item.id}-${key}`}>
+                  {index === 0 ? text : `${spec?.label ?? key}: ${text}`}
+                </Text>
+              );
+            })}
+          </Pressable>
+        )}
+        ListEmptyComponent={!loading && !failed ? <Text style={styles.empty} testID="list-empty">-</Text> : undefined}
+      />
+      <View style={styles.pager}>
+        <Pressable disabled={page <= 0} onPress={() => load(page - 1)} testID="list-prev">
+          <Text style={page <= 0 ? styles.pagerDisabled : styles.pagerText}>{t('Common.previousPage')}</Text>
+        </Pressable>
+        <Text testID="list-page">{`${page + 1} / ${pageCount}`}</Text>
+        <Pressable disabled={page + 1 >= pageCount} onPress={() => load(page + 1)} testID="list-next">
+          <Text style={page + 1 >= pageCount ? styles.pagerDisabled : styles.pagerText}>{t('Common.nextPage')}</Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, padding: 16 },
+  titleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
+  title: { fontSize: 20, fontWeight: '600' },
+  primary: { backgroundColor: '#2563eb', borderRadius: 6, paddingHorizontal: 12, paddingVertical: 8 },
+  primaryText: { color: '#ffffff', fontWeight: '600' },
+  row: { paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#e5e7eb', gap: 2 },
+  rowTitle: { fontSize: 16, fontWeight: '500' },
+  rowDetail: { fontSize: 13, color: '#6b7280' },
+  empty: { textAlign: 'center', color: '#9ca3af', marginTop: 24 },
+  error: { color: '#b91c1c', marginBottom: 8 },
+  pager: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingTop: 12 },
+  pagerText: { color: '#2563eb' },
+  pagerDisabled: { color: '#9ca3af' },
+  search: { borderWidth: 1, borderColor: '#d1d5db', borderRadius: 6, paddingHorizontal: 10, paddingVertical: 8, fontSize: 15, marginBottom: 8 },
+  toolbar: { flexDirection: 'row', gap: 8, marginBottom: 8, alignItems: 'center' },
+  tool: { borderWidth: 1, borderColor: '#d1d5db', borderRadius: 6, paddingHorizontal: 10, paddingVertical: 6 },
+  toolText: { color: '#374151' },
+  panel: { borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 6, padding: 8, marginBottom: 8, gap: 6 },
+  panelRow: { paddingVertical: 6 },
+  panelText: { color: '#374151' },
+  panelActive: { color: '#2563eb', fontWeight: '600' },
+  filterField: { gap: 4 },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  chip: { borderWidth: 1, borderColor: '#d1d5db', borderRadius: 16, paddingHorizontal: 12, paddingVertical: 6 },
+  chipOn: { backgroundColor: '#2563eb', borderColor: '#2563eb' },
+  chipTextOn: { color: '#ffffff' },
+  selectionBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
+  danger: { backgroundColor: '#dc2626', borderRadius: 6, paddingHorizontal: 12, paddingVertical: 8 },
+  dangerDisabled: { backgroundColor: '#fca5a5', borderRadius: 6, paddingHorizontal: 12, paddingVertical: 8 },
+  confirm: { marginBottom: 8, gap: 12, padding: 12, borderWidth: 1, borderColor: '#fecaca', borderRadius: 6 },
+});

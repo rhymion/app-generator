@@ -1,0 +1,52 @@
+import { useEffect, useState } from 'react';
+import { Redirect, Slot } from 'expo-router';
+import { ActivityIndicator, StyleSheet, View } from 'react-native';
+import { FooterBar } from '@/components/FooterBar';
+import { Header } from '@/components/Header';
+import { NavProvider } from '@/lib/nav-context';
+import { getRefreshToken } from '@/lib/token-storage';
+
+export default function AppLayout() {
+  const [checking, setChecking] = useState(true);
+  const [authenticated, setAuthenticated] = useState(false);
+
+  useEffect(() => {
+    // Presence-only check: a stored refresh token means "has a session worth
+    // trying". Actual validity (expired / revoked) is enforced per request by
+    // apiFetch's 401 + refresh handling in lib/api-base.ts, not here.
+    getRefreshToken().then((token) => {
+      setAuthenticated(!!token);
+      setChecking(false);
+    });
+  }, []);
+
+  if (checking) {
+    return (
+      <View style={styles.center}>
+        <ActivityIndicator />
+      </View>
+    );
+  }
+
+  if (!authenticated) {
+    return <Redirect href="/login" />;
+  }
+
+  return (
+    <NavProvider>
+      <View style={styles.shell}>
+        <Header />
+        <View style={styles.content}>
+          <Slot />
+        </View>
+        <FooterBar />
+      </View>
+    </NavProvider>
+  );
+}
+
+const styles = StyleSheet.create({
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  shell: { flex: 1, backgroundColor: '#ffffff' },
+  content: { flex: 1 },
+});

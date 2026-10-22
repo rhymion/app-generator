@@ -424,7 +424,6 @@ definitions:
       - type: object
         required:
           - approver_role
-          - preceding_transitions
         properties:
           requestor_role:
             $ref: "#/definitions/role"

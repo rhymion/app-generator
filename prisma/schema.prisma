@@ -1,11 +1,12 @@
 // This is your Prisma schema file,
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 // Corresponding Prisma version: 7
-// Corresponding JSON schema version: 4.0
+// Corresponding JSON schema version: 5.0
 
 generator client {
-  provider = "prisma-client"
-  output   = "../app/generated/prisma"
+  provider        = "prisma-client"
+  output          = "../app/generated/prisma"
+  previewFeatures = ["relationJoins"]
 }
 
 datasource db {
@@ -53,6 +54,14 @@ model user {
   email                     String              @unique
   password                  String?
   api_key                   String?
+  // Stage 2 of the AI-agent-integration design (app-generator-project-docs
+  // planning/ai-agent-integration-design.md): optional expiry for any
+  // account's API key, human or agent -- no separate agent principal type.
+  // null preserves today's never-expires behavior for every existing key.
+  // Checked in lib/api-auth.ts's authenticateApiKey(); not yet exposed via
+  // any UI/API setter (out of this stage's scope -- see that design doc's
+  // Stage 2 section).
+  api_key_expires_at        DateTime?
   // Opt-in master switch for email notifications -- container only for
   // now, no sending mechanism exists yet. Defaults to false: an unrelated
   // user must actively opt in, never be opted in by default. A future
@@ -85,6 +94,7 @@ model user {
   mfa_secret                String?
   mfa_enabled               Boolean             @default(false)
   mfa_recovery_codes        mfa_recovery_code[]
+  mobile_sessions           mobile_session[]    @relation("UserMobileSessions")
   // Bumped whenever MFA is enabled (lib/mfa/enrollment.ts completeEnrollment).
   // auth.ts's jwt() callback snapshots this into the JWT at sign-in and
   // re-compares it on every subsequent request; a mismatch re-arms
@@ -119,6 +129,7 @@ model user {
   created_tenants           tenant[]            @relation("TenantCreator")
   updated_tenants           tenant[]            @relation("TenantUpdater")
   audit_logs                audit_log[]
+  idempotency_keys          idempotency_key[]
   notifications             notification[]      @relation("NotificationUser")
   created_app_settings      app_setting[]       @relation("AppSettingCreator")
   updated_app_settings      app_setting[]       @relation("AppSettingUpdater")
@@ -129,6 +140,7 @@ model user {
   @@index([creator_id])
   @@index([tenant_id])
   @@index([updater_id])
+  @@index([name])
 }
 
 model role {
@@ -146,6 +158,8 @@ model role {
   permissions   permission[]
   requestor_approval_flows approval_flow[] @relation("ApprovalFlowRequestorRole")
   approver_approval_flows  approval_flow[] @relation("ApprovalFlowApproverRole")
+  @@index([name])
+  @@index([description])
   @@index([creator_id])
   @@index([updater_id])
 }
@@ -167,6 +181,8 @@ model organization {
   // requires the non-FK side to be `Model?`, not `Model[]`, for the client
   // type to reflect that real cardinality instead of a misleading array.
   app_setting app_setting?
+  @@index([name])
+  @@index([description])
   @@index([creator_id])
   @@index([updater_id])
 }
@@ -229,13 +245,76 @@ model organization {
 // a `<name>` relation field derived by stripping the `_id` suffix) and is
 // the literal column name code_generator/validate.py's
 // `_REQUIRED_INDEX_COLUMNS` requires an index on.
+enum Timezone {
+  pacific_pago_pago
+  pacific_honolulu
+  pacific_marquesas
+  america_anchorage
+  america_los_angeles
+  america_denver
+  america_chicago
+  america_mexico_city
+  america_new_york
+  america_toronto
+  america_bogota
+  america_caracas
+  america_st_johns
+  america_sao_paulo
+  america_nuuk
+  atlantic_azores
+  utc
+  europe_london
+  europe_madrid
+  europe_paris
+  europe_berlin
+  europe_rome
+  africa_lagos
+  africa_cairo
+  africa_johannesburg
+  asia_jerusalem
+  europe_istanbul
+  europe_moscow
+  asia_tehran
+  asia_dubai
+  asia_kabul
+  asia_karachi
+  asia_kolkata
+  asia_kathmandu
+  asia_dhaka
+  asia_yangon
+  asia_bangkok
+  asia_jakarta
+  asia_shanghai
+  asia_hong_kong
+  asia_singapore
+  asia_manila
+  australia_perth
+  australia_eucla
+  asia_seoul
+  asia_tokyo
+  australia_adelaide
+  australia_sydney
+  australia_lord_howe
+  pacific_noumea
+  pacific_auckland
+  pacific_chatham
+  pacific_apia
+  pacific_kiritimati
+}
+
 model app_setting {
   id            String        @id @default(cuid())
   organization_id String?
   organization  organization? @relation(fields: [organization_id], references: [id])
-  business_date String
+  // "YYYY-MM-DD"; required while is_pinned is true, empty otherwise (lib/app_setting/service_validation_custom.ts).
+  business_date String?
   is_pinned     Boolean       @default(false)
-  timezone      String        @default("UTC")
+  timezone      Timezone      @default(utc)
+  // Scheduled-task operations (NULL = built-in default; see lib/scheduled-tasks/admin-view.ts):
+  // minutes a `running` record may stay open before the admin page calls it stuck, and
+  // minutes between predecessor rechecks for a task waiting on one.
+  scheduled_task_stuck_after_minutes Int?
+  scheduled_task_recheck_minutes     Int?
   created_at    DateTime      @default(now()) @db.Timestamptz(0)
   updated_at    DateTime      @updatedAt @db.Timestamptz(0)
   creator_id    String
@@ -247,6 +326,9 @@ model app_setting {
   @@index([organization_id])
   @@index([creator_id])
   @@index([updater_id])
+  @@index([business_date])
+  @@index([is_pinned])
+  @@index([timezone])
 }
 
 model permission {
@@ -270,6 +352,7 @@ model permission {
   @@index([creator_id])
   @@index([role_id])
   @@index([updater_id])
+  @@index([name])
 }
 
 model approvable {
@@ -304,6 +387,7 @@ model approval_flow {
   @@index([approver_role_id])
   @@index([requestor_role_id])
   @@index([updater_id])
+  @@index([entity_name])
 }
 
 enum ApprovalRequestStatus {
@@ -342,6 +426,7 @@ model approval_request {
   @@index([approvable_id])
   @@index([approval_flow_id])
   @@index([round_id])
+  @@index([status])
 }
 
 model approval_history {
@@ -457,6 +542,7 @@ model dashboard {
 
   @@index([creator_id])
   @@index([updater_id])
+  @@index([name])
 }
 
 enum DashboardWidgetChartType {
@@ -491,6 +577,7 @@ model dashboard_widget {
   stack_mode      DashboardWidgetStackMode?
   series_field    String?
   group_by_bucket DashboardWidgetGroupByBucket?
+  timezone        Timezone  @default(utc)
   filter_field    String?
   filter_value    String?
   order          Int       @default(0)
@@ -525,8 +612,18 @@ model notification {
 // constraint — deleting a user does not cascade-delete their audit history.
 // `actor_user_id` is nullable because some events (rejected sign-in with an
 // unknown email, system-triggered actions) have no resolved actor.
+//
+// Append-only is enforced in layers (docs/knowledge/audit-log-append-only.md):
+// a Prisma Client guard (lib/audit-log-integrity/guard.ts), a row trigger and
+// privilege template (prisma/sql/audit_log_append_only.sql), and a digest
+// chain over closed periods. `metadata` never contains personal data.
+//
+// The table is range-partitioned on `created_at` by that SQL template, which
+// needs the partition key in the primary key; Prisma cannot declare
+// partitioning, and `prisma db push` / `migrate dev` leave a partitioned
+// parent table alone.
 model audit_log {
-  id            String   @id @default(cuid())
+  id            String   @default(cuid())
   actor_user_id String?
   actor_user    user?    @relation(fields: [actor_user_id], references: [id], onDelete: Restrict)
   action        String
@@ -535,8 +632,60 @@ model audit_log {
   metadata      Json?
   created_at    DateTime @default(now()) @db.Timestamptz(0)
 
+  @@id([id, created_at])
   @@index([actor_user_id])
   @@index([target_table, target_id])
+  @@index([created_at])
+}
+
+// One digest per closed audit_log period (SHA-256 over the period's rows,
+// chained to the previous period's digest). Append-only like audit_log: the
+// SQL template adds the same trigger. See docs/knowledge/audit-log-append-only.md.
+model audit_log_digest {
+  id              String   @id @default(cuid())
+  period_start    DateTime @unique @db.Timestamptz(0)
+  period_end      DateTime @db.Timestamptz(0)
+  row_count       Int
+  digest          String
+  previous_digest String?
+  created_at      DateTime @default(now()) @db.Timestamptz(0)
+}
+
+// One-day idempotency-key cache for external API create calls
+// (ai-agent-integration-design.md "Idempotency keys and rate limiting —
+// resolved design"). A row is written in the SAME transaction as the
+// record it guards -- unlike Redis, Postgres can commit or roll back both
+// together, so a crash mid-write can never leave the key and the record
+// out of sync (the structural reason this is a table, not a cache — see
+// the design doc's "why the table wins"). Scope: single-record create
+// endpoints only -- update/delete already converge to the same end state
+// on retry, and CSV import already has its own key-column dedup.
+//
+// Retention is enforced logically (a row older than one day is treated as
+// expired at lookup time, in lib/idempotency.ts), not by a scheduled
+// deletion job -- the design ruling deliberately does not add a new
+// scheduling mechanism for a housekeeping delete. A stale row is simply
+// overwritten the next time its (key, actor, entity) tuple is reused.
+model idempotency_key {
+  id              String   @id @default(cuid())
+  key             String
+  actor_user_id   String
+  actor_user      user     @relation(fields: [actor_user_id], references: [id], onDelete: Cascade)
+  // The entity name the key was scoped to (route template's `parent`
+  // identifier, e.g. 'invoice') -- the same caller may reuse one key value
+  // across different endpoints without collision.
+  target_entity   String
+  // SHA-256 hex of the request body actually submitted. A retry with the
+  // same key but a different body is a client bug, not a legitimate
+  // replay -- rejected as a conflict rather than silently served the first
+  // request's stale result (see lib/idempotency.ts).
+  request_hash    String
+  response_status Int
+  response_body   Json
+  created_at      DateTime @default(now()) @db.Timestamptz(0)
+
+  @@unique([key, actor_user_id, target_entity], name: "idempotency_key_actor_target")
+  @@index([actor_user_id])
   @@index([created_at])
 }
 
@@ -553,6 +702,25 @@ model mfa_recovery_code {
   code_hash  String
   used_at    DateTime? @db.Timestamptz(0)
   created_at DateTime  @default(now()) @db.Timestamptz(0)
+
+  @@index([user_id])
+}
+
+// Mobile app sessions (access/refresh token pair, one row per signed-in
+// device). `refresh_token_hash` is a deterministic HMAC (not a salted hash)
+// so a presented refresh token can be looked up by its unique index; the
+// plaintext token is never stored. `revoked_at` is set on logout, device
+// revocation, or refresh-token reuse detection.
+model mobile_session {
+  id                 String    @id @default(cuid())
+  user_id            String
+  user               user      @relation("UserMobileSessions", fields: [user_id], references: [id], onDelete: Cascade)
+  refresh_token_hash String    @unique
+  device_name        String?
+  last_used_at       DateTime  @default(now()) @db.Timestamptz(0)
+  expires_at         DateTime  @db.Timestamptz(0)
+  revoked_at         DateTime? @db.Timestamptz(0)
+  created_at         DateTime  @default(now()) @db.Timestamptz(0)
 
   @@index([user_id])
 }

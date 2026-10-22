@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
-"""Idempotently add @@index([col]) for required hot columns in prisma/schema.prisma.
+"""Idempotently add @@index([col]) for required hot/UI-exposed columns in
+prisma/schema.prisma.
 
 Required columns: the hardcoded hot columns (creator_id, assignee_id,
-organization_id) plus every FK column auto-detected from
-`@relation(..., fields: [col], ...)` declarations on the model — mirrors
+organization_id), every FK column auto-detected from
+`@relation(..., fields: [col], ...)` declarations on the model, and every
+column exposed for filtering/sorting in generated UI (a generated list
+view's `x-display.table`, or `x-filter-values`) per Issue #726 — mirrors
 code_generator/validate.py's index requirement.
 Run from the repo root: `python3 scripts/add_required_indexes.py`.
 
@@ -13,10 +16,17 @@ from __future__ import annotations
 
 import re
 import sys
+import tempfile
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "code_generator"))
+import yaml  # noqa: E402
+from build_user_schema import build_user_schema  # noqa: E402
+from validate import derive_ui_exposed_index_columns  # noqa: E402
 
 REQUIRED_COLUMNS = ("creator_id", "assignee_id", "organization_id")
 SCHEMA_PATH = Path("prisma/schema.prisma")
+USER_SCHEMA_PATH = Path("code_generator/json_schema.yaml")
 
 _RELATION_DECL = re.compile(r"@relation\(([^)]*)\)")
 _RELATION_FIELDS_ARG = re.compile(r"fields:\s*\[\s*([^\]]+)\]")
@@ -87,10 +97,10 @@ def has_column(block: str, col: str) -> bool:
     return bool(re.search(rf"^\s*{re.escape(col)}\s+\S", block, re.MULTILINE))
 
 
-def patch_block(block: str) -> tuple[str, list[str]]:
+def patch_block(block: str, ui_cols: set[str]) -> tuple[str, list[str]]:
     """Insert missing @@index([col]) lines just before the closing `}`."""
     indexed = existing_indexed_columns(block)
-    required = set(REQUIRED_COLUMNS) | relation_fk_columns(block)
+    required = set(REQUIRED_COLUMNS) | relation_fk_columns(block) | ui_cols
     additions: list[str] = []
     for col in sorted(required):
         if has_column(block, col) and col not in indexed:
@@ -106,11 +116,42 @@ def patch_block(block: str) -> tuple[str, list[str]]:
     return new_block, additions
 
 
+def derive_ui_columns() -> dict[str, set[str]]:
+    """Build the EXPANDED intermediate schema (mirrors `npm run generate-code`'s
+    own `build_user_schema.py` step) into a scratch temp file and derive
+    UI-exposed index columns from it.
+
+    Must use the expanded form, not `code_generator/json_schema.yaml` (the
+    hand-authored source) directly: the hand-authored form declares a
+    many-to-one relationship as a bare property (e.g. `role: {$ref: ...}`),
+    which `derive_ui_exposed_index_columns()` would misidentify as a plain
+    scalar column — see that function's docstring.
+    """
+    if not USER_SCHEMA_PATH.exists() or not SCHEMA_PATH.exists():
+        return {}
+    with tempfile.TemporaryDirectory() as tmp:
+        out_path = Path(tmp) / "intermediate.yaml"
+        build_user_schema(USER_SCHEMA_PATH, SCHEMA_PATH, out_path)
+        with out_path.open() as f:
+            expanded_schema = yaml.safe_load(f)
+    return derive_ui_exposed_index_columns(expanded_schema)
+
+
 def main() -> int:
     if not SCHEMA_PATH.exists():
         print(f"error: {SCHEMA_PATH} not found (run from repo root)", file=sys.stderr)
         return 2
     text = SCHEMA_PATH.read_text()
+
+    if USER_SCHEMA_PATH.exists():
+        ui_derived = derive_ui_columns()
+    else:
+        ui_derived = {}
+        print(
+            f"warning: {USER_SCHEMA_PATH} not found — skipping UI-exposed "
+            f"(Issue #726) index derivation, only hot/FK columns will be added.",
+            file=sys.stderr,
+        )
 
     blocks = find_model_blocks(text)
     # Apply patches from the end to keep earlier offsets valid.
@@ -118,13 +159,13 @@ def main() -> int:
     total_added = 0
     summary: list[str] = []
     for start, end, block in reversed(blocks):
-        new_block, additions = patch_block(block)
+        model_name = re.match(r"model\s+(\w+)", block).group(1)
+        new_block, additions = patch_block(block, ui_derived.get(model_name, set()))
         if additions:
             out = out[:start] + new_block + out[end:]
             total_added += len(additions)
-            name = re.match(r"model\s+(\w+)", block).group(1)
             for a in additions:
-                summary.append(f"  {name}: {a.strip()}")
+                summary.append(f"  {model_name}: {a.strip()}")
 
     if total_added == 0:
         print("schema.prisma already has all required indexes; no changes.")

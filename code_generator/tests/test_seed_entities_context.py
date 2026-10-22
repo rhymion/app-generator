@@ -310,6 +310,33 @@ def test_grant_flags_import_requires_import_key_and_create_or_update() -> None:
     assert ctx['seed_entity_grants']['importable_widget']['import'] is True
 
 
+def test_grant_flags_import_withheld_for_new_form_bridge_child() -> None:
+    """cmd_1127: a new-form x-bridge child is never import-eligible, even
+    with x-import-key present and create/edit both true -- its parent is
+    selected via selectedParentType/selectedParentId at create time, never
+    a physical FK column, so CSV export never emits a column import could
+    use to satisfy it."""
+    schema = _minimal_schema({
+        'bridge_widget': {
+            'type': 'object',
+            'properties': {'id': {'type': 'string'}, 'code': {'type': 'string'}},
+            'x-import-key': 'code',
+            'x-bridge': {
+                'name': 'bridge_widgetable',
+                'child': 'bridge_widget',
+                'parentCardinality': 'exactlyOne',
+                'parents': [{'role': 'owner_hub', 'target': 'user', 'labelField': 'name'}],
+            },
+            'x-generate': {
+                'list': True, 'view': True, 'new': True, 'edit': True,
+                'delete': True, 'api': True, 'test': False,
+            },
+        },
+    })
+    ctx = seed_entities_context(schema)
+    assert ctx['seed_entity_grants']['bridge_widget']['import'] is False
+
+
 def test_grant_flags_import_withheld_when_new_and_edit_both_false() -> None:
     """Even with x-import-key present, import must stay withheld when
     neither create nor update is possible (build_context.py's Tier1

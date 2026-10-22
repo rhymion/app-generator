@@ -1,0 +1,16 @@
+# Example exceptions file for scripts/check-migrations-match-schema.sh.
+#
+# Copy it to prisma/migration-schema-exceptions.txt (in a consumer: to
+# prj/prisma/migration-schema-exceptions.txt so prj:sync carries it over) and keep only
+# the differences that stay on purpose. The default is no exceptions: an absent or empty
+# file lists none.
+#
+# One rule per line. A rule is the beginning of a SQL statement as
+# `prisma migrate diff --script` prints it; whitespace is collapsed, case matters.
+# A statement is covered when it starts with a rule. Write why above each rule.
+#
+# A table the migrations still create although the schema dropped the model, kept
+# until a drop migration is approved:
+#
+# DROP TABLE "legacy_orphan"
+# ALTER TABLE "legacy_orphan" DROP CONSTRAINT

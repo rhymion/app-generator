@@ -1,0 +1,10 @@
+import type { ReactElement } from 'react';
+import type { FieldComponentProps } from '@/lib/custom-component';
+
+// Hand-maintained. The generator creates this file once and never overwrites it.
+// The schema draws this field with a custom component (x-custom-component); it draws nothing until you
+// implement it. On the form it replaces the field's input (upsert: `value`, `onChange`, `isEdit`); on the
+// detail screen it replaces the field's display (view: `value`). Props: see lib/custom-component.ts.
+export default function {{ component }}(_props: FieldComponentProps): ReactElement | null {
+  return null;
+}

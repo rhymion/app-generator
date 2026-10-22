@@ -282,12 +282,17 @@ export async function resolveActorId(request: NextRequest): Promise<string | nul
 export async function requireDualAuth(request: NextRequest): Promise<{ userId: string }>
 ```
 
-Both check `X-API-Key`/`Authorization: Bearer` first and fall back to the session cookie;
-`resolveActorId` returns `null` when neither is present (for routes that build their own 401 JSON
-body), `requireDualAuth` throws `ApiError(401, ...)` instead (for routes that already funnel every
-error through `handleApiError`). `authenticateApiKey()` itself is API-key-only — it throws if the
-header is absent — so dual-auth routes always branch on header presence before calling it, rather
-than calling it unconditionally.
+Both check the credential headers first and fall back to the session cookie. `X-API-Key` is always an
+API key. An `Authorization: Bearer` token is dispatched by shape, as `authenticate()` does: a mobile
+access token (a JWT, three dot-separated segments) is verified as such, anything else is looked up as an
+API key. A request therefore authenticates the same way whether it comes from a browser, an API-key
+client or the mobile app. Only authentication changes: the caller's `userId` still goes through the
+route's own permission checks and the organization filter, so a token holder sees exactly what the same
+user would see through the web UI. A credential header that is present but invalid ends in `401`; it
+never falls back to the session cookie. `resolveActorId` returns `null` when no credential is present
+(for routes that build their own 401 JSON body), `requireDualAuth` throws `ApiError(401, ...)` instead
+(for routes that already funnel every error through `handleApiError`). `authenticateApiKey()` itself is
+API-key-only and throws if the header is absent.
 
 Currently, the dual-auth routes are: `api_export_route.ts.jinja2`, `api_import_route.ts.jinja2`,
 `split_action_route.ts.jinja2` (all via `resolveActorId`/`requireDualAuth`), and the static

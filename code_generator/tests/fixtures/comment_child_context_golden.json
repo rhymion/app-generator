@@ -1,0 +1,310 @@
+{
+ "nullable": {
+  "build_context": {
+   "child_nested_create": "",
+   "child_nested_update": "",
+   "child_params_for_update": "",
+   "children_data": [
+    {
+     "approval_array_var": "",
+     "approval_indexed": false,
+     "child_pascal": "Notes",
+     "child_prop_defs": {
+      "name": {
+       "type": "string"
+      }
+     },
+     "child_var": "notes",
+     "field_map_create": "          name: f.name,",
+     "field_map_update": "          name: f.name,",
+     "field_type": "{ name: string }",
+     "field_type_with_id": "{ id?: string; name: string }",
+     "file_type": null,
+     "form_key": "note",
+     "has_assignee_id": false,
+     "has_audit_fields": false,
+     "is_independent": false,
+     "is_many_to_many": false,
+     "name": "cc_nullable_note",
+     "nested_writable": true,
+     "output_type": "comments",
+     "parent_fk": null,
+     "property_name": "notes",
+     "props_no_id": [
+      "name"
+     ],
+     "props_with_id": [
+      "id",
+      "name"
+     ],
+     "readonly_field_names": [],
+     "relationship": null,
+     "use_connect": false
+    }
+   ],
+   "include_entries_detail": [
+    "notes: { include: { creator: { select: { id: true, name: true, image: true } }, reactions: { select: { type: true, user_id: true } } }, orderBy: { created_at: 'asc' } }",
+    "creator: { select: { id: true, name: true } }",
+    "updater: { select: { id: true, name: true } }"
+   ],
+   "include_props_detail": "notes: { include: { creator: { select: { id: true, name: true, image: true } }, reactions: { select: { type: true, user_id: true } } }, orderBy: { created_at: 'asc' } }, creator: { select: { id: true, name: true } }, updater: { select: { id: true, name: true } }",
+   "include_props_list": "",
+   "one_to_one_include": "",
+   "search_include_props_list": "",
+   "snapshot_include_props": ""
+  },
+  "entity_context": {
+   "all_option_targets": [
+    "cc_nullable_par"
+   ],
+   "children": [
+    {
+     "declare_type": true,
+     "fields": [
+      {
+       "name": "id",
+       "optional": false,
+       "ts_type": "string"
+      },
+      {
+       "name": "name",
+       "optional": false,
+       "ts_type": "string"
+      },
+      {
+       "name": "cc_nullable_par_id",
+       "optional": false,
+       "ts_type": "string | null"
+      }
+     ],
+     "name": "cc_nullable_note",
+     "output_type": "comments",
+     "property_name": "notes",
+     "relationships": [
+      {
+       "label_field": "name",
+       "relation_name": "cc_nullable_par",
+       "target": "cc_nullable_par",
+       "write_only_narrowed": false
+      }
+     ],
+     "write_only_narrowed": false
+    }
+   ],
+   "import_targets": [],
+   "one_to_one_rels": []
+  }
+ },
+ "plain": {
+  "build_context": {
+   "child_nested_create": "",
+   "child_nested_update": "",
+   "child_params_for_update": "",
+   "children_data": [
+    {
+     "approval_array_var": "",
+     "approval_indexed": false,
+     "child_pascal": "Notes",
+     "child_prop_defs": {
+      "name": {
+       "type": "string"
+      }
+     },
+     "child_var": "notes",
+     "field_map_create": "          name: f.name,",
+     "field_map_update": "          name: f.name,",
+     "field_type": "{ name: string }",
+     "field_type_with_id": "{ id?: string; name: string }",
+     "file_type": null,
+     "form_key": "note",
+     "has_assignee_id": false,
+     "has_audit_fields": false,
+     "is_independent": false,
+     "is_many_to_many": false,
+     "name": "cc_plain_note",
+     "nested_writable": true,
+     "output_type": "comments",
+     "parent_fk": null,
+     "property_name": "notes",
+     "props_no_id": [
+      "name"
+     ],
+     "props_with_id": [
+      "id",
+      "name"
+     ],
+     "readonly_field_names": [],
+     "relationship": null,
+     "use_connect": false
+    }
+   ],
+   "include_entries_detail": [
+    "notes: { include: { creator: { select: { id: true, name: true, image: true } }, reactions: { select: { type: true, user_id: true } } }, orderBy: { created_at: 'asc' } }",
+    "creator: { select: { id: true, name: true } }",
+    "updater: { select: { id: true, name: true } }"
+   ],
+   "include_props_detail": "notes: { include: { creator: { select: { id: true, name: true, image: true } }, reactions: { select: { type: true, user_id: true } } }, orderBy: { created_at: 'asc' } }, creator: { select: { id: true, name: true } }, updater: { select: { id: true, name: true } }",
+   "include_props_list": "",
+   "one_to_one_include": "",
+   "search_include_props_list": "",
+   "snapshot_include_props": ""
+  },
+  "entity_context": {
+   "all_option_targets": [
+    "cc_plain_par"
+   ],
+   "children": [
+    {
+     "declare_type": true,
+     "fields": [
+      {
+       "name": "id",
+       "optional": false,
+       "ts_type": "string"
+      },
+      {
+       "name": "name",
+       "optional": false,
+       "ts_type": "string"
+      },
+      {
+       "name": "cc_plain_par_id",
+       "optional": false,
+       "ts_type": "string"
+      }
+     ],
+     "name": "cc_plain_note",
+     "output_type": "comments",
+     "property_name": "notes",
+     "relationships": [
+      {
+       "label_field": "name",
+       "relation_name": "cc_plain_par",
+       "target": "cc_plain_par",
+       "write_only_narrowed": false
+      }
+     ],
+     "write_only_narrowed": false
+    }
+   ],
+   "import_targets": [],
+   "one_to_one_rels": []
+  }
+ },
+ "rel_par": {
+  "build_context": {
+   "child_nested_create": "",
+   "child_nested_update": "",
+   "child_params_for_update": "",
+   "children_data": [
+    {
+     "approval_array_var": "",
+     "approval_indexed": false,
+     "child_pascal": "Notes",
+     "child_prop_defs": {
+      "name": {
+       "type": "string"
+      },
+      "rel_par_id": {
+       "type": "string",
+       "x-relationship": {
+        "target": "cc_rel_par_par",
+        "type": "many-to-one"
+       }
+      }
+     },
+     "child_var": "notes",
+     "field_map_create": "          name: f.name,\n          rel_par_id: f.rel_par_id,",
+     "field_map_update": "          name: f.name,\n          rel_par_id: f.rel_par_id,",
+     "field_type": "{ name: string; rel_par_id: string }",
+     "field_type_with_id": "{ id?: string; name: string; rel_par_id: string }",
+     "file_type": null,
+     "form_key": "note",
+     "has_assignee_id": false,
+     "has_audit_fields": false,
+     "is_independent": false,
+     "is_many_to_many": false,
+     "name": "cc_rel_par_note",
+     "nested_writable": true,
+     "output_type": "comments",
+     "parent_fk": null,
+     "property_name": "notes",
+     "props_no_id": [
+      "name",
+      "rel_par_id"
+     ],
+     "props_with_id": [
+      "id",
+      "name",
+      "rel_par_id"
+     ],
+     "readonly_field_names": [],
+     "relationship": null,
+     "use_connect": false
+    }
+   ],
+   "include_entries_detail": [
+    "notes: { include: { creator: { select: { id: true, name: true, image: true } }, reactions: { select: { type: true, user_id: true } } }, orderBy: { created_at: 'asc' } }",
+    "creator: { select: { id: true, name: true } }",
+    "updater: { select: { id: true, name: true } }"
+   ],
+   "include_props_detail": "notes: { include: { creator: { select: { id: true, name: true, image: true } }, reactions: { select: { type: true, user_id: true } } }, orderBy: { created_at: 'asc' } }, creator: { select: { id: true, name: true } }, updater: { select: { id: true, name: true } }",
+   "include_props_list": "",
+   "one_to_one_include": "",
+   "search_include_props_list": "",
+   "snapshot_include_props": ""
+  },
+  "entity_context": {
+   "all_option_targets": [
+    "cc_rel_par_par"
+   ],
+   "children": [
+    {
+     "declare_type": true,
+     "fields": [
+      {
+       "name": "id",
+       "optional": false,
+       "ts_type": "string"
+      },
+      {
+       "name": "name",
+       "optional": false,
+       "ts_type": "string"
+      },
+      {
+       "name": "cc_rel_par_par_id",
+       "optional": false,
+       "ts_type": "string"
+      },
+      {
+       "name": "rel_par_id",
+       "optional": false,
+       "ts_type": "string"
+      }
+     ],
+     "name": "cc_rel_par_note",
+     "output_type": "comments",
+     "property_name": "notes",
+     "relationships": [
+      {
+       "label_field": "name",
+       "relation_name": "cc_rel_par_par",
+       "target": "cc_rel_par_par",
+       "write_only_narrowed": false
+      },
+      {
+       "label_field": "name",
+       "relation_name": "rel_par",
+       "target": "cc_rel_par_par",
+       "write_only_narrowed": false
+      }
+     ],
+     "write_only_narrowed": false
+    }
+   ],
+   "import_targets": [],
+   "one_to_one_rels": []
+  }
+ }
+}

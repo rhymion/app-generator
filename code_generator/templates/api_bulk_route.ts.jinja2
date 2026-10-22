@@ -1,6 +1,7 @@
 // AUTO-GENERATED - DO NOT EDIT
 import { NextRequest, NextResponse } from 'next/server';
-import { authenticateApiKey, requireApiPermission, handleApiError } from '@/lib/api-auth';
+import { authenticate, requireApiPermission, handleApiError } from '@/lib/api-auth';
+import { getRateLimiter } from '@/lib/rate-limit';
 {% if can_update or can_delete %}import prisma from '@/lib/prisma';
 {% endif %}{% if can_create %}
 import { add{{ parent_pascal }} } from '@/lib/{{ parent }}/service';
@@ -39,7 +40,14 @@ function makeBulkResponse<T>(results: BulkResult<T>[]): BulkResponse<T> {
 {% if can_create %}
 export async function POST(request: NextRequest) {
   try {
-    const { userId: actorId } = await authenticateApiKey(request);
+    const { userId: actorId } = await authenticate(request);
+    const _rl = await getRateLimiter().check('api:write', actorId);
+    if (!_rl.allowed) {
+      return NextResponse.json(
+        { error: 'rate_limited', retryAfter: _rl.retryAfterSeconds },
+        { status: 429, headers: { 'Retry-After': String(_rl.retryAfterSeconds), 'X-RateLimit-Bucket': 'api:write' } },
+      );
+    }
     await requireApiPermission(actorId, '{{ parent }}', 'create');
     const body = await request.json();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -48,6 +56,17 @@ export async function POST(request: NextRequest) {
 
     for (let i = 0; i < bulkItems.length; i++) {
       try {
+{% if readonly_fields_create_reject %}
+        // Read-only fields can never be supplied by the client, even on create.
+        // Same rule as the single POST (400), reported as this item's failure
+        // because a bulk call answers per item.
+{% for f in readonly_fields_create_reject %}
+        if (bulkItems[i].{{ f }} !== undefined) {
+          bulkResults.push({ index: i, success: false, error: 'Field {{ f }} is read-only and cannot be set' });
+          continue;
+        }
+{% endfor %}
+{% endif %}
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const { {{ all_body_fields_create }} } = bulkItems[i] as any;
         const result = await add{{ parent_pascal }}({{ service_args_for_create }});
@@ -70,7 +89,14 @@ export async function POST(request: NextRequest) {
 {% if can_update %}
 export async function PUT(request: NextRequest) {
   try {
-    const { userId: actorId } = await authenticateApiKey(request);
+    const { userId: actorId } = await authenticate(request);
+    const _rl = await getRateLimiter().check('api:write', actorId);
+    if (!_rl.allowed) {
+      return NextResponse.json(
+        { error: 'rate_limited', retryAfter: _rl.retryAfterSeconds },
+        { status: 429, headers: { 'Retry-After': String(_rl.retryAfterSeconds), 'X-RateLimit-Bucket': 'api:write' } },
+      );
+    }
 {% if is_self_only %}
     // x-self-only: the call still enforces base 'update' permission as a
     // side effect, but the richPerms breakdown itself is unused below —
@@ -87,7 +113,11 @@ export async function PUT(request: NextRequest) {
     const requestedIds = bulkItems.map((item) => item.id).filter(Boolean) as string[];
     const existingRecords = await prisma.{{ model }}.findMany({
       where: { id: { in: requestedIds } },
+{% if readonly_fields_api %}
+      select: { ...{{ item_context_select }}, ...{{ readonly_fields_api_select }} },
+{% else %}
       select: {{ item_context_select }},
+{% endif %}
     });
     const existingMap = new Map(existingRecords.map((r) => [r.id, r]));
 
@@ -125,6 +155,16 @@ export async function PUT(request: NextRequest) {
         bulkResults.push({ index: i, success: false, error: `Access denied: ${id}` });
         continue;
       }
+{% if readonly_fields_api %}
+      // AP-3=B, as on the single PUT: a submitted read-only value that differs
+      // from the stored one is rejected (reported as this item's failure).
+{% for f in readonly_fields_api %}
+      if (bulkItems[i].{{ f }} !== undefined && String(bulkItems[i].{{ f }}) !== String(existing.{{ f }})) {
+        bulkResults.push({ index: i, success: false, error: 'Field {{ f }} is read-only and cannot be changed' });
+        continue;
+      }
+{% endfor %}
+{% endif %}
       try {
         await update{{ parent_pascal }}({{ service_args_for_update }}, null);
         bulkResults.push({ index: i, success: true, data: { success: true } });
@@ -146,7 +186,14 @@ export async function PUT(request: NextRequest) {
 {% if can_delete %}
 export async function DELETE(request: NextRequest) {
   try {
-    const { userId: actorId } = await authenticateApiKey(request);
+    const { userId: actorId } = await authenticate(request);
+    const _rl = await getRateLimiter().check('api:write', actorId);
+    if (!_rl.allowed) {
+      return NextResponse.json(
+        { error: 'rate_limited', retryAfter: _rl.retryAfterSeconds },
+        { status: 429, headers: { 'Retry-After': String(_rl.retryAfterSeconds), 'X-RateLimit-Bucket': 'api:write' } },
+      );
+    }
 {% if is_self_only %}
     // x-self-only: the call still enforces base 'delete' permission as a
     // side effect, but the richPerms breakdown itself is unused below —

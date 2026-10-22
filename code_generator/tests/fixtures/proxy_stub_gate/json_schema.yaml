@@ -12,7 +12,7 @@ definitions:
       invalidate: false
       api: false
       test: false
-    fields:
+    properties:
       name: {}
       email: {}
 
@@ -29,7 +29,11 @@ definitions:
       invalidate: false
       api: true
       test: false
-    fields:
+    x-display:
+      table:
+        - name:
+            primary: true
+    properties:
       name: {}
 
   # allOf proxy view of `widget` with no Prisma model of its own -- mirrors
@@ -48,5 +52,4 @@ definitions:
       invalidate: false
       api: true
       test: false
-    allOf:
-      - $ref: "#/definitions/widget"
+    x-view-of: widget

@@ -369,6 +369,7 @@ def _server_value_shift_schema(user_id_server_value=None):
                     "user_id": user_id_field,
                     "start_time": {"type": "string", "format": "date-time"},
                 },
+                "x-display": {"table": [{"user": {"primary": True}}]},
             },
             "shift_detail": {"allOf": [{"$ref": "#/definitions/shift"}]},
         },

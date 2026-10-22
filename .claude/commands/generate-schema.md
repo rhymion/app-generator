@@ -20,6 +20,14 @@ This is a **generate-schema** task. Read CLAUDE.md before starting.
   with extra force in fast-track mode, where no confirmation
   step catches a missed key.
 
+- Write each entity's columns and relations together in one
+  `properties:` map: scalar/enum columns (an entry per column to
+  expose, `{}` when there is no override), then relation objects and
+  arrays. There is no entity-level `fields:` key; a proxy view over a
+  Prisma model is written `x-view-of: <model>`, never `allOf`.
+  `code_generator/migrate_fields_into_properties.py` rewrites an old
+  schema.
+
 Traps that actually cost time in a real fast-track run (measured from
 a full ER-diagram-only session, not guessed):
 
@@ -72,7 +80,7 @@ Resolve an FK autocomplete/column label from a related field (or a
 composite of fields) instead of the target's raw id:
 
 ```yaml
-fields:
+properties:
   approval_flow_id:
     x-relationship:
       labelField: [entity_name, approver_role.name]
@@ -104,13 +112,24 @@ Or lock a single field directly on the property, without an entity-level list:
 
 ```yaml
 inventory:
-  fields:
+  properties:
     reserved_quantity:
       x-readonly: true
 ```
 <!-- why: same rendering effect as x-readonly-fields for one field, but
      scoped differently — see "x-readonly vs x-readonly-fields" below for
      which to reach for. -->
+
+Hide the other parents' FK columns in a child grid when each row belongs to exactly one of several parents:
+
+```yaml
+step_placement:
+  x-exclusive-parents: [test_case, step]
+```
+<!-- why: step_placement has a nullable test_case_id and a nullable step_id, one filled
+     per row; the grid on the test_case screen drops the step_id column and the grid on
+     the step screen drops test_case_id. Both parents must embed the child as a
+     one-to-many DataGrid; see docs/knowledge/schema-yaml-configuration.md §7.7. -->
 
 ### `x-readonly` vs `x-readonly-fields`: which one to use
 
@@ -119,7 +138,7 @@ on edit). They differ in **scope**, not effect:
 
 | | `x-readonly` | `x-readonly-fields` |
 |---|---|---|
-| Where declared | on the property itself, under `fields:` | entity-level list, alongside `x-generate` |
+| Where declared | on the column's entry in `properties:` | entity-level list, alongside `x-generate` |
 | Scope | the Prisma model — every view built on it | the one view entity it's declared on |
 | Use when | the field must never be editable through *any* view of this model (e.g. a computed/system column) | only *this* view should lock the field down; other views of the same model may still let it be edited |
 
@@ -132,7 +151,7 @@ Restrict a view to only the rows matching a fixed set of field values:
 
 ```yaml
 active_setting:
-  allOf: [{ $ref: '#/definitions/setting' }]
+  x-view-of: user
   x-generate: { ... }
   x-filter-values:
     status: [active, pending]
@@ -177,7 +196,8 @@ Run in this order:
 
 1. `npm run lint`            — **must run before any of the generate-code steps below** (see note)
 2. `npm run test:pytest`      — Python unit tests for code generator
-3. `npm run test:vitest`     — vitest unit/component tests
+3. `npm run test:vitest`     — vitest unit/component tests — on a fresh checkout run
+   `npm run db:generate` first (the Prisma client must exist; CI's Unit Tests job does the same)
 4. `npm run test:e2e:build`  — docker:up:test + generate-code + db:push + db:generate + db:seed-baseline + build
 5. `npm run check:generated` — generated code matches templates/schema
 6. `npm run test:e2e:cy:api` — API Cypress specs only

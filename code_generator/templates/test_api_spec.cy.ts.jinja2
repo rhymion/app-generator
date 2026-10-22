@@ -1,3 +1,4 @@
+{%- set created_body = created_body | default('.body') -%}
 // AUTO-GENERATED - DO NOT EDIT
 import { TEST_API_KEY{% if can_list and can_export %}, TEST_CREDENTIALS{% endif %} } from '../../support/test-credentials';
 
@@ -24,7 +25,7 @@ function _stripRoundTripUnimportableCsvColumns(csv: string): string {
 
 describe('API: {{ title }}', () => {
   beforeEach(() => {
-{% if primary_fk_dep and not primary_fk_dep.is_user_account and primary_fk_dep.extra_required_fields %}
+{% if uses_call_seq %}
     cy.task('db:reset{{ pascal }}CallSeq');
 {% endif %}
     cy.task('db:reset');
@@ -106,13 +107,13 @@ describe('API: {{ title }}', () => {
 {{ I }}}).then((res) => {
 {{ I }}  expect(res.status).to.eq(201);
 {% if can_view %}
-{{ I }}  cy.request({ url: `${API_BASE}/${res.body.id}`, headers: { 'X-API-Key': TEST_API_KEY } })
+{{ I }}  cy.request({ url: `${API_BASE}/${res{{ created_body }}.id}`, headers: { 'X-API-Key': TEST_API_KEY } })
 {{ I }}    .then((getRes) => {
 {{ I }}      expect(getRes.status).to.eq(200);
 {{ I }}      {{ assert_create }}
 {{ I }}    });
 {% else %}
-{{ I }}  expect(res.body.id).to.exist;
+{{ I }}  expect(res{{ created_body }}.id).to.exist;
 {% endif %}
 {{ I }}});
 {% if has_deps %}
@@ -120,6 +121,7 @@ describe('API: {{ title }}', () => {
 {% endif %}
     });
 
+{% if has_required_field_to_omit %}
     it('5.1 fails when a required field is missing', () => {
 {% if has_deps %}
       cy.task<any>('db:populate{{ pascal }}Dependencies').then((deps) => {
@@ -141,6 +143,7 @@ describe('API: {{ title }}', () => {
       });
 {% endif %}
     });
+{% endif %}
 {% if date_range_boundary %}
 
     it('5.2 rejects reservation when {{ date_range_boundary.start_field }} equals {{ date_range_boundary.end_field }} (start must be before end)', () => {
@@ -286,6 +289,7 @@ describe('API: {{ title }}', () => {
 {% endif %}
     });
 
+{% if has_required_field_to_omit %}
     it('8.2 bulk creates — partial failure when a required field is missing', () => {
 {% if reservation_count_pool_pascal %}
       cy.task('db:populate{{ reservation_count_pool_pascal }}', 1);
@@ -322,6 +326,7 @@ describe('API: {{ title }}', () => {
       });
 {% endif %}
     });
+{% endif %}
   });
 {% endif %}
 {% if can_edit %}
@@ -847,6 +852,23 @@ describe('API: {{ title }}', () => {
     });
 {% endif %}
 {% endif %}
+
+    // The relation picker route runs the same org-scoped search the web
+    // picker does: a record of a foreign organization is never offered, a
+    // record the caller may see still is.
+    it('G3.5 GET {{ api_path }}/options never returns an entity in a foreign org', () => {
+      cy.task<any[]>('db:populate{{ pascal }}', 2).then((records) => {
+        cy.task<any>('db:createCrossOrgScenario', { entityName: '{{ parent }}', entityId: records[1].id }).then((scenario) => {
+          cy.request({
+            url: `${API_BASE}/options?ids=${records[0].id},${scenario.entityInOrgB.id}`,
+            headers: { 'X-API-Key': TEST_API_KEY },
+          }).then((res) => {
+            expect(res.status).to.eq(200);
+            expect((res.body as { id: string }[]).map((r) => r.id)).to.deep.equal([records[0].id]);
+          });
+        });
+      });
+    });
   });
 {% endif %}
 {% if has_approvable %}
@@ -898,7 +920,7 @@ describe('API: {{ title }}', () => {
 {{ I }}  },
 {{ I }}}).then((res) => {
 {{ I }}  expect(res.status).to.eq(201);
-{{ I }}  cy.request({ url: `${API_BASE}/${res.body.id}`, headers: { 'X-API-Key': setup.requestorUser.api_key } })
+{{ I }}  cy.request({ url: `${API_BASE}/${res{{ created_body }}.id}`, headers: { 'X-API-Key': setup.requestorUser.api_key } })
 {{ I }}    .then((getRes) => {
 {{ I }}      expect(getRes.body.approvable.approval_requests).to.have.length(2);
 {{ I }}    });
@@ -928,7 +950,7 @@ describe('API: {{ title }}', () => {
 {{ I }}  },
 {{ I }}}).then((res) => {
 {{ I }}  expect(res.status).to.eq(201);
-{{ I }}  cy.request({ url: `${API_BASE}/${res.body.id}`, headers: { 'X-API-Key': setup.noRoleUser.api_key } })
+{{ I }}  cy.request({ url: `${API_BASE}/${res{{ created_body }}.id}`, headers: { 'X-API-Key': setup.noRoleUser.api_key } })
 {{ I }}    .then((getRes) => {
 {{ I }}      expect(getRes.body.approvable.approval_requests).to.have.length(1);
 {{ I }}    });
@@ -1622,12 +1644,12 @@ describe('API: {{ title }}', () => {
           },
         }).then((createRes) => {
           expect(createRes.status).to.eq(201);
-          cy.request({ url: `{{ api_path }}/${createRes.body.id}`, headers: { 'X-API-Key': setup.requestorUser.api_key } })
+          cy.request({ url: `{{ api_path }}/${createRes{{ created_body }}.id}`, headers: { 'X-API-Key': setup.requestorUser.api_key } })
             .then((getRes1) => {
               expect(getRes1.body.approvable.approval_requests).to.have.length(0);
               cy.request({
                 method: 'PUT',
-                url: `{{ api_path }}/${createRes.body.id}`,
+                url: `{{ api_path }}/${createRes{{ created_body }}.id}`,
                 headers: { 'X-API-Key': TEST_API_KEY },
                 body: {
 {% for ln in put_body_resubmit_created %}
@@ -1637,7 +1659,7 @@ describe('API: {{ title }}', () => {
                 },
               }).then((putRes) => {
                 expect(putRes.status).to.eq(200);
-                cy.request({ url: `{{ api_path }}/${createRes.body.id}`, headers: { 'X-API-Key': TEST_API_KEY } })
+                cy.request({ url: `{{ api_path }}/${createRes{{ created_body }}.id}`, headers: { 'X-API-Key': TEST_API_KEY } })
                   .then((getRes2) => {
                     const requests = getRes2.body.approvable.approval_requests;
                     expect(requests.length).to.eq(1);

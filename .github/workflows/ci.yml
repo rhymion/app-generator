@@ -7,22 +7,27 @@ on:
     branches: [master, main, develop]
 
 concurrency:
-  # Keyed on the branch name (head_ref for pull_request, ref_name for push)
-  # rather than on github.ref, so that a push run and a pull_request run
-  # that both cover the same branch/commit land in the same concurrency
-  # group and cancel each other instead of running twice in parallel.
-  # This matters most right after a release PR merges to develop: the
-  # merge produces both a push run (branch=develop) and, while the PR is
-  # still closing, a pull_request run — under github.ref those get
-  # different group keys (refs/heads/develop vs refs/pull/<N>/merge) and
-  # never cancel each other, so the same tree gets built/tested twice.
+  # pull_request runs: keyed on the PR's head branch, and a newer push to the
+  # same PR cancels the superseded run (the old behaviour, still wanted --
+  # nobody needs the result for a commit the PR has already moved past).
   #
-  # Note for later: if `main` ever gets branch protection with a required
-  # check, a push run that gets cancelled here will show up as "no check"
-  # rather than "passed" on that ref — worth remembering before relying on
-  # required-check gating on `main`, since it is currently unprotected.
-  group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
-  cancel-in-progress: true
+  # push runs: keyed on the commit SHA and never cancelled. Pushes only
+  # trigger on the integration branches (see `on:` above), and every commit
+  # that lands there must get its own run to completion. With a shared
+  # per-branch group and cancel-in-progress, a docs-only push cancelled the
+  # in-progress run of the code push before it, and the docs-only run then
+  # skipped E2E itself (detect-changes compares against `event.before`, the
+  # code commit), so the code commit never got a completed E2E run (Issue
+  # #882). A per-branch group with cancel-in-progress: false would not close
+  # this either: GitHub keeps one pending run per group and replaces an older
+  # pending run when a newer one queues.
+  #
+  # `github.head_ref` is empty on push events, so `head_ref || sha` selects the
+  # right key for each event. Trade-off: a pull_request run whose head branch
+  # is itself an integration branch (a develop -> main release PR) is no
+  # longer deduplicated against the push run for the same branch; both run.
+  group: ${{ github.workflow }}-${{ github.head_ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   detect-changes:
@@ -42,10 +47,12 @@ jobs:
         # audit-full-scope/pytest/mention-gate-fixture/
         # mention-gate-plain-image-fixture/decimal-gate-fixture/
         # oto-mandatory-gate-fixture/approval-lockdown-gate-fixture/
-        # payment-gate-fixture/uri-kind-gate-fixture keep running
-        # unconditionally — e2e-tests is
-        # the dominant cost (~57-60 min per cmd_719) and the other ten stay
-        # as a safety net against a path-judgment mistake here). Not a
+        # payment-gate-fixture/uri-kind-gate-fixture/
+        # filter-sort-gate-fixture keep running
+        # unconditionally — e2e-tests (and child-datagrid-e2e-gate-fixture,
+        # the same kind of job) is
+        # the dominant cost (~57-60 min per cmd_719) and the other eleven
+        # stay as a safety net against a path-judgment mistake here). Not a
         # top-level `paths-ignore:` trigger filter — that would make the
         # workflow (and its checks) not run at all for a docs-only push/PR,
         # indistinguishable in the PR Checks list from the check never
@@ -289,6 +296,175 @@ jobs:
         run: npm run test:e2e:build
       - name: Run API E2E tests
         run: npm run test:e2e:cy:start
+
+  child-datagrid-e2e-gate-fixture:
+    name: Child DataGrid E2E Gate Fixture Check
+    # Builds and runs a whole app generated from the default schema plus the
+    # dedicated fixture schema in
+    # code_generator/tests/fixtures/child_datagrid_e2e_gate/ and runs its
+    # Cypress specs (embedded child DataGrid written from the parent screens,
+    # FK label forms, required vs nullable columns, sibling children). Same
+    # shape and cost class as e2e-tests, so it is gated on detect-changes the
+    # same way; the local gate (npm run test:child-datagrid-e2e-gate, step 14a
+    # of .claude/commands/update-generator.md) runs it without that exemption.
+    needs: detect-changes
+    if: needs.detect-changes.outputs.docs_only != 'true'
+    runs-on: ubuntu-latest
+    env:
+      NODE_ENV: test
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.18.0'
+          cache: 'npm'
+      - name: Cache Cypress binary
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/Cypress
+          key: cypress-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - run: npm ci
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - run: npm run test:child-datagrid-e2e-gate
+
+  list-child-e2e-gate-fixture:
+    name: List Child E2E Gate Fixture Check
+    # Builds and runs a whole app generated from the default schema plus the
+    # dedicated fixture schema in code_generator/tests/fixtures/list_child_e2e_gate/
+    # and runs its Cypress specs (a child embedded with `x-outputType: list`:
+    # no child page, editable child page with a nullable link and a second FK to
+    # the parent's own model, many-to-many, self-reference; adding an existing
+    # child to the list and removing one from it). Same shape and cost class as
+    # child-datagrid-e2e-gate-fixture above, so it is gated on detect-changes
+    # the same way; the local gate (npm run test:list-child-e2e-gate, step 14b
+    # of .claude/commands/update-generator.md) runs it without that exemption.
+    needs: detect-changes
+    if: needs.detect-changes.outputs.docs_only != 'true'
+    runs-on: ubuntu-latest
+    env:
+      NODE_ENV: test
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.18.0'
+          cache: 'npm'
+      - name: Cache Cypress binary
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/Cypress
+          key: cypress-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - run: npm ci
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - run: npm run test:list-child-e2e-gate
+
+  comment-rest-e2e-gate-fixture:
+    name: Comment REST E2E Gate Fixture Check
+    # Builds and runs a whole app generated from the default schema plus the
+    # dedicated fixture schema in code_generator/tests/fixtures/comment_rest_e2e_gate/
+    # (one commentable entity scoped by organization) and runs its Cypress specs:
+    # adding, editing and deleting a comment through /api/<entity>/{id}/comments and
+    # searching mention candidates through /api/mention/users. Same shape and cost
+    # class as list-child-e2e-gate-fixture above, so it is gated on detect-changes
+    # the same way; the local gate (npm run test:comment-rest-e2e-gate, step 14c of
+    # .claude/commands/update-generator.md) runs it without that exemption.
+    needs: detect-changes
+    if: needs.detect-changes.outputs.docs_only != 'true'
+    runs-on: ubuntu-latest
+    env:
+      NODE_ENV: test
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.18.0'
+          cache: 'npm'
+      - name: Cache Cypress binary
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/Cypress
+          key: cypress-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - run: npm ci
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - run: npm run test:comment-rest-e2e-gate
+
+  scheduled-task-e2e-gate-fixture:
+    name: Scheduled Task E2E Gate Fixture Check
+    # Builds and runs a whole app generated from the default schema plus the
+    # dedicated fixture schema in code_generator/tests/fixtures/scheduled_task_e2e_gate/
+    # (three scheduled tasks) and runs its Cypress API specs for the scheduled-task
+    # admin REST routes: the overview, rerun / resolve / skip, refusal without the
+    # ScheduledTaskRunner role. Same shape and cost class as
+    # list-child-e2e-gate-fixture above, so it is gated on detect-changes the same
+    # way; the local gate (npm run test:scheduled-task-e2e-gate, step 14d of
+    # .claude/commands/update-generator.md) runs it without that exemption.
+    needs: detect-changes
+    if: needs.detect-changes.outputs.docs_only != 'true'
+    runs-on: ubuntu-latest
+    env:
+      NODE_ENV: test
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.18.0'
+          cache: 'npm'
+      - name: Cache Cypress binary
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/Cypress
+          key: cypress-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - run: npm ci
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - run: npm run test:scheduled-task-e2e-gate
+
+  version-of-e2e-gate-fixture:
+    name: Version Of E2E Gate Fixture Check
+    # Builds and runs a whole app generated from the default schema plus the
+    # dedicated fixture schema in code_generator/tests/fixtures/version_of_e2e_gate/
+    # (an identity and an x-version-of version entity with owned child rows) and
+    # runs its Cypress API specs: the version number assigned at approval, at most
+    # one open draft per identity, current_version_id, deletion of a settled
+    # non-approved draft, the prefilled new version screen, and the identity
+    # tombstone (delete refused after an approved version, new draft refused for
+    # an invalidated identity). Same shape and cost class as
+    # scheduled-task-e2e-gate-fixture above, so it is gated on detect-changes the
+    # same way; the local gate (npm run test:version-of-e2e-gate, step 14e of
+    # .claude/commands/update-generator.md) runs it without that exemption.
+    needs: detect-changes
+    if: needs.detect-changes.outputs.docs_only != 'true'
+    runs-on: ubuntu-latest
+    env:
+      NODE_ENV: test
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.18.0'
+          cache: 'npm'
+      - name: Cache Cypress binary
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/Cypress
+          key: cypress-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - run: npm ci
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - run: npm run test:version-of-e2e-gate
 
   pytest:
     name: Python Generator Tests
@@ -545,8 +721,7 @@ jobs:
     # cmd_753: a small fixture entity (x-payment: true) run through the real
     # generate-code -> tsc pipeline, catching regressions in the write-once
     # Stripe integration stub templates (stripe_lib_stub.ts.jinja2,
-    # stripe_checkout_route_stub.ts.jinja2, stripe_webhook_route_stub.ts.
-    # jinja2) -- including a stale Stripe SDK apiVersion literal, the exact
+    # stripe_webhook_route_stub.ts.jinja2) -- including a stale Stripe SDK apiVersion literal, the exact
     # drift that motivated this gate (the stub pinned a literal that the
     # installed `stripe` SDK's own type no longer accepted). A branch this
     # repo's own generate-code/build (the e2e-tests job) never compiles,
@@ -629,3 +804,87 @@ jobs:
           python-version: '3.12'
       - run: pip install -r requirements.txt
       - run: npm run test:uri-kind-gate
+
+  filter-sort-gate-fixture:
+    name: Filter Sort Gate Fixture Check
+    runs-on: ubuntu-latest
+    # cmd_1200(c): a single fixture entity carrying every ColumnFilterKind
+    # lib/_pagination.ts dispatches on at once (enum/boolean/number/decimal/
+    # date/date-time/time/string) run through the real generate-code -> tsc
+    # pipeline, catching regressions in getters.ts.jinja2's FIELD_KINDS/
+    # ENUM_MEMBERS/DECIMAL_SCALES const declarations and FormUpsert.tsx/
+    # form_validation.ts/service_validation.ts once every kind coexists on
+    # one entity. A branch this repo's own generate-code/build (the
+    # e2e-tests job) never compiles, because this repo's own
+    # json_schema.yaml has zero enum/boolean/decimal/date-kind columns among
+    # its own (api:true, test:true, list:true) entities. No path filter,
+    # same as unit-tests/pytest/mention-gate-fixture/decimal-gate-fixture/
+    # uri-kind-gate-fixture above, per docs/knowledge/gate-exemption-must-
+    # be-machine-checkable.md. See scripts/check_filter_sort_gate_fixture.sh.
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.18.0'
+          cache: 'npm'
+      - run: npm ci
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - run: npm run test:filter-sort-gate
+
+  mobile-playwright:
+    name: Mobile Playwright (path-filtered)
+    # Runs `npm run test:e2e:mobile:pw` (scripts/run_mobile_entity_playwright.sh: the fixture, default and
+    # scheduled modes, each against its own disposable stack) when the diff touches a path the mobile suite
+    # exercises. The path list lives in scripts/mobile_pw_gate_applies.sh, which the local gate step in
+    # .claude/commands/update-generator.md also uses. It is independent of the other jobs: it does not
+    # need detect-changes, and nothing needs it. The decision is made inside the job (not with a top-level
+    # `paths:` filter) so the check shows as passed when the change is out of scope instead of being absent.
+    # About 20 minutes when it runs. The Playwright specs are bound to this repository's own default and
+    # fixture schemas, so they are not part of app-template's CI.
+    runs-on: ubuntu-latest
+    env:
+      NODE_ENV: test
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Decide whether the mobile suite applies to this diff
+        id: scope
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE="${{ github.event.pull_request.base.sha }}"
+          else
+            BASE="${{ github.event.before }}"
+          fi
+          if [ -z "${BASE:-}" ] || [ "$BASE" = "0000000000000000000000000000000000000000" ]; then
+            echo "No usable base commit - running the mobile suite (fail-closed)."
+            echo "applies=yes" >> "$GITHUB_OUTPUT"
+          else
+            echo "applies=$(bash scripts/mobile_pw_gate_applies.sh "$BASE")" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/setup-node@v7
+        if: steps.scope.outputs.applies == 'yes'
+        with:
+          node-version: '24.18.0'
+          cache: 'npm'
+      - uses: actions/setup-python@v7
+        if: steps.scope.outputs.applies == 'yes'
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        if: steps.scope.outputs.applies == 'yes'
+        run: |
+          npm ci
+          pip install -r requirements.txt
+      - name: Install the Playwright browser (version pinned by the generated mobile/package.json)
+        if: steps.scope.outputs.applies == 'yes'
+        run: |
+          PW_VERSION="$(grep -o '"@playwright/test": "[^"]*"' code_generator/templates/mobile/package.json.jinja2 | sed 's/.*"\([~^]*[0-9][^"]*\)"$/\1/; s/^[~^]//')"
+          npx --yes "playwright@${PW_VERSION}" install --with-deps chromium
+      - name: npm run test:e2e:mobile:pw
+        if: steps.scope.outputs.applies == 'yes'
+        run: npm run test:e2e:mobile:pw

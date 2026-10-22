@@ -1,0 +1,40 @@
+import type { GroupNode, NavNode } from './nav';
+
+/**
+ * Drops links the signed-in user may not open (the same rule the desktop
+ * sidebar applies), then drops every group left without a visible
+ * descendant, at every level.
+ */
+export function pruneHidden(nodes: NavNode[], hiddenHrefs: string[]): NavNode[] {
+  const result: NavNode[] = [];
+  for (const node of nodes) {
+    if (node.kind === 'link') {
+      if (!hiddenHrefs.includes(node.href)) result.push(node);
+      continue;
+    }
+    const children = pruneHidden(node.children, hiddenHrefs);
+    if (children.length > 0) result.push({ ...node, children });
+  }
+  return result;
+}
+
+/** Finds a group by slug anywhere in the tree (slugs are unique). */
+export function findGroup(nodes: NavNode[], slug: string): GroupNode | null {
+  for (const node of nodes) {
+    if (node.kind !== 'group') continue;
+    if (node.slug === slug) return node;
+    const nested = findGroup(node.children, slug);
+    if (nested) return nested;
+  }
+  return null;
+}
+
+/** Slug of the top-level group that contains `slug`, or null. */
+export function topLevelOf(nodes: NavNode[], slug: string): string | null {
+  for (const node of nodes) {
+    if (node.kind === 'group' && (node.slug === slug || findGroup(node.children, slug))) {
+      return node.slug;
+    }
+  }
+  return null;
+}

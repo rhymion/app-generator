@@ -1,0 +1,370 @@
+import { useRef, useState, type ComponentType } from 'react';
+import { Pressable, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import { useMessages } from '@/lib/messages';
+import type { ChildRowState, FieldKind, FieldSpec, RelationRow } from '@/lib/entity-http';
+import { DATE_VALUE_HINTS, instantToTimeOfDay, currentDateValue, isValidDateValue, normalizeDateValue, type DateValueFormat } from '@/lib/_date_value';
+import { RelationPicker, relationLabel, type InlineCreateProps } from '@/components/native/RelationPicker';
+{% if has_attachment %}
+import { AttachmentInput } from '@/components/native/AttachmentInput';
+import type { AttachmentRow } from '@/lib/attachment-http';
+{% endif %}
+
+/** Looks a dictionary key up in the shipped messages (the `t` of `useMessages`). */
+export type Translate = (key: string) => string;
+
+// A relation field holds the selected id (many-to-one, one-to-one) or ids (many-to-many); a child_rows field holds its rows.
+export type FieldValueState = string | boolean | string[] | ChildRowState[];
+
+// The shared date rules name the date-time format 'date-time'; the field kind is 'datetime'.
+const DATE_FORMATS: Partial<Record<FieldKind, DateValueFormat>> = {
+  date: 'date',
+  datetime: 'date-time',
+  time: 'time',
+};
+
+const DATE_SHORTCUT_LABELS: Record<DateValueFormat, string> = { date: 'Today', 'date-time': 'Now', time: 'Now' };
+
+/**
+ * Date, date-time and time input. Validates with the same rules as the Web form and the API
+ * (lib/_date_value.ts), stores the shared value shape, and shows a field-level error on blur.
+ */
+function DateValueInput({ spec, format, value, onChange, locked }: {
+  spec: FieldSpec;
+  format: DateValueFormat;
+  value: FieldValueState;
+  onChange: (value: FieldValueState) => void;
+  locked: boolean | undefined;
+}) {
+  const text = typeof value === 'string' ? value : '';
+  const [touched, setTouched] = useState(false);
+  const invalid = text.trim() !== '' && !isValidDateValue(format, text);
+  const commit = () => {
+    setTouched(true);
+    const normalized = normalizeDateValue(format, text);
+    // Valid text is rewritten to the shared shape; invalid text is kept so submit is blocked.
+    if (normalized !== null && normalized !== text) onChange(normalized);
+  };
+  return (
+    <View>
+      <View style={styles.dateRow}>
+        <TextInput
+          style={[styles.input, styles.dateInput, locked ? styles.inputLocked : null, touched && invalid ? styles.inputInvalid : null]}
+          value={text}
+          onChangeText={(next) => onChange(next)}
+          onBlur={commit}
+          editable={!locked}
+          placeholder={DATE_VALUE_HINTS[format]}
+          autoCapitalize="none"
+          autoCorrect={false}
+          testID={`field-${spec.key}`}
+        />
+        {locked ? null : (
+          <Pressable
+            onPress={() => { setTouched(true); onChange(currentDateValue(format)); }}
+            style={styles.chip}
+            testID={`field-${spec.key}-now`}
+          >
+            <Text style={styles.chipText}>{DATE_SHORTCUT_LABELS[format]}</Text>
+          </Pressable>
+        )}
+      </View>
+      {touched && invalid ? (
+        <Text style={styles.fieldError} testID={`field-${spec.key}-error`}>
+          {spec.label} must be a valid {format === 'date-time' ? 'date and time' : format}. Use {DATE_VALUE_HINTS[format]}.
+        </Text>
+      ) : null}
+    </View>
+  );
+}
+
+/** Initial text a record's value is shown as in a form control. */
+export function toFieldState(spec: FieldSpec, value: unknown): FieldValueState {
+  if (spec.kind === 'boolean') return value === true;
+  // A many-to-many arrives as the related rows; the form keeps their ids.
+  if (spec.kind === 'relation_many') {
+    return Array.isArray(value) ? value.map((row) => String((row as RelationRow).id)) : [];
+  }
+  if (spec.kind === 'child_rows') return toRowStates(spec, value);
+  if (value === null || value === undefined) return '';
+  if (spec.kind === 'date') return String(value).slice(0, 10);
+  if (spec.kind === 'time') return instantToTimeOfDay(String(value));
+  return String(value);
+}
+
+/** The rows a record holds under a child_rows field, as the form keeps them (a saved row keeps its id). */
+function toRowStates(spec: FieldSpec, value: unknown): ChildRowState[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((row) => {
+    const record = row as Record<string, unknown>;
+    const values: ChildRowState['values'] = {};
+    for (const field of spec.rowFields ?? []) values[field.key] = toFieldState(field, record[field.key]) as ChildRowState['values'][string];
+    return { id: typeof record.id === 'string' ? record.id : undefined, values };
+  });
+}
+
+/** A new row: every field blank (a boolean off), except a field with a schema default, which starts at it. */
+export function emptyRow(spec: FieldSpec): ChildRowState {
+  const values: ChildRowState['values'] = {};
+  for (const field of spec.rowFields ?? []) values[field.key] = toFieldState(field, field.defaultValue ?? null) as ChildRowState['values'][string];
+  return { values };
+}
+
+/** Text an enum option is shown as: its label when the field has labels, else the option itself. */
+export function optionText(spec: FieldSpec, option: string, translate?: Translate): string {
+  const index = spec.options.indexOf(option);
+  if (index < 0) return option;
+  // An option with a dictionary key (an entity name) is shown as that word; the stored value stays the option.
+  const key = spec.optionLabelKeys?.[index];
+  if (key && translate) {
+    const word = translate(key);
+    if (word !== key) return word;
+  }
+  return spec.optionLabels[index] ? spec.optionLabels[index]! : option;
+}
+
+/** Text a record's value is displayed as on a read-only screen. */
+export function toDisplayText(spec: FieldSpec, value: unknown, translate?: Translate): string {
+  if (spec.kind === 'boolean') return value === true ? 'Yes' : 'No';
+  if (value === null || value === undefined || value === '') return '-';
+  if (spec.kind === 'enum') return optionText(spec, String(value), translate);
+  if (spec.kind === 'date') return String(value).slice(0, 10);
+  if (spec.kind === 'time') return instantToTimeOfDay(String(value));
+  return String(value);
+}
+
+/**
+ * A relation field's value on a read-only screen, each related record a link to its own detail screen
+ * (many-to-one and many-to-many alike). `onOpen` navigates; a field without `viewLink`, or an empty
+ * relation, reads as the plain text of toRecordDisplayText.
+ */
+export function RelationValue({ spec, record, translate, onOpen, testID }: {
+  spec: FieldSpec;
+  record: Record<string, unknown>;
+  translate?: Translate;
+  onOpen: (target: string, id: string) => void;
+  testID?: string;
+}) {
+  const labelField = spec.labelField ?? 'name';
+  const raw = record[spec.relationName ?? spec.key];
+  const rows = (Array.isArray(raw) ? raw : raw && typeof raw === 'object' ? [raw] : []) as RelationRow[];
+  if (!spec.viewLink || !spec.target || rows.length === 0) {
+    return <Text style={styles.value} testID={testID}>{toRecordDisplayText(spec, record, translate)}</Text>;
+  }
+  const target = spec.target;
+  return (
+    <View style={styles.links} testID={testID}>
+      {rows.map((row) => (
+        <Pressable key={row.id} onPress={() => onOpen(target, row.id)} accessibilityRole="link" testID={`${testID ?? `view-field-${spec.key}`}-link-${row.id}`}>
+          <Text style={styles.linkText}>{relationLabel(row, labelField)}</Text>
+        </Pressable>
+      ))}
+    </View>
+  );
+}
+
+/** Text a record's field is displayed as on a read-only screen; a relation shows the related record's label. */
+export function toRecordDisplayText(spec: FieldSpec, record: Record<string, unknown>, translate?: Translate): string {
+  const labelField = spec.labelField ?? 'name';
+  // A direct attachment shows the attached file's name, from the row the REST detail embeds.
+  if (spec.kind === 'attachment') {
+    const row = record[spec.relationName ?? spec.key];
+    return row && typeof row === 'object' && typeof (row as { name?: unknown }).name === 'string' ? (row as { name: string }).name : '-';
+  }
+  if (spec.kind === 'relation') {
+    const row = record[spec.relationName ?? spec.key];
+    return row && typeof row === 'object' ? relationLabel(row as RelationRow, labelField) : '-';
+  }
+  if (spec.kind === 'relation_many') {
+    const rows = record[spec.relationName ?? spec.key];
+    if (!Array.isArray(rows) || rows.length === 0) return '-';
+    return rows.map((row) => relationLabel(row as RelationRow, labelField)).join(', ');
+  }
+  // A child collection reads as one line per row: "Field: value, Field: value".
+  if (spec.kind === 'child_rows') {
+    const rows = record[spec.relationName ?? spec.key];
+    if (!Array.isArray(rows) || rows.length === 0) return '-';
+    return rows
+      .map((row) => (spec.rowFields ?? []).map((field) => `${field.label}: ${toRecordDisplayText(field, row as Record<string, unknown>, translate)}`).join(', '))
+      .join('\n');
+  }
+  return toDisplayText(spec, record[spec.key], translate);
+}
+
+type Props = {
+  spec: FieldSpec;
+  value: FieldValueState;
+  onChange: (value: FieldValueState) => void;
+  disabled?: boolean;
+  /** Entity whose form hosts the field; sent with a relation picker's search. */
+  caller?: string;
+  /** The form's current values; a relation picker forwards the ones its field names. */
+  formValues?: Record<string, FieldValueState>;
+  /** The target's create form for a relation field that declares x-create-inline. */
+  createForm?: ComponentType<InlineCreateProps>;
+{% if has_attachment %}
+  /** The attachment row a direct attachment field currently holds; its id is the field's value. */
+  attachment?: AttachmentRow | null;
+  onAttachmentChange?: (row: AttachmentRow | null) => void;
+{% endif %}
+};
+
+/** A row field's spec with a key that is unique within the form, so its control gets its own test id. */
+function rowFieldSpec(parent: FieldSpec, index: number, field: FieldSpec): FieldSpec {
+  return Object.assign({}, field, { key: `${parent.key}-${index}-${field.key}` });
+}
+
+/**
+ * Row editor for a one-to-many child collection: each row draws the child's own fields with the controls
+ * the form already has, and a button adds or removes a row. A row that was saved keeps its id so the
+ * server updates it in place; the rest is decided by the server, as for the Web grid.
+ */
+function ChildRowsInput({ spec, value, onChange, locked }: {
+  spec: FieldSpec;
+  value: ChildRowState[];
+  onChange: (value: FieldValueState) => void;
+  locked: boolean | undefined;
+}) {
+  const { t } = useMessages();
+  // Controls of a row (a relation picker's modal, a date field's blur) can call back with a closure made
+  // before the latest edit; every change therefore merges into the rows as last committed, not as rendered.
+  const latest = useRef(value);
+  latest.current = value;
+  const commit = (next: ChildRowState[]) => {
+    latest.current = next;
+    onChange(next);
+  };
+  const setField = (index: number, key: string, next: string | boolean | string[]) =>
+    commit(latest.current.map((row, i) => (i === index ? { ...row, values: { ...row.values, [key]: next } } : row)));
+  return (
+    <View style={styles.field} testID={`field-${spec.key}`}>
+      <Text style={styles.label}>{spec.label}</Text>
+      {value.map((row, index) => (
+        <View key={row.id ?? `new-${index}`} style={styles.row} testID={`row-${spec.key}-${index}`}>
+          {(spec.rowFields ?? []).map((field) => (
+            <FieldInput
+              key={field.key}
+              spec={rowFieldSpec(spec, index, field)}
+              value={row.values[field.key] ?? ''}
+              onChange={(next) => setField(index, field.key, next as string | boolean | string[])}
+              disabled={locked}
+              formValues={row.values}
+            />
+          ))}
+          {locked ? null : (
+            <Pressable onPress={() => commit(latest.current.filter((_, i) => i !== index))} style={styles.chip} testID={`row-${spec.key}-${index}-remove`}>
+              <Text style={styles.chipText}>{t('Common.delete')}</Text>
+            </Pressable>
+          )}
+        </View>
+      ))}
+      {locked ? null : (
+        <Pressable onPress={() => commit([...latest.current, emptyRow(spec)])} style={styles.chip} testID={`row-${spec.key}-add`}>
+          <Text style={styles.chipText}>{t('Common.add')}</Text>
+        </Pressable>
+      )}
+    </View>
+  );
+}
+
+/** Native control for one field. Holds no validation or submit logic. */
+export function FieldInput({ spec, value, onChange, disabled, caller, formValues, createForm{% if has_attachment %}, attachment, onAttachmentChange{% endif %} }: Props) {
+  const { t } = useMessages();
+  const locked = disabled || spec.readonly;
+{% if has_attachment %}
+  if (spec.kind === 'attachment') {
+    return (
+      <AttachmentInput
+        spec={spec}
+        row={attachment ?? null}
+        onChange={(row) => {
+          onChange(row ? row.id : '');
+          onAttachmentChange?.(row);
+        }}
+        disabled={locked}
+      />
+    );
+  }
+{% endif %}
+  if (spec.kind === 'child_rows') {
+    return <ChildRowsInput spec={spec} value={Array.isArray(value) ? (value as ChildRowState[]) : []} onChange={onChange} locked={locked} />;
+  }
+  if (spec.kind === 'relation' || spec.kind === 'relation_many') {
+    return (
+      <RelationPicker
+        spec={spec}
+        value={value as string | string[]}
+        onChange={onChange}
+        disabled={locked}
+        caller={caller}
+        formValues={formValues}
+        createForm={createForm}
+      />
+    );
+  }
+  return (
+    <View style={styles.field}>
+      <Text style={styles.label}>
+        {spec.label}
+        {spec.required ? ' *' : ''}
+      </Text>
+      {spec.kind === 'boolean' ? (
+        <Switch
+          value={value === true}
+          onValueChange={(next) => onChange(next)}
+          disabled={locked}
+          testID={`field-${spec.key}`}
+        />
+      ) : spec.kind === 'enum' ? (
+        <View style={styles.chips} testID={`field-${spec.key}`}>
+          {spec.options.map((option) => {
+            const selected = value === option;
+            return (
+              <Pressable
+                key={option}
+                disabled={locked}
+                onPress={() => onChange(selected && !spec.required ? '' : option)}
+                style={[styles.chip, selected ? styles.chipSelected : null]}
+                testID={`field-${spec.key}-${option}`}
+                accessibilityState={ { selected } }
+              >
+                <Text style={selected ? styles.chipTextSelected : styles.chipText}>{optionText(spec, option, t)}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      ) : DATE_FORMATS[spec.kind] ? (
+        <DateValueInput spec={spec} format={DATE_FORMATS[spec.kind]!} value={value} onChange={onChange} locked={locked} />
+      ) : (
+        <TextInput
+          style={[styles.input, locked ? styles.inputLocked : null]}
+          value={typeof value === 'string' ? value : ''}
+          onChangeText={onChange}
+          editable={!locked}
+                    keyboardType={spec.kind === 'number' ? 'number-pad' : spec.kind === 'decimal' ? 'decimal-pad' : 'default'}
+          autoCapitalize="none"
+          testID={`field-${spec.key}`}
+        />
+      )}
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  value: { fontSize: 16 },
+  links: { gap: 4 },
+  linkText: { fontSize: 16, color: '#2563eb', textDecorationLine: 'underline' },
+  field: { gap: 6, marginBottom: 14 },
+  row: { gap: 6, borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 8, padding: 10, marginBottom: 8 },
+  label: { fontSize: 13, fontWeight: '600', color: '#374151' },
+  input: { borderWidth: 1, borderColor: '#d1d5db', borderRadius: 6, paddingHorizontal: 10, paddingVertical: 8, fontSize: 15 },
+  inputInvalid: { borderColor: '#dc2626' },
+  dateRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  dateInput: { flex: 1 },
+  fieldError: { color: '#dc2626', fontSize: 12, marginTop: 4 },
+  inputLocked: { backgroundColor: '#f3f4f6', color: '#6b7280' },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  chip: { borderWidth: 1, borderColor: '#d1d5db', borderRadius: 16, paddingHorizontal: 12, paddingVertical: 6 },
+  chipSelected: { backgroundColor: '#2563eb', borderColor: '#2563eb' },
+  chipText: { color: '#374151' },
+  chipTextSelected: { color: '#ffffff' },
+});

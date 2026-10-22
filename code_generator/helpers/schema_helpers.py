@@ -2,6 +2,8 @@
 
 import re
 
+from keys import x_approval as approval_key
+
 _DATE_FORMATS = frozenset({'date', 'date-time', 'time'})
 _SYSTEM_FIELDS = frozenset({'id', 'created_at', 'updated_at', 'creator_id', 'updater_id'})
 
@@ -39,6 +41,104 @@ def resolve_set_fields(entity_props: dict, raw: dict) -> dict:
     return resolved
 
 
+def resolve_approval_submit_on(raw_def: dict) -> tuple[str | None, object]:
+    """Resolve x-approval.submit_on to a single (field, value) pair.
+
+    cmd_818 (edge-trigger integration): the field that gates
+    approval_request creation, declared the same shape as
+    on_approved/on_rejected.set_fields (a {field: value} map) rather than a
+    bare scalar, so a legacy int-enum label resolves through the same
+    resolve_set_fields() path the dispatch side already uses. Exactly one
+    entry is expected -- the edge trigger only has meaning for a single
+    field's transition. Returns (None, None) when submit_on is absent.
+
+    Lives here (not generators.py, where it originated) since PR2b
+    (Issue #696 state-transition Stage 1) needs to call it from
+    build_context.py, which generators.py itself imports from -- keeping
+    it in generators.py would create a circular import. schema_helpers.py
+    has no dependency on either module, matching resolve_set_fields (which
+    this function already calls) already living here for the same reason.
+    generators.py/validate.py/generate.py keep working unchanged: they
+    already import this name from generators.py, which now re-exports it
+    via its own `from helpers.schema_helpers import (..., resolve_approval_
+    submit_on, ...)` rather than defining it.
+    """
+    x_approval = approval_key.get_or_empty(raw_def)
+    raw = x_approval.get('submit_on') or {}
+    if not raw:
+        return None, None
+    if len(raw) > 1:
+        raise ValueError(
+            f"x-approval.submit_on: expected exactly one field, got {list(raw)}"
+        )
+    entity_props = raw_def.get('properties', {})
+    resolved = resolve_set_fields(entity_props, raw)
+    field = next(iter(resolved))
+    return field, resolved[field]
+
+
+def derive_approval_legal_transition_edges(model_def: dict, field: str) -> set[tuple[str, str]] | None:
+    """State-transition/x-approval AND-composition support (Issue #696
+    Stage 1 PR2b; state-transition-generator-design.md 丙's composition
+    law and Case A/B/C). For `field`, when it is ALSO the field x-approval's
+    own `submit_on` governs on this same entity, returns the small fixed
+    set of (fromState, toState) pairs x-approval itself considers legal:
+    submission (the field's own JSON-Schema `default` -> submit_on's
+    value), approval (submit_on's value -> on_approved's value), rejection
+    (submit_on's value -> on_rejected's value), and — only when the
+    rejection is non-terminal — resubmission (on_rejected's value ->
+    submit_on's value again; 846b: "the ordinary edit path... must stay
+    open in that state").
+
+    Deliberately narrower than Case D's (validate.py) own legal-VALUES set
+    (a flat union of the values above): design doc 丙's Case A requires
+    rejecting a diagram edge whose two endpoints are EACH individually a
+    legal x-approval value but whose PAIR is not one x-approval itself
+    would ever produce (e.g. a diagram's direct draft->approved edge when
+    x-approval only ever moves draft->submitted->approved) — a values-only
+    membership check cannot distinguish that from a genuinely legal edge,
+    so this function reasons about pairs, reusing resolve_approval_
+    submit_on()/resolve_set_fields() (the same building blocks Case D
+    already uses) rather than re-deriving x-approval's own set_fields
+    resolution a third time.
+
+    Returns None when this entity has no x-approval submit_on at all, or
+    when its submit_on governs a DIFFERENT field than `field` — the design's
+    field-scoped independence requirement (an x-approval entity may govern
+    a field a diagram never touches, and vice versa); callers must treat
+    None as "no AND-composition applies here", not as "reject everything".
+    """
+    x_approval = approval_key.get_or_empty(model_def)
+    submit_field, submit_value = resolve_approval_submit_on(model_def)
+    if submit_field != field:
+        return None
+
+    entity_props = model_def.get('properties', {})
+    edges: set[tuple[str, str]] = set()
+
+    default_value = (entity_props.get(field) or {}).get('default')
+    if default_value is not None:
+        edges.add((str(default_value), str(submit_value)))
+
+    on_approved_resolved = resolve_set_fields(
+        entity_props, (x_approval.get('on_approved') or {}).get('set_fields') or {},
+    )
+    if field in on_approved_resolved:
+        edges.add((str(submit_value), str(on_approved_resolved[field])))
+
+    on_rejected_block = x_approval.get('on_rejected') or {}
+    on_rejected_resolved = resolve_set_fields(
+        entity_props, on_rejected_block.get('set_fields') or {},
+    )
+    if field in on_rejected_resolved:
+        rejected_value = str(on_rejected_resolved[field])
+        edges.add((str(submit_value), rejected_value))
+        if not on_rejected_block.get('terminal'):
+            edges.add((rejected_value, str(submit_value)))
+
+    return edges
+
+
 def derive_write_locked_values(model_def: dict) -> dict[str, list]:
     """Per entity, the (field, value) pairs that only the system may
     write — union of:
@@ -47,20 +147,34 @@ def derive_write_locked_values(model_def: dict) -> dict[str, list]:
       - x-write-locked-values explicit declarations (entity-level x-* key,
         {field_name: [value, ...]}) — works independently of x-approval.
 
+    x-state-machines governed fields (Issue #696) are deliberately NOT a
+    source here (a correction to this function's own earlier design): every
+    entry point that can write a row -- UI Server Action, REST route, CSV
+    import (cmd_996, Issue #93) -- funnels through add{{Parent}}/
+    update{{Parent}} (service.ts), the same convergence point x-approval's
+    own guard already relies on, so a governed field's legality is checked
+    there (validateOnUpdate calling lib/state_transitions.ts's
+    assertTransitionAllowed()) rather than by locking every non-initial
+    diagram state out of the ordinary write path. There is no longer a
+    direct-`tx`, service-layer-bypassing writer for these fields to guard
+    against -- the value-lockdown mechanism this function implements exists
+    for exactly that bypass scenario (Source 1/2 below), which state
+    machines no longer have.
+
     Field-scoped, not entity-wide: locking a field's whole range would also
     block values an ordinary create needs (e.g. the initial pending
     value) — only the specific values named are locked. Not bundled across
     entities either — a value that is locked on one entity may be an
     ordinary user-writable value on another.
 
-    Returns {} when neither source declares anything. Callers must treat
+    Returns {} when no source declares anything. Callers must treat
     an empty result as "unprotected", not as "nothing to protect here".
     """
     locked: dict[str, list] = {}
     entity_props = model_def.get('properties', {})
 
     # Source 1: x-approval set_fields (unchanged behavior)
-    x_approval = model_def.get('x-approval')
+    x_approval = approval_key.get(model_def)
     if x_approval:
         for stage in ('on_approved', 'on_rejected'):
             raw = (x_approval.get(stage) or {}).get('set_fields') or {}
@@ -111,7 +225,7 @@ def derive_write_locked_values_for_view(
     """View-scoped variant of `derive_write_locked_values`.
 
     The entity's own canonical screen (see `is_canonical_model_view`) gets
-    the full union (both sources) exactly as `derive_write_locked_values
+    the full union (all sources) exactly as `derive_write_locked_values
     (model_def)` always has -- `model_def` already resolves to wherever
     that canonical screen's own x-write-locked-values declaration actually
     lives (a Category C key moves onto the raw twin when the entity is
@@ -184,7 +298,7 @@ def derive_post_decision_freeze_values(raw_def: dict) -> dict[str, list]:
     approval_lockdown_context() (generators.py) (cmd_1022).
     """
     locked: dict[str, list] = {}
-    x_approval = raw_def.get('x-approval')
+    x_approval = approval_key.get(raw_def)
     if x_approval:
         entity_props = raw_def.get('properties', {})
 
@@ -276,6 +390,47 @@ def get_write_only_field_names(properties: dict) -> list[str]:
     ]
 
 
+def is_text_column_prop(field_name: str, prop: dict) -> bool:
+    """True for a human-readable string column: not an id, FK, enum, CUID,
+    date/uri-formatted, Decimal-backed or write-only column.
+
+    The shared base rule of `derive_text_fields` (cross-entity search) and
+    `x-trigram-filter` (list panel search), which add their own opt-outs.
+    """
+    if not isinstance(prop, dict):
+        return False
+    if not is_string_prop(prop):
+        return False
+    # id and explicit primary key
+    if field_name == 'id' or prop.get('x-primary'):
+        return False
+    # FK fields: x-relationship annotation or *_id naming convention
+    if prop.get('x-relationship') or field_name.endswith('_id'):
+        return False
+    # enum values (integer or string)
+    if isinstance(prop.get('enum'), list):
+        return False
+    # CUID/ID pattern strings
+    pattern = prop.get('pattern', '')
+    if pattern and re.search(r'\^c\[a-z0-9\]', pattern):
+        return False
+    # Non-text formats
+    if prop.get('format') in ('date', 'date-time', 'time', 'uri'):
+        return False
+    # Decimal-backed fields: exposed as JSON type "string" (precision-
+    # preserving), but Prisma's Decimal column does not support the
+    # `contains` filter this list feeds into (search_helpers.ts.jinja2 /
+    # autocomplete_filter.ts.jinja2) -- a string-shape check alone can't
+    # tell a Decimal column from an ordinary text column.
+    if prop.get('_prisma_decimal_type'):
+        return False
+    # Write-only fields (e.g. password, api_key)
+    xc = prop.get('x-custom-component', {})
+    if isinstance(xc, dict) and 'upsert' in (xc.get('target') or []):
+        return False
+    return True
+
+
 def derive_text_fields(properties: dict) -> list[str]:
     """Auto-derive searchable text fields from entity properties.
 
@@ -285,44 +440,39 @@ def derive_text_fields(properties: dict) -> list[str]:
     searchXxxOptions autocomplete filter (build_context.py) so both derive
     the same set of human-readable text columns from a single rule.
     """
-    result = []
+    return [
+        field_name
+        for field_name, prop in properties.items()
+        if is_text_column_prop(field_name, prop) and prop.get('x-search') is not False
+    ]
+
+
+def resolve_trigram_search_fields(properties: dict, search_fields: list[str]) -> list[str]:
+    """Columns the list panel search box matches (and indexes), in order.
+
+    `search_fields` are the entity's cross-entity search trigram columns (empty
+    for an entity that is not a search target). A column annotated
+    `x-trigram-filter: true` is added; `x-trigram-filter: false` removes it.
+    """
+    result = list(search_fields)
     for field_name, prop in properties.items():
         if not isinstance(prop, dict):
             continue
-        if not is_string_prop(prop):
-            continue
-        # id and explicit primary key
-        if field_name == 'id' or prop.get('x-primary'):
-            continue
-        # FK fields: x-relationship annotation or *_id naming convention
-        if prop.get('x-relationship') or field_name.endswith('_id'):
-            continue
-        # enum values (integer or string)
-        if isinstance(prop.get('enum'), list):
-            continue
-        # CUID/ID pattern strings
-        pattern = prop.get('pattern', '')
-        if pattern and re.search(r'\^c\[a-z0-9\]', pattern):
-            continue
-        # Non-text formats
-        if prop.get('format') in ('date', 'date-time', 'time', 'uri'):
-            continue
-        # Decimal-backed fields: exposed as JSON type "string" (precision-
-        # preserving), but Prisma's Decimal column does not support the
-        # `contains` filter this list feeds into (search_helpers.ts.jinja2 /
-        # autocomplete_filter.ts.jinja2) -- a string-shape check alone can't
-        # tell a Decimal column from an ordinary text column.
-        if prop.get('_prisma_decimal_type'):
-            continue
-        # Write-only fields (e.g. password, api_key)
-        xc = prop.get('x-custom-component', {})
-        if isinstance(xc, dict) and 'upsert' in (xc.get('target') or []):
-            continue
-        # Per-field opt-out
-        if prop.get('x-search') is False:
-            continue
-        result.append(field_name)
+        flag = prop.get('x-trigram-filter')
+        if flag is True and field_name not in result:
+            result.append(field_name)
+        elif flag is False and field_name in result:
+            result.remove(field_name)
     return result
+
+
+def trigram_filter_true_fields(properties: dict) -> list[str]:
+    """Columns annotated `x-trigram-filter: true`, in declaration order."""
+    return [
+        field_name
+        for field_name, prop in properties.items()
+        if isinstance(prop, dict) and prop.get('x-trigram-filter') is True
+    ]
 
 
 def _label_field_paths(label_field) -> list[str]:
@@ -351,11 +501,13 @@ def derive_searchable_relation_fields(properties: dict, schema: dict) -> list[di
 
     A composite `labelField` ([f1, f2]) is evaluated element by element —
     each qualifying element contributes its own `{relation, field}` entry.
-    Two kinds of element are excluded:
-      - dotted paths (`approver_role.name`): resolving the FK's *own*
-        FK to another entity would need a second nested `where` hop, which
-        getters.ts.jinja2 does not render (one-hop only; no schema case
-        needs it today — see docs/knowledge/label-field-search-semantics.md).
+    A dotted element (`test_case_version.title`) resolves one more hop
+    through one of the target's own FKs and yields `{relation, via, field}`,
+    rendered as a two-level nested `where`. Two kinds of element are excluded:
+      - dotted paths with more than one extra hop, or whose first segment is
+        not an FK of the target (`approver_role.name` on a target without
+        that FK): getters.ts.jinja2 renders at most two nested levels — see
+        docs/knowledge/label-field-search-semantics.md.
       - non-string-searchable fields: same filter as `derive_text_fields`
         (string type, no `enum`, not a date/uri `format`, not a CUID-pattern
         id) — `contains` is a string-only Prisma operator, and an enum's
@@ -374,9 +526,21 @@ def derive_searchable_relation_fields(properties: dict, schema: dict) -> list[di
         relation_name = field_name.removesuffix('_id') if field_name.endswith('_id') else field_name
         target_props = get_entity_properties(target, schema)
         for path in _label_field_paths(label_field):
+            via = None
+            lookup_props = target_props
+            lookup_name = path
             if '.' in path:
-                continue
-            final_prop = target_props.get(path)
+                # Exactly one more hop through one of the target's own FKs
+                # (`<fk>.<column>`); longer paths stay excluded.
+                via, _, lookup_name = path.partition('.')
+                if '.' in lookup_name:
+                    continue
+                via_prop = target_props.get(f'{via}_id')
+                via_target = ((via_prop or {}).get('x-relationship') or {}).get('target') if isinstance(via_prop, dict) else None
+                if not via_target:
+                    continue
+                lookup_props = get_entity_properties(via_target, schema)
+            final_prop = lookup_props.get(lookup_name)
             if not isinstance(final_prop, dict):
                 continue
             if not is_string_prop(final_prop):
@@ -388,7 +552,10 @@ def derive_searchable_relation_fields(properties: dict, schema: dict) -> list[di
             pattern = final_prop.get('pattern', '')
             if pattern and re.search(r'\^c\[a-z0-9\]', pattern):
                 continue
-            result.append({'relation': relation_name, 'field': path})
+            entry = {'relation': relation_name, 'field': lookup_name}
+            if via:
+                entry['via'] = via
+            result.append(entry)
     return result
 
 
@@ -467,6 +634,54 @@ def derive_cross_entity_searchable_fields(entity_name: str, schema: dict) -> lis
                     continue
                 seen.add((relation_name, final_field))
                 result.append({'relation': relation_name, 'field': final_field})
+    return result
+
+
+def is_integer_prop(prop: dict) -> bool:
+    t = prop.get('type')
+    if isinstance(t, str):
+        return t == 'integer'
+    if isinstance(t, list):
+        return 'integer' in t and all(v in ('integer', 'null') for v in t)
+    return False
+
+
+def derive_searchable_integer_fields(entity_name: str, schema: dict) -> list[str]:
+    """Own integer fields that appear as a plain (non-dotted) segment of some
+    FK's `x-relationship.labelField` targeting `entity_name`.
+
+    The screen label of such a relation ends in the integer's digits
+    (e.g. `[test_case.title, step.name, step_no]` renders `Title Step 1`),
+    but `contains` is a string-only Prisma operator, so the integer segment
+    never joins the text/relation search fields and the last typed token
+    matches nothing. The generated `searchXxxOptions` matches an all-digit
+    token against these fields by equality instead, in addition to the
+    string fields (see getters.ts.jinja2) — purely additive per token.
+
+    Only integer columns qualify: enum, boolean, decimal, date and FK
+    columns keep their existing behavior. Order follows first reference in
+    schema declaration order, de-duplicated.
+    """
+    own_props = get_entity_properties(entity_name, schema)
+    result: list[str] = []
+    for other_def in schema.get('definitions', {}).values():
+        if not isinstance(other_def, dict):
+            continue
+        for prop in (other_def.get('properties') or {}).values():
+            if not isinstance(prop, dict):
+                continue
+            rel = prop.get('x-relationship') or {}
+            if rel.get('target') != entity_name:
+                continue
+            for path in _label_field_paths(rel.get('labelField')):
+                if '.' in path or path in result:
+                    continue
+                final_prop = own_props.get(path)
+                if not isinstance(final_prop, dict) or not is_integer_prop(final_prop):
+                    continue
+                if isinstance(final_prop.get('enum'), list) or final_prop.get('x-relationship'):
+                    continue
+                result.append(path)
     return result
 
 
@@ -568,7 +783,7 @@ def get_approval_lines_props(parent_def: dict, model: str, schema: dict) -> list
             detail_props = get_detail_properties(model, schema) or {}
             ref = ((detail_props.get(lines_prop) or {}).get('items') or {}).get('$ref', '')
             lines_entity = ref.rsplit('/', 1)[-1]
-            if lines_entity and (schema.get('definitions', {}).get(lines_entity) or {}).get('x-approval'):
+            if lines_entity and approval_key.has(schema.get('definitions', {}).get(lines_entity) or {}):
                 props.append(lines_prop)
     return props
 
@@ -749,6 +964,21 @@ def get_parent_fk_props(child_def: dict, parent_model: str) -> set[str]:
         if (prop.get('x-relationship') or {}).get('target') == parent_model
     }
     return found or {convention}
+
+
+def resolve_parent_fk_props(child_entry: dict, child_def: dict, parent_model: str) -> set[str]:
+    """Structural parent FK column(s) of an embedded child.
+
+    DataGrid children use the column(s) the parent's Prisma relation names
+    (`parent_fk`, recorded by build_user_schema.py as `x-parent-fk`), so an
+    unrelated second FK to the same model is never taken for the structural
+    link. `list` children and children without a recorded `parent_fk` keep the
+    `get_parent_fk_props` convention/annotation lookup unchanged.
+    """
+    declared = child_entry.get('parent_fk')
+    if declared and child_entry.get('output_type') not in ('list', 'comments'):
+        return set(declared)
+    return get_parent_fk_props(child_def, parent_model)
 
 
 def get_one_to_one_rels(parent_def: dict, schema: dict) -> list[dict]:
@@ -1177,8 +1407,45 @@ def get_parent_relationships(parent_def: dict, schema: dict | None = None) -> li
             # FK field carries no 'x-autocomplete-context' annotation — the
             # unchanged (Phase-1) default.
             'autocomplete_context_fields': list(prop.get('x-autocomplete-context') or []),
+            # x-create-inline: the field's autocomplete also offers "Create new",
+            # which opens the target's own generated form in a dialog.
+            'create_inline': prop.get('x-create-inline') is True,
         })
     return result
+
+
+def get_inline_create_fields(schema: dict) -> list[dict]:
+    """Every field that declares `x-create-inline: true`.
+
+    Each entry: {entity, prop_name, target, rel_type}. `target` and `rel_type`
+    come from the field's own `x-relationship` and are empty when it has none
+    (validate.py rejects that shape). Entities are visited by their view key
+    (`x`), never by the raw `__x` twin, so a field is reported once.
+    """
+    found = []
+    for key in (schema.get('definitions') or {}):
+        if key.startswith('__'):
+            continue
+        for prop_name, prop in get_entity_properties(key, schema).items():
+            if not isinstance(prop, dict) or prop.get('x-create-inline') is not True:
+                continue
+            rel = prop.get('x-relationship') or {}
+            found.append({
+                'entity': key,
+                'prop_name': prop_name,
+                'target': rel.get('target', ''),
+                'rel_type': rel.get('type', ''),
+            })
+    return found
+
+
+def get_inline_create_targets(schema: dict) -> set[str]:
+    """Entities some many-to-one field offers to create in place (the entities
+    that need the dialog component and the return-id mode of their save action)."""
+    return {
+        f['target'] for f in get_inline_create_fields(schema)
+        if f['target'] and f['rel_type'] == 'many-to-one'
+    }
 
 
 def get_direct_attachment_fk_props(parent_def: dict) -> list[dict]:

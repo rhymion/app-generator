@@ -1,0 +1,181 @@
+// Fixture models for the version-of-e2e-gate (appended to a COPY of
+// prisma/schema.prisma by scripts/check_version_of_e2e_gate_fixture.sh; the
+// default schema is never edited). The back-fields the default `user` and
+// `approvable` models need are listed in schema_relations.json.
+//
+// x-version-of reads these columns but does not create them: the identity's
+// nullable current_version_id, the version's identity FK, a nullable number and
+// the composite unique on (identity FK, number).
+
+enum VoItemVersionStatus {
+  draft
+  pending
+  approved
+  rejected
+}
+
+model vo_item {
+  id                 String            @id @default(cuid())
+  name               String            @unique
+  current_version_id String?           @unique
+  current_version    vo_item_version?  @relation("VoItemCurrent", fields: [current_version_id], references: [id], onDelete: SetNull)
+  versions           vo_item_version[] @relation("VoItemVersions")
+  invalidated_at     DateTime?         @db.Timestamptz(0)
+  created_at         DateTime          @default(now()) @db.Timestamptz(0)
+  updated_at         DateTime          @updatedAt @db.Timestamptz(0)
+  creator_id         String
+  creator            user              @relation("VoItemCreator", fields: [creator_id], references: [id])
+  updater_id         String
+  updater            user              @relation("VoItemUpdater", fields: [updater_id], references: [id])
+
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
+model vo_item_version {
+  id                   String                @id @default(cuid())
+  vo_item_id           String
+  vo_item              vo_item               @relation("VoItemVersions", fields: [vo_item_id], references: [id], onDelete: Cascade)
+  current_of           vo_item?              @relation("VoItemCurrent")
+  organization_id      String
+  organization         organization          @relation(fields: [organization_id], references: [id])
+  title                String
+  summary              String?
+  ref_code             String?               @unique
+  notes                String?
+  version_no           Int?
+  status               VoItemVersionStatus   @default(draft)
+  approvable_id        String                @unique
+  approvable           approvable            @relation(fields: [approvable_id], references: [id], onDelete: Cascade)
+  attachable_id        String                @unique
+  attachable           attachable            @relation(fields: [attachable_id], references: [id])
+  vo_item_version_lines vo_item_version_line[]
+  created_at           DateTime              @default(now()) @db.Timestamptz(0)
+  updated_at           DateTime              @updatedAt @db.Timestamptz(0)
+  creator_id           String
+  creator              user                  @relation("VoItemVersionCreator", fields: [creator_id], references: [id])
+  updater_id           String
+  updater              user                  @relation("VoItemVersionUpdater", fields: [updater_id], references: [id])
+
+  @@unique([vo_item_id, version_no])
+  @@index([vo_item_id])
+  @@index([organization_id])
+  @@index([title])
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
+model vo_item_version_line {
+  id                 String          @id @default(cuid())
+  vo_item_version_id String
+  vo_item_version    vo_item_version @relation(fields: [vo_item_version_id], references: [id], onDelete: Cascade)
+  line_code          String          @unique
+  note               String
+  quantity           Int?
+  created_at         DateTime        @default(now()) @db.Timestamptz(0)
+  updated_at         DateTime        @updatedAt @db.Timestamptz(0)
+
+  @@index([vo_item_version_id])
+}
+
+enum VoDocVersionStatus {
+  draft
+  revise
+  pending
+  approved
+}
+
+model vo_doc {
+  id                 String           @id @default(cuid())
+  name               String           @unique
+  current_version_id String?          @unique
+  current_version    vo_doc_version?  @relation("VoDocCurrent", fields: [current_version_id], references: [id], onDelete: SetNull)
+  versions           vo_doc_version[] @relation("VoDocVersions")
+  created_at         DateTime         @default(now()) @db.Timestamptz(0)
+  updated_at         DateTime         @updatedAt @db.Timestamptz(0)
+  creator_id         String
+  creator            user             @relation("VoDocCreator", fields: [creator_id], references: [id])
+  updater_id         String
+  updater            user             @relation("VoDocUpdater", fields: [updater_id], references: [id])
+
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
+model vo_doc_version {
+  id            String             @id @default(cuid())
+  vo_doc_id     String
+  vo_doc        vo_doc             @relation("VoDocVersions", fields: [vo_doc_id], references: [id], onDelete: Cascade)
+  current_of    vo_doc?            @relation("VoDocCurrent")
+  title         String
+  version_no    Int?
+  status        VoDocVersionStatus @default(draft)
+  approvable_id String             @unique
+  approvable    approvable         @relation(fields: [approvable_id], references: [id], onDelete: Cascade)
+  attachable_id String             @unique
+  attachable    attachable         @relation(fields: [attachable_id], references: [id])
+  created_at    DateTime           @default(now()) @db.Timestamptz(0)
+  updated_at    DateTime           @updatedAt @db.Timestamptz(0)
+  creator_id    String
+  creator       user               @relation("VoDocVersionCreator", fields: [creator_id], references: [id])
+  updater_id    String
+  updater       user               @relation("VoDocVersionUpdater", fields: [updater_id], references: [id])
+
+  @@unique([vo_doc_id, version_no])
+  @@index([vo_doc_id])
+  @@index([title])
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
+enum VoPageVersionStatus {
+  draft
+  revise
+  pending
+  approved
+}
+
+// The identity has no content column of its own: its primary column (title) is virtual
+// and is read from the current version.
+model vo_page {
+  id                 String           @id @default(cuid())
+  code               String           @unique
+  current_version_id  String?          @unique
+  current_version    vo_page_version? @relation("VoPageCurrent", fields: [current_version_id], references: [id], onDelete: SetNull)
+  versions           vo_page_version[] @relation("VoPageVersions")
+  created_at         DateTime         @default(now()) @db.Timestamptz(0)
+  updated_at         DateTime         @updatedAt @db.Timestamptz(0)
+  creator_id         String
+  creator            user             @relation("VoPageCreator", fields: [creator_id], references: [id])
+  updater_id         String
+  updater            user             @relation("VoPageUpdater", fields: [updater_id], references: [id])
+
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
+model vo_page_version {
+  id            String              @id @default(cuid())
+  vo_page_id    String
+  vo_page       vo_page             @relation("VoPageVersions", fields: [vo_page_id], references: [id], onDelete: Cascade)
+  current_of    vo_page?            @relation("VoPageCurrent")
+  title         String
+  version_no    Int?
+  status        VoPageVersionStatus @default(draft)
+  approvable_id String              @unique
+  approvable    approvable          @relation(fields: [approvable_id], references: [id], onDelete: Cascade)
+  attachable_id String              @unique
+  attachable    attachable          @relation(fields: [attachable_id], references: [id])
+  created_at    DateTime            @default(now()) @db.Timestamptz(0)
+  updated_at    DateTime            @updatedAt @db.Timestamptz(0)
+  creator_id    String
+  creator       user                @relation("VoPageVersionCreator", fields: [creator_id], references: [id])
+  updater_id    String
+  updater       user                @relation("VoPageVersionUpdater", fields: [updater_id], references: [id])
+
+  @@unique([vo_page_id, version_no])
+  @@index([vo_page_id])
+  @@index([title])
+  @@index([creator_id])
+  @@index([updater_id])
+}

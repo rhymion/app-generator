@@ -239,7 +239,7 @@ class TestServiceTemplateRendering:
         )
         assert "_server_value_overrides?: Record<string, string>" in rendered
         assert "_serverValueOverrides['applicant_id'] = 'overridden'" in rendered
-        assert "return { id: created.id, ...(Object.keys(_serverValueOverrides).length" in rendered
+        assert "const _result = { id: created.id, ...(Object.keys(_serverValueOverrides).length" in rendered
         assert "import { getModelPermissions } from '@/lib/authz';" in rendered
 
     def test_no_override_does_not_import_getmodelpermissions(self):

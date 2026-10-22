@@ -1,6 +1,6 @@
 // AUTO-GENERATED - DO NOT EDIT
 import { NextRequest, NextResponse } from 'next/server';
-import { authenticateApiKey, ApiError, handleApiError } from '@/lib/api-auth';
+import { authenticate, ApiError, handleApiError } from '@/lib/api-auth';
 import { buildSearchQuery } from '@/lib/search/helpers';
 import { auth } from '@/auth';
 
@@ -30,7 +30,7 @@ export async function GET(request: NextRequest) {
 
     let userId: string;
     if (apiKeyHeader) {
-      const result = await authenticateApiKey(request);
+      const result = await authenticate(request);
       userId = result.userId;
     } else {
       const session = await auth();

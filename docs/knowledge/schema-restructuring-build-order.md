@@ -73,8 +73,9 @@ post-switch (`.generated/json_schema.yaml`) invocations.
 `code_generator/json_schema.yaml` is now in the simplified format (§4 of the
 design doc): the ~49 raw entity definitions (`type`/`required`/full
 `properties`) are gone. Only non-derivable (Category C/D, §3) annotations
-remain, keyed by entity and, for field-level annotations, nested under a
-`fields:` map. `build_user_schema.py` gained the Prisma-derivation logic
+remain, keyed by entity and, for field-level annotations, nested under the
+entity's `properties:` map (scalar columns and relation objects share it; the
+builder sorts them by asking Prisma what each name is). `build_user_schema.py` gained the Prisma-derivation logic
 (new module `code_generator/schema_deriver.py`) that reconstructs the
 legacy-shape intermediate schema from Prisma + these annotations, per §5/§7.
 
@@ -84,8 +85,8 @@ Two supporting pieces:
   (`parse_prisma_schema`) plus `derive_raw_entity`/`derive_property`
   (Category A/B derivation) and the R5 divergence check
   (`SchemaDivergenceError`, raised when a user-schema `x-relationship.target`
-  contradicts Prisma's actual `@relation` target, or a `fields:` entry names
-  a column that doesn't exist in the Prisma model at all).
+  contradicts Prisma's actual `@relation` target, or a `properties:` entry names
+  something that doesn't exist in the Prisma model at all).
 - `code_generator/convert_to_user_schema.py` — the automated converter
   (design doc §4/§12 "automated schema converter", explicitly required
   instead of hand-rewriting): takes the legacy fully-specified format and
@@ -95,7 +96,7 @@ Two supporting pieces:
 A handful of pre-existing, real-world exceptions to "purely mechanical"
 Category A/B derivation surfaced while proving this against both proj_b's
 own schema and proj_c's (much larger, real) schema, and are preserved via
-narrow escape-hatch keys in a field's `fields:` override rather than
+narrow escape-hatch keys on a column's `properties:` entry rather than
 silently "corrected":
 
 - `_required: true` — a field the legacy schema marks required despite a
@@ -151,7 +152,7 @@ doc's ~1,400-line/43% estimate.
 paired-naming convention shown in this section's examples above (e.g.
 `role_detail:`) is no longer how entities are written — see "Current
 entity-naming convention" below. Everything else this section describes
-(the simplified `fields:`-based user schema, Prisma-derivation, the
+(the simplified `properties:`-based user schema, Prisma-derivation, the
 Category A/B/C/D split, the escape-hatch keys, `schema_deriver.py`) is
 unchanged and still exactly how the pipeline works today; only the key
 naming that tells the builder "this entity needs a raw/view split" changed
@@ -186,12 +187,11 @@ role_detail:                # the only entity the user wrote
   x-relationships:
     users: { type: many-to-many, target: user }
   x-import-key: [name]
-  fields:
-    name: { minLength: 1 }
-    description: {}
   required:
     - users
   properties:
+    name: { minLength: 1 }
+    description: {}
     users: { type: array, x-outputType: list, items: { $ref: "#/definitions/user" } }
 ```
 
@@ -215,18 +215,17 @@ role:
   x-relationships:
     users: { type: many-to-many, target: user }
   x-import-key: [name]
-  fields:
-    name: {}
-    description: {}
   required:
     - users
   properties:
+    name: {}
+    description: {}
     users: { type: array, x-outputType: list, items: { $ref: "#/definitions/user" } }
 ```
 
 The only functional differences from the Stage 3 form above: the key is
 `role` instead of `role_detail`, the derived raw entity's key is now
-`__role` instead of the (collision-prone) bare `role`, and `fields.name`
+`__role` instead of the (collision-prone) bare `role`, and `properties.name`
 dropped its `minLength: 1` (an unrelated, later content edit, not part of
 this renaming). `code_generator/json_schema.yaml` (the live default
 schema) has zero `_detail`-suffixed entity names today — confirmed via
@@ -274,15 +273,23 @@ currently ending at line 330 — line ranges drift with every edit, grep
    from Prisma in place, with the user's own annotations merged directly
    onto it — no `__`-prefixed sibling, since there is nothing to
    disambiguate it from.
-3. **Pass-through** — an entity name that is *not* a Prisma model (e.g.
-   `setting`, a second view over the `user` model). Copied through
-   unchanged; it never had raw boilerplate to eliminate.
+3. **Proxy view** — an entity name that is *not* a Prisma model (e.g.
+   `setting`, a second view over the `user` model). It names its model with
+   `x-view-of`, and the builder expands it into
+   `allOf: [{$ref: "#/definitions/<model>"}, {...}]` (the `$ref` targets the
+   model's canonical view, never the `__`-prefixed raw entity); it never had
+   raw boilerplate to eliminate.
 
 Entity-name validation (`_validate_entity_names()`) runs first and rejects
-two mistakes outright: a user-authored entity name starting with the
-reserved `__` prefix, and a Prisma-model-named entity written in the
-pass-through (`allOf`-wrapper) shape (that shape is reserved for
-non-model names like `setting`).
+these mistakes outright: a user-authored entity name starting with the
+reserved `__` prefix; `x-view-of` on a Prisma-model-named entity; `x-view-of`
+together with `allOf`; an entity that is neither a Prisma model nor has
+`x-view-of`; and an `x-view-of` value that is not a Prisma model. Before the
+paired/standalone/proxy split, each entity's `properties:` is divided by
+Prisma field kind: scalar/enum columns become column specs (in written
+order), relations become embedded relation objects, and a name Prisma does
+not have is an error. A leftover entity-level `fields:` key is also an error
+that points to `code_generator/migrate_fields_into_properties.py`.
 
 One more build-order detail not covered by Stages 1–3: before any of the
 above runs, `build_user_schema.py` merges in
@@ -373,7 +380,7 @@ each converted entity:
 - Category C entity-level annotations that lived on the old raw `{model}:`
   entry move onto the new `{model}:` entry.
 - A `labelField` other than the Prisma-derivable default (`name`), or any
-  other Category C/D field-level override, is preserved under `fields:`.
+  other Category C/D field-level override, is preserved on the column's entry under `properties:`.
 
 After conversion, run `build_user_schema.py` against the result (as shown
 in "What generator invocation looks like" above) to confirm it derives

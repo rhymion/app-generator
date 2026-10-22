@@ -406,6 +406,13 @@ The `cy.login` call uses `cy.session` with `cacheAcrossSpecs: true` so the
 login session is shared across spec files (but cleared explicitly in `beforeEach`
 via `Cypress.session.clearAllSavedSessions()`).
 
+### Look buttons up inside the page, and assert in a retried command
+
+Two flake patterns recur in gate specs for Suspense pages (every generated `new` and `edit` page):
+
+- **A document-wide `cy.get('button[type="submit"]')` can match two elements.** While React streams a Suspense page, the revealed form is in `<main>` and a hidden copy of the same form sits in a detached buffer (`div#S:0[hidden]`) for a few tens of milliseconds. `click()` then fails with "Your subject contained 2 elements". Look the button up inside the revealed form, e.g. `cy.get('main form button[type="submit"]')`. Do not use `{ multiple: true }` or an unexplained `.first()`.
+- **`cy.get(...).then(($els) => expect(...))` reads once.** If an element of the same selector is already on screen (for example the previous diff pair before a "Compare" click re-renders), the assertion sees stale values. Put the assertion in `.should(($els) => { expect(...) })`, which Cypress retries.
+
 ---
 
 ## MUI DataGrid patterns
@@ -454,8 +461,15 @@ needed 2+ DataGrid children on one form to surface.
 
 ### DataGrid-child date/date-time/time edit cells need ISO input, not the top-level format
 
-**This is a separate input mechanism from the `MUI DateTimePicker patterns` section below** — a
-DataGrid-child date/date-time/time column has no `renderEditCell` override, so editing it goes
+**Current behaviour (issue #764)**: a generated DataGrid-child date/date-time column edits through an
+MUI `DatePicker` / `DateTimePicker` (`dateColumnProps` in `components/_standard/DataGridDatePickers.tsx`).
+`editDataGridCell()` in `cypress/support/datagrid-helpers.ts` still takes the ISO value
+(`YYYY-MM-DD` / `YYYY-MM-DDThh:mm`) and types it into the picker's sections (English order
+MM/DD/YYYY hh:mm AM|PM); generated specs are unchanged. The rest of this section describes the native
+input path, which `editDataGridCell()` still takes when the cell holds a native input.
+
+**This is a separate input mechanism from the `MUI DateTimePicker patterns` section below** — before
+#764 a DataGrid-child date/date-time/time column had no `renderEditCell` override, so editing it went
 through the browser's **native `datetime-local` input**, not the `DateTimeWrapper`/MUI
 `DateTimePicker` widget the top-level form uses.
 

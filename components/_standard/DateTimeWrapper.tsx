@@ -1,7 +1,5 @@
 'use client';
 import dayjs from 'dayjs';
-import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
-import { AdapterDayjs } from '@mui/x-date-pickers/AdapterDayjs';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { DateTimePicker } from '@mui/x-date-pickers/DateTimePicker';
 import { TimePicker } from '@mui/x-date-pickers/TimePicker';
@@ -20,7 +18,8 @@ export default function DateTimeWrapper({label, date_time, show_date = true, sho
           style={{ opacity: 0, width: '100%', height: 0, position: 'absolute', pointerEvents: 'none', padding: 0, border: 'none' }}
         />
       )}
-      <LocalizationProvider dateAdapter={AdapterDayjs}>
+      {/* The app-wide LocalizationProvider (app/[locale]/providers.tsx) supplies the adapter and locale. */}
+      <>
         { show_date && !show_time && (
         <DatePicker
           label={label}
@@ -51,7 +50,7 @@ export default function DateTimeWrapper({label, date_time, show_date = true, sho
         />
          )
         }
-      </LocalizationProvider>
+      </>
     </div>
     );
 }

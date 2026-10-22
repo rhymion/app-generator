@@ -1,0 +1,81 @@
+import { router, useLocalSearchParams } from 'expo-router';
+import { MaterialIcons } from '@expo/vector-icons';
+import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
+import { NavIcon } from '@/components/NavIcon';
+import type { NavNode } from '@/lib/nav';
+import { useLocale } from '@/lib/locale';
+import { useNav } from '@/lib/nav-context';
+import { findGroup } from '@/lib/nav-tree';
+
+/**
+ * One level of the navigation hierarchy on the main screen: the group's
+ * sub-groups (drill one level further) and entity links. The same screen
+ * serves every depth; each sub-group is one more pushed screen.
+ */
+export default function SectionScreen() {
+  const { slug } = useLocalSearchParams<{ slug: string }>();
+  const { tabs, ready } = useNav();
+  const { labelOf } = useLocale();
+  const group = findGroup(tabs, slug);
+
+  if (!ready) return null;
+  if (!group) {
+    return (
+      <View style={styles.center} testID="section-empty">
+        <Text>Nothing to show here.</Text>
+      </View>
+    );
+  }
+
+  const open = (node: NavNode) => {
+    if (node.kind === 'group') router.push(`/section/${node.slug}` as never);
+    else router.push(`/entity/${node.entity}` as never);
+  };
+
+  return (
+    <View style={styles.container} testID={`section-${group.slug}`}>
+      <View style={styles.titleRow}>
+        {router.canGoBack() ? (
+          <Pressable onPress={() => router.back()} testID="section-back" accessibilityLabel="Back">
+            <MaterialIcons name="arrow-back" size={22} color="#374151" />
+          </Pressable>
+        ) : null}
+        <Text style={styles.title} testID="section-title">
+          {labelOf(group)}
+        </Text>
+      </View>
+      <FlatList
+        data={group.children}
+        keyExtractor={(node) => node.key}
+        renderItem={({ item }) => (
+          <Pressable
+            style={styles.row}
+            onPress={() => open(item)}
+            testID={`nav-row-${item.kind === 'group' ? item.slug : item.entity}`}
+          >
+            <NavIcon icon={item.icon} size={22} />
+            <Text style={styles.rowText}>{labelOf(item)}</Text>
+            {item.kind === 'group' ? <MaterialIcons name="chevron-right" size={22} color="#9ca3af" /> : null}
+          </Pressable>
+        )}
+      />
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1 },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  titleRow: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 16 },
+  title: { fontSize: 20, fontWeight: '600' },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
+  },
+  rowText: { flex: 1, fontSize: 16 },
+});

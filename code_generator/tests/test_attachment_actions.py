@@ -18,6 +18,8 @@ Three surfaces are covered:
      components/_standard/AttachmentSection.tsx imports from it
      unconditionally.
 """
+import shutil
+import subprocess
 from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader
@@ -144,15 +146,39 @@ def test_template_emits_select_branch_includes_assignee_when_present():
 
 
 def test_template_emits_owner_permission_check_per_owner():
-    """cmd_419: editing an attachment defers to the owner's own
-    requirePermission('<model>', 'update', item) path (RBAC + Creator/
-    Assignee item-level resolution) rather than a bespoke creatorId check —
-    one branch per owner, falling through to a final error when none of the
-    owner FKs resolved."""
+    """cmd_419/Issue #750: editing an attachment defers to the owner's own
+    permission (RBAC + Creator/Assignee item-level resolution) rather than
+    a bespoke creatorId check — one branch per owner, falling through to a
+    final error when none of the owner FKs resolved. Since #750, the
+    item-level check reuses the per-owner RichPermissions already fetched
+    by the coarse pre-check (resolvePermissions), rather than a second
+    requirePermission(model, 'update', item) call."""
     out = _render([{'name': 'resource'}, {'name': 'product'}])
-    assert "requirePermission('resource', 'update', owner.resource);" in out
-    assert "requirePermission('product', 'update', owner.product);" in out
+    assert "const resolved = await resolvePermissions(basePermsByOwner['resource'], owner.resource, userId);" in out
+    assert "const resolved = await resolvePermissions(basePermsByOwner['product'], owner.product, userId);" in out
     assert "throw new Error('Attachable has no owner');" in out
+
+
+def test_template_coarse_check_precedes_owner_row_fetch():
+    """Issue #750: the coarse, item-independent permission gate (spanning
+    every candidate owner model, since which one applies isn't known until
+    the row is fetched) must run BEFORE the attachable/owner row fetch —
+    otherwise a caller with zero possible update grant on any candidate
+    owner model can still distinguish an existing-but-forbidden
+    attachable_id from a non-existent one via which error is thrown."""
+    out = _render([{'name': 'resource'}, {'name': 'product'}])
+    coarse_fetch = "basePermsByOwner['resource'] = (await getModelPermissions('resource', userId)).permissions;"
+    coarse_gate = "if (!Object.values(basePermsByOwner).some((p) => p.update)) {"
+    owner_fetch = 'const owner = await prisma.attachable.findUnique({'
+    assert coarse_fetch in out
+    assert coarse_gate in out
+    assert owner_fetch in out
+    assert out.index(coarse_fetch) < out.index(coarse_gate)
+    assert out.index(coarse_gate) < out.index(owner_fetch)
+    # No second getModelPermissions()-backed call for either model -- the
+    # item-level check reuses basePermsByOwner via resolvePermissions().
+    assert "getModelPermissions('resource', userId)" in out
+    assert out.count("getModelPermissions('resource', userId)") == 1
 
 
 def test_template_emits_revalidate_paths_per_owner():
@@ -164,9 +190,15 @@ def test_template_emits_revalidate_paths_per_owner():
 def test_template_with_no_owners_still_renders():
     """When the schema has no attachable owners the file shouldn't be emitted
     at all (see generate.py), but the template must still render to valid
-    TypeScript so a future caller that does emit it can rely on the shape."""
+    TypeScript so a future caller that does emit it can rely on the shape.
+    With zero candidate owner models, the Issue #750 coarse pre-check block
+    (which itself needs at least one owner to check any grant against) is
+    skipped entirely — this dead-code branch renders exactly as it did
+    before #750, falling straight to the final error."""
     out = _render([])
-    # No owner branches to check against — falls straight to the error.
+    # No owner branches to check against — falls straight to the error,
+    # with no coarse-check block rendered (nothing to check).
+    assert "if (!Object.values(basePermsByOwner).some((p) => p.update)) {" not in out
     assert "throw new Error('Attachable has no owner');" in out
     # No branches in the select clauses.
     assert ': { select: { id: true, creator_id: true } }' not in out
@@ -220,3 +252,44 @@ def test_cleanup_deletes_generated_catalogs(tmp_path: Path):
     # entity were in the schema. The minimal fixture above has only `thing`,
     # so lib/dashboard is empty and gets pruned too.
     assert not (out / 'lib' / 'dashboard').exists()
+
+
+# ---------------------------------------------------------------------------
+# setAttachmentsForBridge ownership (Issue #958)
+# ---------------------------------------------------------------------------
+
+BRIDGE_FIXTURE = REPO_ROOT / 'code_generator' / 'tests' / 'fixtures' / 'attachment_bridge_actions'
+BRIDGE_STAGE = REPO_ROOT / '.generated-attachment-bridge-test'
+
+
+def test_rendered_bridge_action_rejects_foreign_attachment_ids():
+    """Runs the rendered action under vitest against an in-memory Prisma fake.
+
+    Covers an attachment id of a same-organization record, of another
+    organization, of the same record but another type (all rejected with
+    nothing written), the unchanged replace/order semantics, and the permission
+    check that precedes it. The test names live in bridge_actions.test.ts.
+    """
+    shutil.rmtree(BRIDGE_STAGE, ignore_errors=True)
+    (BRIDGE_STAGE / 'lib').mkdir(parents=True)
+    try:
+        shutil.copy(REPO_ROOT / 'lib' / '_errors.ts', BRIDGE_STAGE / 'lib' / '_errors.ts')
+        shutil.copytree(BRIDGE_FIXTURE / 'fake', BRIDGE_STAGE / 'fake')
+        for name in ('bridge_actions.test.ts', 'vitest.config.mts'):
+            shutil.copy(BRIDGE_FIXTURE / name, BRIDGE_STAGE / name)
+        env = Environment(
+            loader=FileSystemLoader(str(TEMPLATES_DIR)),
+            trim_blocks=True, lstrip_blocks=True,
+        )
+        (BRIDGE_STAGE / 'bridge_actions.ts').write_text(
+            env.get_template('attachment_actions.ts.jinja2').render(
+                owners=[{'name': 'resource'}], type_ts='number',
+            )
+        )
+        result = subprocess.run(
+            ['npx', 'vitest', 'run', '--config', str(BRIDGE_STAGE / 'vitest.config.mts')],
+            cwd=REPO_ROOT, capture_output=True, text=True,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+    finally:
+        shutil.rmtree(BRIDGE_STAGE, ignore_errors=True)

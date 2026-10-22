@@ -1,0 +1,29 @@
+'use client';
+// AUTO-GENERATED - DO NOT EDIT
+//
+// x-version-of: the standard version list and two-version diff on the '{{ identity }}'
+// detail screen. Reads go through {{ parent }}'s own getters (same permissions, same
+// organization scope); each field renders with the detail screen's markup.
+import VersionHistoryPanel from '@/components/_standard/VersionHistoryPanel';
+import { get{{ parent_pascal }}VersionHistory, get{{ parent_pascal }}VersionDiff } from '@/lib/{{ parent }}/getters';
+import VersionField, { VERSION_FIELDS } from './VersionFields';
+import type { ChildSpec } from '@/components/_standard/VersionHistoryPanel';
+import type { {{ parent_pascal }}Detail } from '@/lib/{{ parent }}/types';
+
+const CHILDREN: ChildSpec[] = {{ children | tojson }};
+
+// FormView passes permissions / role ids to every view component; the reads here enforce their own.
+export default function VersionHistory({ src }: { src: { id: string }; permissions?: unknown; currentUserRoleIds?: string[]; currentUserId?: string | null }) {
+  return (
+    <VersionHistoryPanel
+      identityId={src.id}
+      newVersionHref={`/{{ parent }}/new?new_version_of=${encodeURIComponent(src.id)}`}
+      numberField="{{ number }}"
+      fields={VERSION_FIELDS}
+      childSpecs={CHILDREN}
+      getHistory={get{{ parent_pascal }}VersionHistory}
+      getDiff={get{{ parent_pascal }}VersionDiff}
+      renderField={(row, field) => <VersionField src={row as unknown as {{ parent_pascal }}Detail} field={field} />}
+    />
+  );
+}

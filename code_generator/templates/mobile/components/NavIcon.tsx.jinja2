@@ -1,0 +1,23 @@
+import { MaterialCommunityIcons, MaterialIcons } from '@expo/vector-icons';
+import type { IconRef } from '@/lib/nav';
+
+type Props = { icon: IconRef; size?: number; color?: string };
+
+/**
+ * Renders an icon resolved by the generator from the desktop sidebar's icon
+ * names. Glyph names are generated, so they are cast to the font's name type.
+ */
+export function NavIcon({ icon, size = 24, color = '#374151' }: Props) {
+  if (icon.family === 'MaterialCommunityIcons') {
+    return (
+      <MaterialCommunityIcons
+        name={icon.name as keyof typeof MaterialCommunityIcons.glyphMap}
+        size={size}
+        color={color}
+      />
+    );
+  }
+  return (
+    <MaterialIcons name={icon.name as keyof typeof MaterialIcons.glyphMap} size={size} color={color} />
+  );
+}

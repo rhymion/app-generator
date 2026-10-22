@@ -1,0 +1,21 @@
+# AUTO-GENERATED - DO NOT EDIT
+#
+# Signs in as the seeded administrator (db:seed-baseline) and waits for the footer tabs.
+# Environment: E2E_EMAIL, E2E_PASSWORD (see scripts/run_mobile_native_e2e.sh).
+appId: ${E2E_APP_ID}
+---
+- launchApp:
+    clearState: true
+- tapOn:
+    id: login-email
+- inputText: ${E2E_EMAIL}
+- tapOn:
+    id: login-password
+- inputText: ${E2E_PASSWORD}
+- hideKeyboard
+- tapOn:
+    id: login-submit
+- extendedWaitUntil:
+    visible:
+      id: footer-bar
+    timeout: 30000

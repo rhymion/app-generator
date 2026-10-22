@@ -74,9 +74,13 @@ def _entity_nav(entity: dict, schema: dict) -> dict | None:
     view — would silently stop resolving.
     """
     def_key = entity.get('definition_key') or entity.get('model')
+    if not def_key:
+        # Not a schema entity (see nav_extra_entities): there is no definition
+        # to carry an x-nav block, so the entry stays a flat top-level link.
+        return None
     x_nav = schema.get('definitions', {}).get(def_key, {}).get('x-nav')
     if not x_nav:
-        x_nav = _raw_def(entity['model'], schema).get('x-nav')
+        x_nav = _raw_def(entity.get('model', def_key), schema).get('x-nav')
     return x_nav if isinstance(x_nav, dict) else None
 
 
@@ -146,6 +150,30 @@ def nav_list_entities(entities: list) -> list:
     nav entries it had itself created for a proxy view — see cmd_817.
     """
     return [e for e in entities if e['generate_config'].get('list', True)]
+
+
+# Sidebar link for the generated scheduled-task admin page. It is not a schema
+# entity (the `scheduled_task_run` table is injected by generate.py), so it is
+# added to the nav here instead of through nav_list_entities.
+EXTRA_NAV_PARENT = 'scheduled_task_run'
+
+
+def schema_declares_scheduled_tasks(schema: dict) -> bool:
+    """True when the schema has a top-level `x-scheduled-tasks` entry or any
+    entity-level `x-scheduled-task` — the same condition under which generate.py
+    emits the `scheduled_task_run` table and its admin page."""
+    if schema.get('x-scheduled-tasks'):
+        return True
+    return any(
+        isinstance(definition, dict) and definition.get('x-scheduled-task')
+        for definition in (schema.get('definitions') or {}).values()
+    )
+
+
+def nav_extra_entities(schema: dict) -> list:
+    """Nav entries that are not schema entities (see EXTRA_NAV_PARENT). Shared by
+    generate (generators_i18n) and cleanup, like nav_list_entities."""
+    return [{'parent': EXTRA_NAV_PARENT}] if schema_declares_scheduled_tasks(schema) else []
 
 
 def build_nav_config(entities: list, schema: dict) -> dict:

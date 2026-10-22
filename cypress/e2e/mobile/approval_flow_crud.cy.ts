@@ -38,7 +38,7 @@ describe('Testing Approval Flow pages and their behavior [mobile] (hand-written 
     it('1.2 renders one card per item with the primary value as title', () => {
       seedApprovalFlowRows(1);
       cy.visit('/en/approval_flow');
-      cy.contains('user').should('be.visible');
+      cy.contains('User').should('be.visible');
       cy.get('input[type="checkbox"][aria-label^="Select "]').should('have.length', 1);
     });
 
@@ -51,7 +51,7 @@ describe('Testing Approval Flow pages and their behavior [mobile] (hand-written 
     it('1.4 opens the view page when the card title is tapped', () => {
       seedApprovalFlowRows(1);
       cy.visit('/en/approval_flow');
-      cy.contains('user').click();
+      cy.contains('User').click();
       cy.url().should('include', '/approval_flow/view');
     });
   });

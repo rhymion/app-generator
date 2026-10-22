@@ -1,0 +1,2 @@
+// The scheduled-task-e2e-gate adds no model: the scheduled_task_run table is
+// injected by generate-code itself when the schema declares a scheduled task.
