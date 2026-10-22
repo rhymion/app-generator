@@ -20,7 +20,9 @@ export type ResolveApprovableOrganization = (
  * - Record with a NULL organization (optional organization relationship):
  *   not tied to any organization, allowed, same as the read scope.
  * - Otherwise the user must be a member of the record's organization.
- * - Unknown request, entity or record: refused (fail closed).
+ * - Entity that is not an approvable entity of the app: not scoped, allowed
+ *   (the resolver reports it as `scoped: false`).
+ * - Unknown request, or a missing record of a known entity: refused (fail closed).
  *
  * Shared by the REST approve/reject routes and the Server Action path
  * (actions_core.ts) so both apply the same rule.

@@ -197,7 +197,8 @@ behind the request, on both entry points: the Server Action (`actions_core.ts`) 
 - a record whose `organization_id` is NULL (optional organization relationship) is not tied to any
   organization and the check passes, matching the read scope;
 - otherwise the user must be a member of that organization;
-- an unknown entity or a missing record fails closed.
+- an entity that is not an approvable entity of the app has no organization-scoped records and the
+  check passes; a missing record of a known entity fails closed.
 
 A refused request is reported as "Approval request not found" (`404` on REST), the same as any record
 outside the caller's organizations. A user without the approver role still gets `403`. Withdrawing is

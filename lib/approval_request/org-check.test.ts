@@ -55,7 +55,7 @@ describe('isApproverInTargetOrganization', () => {
     expect(orgFindFirst).not.toHaveBeenCalled();
   });
 
-  it('refuses when the target record or entity cannot be resolved (fail closed)', async () => {
+  it('refuses when the target record cannot be resolved (fail closed)', async () => {
     resolve.mockResolvedValue(null);
     await expect(isApproverInTargetOrganization('user-a', 'req-1', resolve)).resolves.toBe(false);
   });

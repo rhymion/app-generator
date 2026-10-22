@@ -35,8 +35,10 @@ export async function resolveApprovableTarget(
  * organization: holding the approver role alone is not enough.
  *
  * `scoped: false` means the entity has no organization_id column (not
- * organization-scoped). Returns null when the entity is unknown or the row
- * does not exist; callers must treat that as "not found" (fail closed).
+ * organization-scoped), or is not an approvable entity of this app at all
+ * (no record of it can carry an organization). Returns null when the entity
+ * is known but the row does not exist; callers must treat that as "not
+ * found" (fail closed).
  */
 export type ApprovableOrganization =
   | { scoped: false }
@@ -58,7 +60,7 @@ export async function resolveApprovableOrganization(
 {% endif %}
   }
 {% endfor %}
-  return null;
+  return { scoped: false };
 }
 
 /**

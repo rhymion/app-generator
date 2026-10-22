@@ -5,7 +5,9 @@ organization of the record behind the approval request.
 
 An entity with an organization_id column is organization-scoped and the
 resolver returns that column; an entity without one is reported as not scoped;
-an unknown entity or a missing row yields null (the caller fails closed).
+an entity that is not an approvable entity of the app is reported as not
+scoped (no record of it can carry an organization); a missing row of a known
+entity yields null (the caller fails closed).
 """
 from pathlib import Path
 
@@ -46,10 +48,10 @@ def test_proxy_view_queries_the_backing_model_by_view_key():
     assert 'tx.leave_request.findFirst' in branch
 
 
-def test_unknown_entity_falls_through_to_null():
+def test_unknown_entity_falls_through_to_not_scoped():
     out = _render([{'parent': 'leave_request', 'model': 'leave_request', 'org_scoped': True}])
     body = out[out.index('export async function resolveApprovableOrganization'):out.index('export function resolveApprovableModel')]
-    assert '\n  return null;\n}' in body
+    assert '\n  return { scoped: false };\n}' in body
 
 
 def test_empty_entity_list_still_emits_a_compilable_resolver():
