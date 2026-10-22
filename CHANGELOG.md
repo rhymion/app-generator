@@ -23,6 +23,13 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `searchKey`. See `docs/knowledge/list-panel-trigram-filter.md`.
 
 ### Changed
+- **Entity-level `required:` lists relation embeds only, and means the same on every entity** (Issue #1066). A name in
+  `required:` that is a Prisma column, or that Prisma does not know, is now a build error; a column is required when
+  Prisma makes it non-nullable without a default, or when its entry under `properties:` sets `_required: true`.
+  A standalone entity (one with no view-level key such as `x-generate`) used to have its derived required list replaced by
+  `required:`, which dropped `id`; it is now merged with the derived list, as for any other entity. The default schema's
+  stale `approval_flow` entry `preceding_transitions` is removed. Schemas that name a column in `required:` must drop it
+  (the column stays required through Prisma). See `docs/knowledge/schema-yaml-configuration.md`.
 - **The generated Expo app moves to SDK 58** (Issue #1073). `mobile/package.json` now pins the SDK 58 set (Expo 58, React 19.3,
   React Native 0.88, `expo-router` 58). `expo-router` 58 no longer depends on `query-string`, so the vulnerable
   `decode-uri-component` is no longer part of the app bundle. See `docs/knowledge/mobile-app.md`.

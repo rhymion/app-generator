@@ -407,7 +407,6 @@ definitions:
 
     required:
       - approver_role
-      - preceding_transitions
   approval_request:
     x-display:
       table:

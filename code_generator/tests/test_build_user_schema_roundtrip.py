@@ -313,6 +313,80 @@ def test_standalone_entity_properties_key_does_not_clobber_derived_scalars():
 
 
 # ---------------------------------------------------------------------------
+# Entity-level `required:` lists relation embeds only
+# ---------------------------------------------------------------------------
+
+def _build_with_required(entity_key, entry):
+    prisma_models = parse_prisma_schema(PRISMA_SCHEMA_PATH)
+    prisma_enums = parse_prisma_enums(PRISMA_SCHEMA_PATH)
+    return build_intermediate_schema({"definitions": {entity_key: entry}}, prisma_models, prisma_enums)
+
+
+def test_required_naming_a_relation_embed_is_accepted_paired():
+    out = _build_with_required("role", {
+        "x-generate": {"list": True},
+        "properties": {"users": {"type": "array", "items": {"$ref": "#/definitions/user"}}},
+        "required": ["users"],
+    })
+    assert out["definitions"]["role"]["allOf"][1]["required"] == ["users"]
+
+
+def test_required_naming_a_column_raises_paired():
+    with pytest.raises(UserSchemaError, match=r"role\.required.*'name'.*column"):
+        _build_with_required("role", {
+            "x-generate": {"list": True},
+            "properties": {"name": {}},
+            "required": ["name"],
+        })
+
+
+def test_required_naming_an_unknown_name_raises_paired():
+    with pytest.raises(UserSchemaError, match=r"role\.required.*'no_such_name'"):
+        _build_with_required("role", {
+            "x-generate": {"list": True},
+            "required": ["no_such_name"],
+        })
+
+
+def test_required_naming_a_column_raises_standalone():
+    with pytest.raises(UserSchemaError, match=r"attachment\.required.*'name'.*column"):
+        _build_with_required("attachment", {
+            "properties": {"name": {}},
+            "required": ["name"],
+        })
+
+
+def test_required_naming_an_unknown_name_raises_standalone():
+    with pytest.raises(UserSchemaError, match=r"attachment\.required.*'no_such_name'"):
+        _build_with_required("attachment", {
+            "properties": {"name": {}},
+            "required": ["no_such_name"],
+        })
+
+
+def test_standalone_required_keeps_id_and_prisma_required_columns():
+    """A standalone entity used to have its derived `required` list replaced
+    by the user's, dropping `id`. It is now a union, as for a paired entity."""
+    prisma_models = parse_prisma_schema(PRISMA_SCHEMA_PATH)
+    prisma_enums = parse_prisma_enums(PRISMA_SCHEMA_PATH)
+    derived_only = build_intermediate_schema(
+        {"definitions": {"role": {"properties": {"name": {}, "users": {"type": "array", "items": {"$ref": "#/definitions/user"}}}}}},
+        prisma_models, prisma_enums,
+    )["definitions"]["role"]["required"]
+    out = build_intermediate_schema(
+        {"definitions": {"role": {
+            "properties": {"name": {}, "users": {"type": "array", "items": {"$ref": "#/definitions/user"}}},
+            "required": ["users"],
+        }}},
+        prisma_models, prisma_enums,
+    )["definitions"]["role"]["required"]
+    assert "id" in out
+    assert "users" in out
+    assert set(derived_only) <= set(out)
+    assert len(out) == len(set(out))
+
+
+# ---------------------------------------------------------------------------
 # Phase A golden diff (see docs/knowledge/schema-restructuring-build-order.md Sec.5 phase_A_schema_level)
 # ---------------------------------------------------------------------------
 
