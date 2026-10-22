@@ -3,6 +3,8 @@ import { requireCaller, handleApiError } from '@/lib/api-auth';
 import { ApiError } from '@/lib/api-auth';
 import prisma from '@/lib/prisma';
 import { getUserRoleIds } from '@/lib/authz';
+import { isApproverInTargetOrganization } from '@/lib/approval_request/org-check';
+import { resolveApprovableOrganization } from '@/lib/approval_request/resolve_target';
 import { assertApprovalOrder } from '@/lib/approval_request/order-check';
 import { isTerminalReject, dispatchOnRejected } from '@/lib/approval_request/on_rejected_dispatch';
 import { dispatchBeforeReject } from '@/lib/approval_request/on_before_reject_dispatch';
@@ -29,6 +31,12 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const roleIds = await getUserRoleIds(userId);
     if (!roleIds.includes(req.approval_flow.approver_role_id)) {
       throw new ApiError(403, 'Access denied: not a member of the approver role');
+    }
+    // The approver role says who may approve; the target record's organization
+    // says whose records. Reported as "not found", like an out-of-scope record
+    // elsewhere in the API.
+    if (!(await isApproverInTargetOrganization(userId, id, resolveApprovableOrganization))) {
+      throw new ApiError(404, 'Approval request not found');
     }
 
     await assertApprovalOrder(id);

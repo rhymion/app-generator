@@ -2980,7 +2980,14 @@ def generate(schema_path: str, output_dir: str) -> None:
         )
         if not has_approvable_bridge:
             continue
-        approvable_bridge_entities.append({'parent': entity['parent'], 'model': entity['model']})
+        approvable_bridge_entities.append({
+            'parent': entity['parent'],
+            'model': entity['model'],
+            # Mirrors should_filter_by_org: an entity with an organization_id
+            # column is organization-scoped, so approve/reject must check the
+            # approver belongs to the target record's organization.
+            'org_scoped': 'organization_id' in props,
+        })
     # Always emitted (mirrors on_approved_dispatch.ts below) — actions.ts
     # imports this unconditionally, so it must exist even with zero entities.
     _write(

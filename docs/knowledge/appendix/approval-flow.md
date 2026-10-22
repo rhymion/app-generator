@@ -180,11 +180,28 @@ generated). Two server actions are provided:
 
 | Action | Permission check | Result |
 |---|---|---|
-| `approveApprovalRequest(id, message?)` | User must have `approver_role_id`; all `preceded_by` flows for this approvable must already be `approved` (`assertApprovalOrder()`, §16.6.1) | Sets status → `approved`; notifies the entity creator (Trigger #3, §16.9 note below) |
-| `rejectApprovalRequest(id, message?, options?)` | User must have `approver_role_id`; same `assertApprovalOrder()` ordering check as approve | Sets status → `rejected`, or `terminal_rejected` if `isTerminalReject()` says so (§16.11); either way, notifies the entity creator (Trigger #3) with a payload `status` matching the actual outcome |
+| `approveApprovalRequest(id, message?)` | User must have `approver_role_id` and belong to the target record's organization (see "Organization scope" below); all `preceded_by` flows for this approvable must already be `approved` (`assertApprovalOrder()`, §16.6.1) | Sets status → `approved`; notifies the entity creator (Trigger #3, §16.9 note below) |
+| `rejectApprovalRequest(id, message?, options?)` | User must have `approver_role_id` and belong to the target record's organization; same `assertApprovalOrder()` ordering check as approve | Sets status → `rejected`, or `terminal_rejected` if `isTerminalReject()` says so (§16.11); either way, notifies the entity creator (Trigger #3) with a payload `status` matching the actual outcome |
 
 Each action creates an `approval_history` row recording `pre_status`, `post_status`, `message`,
 and `creator_id` (the acting user).
+
+**Organization scope.** The approver role says who may approve; the target record's organization says
+whose records. Approve and reject refuse a user who does not belong to the organization of the record
+behind the request, on both entry points: the Server Action (`actions_core.ts`) and the REST routes
+`app/api/approval_request/[id]/{approve,reject}/route.ts`. Both call `isApproverInTargetOrganization()`
+(`lib/approval_request/org-check.ts`), which reads the record's organization through the generated
+`resolveApprovableOrganization()` (`lib/approval_request/resolve_target.ts`):
+
+- an entity without an `organization_id` column is not organization-scoped and the check passes;
+- a record whose `organization_id` is NULL (optional organization relationship) is not tied to any
+  organization and the check passes, matching the read scope;
+- otherwise the user must be a member of that organization;
+- an unknown entity or a missing record fails closed.
+
+A refused request is reported as "Approval request not found" (`404` on REST), the same as any record
+outside the caller's organizations. A user without the approver role still gets `403`. Withdrawing is
+unaffected: only the requestor can withdraw.
 
 **There is no dedicated resubmit action or route.** Re-submission after a non-terminal rejection
 is an ordinary edit of the entity's own status field back to `x-approval.submit_on`'s value
