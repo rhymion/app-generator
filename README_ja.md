@@ -470,6 +470,7 @@ preview デプロイと異なり自動的なクローラー保護を受けませ
 | `gcp-seed.sh` | データベースのシード |
 | `gcp-teardown.sh` | GCP リソースの削除（2段階確認付き） |
 | `gcp-task-runner.sh` | `task:run-all` を実行する夜間 Cloud Run Job + Cloud Scheduler ジョブのプロビジョニング（`DRY_RUN=true` でプレビュー） |
+| `gcp-task-runner-teardown.sh` | `gcp-task-runner.sh` が作成したリソースのみを削除（プロジェクトは削除しない）。監査ログ用バケットは `DELETE_AUDIT_LOG_BUCKET=true` の場合のみ（`DRY_RUN=true` でプレビュー）。`docs/knowledge/gcp-task-runner-operations.md` を参照 |
 
 `gcp-deploy.sh` は `generate-code` が生成する `Dockerfile` を要します —
 `x-cloud` を有効化した**後**に `generate-code` を実行し、`gcp-deploy.sh`

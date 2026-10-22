@@ -1,0 +1,45 @@
+// Display rules that the relation picker, the read-only screens and the entity list share:
+// the label of a related record, and the list panel's view of a form field. Pure TypeScript
+// (no React, no react-native), so it runs under Node in the generator's unit tests.
+import type { ListFieldSpec } from './_list_query';
+import type { FieldSpec, RelationRow } from './entity-http';
+
+/** `labelField` of a relationship: one path, or several paths the label joins with a space. */
+export type LabelField = string | string[];
+
+/** The value at a dotted path (`approver_role.name`) of a record; undefined when a step is missing. */
+function valueAtPath(record: Record<string, unknown>, path: string): unknown {
+  let current: unknown = record;
+  for (const segment of path.split('.')) {
+    if (current === null || typeof current !== 'object') return undefined;
+    current = (current as Record<string, unknown>)[segment];
+  }
+  return current;
+}
+
+/**
+ * Name of a related record: its label paths joined with a single space (the Web joins them the same way),
+ * or its id when every path is empty. A path may run through the relations the REST row embeds.
+ */
+export function relationLabel(row: RelationRow, labelField: LabelField): string {
+  const paths = Array.isArray(labelField) ? labelField : [labelField];
+  const parts = paths
+    .map((path) => valueAtPath(row, path))
+    .filter((value) => value !== null && value !== undefined && value !== '')
+    .map(String);
+  return parts.length > 0 ? parts.join(' ') : String(row.id);
+}
+
+/**
+ * The list panel's view of a form field. A form field lists the text of its enum members by position
+ * (`optionLabels[i]` belongs to `options[i]`, empty when the member is its own text); the panel
+ * (lib/_list_query.ts, shared with the Web list) looks the text up by member.
+ */
+export function toListFieldSpec(spec: FieldSpec): ListFieldSpec {
+  const optionLabels: Record<string, string> = {};
+  spec.options.forEach((option, index) => {
+    const label = spec.optionLabels[index];
+    if (label) optionLabels[option] = label;
+  });
+  return { key: spec.key, label: spec.label, kind: spec.kind, options: spec.options, optionLabels };
+}

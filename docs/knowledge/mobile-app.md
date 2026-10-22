@@ -223,6 +223,19 @@ ancestors (a record that is already a selected child is shown as a chip, not as 
 The service still refuses an attach that would break these rules, and the form shows the server's message. The target need not
 have native screens of its own.
 
+The detail screen names a relation by the label column (`labelField` of the relationship) of the record the
+REST detail embeds. A list row shows scalar columns only: the REST list does not embed related labels.
+
+A required foreign key is checked by the same `form_validation.ts` the Web form runs (`Mobile Group is
+required`), before any request. Form state, submit and error mapping stay in `use_entity_form.ts`; the picker
+is presentation plus the options request.
+
+A composite `labelField` (a list of columns or dotted paths such as `approver_role.name`) is joined with a single
+space, as on the Web; a path runs through the relations the row embeds, and a label whose paths are all empty shows
+the record's id. A date segment shows its stored text, not the Web's formatted date. The rule is `relationLabel` in
+`lib/label-spec.ts`, which also converts a form field to the list panel's field type (`toListFieldSpec`: the form lists
+enum labels by position, the panel looks them up by member).
+
 ### Direct attachment fields
 
 A field declared with `x-relationship: {target: attachment, type: direct}` is drawn by
@@ -381,9 +394,6 @@ no REST route exposes the `payable` status (the `payable` model is internal to `
 distinction needs a route first. The provider's success and cancel pages are Web pages in the in-app browser
 and need a signed-in Web session; the webhook is the dependable confirmation.
 
-The detail screen names a relation by the label column (`labelField` of the relationship) of the record the
-REST detail embeds. A list row shows scalar columns only: the REST list does not embed related labels.
-
 ### Related records
 
 On the detail screen, a many-to-one or one-to-one reference and each record of a many-to-many or one-to-many list
@@ -393,10 +403,6 @@ field carries `viewLink: true` in the generated client when the target has a nat
 empty relation. The link is not withheld from a reader who may not see the record: the target screen answers for
 itself. The form screens (the pickers) keep their selection controls and do not link. The same Expo bundle serves the
 web build, so the mobile web screens behave identically.
-
-A required foreign key is checked by the same `form_validation.ts` the Web form runs (`Mobile Group is
-required`), before any request. Form state, submit and error mapping stay in `use_entity_form.ts`; the picker
-is presentation plus the options request.
 
 ### Approval
 
@@ -514,8 +520,8 @@ contexts into `mobile/`, so each copy is identical to its Web counterpart:
 `lib/_errors.ts` and `lib/authz.ts` in `mobile/` hold only the types those modules import.
 
 The hooks need React 19: `use_entity_form.ts` passes an async function to `startTransition`, which the React
-18 typings reject. The app therefore runs one Expo SDK's bundled set (Expo SDK 57: React 19.2,
-React Native 0.86, `expo-router` 57, `@expo/vector-icons` 15). The versions are pinned together in
+18 typings reject. The app therefore runs one Expo SDK's bundled set (Expo SDK 58: React 19.3,
+React Native 0.88, `expo-router` 58, `@expo/vector-icons` 15). The versions are pinned together in
 `templates/mobile/package.json.jinja2`; bump the whole set with `npx expo install --fix`, not one package.
 `@playwright/test` is not part of the SDK and is pinned separately. The screens' own saving flag wraps the
 transport call, so a save in flight is visible even where a transition does not track async work.
@@ -698,6 +704,9 @@ The environment variables the script honours are `MODE`, `PW_ARGS` (one mode onl
 stack, it starts its own and signs in as the seeded administrator (`admin@example.com` / `password123`). The
 checkout's `node_modules` must be a real directory (a plain `npm ci`); the script refuses a symlinked one,
 because `next build` (Turbopack) cannot resolve it in the copy.
+
+Each mode also runs `npm run typecheck` in the generated `mobile/` before the specs and stops on any error, because the
+Playwright specs run the web export, which does not type-check.
 
 The specs are bound to this repository's own default and fixture schemas. They are not run in app-template or
 another consumer repository: its schema has different footer tabs and none of the `mobile_*` fixture entities.

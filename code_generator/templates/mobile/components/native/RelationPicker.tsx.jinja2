@@ -2,12 +2,9 @@ import { useCallback, useEffect, useRef, useState, type ComponentType } from 're
 import { ActivityIndicator, FlatList, Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useMessages } from '@/lib/messages';
 import { fetchPermissions, searchEntityOptions, type FieldSpec, type RelationRow } from '@/lib/entity-http';
+import { relationLabel } from '@/lib/label-spec';
 
-/** Name of a related record: its label column, or its id when that column is empty. */
-export function relationLabel(row: RelationRow, labelField: string): string {
-  const value = row[labelField];
-  return value === null || value === undefined || value === '' ? String(row.id) : String(value);
-}
+export { relationLabel };
 
 /** What the target's create form is given when it is opened from a picker (x-create-inline). */
 export type InlineCreateProps = {
@@ -242,7 +239,7 @@ export function RelationPicker({ spec, value, onChange, disabled, caller, formVa
           <FlatList
             data={rows}
             keyExtractor={(row) => row.id}
-            ListEmptyComponent={loading ? null : <Text style={styles.empty} testID="picker-empty">{t('Common.noOptions')}</Text>}
+            ListEmptyComponent={loading ? undefined : <Text style={styles.empty} testID="picker-empty">{t('Common.noOptions')}</Text>}
             renderItem={({ item }) => {
               const checked = selected.includes(item.id);
               return (

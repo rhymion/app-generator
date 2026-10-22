@@ -37,6 +37,7 @@
 #              EXPO_WEB_URL, TEST_EMAIL and TEST_PASSWORD from the caller are ignored: the script starts its own
 #              stack and signs in as the seeded administrator.
 # Every mode sets x-generator.mobile.enabled: true in the copy and fails closed if mobile/ is not generated.
+# Every mode also runs `npm run typecheck` in the generated mobile/ before the specs and fails closed on any error.
 # Path-triggered step of the update-generator gate (.claude/commands/update-generator.md), not part of the
 # unconditional gate.
 set -euo pipefail
@@ -332,6 +333,15 @@ fi
 
 echo "-- installing the Expo dependencies --"
 (cd mobile && npm install --no-audit --no-fund >"$BUILD_DIR/mobile-install.log" 2>&1)
+
+# The Playwright specs run the web export, which does not type-check. Without this step a type error in the
+# generated app (a template that hands a FieldSpec list to a ListFieldSpec parameter, say) reaches users unseen.
+echo "-- type-checking the generated Expo app --"
+if ! (cd mobile && npm run typecheck >"$BUILD_DIR/mobile-typecheck.log" 2>&1); then
+  echo "mobile-entity-playwright: the generated Expo app does not type-check (mode $MODE):" >&2
+  head -40 "$BUILD_DIR/mobile-typecheck.log" >&2
+  exit 1
+fi
 
 # start-server-and-test starts the two servers (the API; the Expo web bundle with its proxy), waits for each URL and stops
 # them all when the specs finish.

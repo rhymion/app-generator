@@ -1,4 +1,4 @@
-{# Versions are one Expo SDK's bundled set (`expo/bundledNativeModules.json` of expo 57). They are
+{# Versions are one Expo SDK's bundled set (`expo/bundledNativeModules.json` of expo 58). They are
    pinned together because the entity screens call hooks that Web shares and that need React 19
    (lib/<entity>/use_entity_form.ts starts an async transition, which React 18 types reject);
    Expo SDK 51 shipped React 18.2. Bump the whole set with `npx expo install --fix`, never one
@@ -18,33 +18,33 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
-    "@expo/metro-runtime": "~57.0.16",
+    "@expo/metro-runtime": "~58.0.14",
     "@expo/vector-icons": "^15.0.2",
-    "expo": "~57.0.27",
-    "expo-constants": "~57.0.21",
+    "expo": "~58.0.16",
+    "expo-constants": "~58.0.12",
 {% if has_attachment or has_bridge_attachment %}
-    "expo-document-picker": "~57.0.3",
+    "expo-document-picker": "~58.0.4",
 {% endif %}
-    "expo-font": "~57.0.4",
-    "expo-linking": "~57.0.12",
-    "expo-local-authentication": "~57.0.3",
-    "expo-router": "~57.0.25",
-    "expo-secure-store": "~57.0.4",
-    "expo-status-bar": "~57.0.1",
+    "expo-font": "~58.0.9",
+    "expo-linking": "~58.0.13",
+    "expo-local-authentication": "~58.0.2",
+    "expo-router": "~58.0.24",
+    "expo-secure-store": "~58.0.2",
+    "expo-status-bar": "~58.0.3",
 {% if has_payment %}
-    "expo-web-browser": "~57.0.3",
+    "expo-web-browser": "~58.0.6",
 {% endif %}
-    "react": "19.2.3",
-    "react-dom": "19.2.3",
-    "react-native": "0.86.3",
-    "react-native-safe-area-context": "~5.7.0",
-    "react-native-screens": "~4.26.0",
-    "react-native-web": "~0.21.0"
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "react-native": "0.88.0",
+    "react-native-safe-area-context": "~5.10.1",
+    "react-native-screens": "~4.30.0",
+    "react-native-web": "~0.21.4"
   },
   "devDependencies": {
     "@babel/core": "^7.24.0",
     "@playwright/test": "~1.63.0",
-    "@types/react": "~19.2.0",
+    "@types/react": "~19.3.0",
     "typescript": "~6.0.3"
   }
 }

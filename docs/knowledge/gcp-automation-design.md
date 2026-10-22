@@ -191,6 +191,8 @@ minimal Cloud Run Job that runs `npm run task:run-all`, independent of where
 the app itself is hosted. It has its own secrets file and does not use the
 `app-*` secrets above. See `docs/knowledge/scheduled-task-operations.md`
 ("Nightly trigger: Cloud Scheduler + a minimal Cloud Run Job").
+`bash scripts/gcp-task-runner-teardown.sh` removes exactly what that script
+created and never the project; see `docs/knowledge/gcp-task-runner-operations.md`.
 
 ### On Teardown
 

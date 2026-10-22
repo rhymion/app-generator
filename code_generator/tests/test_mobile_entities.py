@@ -584,7 +584,7 @@ def test_payment_form_opens_the_checkout_url_in_the_in_app_browser(out):
 
 
 def test_payment_dependency_and_helper_exist_only_with_a_payment_entity(out):
-    assert json.loads(_read(out, 'package.json'))['dependencies']['expo-web-browser'].startswith('~57.')
+    assert json.loads(_read(out, 'package.json'))['dependencies']['expo-web-browser'].startswith('~58.')
     view = _read(out, 'components/mobile_order/FormView.tsx')
     assert 'view-payment-returned' in view
     assert 'view-payment-returned' not in _read(out, 'components/mobile_note/FormView.tsx')
@@ -1001,7 +1001,7 @@ def test_multipart_upload_keeps_its_own_content_type(out):
 
 def test_attachment_dependency_and_helpers_exist_only_with_an_attachment_entity(out):
     deps = json.loads(_read(out, 'package.json'))['dependencies']
-    assert deps['expo-document-picker'].startswith('~57.')
+    assert deps['expo-document-picker'].startswith('~58.')
     assert 'attachment' not in _read(out, 'components/mobile_note/FormUpsert.tsx').lower()
     assert 'AttachmentValue' not in _read(out, 'components/mobile_note/FormView.tsx')
 

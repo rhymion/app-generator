@@ -246,8 +246,11 @@ name is, never by the shape of the entry (`type:` / `$ref:`) or by its target:
 
 Entries are written columns first, then relations; the order of the scalar entries is the column
 order of the generated form and list, so it is preserved exactly. The top-level `required:` list
-applies to the relation/array entries only, and keeps the meaning it had before the merge.
-Do not read it as the database nullability of a scalar column: that always comes from Prisma.
+applies to the relation/array entries only, on every entity (paired with a view-level key or standalone alike), and
+it is merged with the required list derived from Prisma, so `id` and every non-nullable column stay required. Naming a
+column or an unknown name in it is a build error. A column is required when Prisma makes it non-nullable without a
+default, or when its entry under `properties:` sets `_required: true` (the way to require a column that has a default or
+is nullable).
 
 The set of scalar entries is also the **source of truth for which scalar columns are exposed at
 all** — Prisma having a column does not mean it appears in the generated form/API unless it is

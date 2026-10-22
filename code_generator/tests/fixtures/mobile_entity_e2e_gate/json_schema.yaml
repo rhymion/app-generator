@@ -61,10 +61,6 @@ definitions:
         format: date-time
       remind_time:
         format: time
-    required:
-      - title
-      - status
-      - is_done
 
   mobile_log:
     x-generate:
@@ -82,8 +78,6 @@ definitions:
             primary: true
     properties:
       message: {}
-    required:
-      - message
 
   # x-entity-select: entity_name holds the name of one of the schema's entities; the native form draws
   # it as chips labelled with the entity titles and saves the entity name.
@@ -106,9 +100,6 @@ definitions:
       name: {}
       entity_name:
         x-entity-select: true
-    required:
-      - name
-      - entity_name
 
   mobile_group:
     x-generate:
@@ -126,8 +117,6 @@ definitions:
             primary: true
     properties:
       name: {}
-    required:
-      - name
 
   mobile_tag:
     x-generate:
@@ -145,8 +134,6 @@ definitions:
             primary: true
     properties:
       name: {}
-    required:
-      - name
 
   mobile_profile:
     x-generate:
@@ -164,8 +151,6 @@ definitions:
             primary: true
     properties:
       name: {}
-    required:
-      - name
 
   mobile_task:
     x-generate:
@@ -210,9 +195,6 @@ definitions:
         x-outputType: list
         items:
           $ref: "#/definitions/mobile_tag"
-    required:
-      - title
-      - mobile_group_id
 
   mobile_org_item:
     x-generate:
@@ -233,9 +215,6 @@ definitions:
       organization_id:
         x-relationship:
           labelField: name
-    required:
-      - name
-      - organization_id
 
   mobile_document:
     x-generate:
@@ -261,9 +240,6 @@ definitions:
         x-relationship:
           target: attachment
           type: direct
-    required:
-      - title
-      - contract_id
 
   # x-create-inline: mobile_ticket's category field offers "Create new", which opens
   # mobile_category's native create form over the ticket form. mobile_category declares no
@@ -284,8 +260,6 @@ definitions:
             primary: true
     properties:
       name: {}
-    required:
-      - name
 
   mobile_ticket:
     x-generate:
@@ -309,9 +283,6 @@ definitions:
           target: mobile_category
           labelField: name
         x-create-inline: true
-    required:
-      - title
-      - mobile_category_id
 
   # x-payment: creating a record answers with a hosted checkout URL, which the native form opens
   # in the in-app browser. The Price is the entity's own stripe_price_id (a column default).
@@ -333,8 +304,6 @@ definitions:
     properties:
       name: {}
       stripe_price_id: {}
-    required:
-      - name
 
   mobile_thread:
     x-generate:
@@ -359,8 +328,6 @@ definitions:
           labelField: id
       commentable:
         $ref: "#/definitions/commentable"
-    required:
-      - title
 
   # Approval: the detail screen shows the approval requests of the current round with approve / reject / withdraw.
   mobile_request:
@@ -399,6 +366,7 @@ definitions:
       title: {}
       status:
         enum: ["draft", "submitted", "approved", "rejected"]
+        _required: true
       approvable_id:
         x-relationship:
           type: one-to-one_bridge
@@ -406,10 +374,6 @@ definitions:
           labelField: id
       approvable:
         $ref: "#/definitions/approvable"
-    required:
-      - title
-      - status
-      - approvable_id
 
   # Split: the detail screen of an approval entity with x-splittable offers the split action. The
   # parts redistribute the quantity and each names a group.
@@ -455,6 +419,7 @@ definitions:
       quantity: {}
       status:
         enum: ["draft", "pending", "approved", "rejected", "split"]
+        _required: true
       mobile_group_id:
         x-relationship:
           labelField: name
@@ -465,12 +430,6 @@ definitions:
           labelField: id
       approvable:
         $ref: "#/definitions/approvable"
-    required:
-      - title
-      - quantity
-      - status
-      - mobile_group_id
-      - approvable_id
 
   # Reservation: the server allocates a room from the pool when a stay is created. A request with no free
   # room is refused with CAPACITY, and an allocated stay can no longer change its criteria
@@ -495,10 +454,6 @@ definitions:
       category: {}
       room_state:
         type: integer
-    required:
-      - room_no
-      - category
-      - room_state
 
   mobile_stay:
     x-generate:
@@ -533,9 +488,6 @@ definitions:
       mobile_room_id:
         x-relationship:
           labelField: room_no
-    required:
-      - guest_name
-      - category
 
   # A one-to-many child collection (the Web form's editable grid): drawn on mobile as a row editor.
   # The line carries a required integer, an enum with a default, an optional date, a decimal-free text and a
@@ -560,8 +512,6 @@ definitions:
         type: array
         items:
           $ref: "#/definitions/mobile_invoice_line"
-    required:
-      - invoice_no
 
   mobile_invoice_line:
     properties:
@@ -576,10 +526,6 @@ definitions:
       mobile_group_id:
         x-relationship:
           labelField: name
-    required:
-      - description
-      - quantity
-      - mobile_group_id
 
   # A self-referencing one-to-many list (`children`) over the nullable `parent_id`: the picker offers records
   # that have no parent yet or are already this record's children, and never the record itself.
@@ -609,7 +555,6 @@ definitions:
           $ref: "#/definitions/mobile_step"
         x-outputType: list
     required:
-      - name
       - children
 
   mobile_asset:
@@ -641,8 +586,6 @@ definitions:
           labelField: id
       attachable:
         $ref: "#/definitions/attachable"
-    required:
-      - title
 
   mobile_gadget:
     x-generate:
@@ -685,5 +628,3 @@ definitions:
         x-custom-component:
           target:
             - upsert
-    required:
-      - title
