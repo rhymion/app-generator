@@ -30,7 +30,7 @@ describe('API: split action', () => {
       split(record.id).its('status').should('eq', 200);
       statusOf(record.id).then((status) => expect(status).to.eq('split'));
       cy.request({ url: '/api/cr_split', headers: asKey() }).then((res) => {
-        const rows = (res.body.data ?? res.body) as { id: string; status: string }[];
+        const rows = res.body.rows as { id: string; status: string }[];
         expect(rows.filter((r) => r.status === 'pending')).to.have.length(2);
       });
     });
