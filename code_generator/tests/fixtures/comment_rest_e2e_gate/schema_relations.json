@@ -5,12 +5,18 @@
     "created_cr_assets cr_asset[] @relation(\"CrAssetCreator\")",
     "updated_cr_assets cr_asset[] @relation(\"CrAssetUpdater\")",
     "created_cr_splits cr_split[] @relation(\"CrSplitCreator\")",
-    "updated_cr_splits cr_split[] @relation(\"CrSplitUpdater\")"
+    "updated_cr_splits cr_split[] @relation(\"CrSplitUpdater\")",
+    "created_cr_split_creates cr_split_create[] @relation(\"CrSplitCreateCreator\")",
+    "updated_cr_split_creates cr_split_create[] @relation(\"CrSplitCreateUpdater\")",
+    "created_cr_split_reads cr_split_read[] @relation(\"CrSplitReadCreator\")",
+    "updated_cr_split_reads cr_split_read[] @relation(\"CrSplitReadUpdater\")"
   ],
   "organization": [
     "cr_tickets cr_ticket[]",
     "cr_assets cr_asset[]",
-    "cr_splits cr_split[]"
+    "cr_splits cr_split[]",
+    "cr_split_creates cr_split_create[]",
+    "cr_split_reads cr_split_read[]"
   ],
   "commentable": [
     "cr_ticket cr_ticket?"

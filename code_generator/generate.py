@@ -71,6 +71,7 @@ from generators import (
     reaction_type_ts,
     _build_approval_create_block_for_entity,
     _build_split_approval_inherit_block,
+    _seed_entity_grant_flags,
     _raw_def,
     resolve_approval_submit_on,
     seed_entities_context,
@@ -2438,8 +2439,19 @@ def generate(schema_path: str, output_dir: str) -> None:
             'is_self_only': _split_scope['is_self_only'],
         }
 
+        # Coarse permission for the split route, chosen once per entity from its
+        # own x-generate flags with the SAME formula the grant-all-permissions
+        # gate uses: update when edit is enabled, else create when new is
+        # enabled, else read. A permission the schema disabled can never be
+        # assigned, so requiring it would lock every caller out.
+        _split_grants = _seed_entity_grant_flags(_def_key, _splittable_defs, True)
+        _split_permission_op = next(
+            (op for op in ('update', 'create', 'read') if _split_grants[op]), 'read'
+        )
+
         _split_ctx = {
             'entity_name': _def_key,
+            'split_permission_op': _split_permission_op,
             'pascal_name': to_pascal_case(_def_key),
             'status_split_value': next((v for v in _split_status_enum if str(v).lower() == 'split'), 'split'),
             'status_rejected_value': next((v for v in _split_status_enum if str(v).lower() == 'rejected'), 'rejected'),

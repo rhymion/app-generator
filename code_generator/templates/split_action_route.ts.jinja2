@@ -33,10 +33,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const { id } = await params;
 
     // Splitting closes the parent and creates children, so it needs the same
-    // 'update' permission as any other state change of this entity. The coarse
-    // check runs before the record is read, so a caller with no access path
-    // learns nothing about whether the record exists.
-    const _basePerms = await requireApiPermission(userId, '{{ entity_name }}', 'update');
+    // permission as the strongest state change this entity's configuration
+    // allows: 'update' when editing is enabled, else 'create', else 'read'.
+    // The coarse check runs before the record is read, so a caller with no
+    // access path learns nothing about whether the record exists.
+    const _basePerms = await requireApiPermission(userId, '{{ entity_name }}', '{{ split_permission_op }}');
 
     let body: { parts?: SplitPart[] };
     try {
@@ -82,7 +83,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     // Record-level resolution (general / Creator / Assignee grants), as the
     // single-record PUT does.
     const _resolved = await resolvePermissions(_basePerms, parent as Record<string, unknown>, userId);
-    if (!_resolved.update) throw new ApiError(403, 'Access denied: {{ entity_name }}.update');
+    if (!_resolved.{{ split_permission_op }}) throw new ApiError(403, 'Access denied: {{ entity_name }}.{{ split_permission_op }}');
     {% endif %}
 
     // R6: only pending entities may be split

@@ -8,6 +8,7 @@ record). The Cypress G3.6/G3.7 cases cover the bulk routes end to end; these
 tests pin the rendered shape so a template edit cannot silently drop the
 checks, and keep the legitimate (unscoped / own-organization) shape intact.
 """
+import pytest
 import pathlib
 
 from jinja2 import Environment, FileSystemLoader
@@ -117,7 +118,7 @@ def _split_ctx(**overrides) -> dict:
         'inherited_fields': [], 'has_inventory_bridge': False,
         'split_reserves_inventory': False, 'per_part_required_mandatory': [],
         'should_filter_by_org': True, 'org_relationship_optional': False,
-        'is_self_only': False,
+        'is_self_only': False, 'split_permission_op': 'update',
     }
     ctx.update(overrides)
     return ctx
@@ -165,3 +166,13 @@ def test_split_route_for_a_self_only_entity_gates_on_ownership():
     out = _render_split(is_self_only=True)
     assert 'parent.creator_id !== userId' in out
     assert 'resolvePermissions(' not in out
+
+
+@pytest.mark.parametrize('op', ['update', 'create', 'read'])
+def test_split_route_uses_the_permission_chosen_for_the_entity(op):
+    out = _render_split(split_permission_op=op)
+    assert f"await requireApiPermission(userId, 'thing', '{op}')" in out
+    assert f"if (!_resolved.{op}) throw new ApiError(403, 'Access denied: thing.{op}')" in out
+    for other in {'update', 'create', 'read'} - {op}:
+        assert f"'thing', '{other}')" not in out
+        assert f'_resolved.{other}' not in out

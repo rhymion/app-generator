@@ -83,10 +83,14 @@ pick which inventory lot each split part draws from).
 
 `templates/split_action_route.ts.jinja2` generates `POST .../actions/split/route.ts`, shared by
 every `x-splittable` entity. The route
-requires the entity's `update` permission (checked before the record is read), looks the record up
+requires a coarse permission (checked before the record is read): `update` when the entity has edit
+enabled, `create` when it does not but has new enabled, and otherwise `read` (list or view), never a
+permission the entity's own `x-generate` configuration has disabled, because an entity with no
+standalone create/update surface has no other operation the standard grant mechanism can assign. It
+looks the record up
 within the caller's organizations when the entity is organization-scoped (a record outside them
 answers 404, like a missing one), and then resolves record-level permission (general / Creator /
-Assignee) exactly as the single-record `PUT` does; an `x-self-only` entity is gated on ownership. For an entity that also reserves inventory
+Assignee) for that same operation, as the single-record `PUT` does for `update`; an `x-self-only` entity is gated on ownership. For an entity that also reserves inventory
 (`has_inventory_bridge and split_reserves_inventory`, true for `purchase_per_item`), splitting:
 
 1. Releases the parent's reserved quantity (reads its `inventory_transaction` rows with

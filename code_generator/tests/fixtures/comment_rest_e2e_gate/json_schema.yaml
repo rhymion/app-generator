@@ -15,6 +15,10 @@
 #   cr_split    an `x-splittable` entity scoped by organization (no approval, no quantity: the API-only
 #               form), for POST /api/cr_split/{id}/actions/split: the update-permission check and the
 #               organization scoping of the split route.
+#   cr_split_create / cr_split_read
+#               the same shape with editing disabled (`edit: false`): the update permission can never
+#               be assigned there, so the split route asks for `create` (cr_split_create, `new: true`)
+#               or `read` (cr_split_read, `new: false` too).
 definitions:
   cr_ticket:
     x-generate:
@@ -82,6 +86,56 @@ definitions:
       view: true
       new: true
       edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: true
+    x-splittable: true
+    x-display:
+      table:
+        - title:
+            primary: true
+        - status: {}
+    properties:
+      title: {}
+      status:
+        enum: ["pending", "split", "rejected"]
+        _required: true
+      organization_id:
+        x-relationship:
+          labelField: name
+
+  cr_split_create:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: false
+      delete: true
+      invalidate: false
+      api: true
+      test: true
+    x-splittable: true
+    x-display:
+      table:
+        - title:
+            primary: true
+        - status: {}
+    properties:
+      title: {}
+      status:
+        enum: ["pending", "split", "rejected"]
+        _required: true
+      organization_id:
+        x-relationship:
+          labelField: name
+
+  cr_split_read:
+    x-generate:
+      list: true
+      view: true
+      new: false
+      edit: false
       delete: true
       invalidate: false
       api: true
