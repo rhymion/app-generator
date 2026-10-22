@@ -4,6 +4,8 @@ The format is based on Keep a Changelog (https://keepachangelog.com/),
 and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
+
+## [5.0.0] - 2026-10-22
 ### Added
 - **`scripts/gcp-task-runner-teardown.sh` deletes what `gcp-task-runner.sh` created.** It removes, by name and in order, the
   Cloud Scheduler job, the Cloud Run Job, the runtime service account's bucket bindings, the task-runner secrets, the two
