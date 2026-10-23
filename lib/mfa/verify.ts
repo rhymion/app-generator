@@ -19,7 +19,9 @@
  * the schema hasn't been migrated.
  */
 import prisma from '@/lib/prisma';
+import { getRateLimiter } from '@/lib/rate-limit';
 import { decryptSecret } from './crypto';
+import { MfaRateLimitedError } from './errors';
 import { verifyRecoveryCode } from './recovery';
 import { verifyTotp } from './totp';
 
@@ -39,8 +41,18 @@ function client(): MfaPrismaClient {
   return prisma as unknown as MfaPrismaClient;
 }
 
-/** True iff `code` is a currently-valid TOTP or an unused recovery code for `userId`. */
+/**
+ * True iff `code` is a currently-valid TOTP or an unused recovery code for `userId`.
+ *
+ * Every call spends one attempt from the `auth:mfa:challenge` bucket (keyed by
+ * user id), so every caller — web sign-in, the challenge action, the mobile
+ * token route, enrollment — shares one budget. Throws `MfaRateLimitedError`
+ * once it is spent, before any guess is evaluated.
+ */
 export async function verifyMfaCode(userId: string, code: string): Promise<boolean> {
+  const decision = await getRateLimiter().check('auth:mfa:challenge', userId);
+  if (!decision.allowed) throw new MfaRateLimitedError(decision.retryAfterSeconds);
+
   const user = await client().user.findUnique({
     where: { id: userId },
     select: { id: true, mfa_secret: true, mfa_enabled: true },

@@ -3,6 +3,15 @@ All notable changes to this project will be documented in this file.
 The format is based on Keep a Changelog (https://keepachangelog.com/),
 and this project adheres to Semantic Versioning (https://semver.org/).
 
+## [Unreleased]
+### Security
+- **Rate limits.** `POST /api/auth/register` is limited to 5 requests per IP per 10 minutes (`auth:register`). The MFA attempt budget (`auth:mfa:challenge`, 10 per user per 5 minutes) is now enforced inside `verifyMfaCode`, so the mobile token route (`POST /api/mobile/auth/token`) shares it with web sign-in; the web limit itself is unchanged. `authenticateApiKey` spends a new `auth:apikey` bucket (10 lookups per key per minute, keyed by a hash of the key) for uncached keys. A spent budget answers `429` with `Retry-After`.
+- **Upload content check.** `POST /api/upload` (Vercel Blob and GCS variants) rejects a file whose leading bytes do not fit its declared type.
+- **Env file permissions.** The deploy scripts set `.env.production.local` to mode `0600`.
+
+### Fixed
+- `npm run check:generated` now scans the scheduled-task service files and `lib/audit-log-ops/jobs.ts`, which it previously skipped.
+
 ## [5.0.2] - 2026-10-23
 ### Changed
 - Simplify descriptions in changelog and readme

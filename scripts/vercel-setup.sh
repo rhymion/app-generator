@@ -30,6 +30,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/vercel-env.sh"
+
+# The file holds secrets; keep it readable by the owner only.
+chmod 600 "${_ENV_FILE}"
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/vercel-region.sh"
 

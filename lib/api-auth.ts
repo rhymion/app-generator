@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { createHash } from 'node:crypto';
 import prisma from '@/lib/prisma';
+import { getRateLimiter } from '@/lib/rate-limit';
 import { requirePermission, getSessionUserId, type RichPermissions, type Operation, type ItemContext } from '@/lib/authz';
 import { TtlLruCache } from '@/lib/_ttl_lru';
 import { AppError, type ErrorCode } from '@/lib/_errors';
@@ -11,6 +13,7 @@ export class ApiError extends Error {
   constructor(
     public statusCode: number,
     message: string,
+    public retryAfterSeconds?: number,
   ) {
     super(message);
     this.name = 'ApiError';
@@ -76,6 +79,16 @@ export async function authenticateApiKey(request: NextRequest): Promise<{ userId
       }
       return { userId: cached.userId };
     }
+  }
+
+  // Uncached lookups spend an `auth:apikey` attempt, keyed by a hash of the
+  // presented key so the raw secret is never held as a limiter key.
+  const decision = await getRateLimiter().check(
+    'auth:apikey',
+    createHash('sha256').update(apiKey).digest('hex'),
+  );
+  if (!decision.allowed) {
+    throw new ApiError(429, 'Too many API key attempts.', decision.retryAfterSeconds);
   }
 
   const user = await prisma.user.findFirst({
@@ -252,7 +265,15 @@ const APP_ERROR_STATUS_MAP: Record<ErrorCode, number> = {
 
 export function handleApiError(error: unknown): NextResponse {
   if (error instanceof ApiError) {
-    return NextResponse.json({ error: error.message }, { status: error.statusCode });
+    return NextResponse.json(
+      { error: error.message },
+      {
+        status: error.statusCode,
+        ...(error.retryAfterSeconds !== undefined
+          ? { headers: { 'Retry-After': String(error.retryAfterSeconds) } }
+          : {}),
+      },
+    );
   }
   if (error instanceof AppError) {
     return NextResponse.json(

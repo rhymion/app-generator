@@ -104,6 +104,15 @@ const PRODUCTION_BUCKETS: Record<string, RateLimitBucketConfig> = {
   // probing many accounts from one IP does not burn a single shared counter,
   // and one account probed from many IPs is still caught.
   'mobile:auth:token':       { limit: 5, windowMs: 15 * 60_000 },
+  // 5 registration requests per IP per 10 minutes. Self-registration has a
+  // much lower legitimate per-IP burst than repeated sign-in, so the ceiling
+  // is tighter than `auth:signin:credentials` while still letting a
+  // household create a few real accounts in one sitting.
+  'auth:register':           { limit: 5, windowMs: 10 * 60_000 },
+  // 10 API-key lookups per presented key per minute, keyed by a hash of the
+  // key (never the raw secret). Checked only when the key is not already in
+  // the per-process lookup cache, so established keys are unaffected.
+  'auth:apikey':             { limit: 10, windowMs: 60_000 },
 };
 
 // The Cypress UI suite intentionally logs in fresh for every `it()` (each

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { Storage } from '@google-cloud/storage';
 import { requireCaller, ApiError } from '@/lib/api-auth';
+import { uploadContentMatchesDeclaredType } from '@/lib/upload-content-check';
 
 const storage = new Storage();
 const bucketName = process.env.GCS_BUCKET_NAME!;
@@ -46,6 +47,11 @@ export async function POST(request: NextRequest) {
     ];
     if (!validTypes.includes(file.type)) {
       return NextResponse.json({ error: 'Invalid file type.' }, { status: 400 });
+    }
+
+    // The declared type is only a claim: the leading bytes must fit it.
+    if (!(await uploadContentMatchesDeclaredType(file))) {
+      return NextResponse.json({ error: 'File content does not match its declared type.' }, { status: 400 });
     }
 
     const maxSize = Number(process.env.UPLOAD_MAX_BYTES ?? String(10 * 1024 * 1024)); // 10MB
