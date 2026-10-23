@@ -225,6 +225,8 @@ lib/dashboard/use_entity_approval_actions.ts
 !lib/approval_request/actions.test.ts
 !lib/approval_request/actions_core.ts
 !lib/approval_request/order-check.ts
+!lib/approval_request/org-check.ts
+!lib/approval_request/org-check.test.ts
 !lib/approval_request/submit_predicate.ts
 !lib/approval_request/submit_predicate.test.ts
 !lib/setting/password-actions.ts
@@ -370,6 +372,8 @@ cypress/e2e/api/*.cy.ts
 !cypress/e2e/api/write_once_side_effect_roundtrip_probe.cy.ts
 !cypress/e2e/api/update_omitted_relation_unchanged.cy.ts
 !cypress/e2e/api/direct_attachment_rest.cy.ts
+!cypress/e2e/api/upload_path_safety.cy.ts
+!cypress/e2e/api/user_invalidate_record_scope.cy.ts
 
 # ── cypress/support/ ──
 cypress/support/*/

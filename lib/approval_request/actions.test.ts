@@ -90,7 +90,15 @@ vi.mock('@/lib/approval_request/order-check', async (importOriginal) => ({
   assertApprovalOrder: vi.fn().mockResolvedValue(undefined),
 }));
 
+// The organization rule itself is covered by org-check.test.ts and
+// test/flows/approval_org_scope.test.ts (real DB); here it is a controllable
+// collaborator so the action-level wiring can be asserted.
+vi.mock('@/lib/approval_request/org-check', () => ({
+  isApproverInTargetOrganization: vi.fn().mockResolvedValue(true),
+}));
+
 import { getSessionUserIdOrThrow, getUserRoleIds } from '@/lib/authz';
+import { isApproverInTargetOrganization } from '@/lib/approval_request/org-check';
 import { notify } from '@/lib/_notifier';
 import { assertApprovalOrder } from '@/lib/approval_request/order-check';
 import { createApprovalActions } from './actions_core';
@@ -102,6 +110,7 @@ const resolveApprovableTarget = vi.fn();
 // Every fixture below uses entity_name === model (parent == model), so the
 // default identity mapping keeps existing assertions unchanged.
 const resolveApprovableModel = vi.fn((name: string): string | null => name);
+const resolveApprovableOrganization = vi.fn();
 const dispatchOnApproved = vi.fn();
 const dispatchOnRejected = vi.fn();
 const isTerminalReject = vi.fn(() => false);
@@ -125,6 +134,7 @@ const {
 } = createApprovalActions({
   resolveApprovableTarget,
   resolveApprovableModel,
+  resolveApprovableOrganization,
   dispatchOnApproved,
   dispatchOnRejected,
   isTerminalReject,
@@ -168,6 +178,7 @@ beforeEach(() => {
   transactionMock.mockReset().mockImplementation(async (cb) => cb(fakeTx));
   vi.mocked(getSessionUserIdOrThrow).mockReset().mockResolvedValue('user-1');
   vi.mocked(getUserRoleIds).mockReset().mockResolvedValue(['approver-role']);
+  vi.mocked(isApproverInTargetOrganization).mockReset().mockResolvedValue(true);
   // Default: no follow-on flows for the just-approved flow, so existing
   // tests that don't care about cmd_541's order-reached notification see no
   // behavior change (findNewlyActionableFollowFlowIds() short-circuits on
@@ -589,12 +600,42 @@ describe('assertApprovalOrder gate (cmd_540)', () => {
   });
 });
 
+// Approve/reject require the approver role AND membership in the target
+// record's organization. The Server Action path must refuse before any write,
+// same as the REST routes (test/flows/approval_org_scope.test.ts).
+describe('target organization gate on approve/reject', () => {
+  const stubApproverRoleLookup = () => {
+    findUnique.mockResolvedValue({ approval_flow: { approver_role_id: 'approver-role' } });
+  };
+
+  it.each([
+    ['approveApprovalRequest', approveApprovalRequest],
+    ['rejectApprovalRequest', rejectApprovalRequest],
+  ])('%s refuses an approver outside the target organization, before any write', async (_name, action) => {
+    stubApproverRoleLookup();
+    vi.mocked(isApproverInTargetOrganization).mockResolvedValue(false);
+
+    await expect(action('req-1')).rejects.toThrow('Approval request not found');
+    expect(isApproverInTargetOrganization).toHaveBeenCalledWith('user-1', 'req-1', resolveApprovableOrganization);
+    expect(transactionMock).not.toHaveBeenCalled();
+    expect(arUpdate).not.toHaveBeenCalled();
+  });
+
+  it('still reports the role failure first for a user without the approver role', async () => {
+    stubApproverRoleLookup();
+    vi.mocked(getUserRoleIds).mockResolvedValue(['some-other-role']);
+
+    await expect(approveApprovalRequest('req-1')).rejects.toThrow('not a member of the approver role');
+    expect(isApproverInTargetOrganization).not.toHaveBeenCalled();
+  });
+});
+
 // cmd_818 (E6): resubmitApprovalRequest is retired along with its
 // dedicated status-flip mechanism (see the D1 comment above).
 describe('resubmitApprovalRequest removal (cmd_818 E6)', () => {
   it('is not present on the actions object createApprovalActions returns', () => {
     const actions = createApprovalActions({
-      resolveApprovableTarget, resolveApprovableModel, dispatchOnApproved, dispatchOnRejected, isTerminalReject,
+      resolveApprovableTarget, resolveApprovableModel, resolveApprovableOrganization, dispatchOnApproved, dispatchOnRejected, isTerminalReject,
       hasOnWithdrawn, dispatchOnWithdrawn, dispatchBeforeApprove, dispatchBeforeReject, dispatchBeforeWithdraw,
     });
     expect('resubmitApprovalRequest' in actions).toBe(false);

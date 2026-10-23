@@ -27,6 +27,10 @@ const getSessionUserIdOrThrow = vi.fn();
 const getUserRoleIds = vi.fn();
 vi.mock('@/lib/authz', () => ({ getSessionUserIdOrThrow, getUserRoleIds }));
 
+// These tests use synthetic approvable ids with no backing record; organization
+// scoping of approve/reject is covered by approval_org_scope.test.ts.
+vi.mock('@/lib/approval_request/org-check', () => ({ isApproverInTargetOrganization: async () => true }));
+
 // A withdrawable entity the test supplies itself. withdrawApprovalRequest
 // refuses an entity that does not declare x-approval.on_withdrawn, and which
 // entities declare it depends on the consumer's schema. Rather than borrow an

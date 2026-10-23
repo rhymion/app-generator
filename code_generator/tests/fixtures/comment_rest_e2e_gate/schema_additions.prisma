@@ -39,3 +39,75 @@ model cr_asset {
   @@index([creator_id])
   @@index([updater_id])
 }
+
+enum CrSplitStatus {
+  pending
+  split
+  rejected
+}
+
+model cr_split {
+  id              String        @id @default(cuid())
+  title           String
+  status          CrSplitStatus @default(pending)
+  organization_id String
+  organization    organization  @relation(fields: [organization_id], references: [id])
+  created_at      DateTime      @default(now()) @db.Timestamptz(0)
+  updated_at      DateTime      @updatedAt @db.Timestamptz(0)
+  creator_id      String
+  creator         user          @relation("CrSplitCreator", fields: [creator_id], references: [id])
+  updater_id      String
+  updater         user          @relation("CrSplitUpdater", fields: [updater_id], references: [id])
+  @@index([title])
+  @@index([organization_id])
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
+enum CrSplitCreateStatus {
+  pending
+  split
+  rejected
+}
+
+model cr_split_create {
+  id              String        @id @default(cuid())
+  title           String
+  status          CrSplitCreateStatus @default(pending)
+  organization_id String
+  organization    organization  @relation(fields: [organization_id], references: [id])
+  created_at      DateTime      @default(now()) @db.Timestamptz(0)
+  updated_at      DateTime      @updatedAt @db.Timestamptz(0)
+  creator_id      String
+  creator         user          @relation("CrSplitCreateCreator", fields: [creator_id], references: [id])
+  updater_id      String
+  updater         user          @relation("CrSplitCreateUpdater", fields: [updater_id], references: [id])
+  @@index([title])
+  @@index([organization_id])
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
+enum CrSplitReadStatus {
+  pending
+  split
+  rejected
+}
+
+model cr_split_read {
+  id              String        @id @default(cuid())
+  title           String
+  status          CrSplitReadStatus @default(pending)
+  organization_id String
+  organization    organization  @relation(fields: [organization_id], references: [id])
+  created_at      DateTime      @default(now()) @db.Timestamptz(0)
+  updated_at      DateTime      @updatedAt @db.Timestamptz(0)
+  creator_id      String
+  creator         user          @relation("CrSplitReadCreator", fields: [creator_id], references: [id])
+  updater_id      String
+  updater         user          @relation("CrSplitReadUpdater", fields: [updater_id], references: [id])
+  @@index([title])
+  @@index([organization_id])
+  @@index([creator_id])
+  @@index([updater_id])
+}

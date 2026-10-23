@@ -851,6 +851,49 @@ describe('API: {{ title }}', () => {
       });
     });
 {% endif %}
+
+    // The bulk route answers per item (207), so a record of a foreign
+    // organization must come back as a failed "Not found" item, exactly like a
+    // missing id, and must not be written.
+    it('G3.6 bulk PUT on entity in foreign org reports Not found and does not write', () => {
+      cy.task<any>('db:populate{{ pascal }}', 1).then((records) => {
+        cy.task<any>('db:createCrossOrgScenario', { entityName: '{{ parent }}', entityId: records[0].id }).then((scenario) => {
+          cy.request({
+            method: 'PUT',
+            url: `${API_BASE}/bulk`,
+            headers: { 'X-API-Key': TEST_API_KEY },
+            body: [{ id: scenario.entityInOrgB.id }],
+            failOnStatusCode: false,
+          }).then((res) => {
+            expect(res.status).to.eq(207);
+            expect(res.body.summary.succeeded).to.eq(0);
+            expect(res.body.results[0].success).to.eq(false);
+            expect(res.body.results[0].error).to.match(/^Not found/);
+          });
+        });
+      });
+    });
+{% endif %}
+{% if can_delete %}
+
+    it('G3.7 bulk DELETE on entity in foreign org reports Not found and does not delete', () => {
+      cy.task<any>('db:populate{{ pascal }}', 1).then((records) => {
+        cy.task<any>('db:createCrossOrgScenario', { entityName: '{{ parent }}', entityId: records[0].id }).then((scenario) => {
+          cy.request({
+            method: 'DELETE',
+            url: `${API_BASE}/bulk`,
+            headers: { 'X-API-Key': TEST_API_KEY },
+            body: [{ id: scenario.entityInOrgB.id }],
+            failOnStatusCode: false,
+          }).then((res) => {
+            expect(res.status).to.eq(207);
+            expect(res.body.summary.succeeded).to.eq(0);
+            expect(res.body.results[0].success).to.eq(false);
+            expect(res.body.results[0].error).to.match(/^Not found/);
+          });
+        });
+      });
+    });
 {% endif %}
 
     // The relation picker route runs the same org-scoped search the web
