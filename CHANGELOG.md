@@ -4,6 +4,8 @@ The format is based on Keep a Changelog (https://keepachangelog.com/),
 and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
+### Fixed
+- **`VersionHistory` messages generated for every `x-version-of` identity** (Issue #1088). The `VersionHistory` section of `messages/*.json` was skipped when the identity declared its own `x-custom-components`, so the version screens failed with `MISSING_MESSAGE: VersionHistory`.
 ### Security
 - **Consumer `ci.yml` actions pinned to commit SHAs** (Issue #1099). `docs/consumer-commands/ci.yml` references each GitHub Action by full commit SHA with a version comment instead of a mutable tag. Each consumer's next submodule pointer bump must also copy the updated file into its `.github/workflows/ci.yml`, or its `Verify ci.yml` job fails.
 
