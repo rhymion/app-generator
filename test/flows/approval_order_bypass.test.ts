@@ -37,6 +37,10 @@ const getSessionUserIdOrThrow = vi.fn();
 const getUserRoleIds = vi.fn();
 vi.mock('@/lib/authz', () => ({ getSessionUserIdOrThrow, getUserRoleIds }));
 
+// These tests use synthetic approvable ids with no backing record; organization
+// scoping of approve/reject is covered by approval_org_scope.test.ts.
+vi.mock('@/lib/approval_request/org-check', () => ({ isApproverInTargetOrganization: async () => true }));
+
 const { default: prisma } = await import('@/lib/prisma');
 const { approveApprovalRequest, rejectApprovalRequest } = await import('@/lib/approval_request/actions');
 

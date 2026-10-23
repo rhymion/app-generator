@@ -5,6 +5,14 @@ import { requireCaller, ApiError } from '@/lib/api-auth';
 const storage = new Storage();
 const bucketName = process.env.GCS_BUCKET_NAME!;
 
+// The multipart filename is client-controlled: keep only its last path
+// segment (either separator style) and drop control characters, so it can be
+// shown in the URL but can never act as a path.
+function toStoredFilename(raw: string): string {
+  const base = (raw.split(/[\\/]/).pop() ?? '').replace(/[\u0000-\u001f\u007f]/g, '').trim();
+  return base === '' || base === '.' || base === '..' ? 'file' : base;
+}
+
 export async function POST(request: NextRequest) {
   try {
     // Any authenticated caller: the browser session, or a mobile access token / API key.
@@ -48,7 +56,7 @@ export async function POST(request: NextRequest) {
     const timestamp = Date.now();
     const randomString = Math.random().toString(36).substring(2, 15);
     const uniqueDir = `${timestamp}-${randomString}`;
-    const originalFilename = file.name;
+    const originalFilename = toStoredFilename(file.name);
     const gcsPath = `${uniqueDir}/${originalFilename}`;
 
     const bytes = await file.arrayBuffer();

@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireCaller, handleApiError, ApiError } from '@/lib/api-auth';
+import { requireCaller, requireApiPermission, handleApiError, ApiError } from '@/lib/api-auth';
+import { resolvePermissions } from '@/lib/authz';
 import prisma from '@/lib/prisma';
+{% if should_filter_by_org %}
+import { getAssociatedOrganizations } from '@/lib/organization/getters_associated';
+{% endif %}
 {% if has_approvable %}
 import { notifyApprovalRequestCreated } from '@/lib/_notifyApprovalRequest';
 import { createId } from '@paralleldrive/cuid2';
@@ -26,10 +30,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     // X-API-Key / Authorization (API key or mobile access token) when present,
     // session cookie otherwise (see app/api/search/route.ts).
     const { userId } = await requireCaller(req);
-    {% if not has_approvable %}
-    void userId;
-    {% endif %}
     const { id } = await params;
+
+    // Splitting closes the parent and creates children, so it needs the same
+    // permission as the strongest state change this entity's configuration
+    // allows: 'update' when editing is enabled, else 'create', else 'read'.
+    // The coarse check runs before the record is read, so a caller with no
+    // access path learns nothing about whether the record exists.
+    const _basePerms = await requireApiPermission(userId, '{{ entity_name }}', '{{ split_permission_op }}');
 
     let body: { parts?: SplitPart[] };
     try {
@@ -42,8 +50,20 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       throw new ApiError(400, 'parts must be an array with at least 2 items');
     }
 
-    const parent = await prisma.{{ entity_name }}.findUnique({
-      where: { id },
+    {% if should_filter_by_org %}
+    // Organization scoping, as the single-record routes do: a record outside
+    // the caller's organizations is reported exactly like a missing one.
+    const _assocOrgIds = (await getAssociatedOrganizations(userId)).map((o) => o.id);
+    {% endif %}
+    const parent = await prisma.{{ entity_name }}.findFirst({
+      where: {
+        id,
+        {% if should_filter_by_org and org_relationship_optional %}
+        OR: [{ organization_id: { in: _assocOrgIds } }, { organization_id: null }],
+        {% elif should_filter_by_org %}
+        organization_id: { in: _assocOrgIds },
+        {% endif %}
+      },
       {% if has_approvable %}
       // cmd_439 F1: approval_requests included so split children can inherit
       // the parent's flow IDs (Option A — see _parentARFlowIds below).
@@ -56,6 +76,15 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       {% endif %}
     });
     if (!parent) throw new ApiError(404, 'Not found');
+    {% if is_self_only %}
+    // x-self-only: ownership is the sole gate, no permission override.
+    if (parent.creator_id !== userId) throw new ApiError(404, 'Not found');
+    {% else %}
+    // Record-level resolution (general / Creator / Assignee grants), as the
+    // single-record PUT does.
+    const _resolved = await resolvePermissions(_basePerms, parent as Record<string, unknown>, userId);
+    if (!_resolved.{{ split_permission_op }}) throw new ApiError(403, 'Access denied: {{ entity_name }}.{{ split_permission_op }}');
+    {% endif %}
 
     // R6: only pending entities may be split
     if (parent.status === SPLIT_STATUS || parent.status === REJECTED_STATUS) {

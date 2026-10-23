@@ -5,6 +5,7 @@ import { notifyApprovalOrderReached } from '@/lib/_notifyApprovalRequest';
 import { findNewlyActionableFollowFlowIds } from '@/lib/approval_request/order-check';
 import { revalidatePath } from 'next/cache';
 import { assertApprovalOrder } from '@/lib/approval_request/order-check';
+import { isApproverInTargetOrganization, type ResolveApprovableOrganization } from '@/lib/approval_request/org-check';
 
 // approval_history.pre_status/post_status are separate legacy Int columns
 // (ordinal snapshot, out of Class A Batch A1 scope) — this maps the
@@ -40,6 +41,9 @@ export type ApprovalActionDeps = {
   // translation step first. resolveApprovableModel(entityName) returns the
   // Prisma model that entityName's view resolves to.
   resolveApprovableModel: (entityName: string) => string | null;
+  // Organization of the approvable's target row, so approve/reject can refuse
+  // an approver outside that organization (see org-check.ts).
+  resolveApprovableOrganization: ResolveApprovableOrganization;
   dispatchOnApproved: (
     tx: TransactionClient,
     modelName: string,
@@ -98,6 +102,9 @@ export function createApprovalActions(deps: ApprovalActionDeps) {
     const roleIds = await getUserRoleIds(userId);
     if (!roleIds.includes(req.approval_flow.approver_role_id)) {
       throw new Error('Access denied: not a member of the approver role');
+    }
+    if (!(await isApproverInTargetOrganization(userId, id, deps.resolveApprovableOrganization))) {
+      throw new Error('Approval request not found');
     }
   }
 

@@ -3,7 +3,7 @@
 import { dispatchOnApproved } from '@/lib/approval_request/on_approved_dispatch';
 import { isTerminalReject, dispatchOnRejected } from '@/lib/approval_request/on_rejected_dispatch';
 import { dispatchOnWithdrawn, hasOnWithdrawn } from '@/lib/approval_request/on_withdrawn_dispatch';
-import { resolveApprovableTarget, resolveApprovableModel } from '@/lib/approval_request/resolve_target';
+import { resolveApprovableTarget, resolveApprovableModel, resolveApprovableOrganization } from '@/lib/approval_request/resolve_target';
 import { createApprovalActions } from '@/lib/approval_request/actions_core';
 // cmd_923b: pre-action validation dispatchers -- see actions_core.ts's
 // ApprovalActionDeps doc for why these are injected the same way as the
@@ -21,6 +21,7 @@ import { dispatchBeforeWithdraw } from '@/lib/approval_request/on_before_withdra
 const approvalActions = createApprovalActions({
   resolveApprovableTarget,
   resolveApprovableModel,
+  resolveApprovableOrganization,
   dispatchOnApproved,
   dispatchOnRejected,
   isTerminalReject,

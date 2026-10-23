@@ -71,6 +71,7 @@ from generators import (
     reaction_type_ts,
     _build_approval_create_block_for_entity,
     _build_split_approval_inherit_block,
+    _seed_entity_grant_flags,
     _raw_def,
     resolve_approval_submit_on,
     seed_entities_context,
@@ -2424,8 +2425,33 @@ def generate(schema_path: str, output_dir: str) -> None:
             if _split_has_approvable else ''
         )
 
+        # Same read/write scope facts the entity's own routes use (organization
+        # isolation, x-self-only): the split route must not be a way around them.
+        _split_scope = dashboard_access_scopes.get(_def_key)
+        if _split_scope is None:
+            raise ValueError(
+                f"x-splittable for {_def_key!r}: no access scope was built for this entity "
+                f"(it was not generated); refusing to emit an unscoped split route"
+            )
+        _split_access_scope = {
+            'should_filter_by_org': _split_scope['should_filter_by_org'],
+            'org_relationship_optional': _split_scope['org_relationship_optional'],
+            'is_self_only': _split_scope['is_self_only'],
+        }
+
+        # Coarse permission for the split route, chosen once per entity from its
+        # own x-generate flags with the SAME formula the grant-all-permissions
+        # gate uses: update when edit is enabled, else create when new is
+        # enabled, else read. A permission the schema disabled can never be
+        # assigned, so requiring it would lock every caller out.
+        _split_grants = _seed_entity_grant_flags(_def_key, _splittable_defs, True)
+        _split_permission_op = next(
+            (op for op in ('update', 'create', 'read') if _split_grants[op]), 'read'
+        )
+
         _split_ctx = {
             'entity_name': _def_key,
+            'split_permission_op': _split_permission_op,
             'pascal_name': to_pascal_case(_def_key),
             'status_split_value': next((v for v in _split_status_enum if str(v).lower() == 'split'), 'split'),
             'status_rejected_value': next((v for v in _split_status_enum if str(v).lower() == 'rejected'), 'rejected'),
@@ -2442,6 +2468,7 @@ def generate(schema_path: str, output_dir: str) -> None:
             'split_reserves_inventory': _split_reserves_inventory,
             'split_item_field': _split_item_f,
             'per_part_required_mandatory': _per_part_req_mandatory,
+            **_split_access_scope,
             **_ledger_domain_vars,
         }
         _split_api_dir = out / 'app' / 'api' / _def_key / '[id]' / 'actions' / 'split'
@@ -2980,7 +3007,14 @@ def generate(schema_path: str, output_dir: str) -> None:
         )
         if not has_approvable_bridge:
             continue
-        approvable_bridge_entities.append({'parent': entity['parent'], 'model': entity['model']})
+        approvable_bridge_entities.append({
+            'parent': entity['parent'],
+            'model': entity['model'],
+            # Mirrors should_filter_by_org: an entity with an organization_id
+            # column is organization-scoped, so approve/reject must check the
+            # approver belongs to the target record's organization.
+            'org_scoped': 'organization_id' in props,
+        })
     # Always emitted (mirrors on_approved_dispatch.ts below) — actions.ts
     # imports this unconditionally, so it must exist even with zero entities.
     _write(

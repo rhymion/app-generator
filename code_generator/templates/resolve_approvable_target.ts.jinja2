@@ -30,6 +30,40 @@ export async function resolveApprovableTarget(
 }
 
 /**
+ * Organization of the row that owns a given approvable. Approve/reject use
+ * this to refuse an approver who does not belong to the target record's
+ * organization: holding the approver role alone is not enough.
+ *
+ * `scoped: false` means the entity has no organization_id column (not
+ * organization-scoped), or is not an approvable entity of this app at all
+ * (no record of it can carry an organization). Returns null when the entity
+ * is known but the row does not exist; callers must treat that as "not
+ * found" (fail closed).
+ */
+export type ApprovableOrganization =
+  | { scoped: false }
+  | { scoped: true; organizationId: string | null };
+
+export async function resolveApprovableOrganization(
+  {% if entities %}tx{% else %}_tx{% endif %}: Tx,
+  {% if entities %}entityType{% else %}_entityType{% endif %}: string,
+  {% if entities %}approvableId{% else %}_approvableId{% endif %}: string,
+): Promise<ApprovableOrganization | null> {
+{% for entity in entities %}
+  if (entityType === '{{ entity.parent }}') {
+{% if entity.org_scoped %}
+    const row = await tx.{{ entity.model }}.findFirst({ where: { approvable_id: approvableId }, select: { organization_id: true } });
+    return row ? { scoped: true, organizationId: row.organization_id } : null;
+{% else %}
+    const row = await tx.{{ entity.model }}.findFirst({ where: { approvable_id: approvableId }, select: { id: true } });
+    return row ? { scoped: false } : null;
+{% endif %}
+  }
+{% endfor %}
+  return { scoped: false };
+}
+
+/**
  * Resolve entityType (approval_flow.entity_name, a view key) to the Prisma
  * model backing it. cmd_818: on_approved_dispatch.ts/on_rejected_dispatch.ts
  * key their own per-entity blocks by MODEL (x-approval is a raw-entity-level

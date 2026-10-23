@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { authenticate, requireApiPermission, handleApiError } from '@/lib/api-auth';
 import { getRateLimiter } from '@/lib/rate-limit';
 {% if can_update or can_delete %}import prisma from '@/lib/prisma';
+{% endif %}{% if should_filter_by_org and (can_update or can_delete) %}import { getAssociatedOrganizations } from '@/lib/organization/getters_associated';
 {% endif %}{% if can_create %}
 import { add{{ parent_pascal }} } from '@/lib/{{ parent }}/service';
 {% endif %}
@@ -111,8 +112,19 @@ export async function PUT(request: NextRequest) {
 
     // Fetch all requested records in one query for existence checks
     const requestedIds = bulkItems.map((item) => item.id).filter(Boolean) as string[];
+{% if should_filter_by_org %}
+    // Organization scoping, as the single-record routes do: a record outside
+    // the actor's organizations is reported exactly like a missing one.
+    const _assocOrgIds = (await getAssociatedOrganizations(actorId)).map((o) => o.id);
+{% endif %}
     const existingRecords = await prisma.{{ model }}.findMany({
+{% if should_filter_by_org and org_relationship_optional %}
+      where: { id: { in: requestedIds }, OR: [{ organization_id: { in: _assocOrgIds } }, { organization_id: null }] },
+{% elif should_filter_by_org %}
+      where: { id: { in: requestedIds }, organization_id: { in: _assocOrgIds } },
+{% else %}
       where: { id: { in: requestedIds } },
+{% endif %}
 {% if readonly_fields_api %}
       select: { ...{{ item_context_select }}, ...{{ readonly_fields_api_select }} },
 {% else %}
@@ -207,8 +219,19 @@ export async function DELETE(request: NextRequest) {
 
     // Fetch all requested records in one query for existence checks
     const requestedIds = bulkItems.map((item) => item.id);
+{% if should_filter_by_org %}
+    // Organization scoping, as the single-record routes do: a record outside
+    // the actor's organizations is reported exactly like a missing one.
+    const _assocOrgIds = (await getAssociatedOrganizations(actorId)).map((o) => o.id);
+{% endif %}
     const existingRecords = await prisma.{{ model }}.findMany({
+{% if should_filter_by_org and org_relationship_optional %}
+      where: { id: { in: requestedIds }, OR: [{ organization_id: { in: _assocOrgIds } }, { organization_id: null }] },
+{% elif should_filter_by_org %}
+      where: { id: { in: requestedIds }, organization_id: { in: _assocOrgIds } },
+{% else %}
       where: { id: { in: requestedIds } },
+{% endif %}
       select: {{ item_context_select }},
     });
     const existingMap = new Map(existingRecords.map((r) => [r.id, r]));
