@@ -130,7 +130,7 @@ describe('authenticateApiKey', () => {
     } satisfies Partial<ApiError>);
   });
 
-  it('throttles repeated uncached lookups of one key at 10 per minute, with Retry-After', async () => {
+  it('answers 429 with Retry-After once one unknown key has failed 10 times in a minute', async () => {
     userFindFirst.mockResolvedValue(null);
     const request = makeRequest({ 'X-API-Key': 'mk_probe' });
     for (let i = 0; i < 10; i++) {
@@ -140,16 +140,22 @@ describe('authenticateApiKey', () => {
     const blocked = await authenticateApiKey(request).catch((e: unknown) => e);
 
     expect(blocked).toMatchObject({ statusCode: 429 });
-    expect(userFindFirst).toHaveBeenCalledTimes(10);
     expect(handleApiError(blocked).headers.get('Retry-After')).toMatch(/^[1-9]\d*$/);
+  });
+
+  it('never throttles a valid key, however often it is used', async () => {
+    userFindFirst.mockResolvedValue({ id: 'user-9', api_key_expires_at: null });
+    for (let i = 0; i < 30; i++) {
+      await expect(authenticateApiKey(makeRequest({ 'X-API-Key': 'mk_valid' }))).resolves.toEqual({ userId: 'user-9' });
+    }
   });
 
   it('keys the limiter by a hash of the presented key, never the raw key', async () => {
     const { getRateLimiter } = await import('./rate-limit');
     const check = vi.spyOn(getRateLimiter(), 'check');
-    userFindFirst.mockResolvedValue({ id: 'user-8', api_key_expires_at: null });
+    userFindFirst.mockResolvedValue(null);
 
-    await authenticateApiKey(makeRequest({ 'X-API-Key': 'mk_secret_value' }));
+    await authenticateApiKey(makeRequest({ 'X-API-Key': 'mk_secret_value' })).catch(() => undefined);
 
     expect(check).toHaveBeenCalledWith('auth:apikey', expect.stringMatching(/^[0-9a-f]{64}$/));
     expect(JSON.stringify(check.mock.calls)).not.toContain('mk_secret_value');

@@ -60,6 +60,24 @@ export function clearApiKeyCache(): void {
   apiKeyCache.clear();
 }
 
+/**
+ * Rejects a presented key that matches no user. Each rejection spends one
+ * attempt from the `auth:apikey` bucket, keyed by a hash of the presented key
+ * (never the raw secret), so a key that keeps failing is answered with 429
+ * instead of 401. Only failures are counted: a valid key is never throttled
+ * here, and `api:read` / `api:write` still bound authenticated traffic.
+ */
+async function rejectUnknownApiKey(apiKey: string): Promise<never> {
+  const decision = await getRateLimiter().check(
+    'auth:apikey',
+    createHash('sha256').update(apiKey).digest('hex'),
+  );
+  if (!decision.allowed) {
+    throw new ApiError(429, 'Too many API key attempts.', decision.retryAfterSeconds);
+  }
+  throw new ApiError(401, 'Invalid API key.');
+}
+
 export async function authenticateApiKey(request: NextRequest): Promise<{ userId: string }> {
   enterRequestScope();
   const apiKey =
@@ -73,22 +91,12 @@ export async function authenticateApiKey(request: NextRequest): Promise<{ userId
   if (apiKeyCacheEnabled) {
     const cached = apiKeyCache.get(apiKey);
     if (cached !== undefined) {
-      if (cached === null) throw new ApiError(401, 'Invalid API key.');
+      if (cached === null) return rejectUnknownApiKey(apiKey);
       if (cached.expiresAt && cached.expiresAt <= new Date()) {
         throw new ApiError(401, 'API key expired.');
       }
       return { userId: cached.userId };
     }
-  }
-
-  // Uncached lookups spend an `auth:apikey` attempt, keyed by a hash of the
-  // presented key so the raw secret is never held as a limiter key.
-  const decision = await getRateLimiter().check(
-    'auth:apikey',
-    createHash('sha256').update(apiKey).digest('hex'),
-  );
-  if (!decision.allowed) {
-    throw new ApiError(429, 'Too many API key attempts.', decision.retryAfterSeconds);
   }
 
   const user = await prisma.user.findFirst({
@@ -101,7 +109,7 @@ export async function authenticateApiKey(request: NextRequest): Promise<{ userId
   }
 
   if (!user) {
-    throw new ApiError(401, 'Invalid API key.');
+    return rejectUnknownApiKey(apiKey);
   }
 
   if (user.api_key_expires_at && user.api_key_expires_at <= new Date()) {

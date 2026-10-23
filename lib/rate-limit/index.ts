@@ -109,9 +109,9 @@ const PRODUCTION_BUCKETS: Record<string, RateLimitBucketConfig> = {
   // is tighter than `auth:signin:credentials` while still letting a
   // household create a few real accounts in one sitting.
   'auth:register':           { limit: 5, windowMs: 10 * 60_000 },
-  // 10 API-key lookups per presented key per minute, keyed by a hash of the
-  // key (never the raw secret). Checked only when the key is not already in
-  // the per-process lookup cache, so established keys are unaffected.
+  // 10 failed API-key lookups per presented key per minute, keyed by a hash
+  // of the key (never the raw secret). Only failures are counted, so a valid
+  // key is never throttled by this bucket.
   'auth:apikey':             { limit: 10, windowMs: 60_000 },
 };
 

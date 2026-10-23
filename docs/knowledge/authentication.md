@@ -308,10 +308,11 @@ credentials sign-in reports it as an invalid code.
 **Self-registration and API keys.** `POST /api/auth/register` is limited per
 client IP by the `auth:register` bucket (5 requests / 10 min) and answers
 `429` with `Retry-After` when it is spent. `authenticateApiKey`
-(`lib/api-auth.ts`) spends the `auth:apikey` bucket (10 lookups / min) for a
-key that is not in the per-process lookup cache; the limiter key is the
-SHA-256 of the presented key, never the key itself. A spent budget answers
-`429` with `Retry-After`.
+(`lib/api-auth.ts`) spends the `auth:apikey` bucket (10 failures / min) each
+time a presented key matches no user; the limiter key is the SHA-256 of the
+presented key, never the key itself. Only failures are counted, so a valid
+key is never throttled by this bucket. Once the budget for a key is spent the
+rejection is `429` with `Retry-After` instead of `401`.
 
 The same "Server Action outside the `/api/auth/*` matcher" shape exists
 in `lib/mfa/enrollment.ts`'s `completeEnrollment`/`disableMfa`/

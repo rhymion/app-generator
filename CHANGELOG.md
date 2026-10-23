@@ -5,7 +5,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 ### Security
-- **Rate limits.** `POST /api/auth/register` is limited to 5 requests per IP per 10 minutes (`auth:register`). The MFA attempt budget (`auth:mfa:challenge`, 10 per user per 5 minutes) is now enforced inside `verifyMfaCode`, so the mobile token route (`POST /api/mobile/auth/token`) shares it with web sign-in; the web limit itself is unchanged. `authenticateApiKey` spends a new `auth:apikey` bucket (10 lookups per key per minute, keyed by a hash of the key) for uncached keys. A spent budget answers `429` with `Retry-After`.
+- **Rate limits.** `POST /api/auth/register` is limited to 5 requests per IP per 10 minutes (`auth:register`). The MFA attempt budget (`auth:mfa:challenge`, 10 per user per 5 minutes) is now enforced inside `verifyMfaCode`, so the mobile token route (`POST /api/mobile/auth/token`) shares it with web sign-in; the web limit itself is unchanged. `authenticateApiKey` counts failed lookups in a new `auth:apikey` bucket (10 per presented key per minute, keyed by a hash of the key); valid keys are never throttled. A spent budget answers `429` with `Retry-After`.
 - **Env file permissions.** The deploy scripts set `.env.production.local` to mode `0600`.
 
 ### Fixed
