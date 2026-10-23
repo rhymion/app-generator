@@ -28,7 +28,8 @@ Five authorization and input-validation gaps in generated code are fixed. Three 
 - **REST routes for clients that cannot call Server Actions** (Issues #852, #885, #887, #931, #949). `GET /api/{entity}/options`
   (relation pickers), comment writes and `GET /api/mention/users`, `GET /api/scheduled-task-runs` with the rerun, resolve and skip
   actions, `PUT /api/<entity>/<id>/attachments` and `POST /api/attachment/direct`. They run the web actions as the authenticated
-  caller, so permission and organization checks are unchanged. See `docs/knowledge/relation-picker-rest-route.md`,
+  caller, so permission and organization checks are unchanged; reservation routes answer `{ error, code: 'CAPACITY' }` or
+  `RESERVATION_LOCKED` (HTTP 409). See `docs/knowledge/relation-picker-rest-route.md`,
   `docs/knowledge/comment-and-mention-rest-routes.md` and `docs/knowledge/scheduled-task-operations.md`.
 - **Mobile build and test tooling** (Issues #985, #987, #994). `npm run test:e2e:mobile:pw` runs the Playwright modes through
   `scripts/run_mobile_entity_playwright.sh` (gate step and `mobile-playwright` CI job; the bare invocation needs
@@ -39,7 +40,7 @@ Five authorization and input-validation gaps in generated code are fixed. Three 
   identity, keeps `current_version_id`, and keeps a terminally rejected version as a closed record. The identity gets a
   Version history section with a two-version diff and a **New version** button, a prefilled `/<version>/new` screen, and a
   tombstone (an identity with an approved version cannot be deleted; `x-generate.invalidate` needs `invalidated_at DateTime?`).
-  Covered by `test:version-of-e2e-gate` and its CI job. See `docs/knowledge/schema-yaml-configuration.md` section 7.8.
+  Generated test dependencies skip the optional FK that closes a required cycle. Covered by `test:version-of-e2e-gate` and its CI job. See `docs/knowledge/schema-yaml-configuration.md` section 7.8.
 - **`x-exclusive-parents`: a child owned by exactly one of several parents** (Issues #811, #814). Declared on the child, it hides
   the other parents' FK columns in the embedded DataGrid and rejects, on every write path, a save with no owner or more than one
   (`Errors.exclusiveParentsMissing`, `exclusiveParentsInvalid`). Generated tests write exactly one owner. See
@@ -77,8 +78,9 @@ Five authorization and input-validation gaps in generated code are fixed. Three 
   `x-cloud.provider` is. See `docs/knowledge/gcp-task-runner-operations.md` and `docs/knowledge/scheduled-task-operations.md`.
 - **Hand-written hooks for generated tests and validation** (Issues #817, #819). Every `test: true` entity gets a write-once
   `cypress/support/<entity>/helper_custom.ts` with `dependencyValues(key, defaults)` (kept at
-  `prj/cypress/support/<entity>/helper_custom.ts`), and an `AppError` takes `messageKey` and `messageArgs` so a hand-written rule
-  shows a translated message from the consumer's `ValidationMessages` namespace. See `docs/knowledge/code-generation-custom-extensions.md`.
+  `prj/cypress/support/<entity>/helper_custom.ts`), an `AppError` takes `messageKey` and `messageArgs` so a hand-written rule
+  shows a translated message from the consumer's `ValidationMessages` namespace, and `x-custom-component` (target `upsert`) also works on a
+  child array property. See `docs/knowledge/code-generation-custom-extensions.md`.
 - **`scripts/check-migrations-match-schema.sh`** (migration check). It runs `prisma migrate deploy` and `prisma migrate diff` against
   `prisma/schema.prisma` on an empty local scratch database and prints the missing SQL; run it when preparing a `develop` merge or
   a deployment. See `docs/knowledge/migration-schema-check.md`.
@@ -113,7 +115,7 @@ Five authorization and input-validation gaps in generated code are fixed. Three 
   daily digests into GCS or S3 write-once storage (opt-in `x-generator.audit-log-storage.enabled`), auth code no longer writes email
   addresses, and `anonymizeUser()` erases the person's related records and keeps the first erasure time. `x-pii` changes
   generated code only on `user`; `x-retention` and `x-gdpr-mode` do not affect generated files. Consumers add the SQL to their
-  migrations. See `docs/knowledge/audit-log-append-only.md`, `docs/knowledge/x-pii.md` and `docs/knowledge/x-gdpr-mode.md`.
+  migrations and re-run `audit_log_append_only.sql` and `audit_log_app_role.sql` on existing databases (the role can create partitions). See `docs/knowledge/audit-log-append-only.md`, `docs/knowledge/x-pii.md` and `docs/knowledge/x-gdpr-mode.md`.
 - **`x-payment` creates a provisional record that Stripe Checkout confirms or removes** (Issues #775, #776, #786, #788, #789).
   A `pending` row in the generated `payable` table (consumers write the migration) is marked `paid` by the webhook or by the
   success page, and removed when the session expires; the API answers `{ "record", "checkoutUrl" }`. The Stripe Price is a required
@@ -162,9 +164,10 @@ Five authorization and input-validation gaps in generated code are fixed. Three 
 - **One-to-many list children** (Issues #800-#802, #804, #805, #807). A child that already has a parent is no longer moved to
   another parent (the picker offers children without a parent, and the service rejects others), the second FK to the parent's
   model is kept in fetched data, a nullable date starts empty, and the form props of a shared target are kept.
-- **Generated code, specs and test helpers** (Issues #813, #835, #841, #842, #965, #1026, #1031, #1044, #1046, #997). Flattened
+- **Generated code, specs and test helpers** (Issues #578, #813, #835, #841, #842, #965, #1026, #1031, #1044, #1046, #997). Flattened
   one-to-one writes use `actorId`, `form_validation.ts` compiles and the API spec holds for an entity with no required field, delete
-  and numeric populate examples hold, the autocomplete search matches an integer label segment, and per-entity search and
+  and numeric populate examples hold, the autocomplete search matches an integer label segment, the Mobile Web card list hides delete controls when `x-generate.delete` is
+  `false` (Issue #578), the Cypress helpers `selectAutocomplete` and `getDataGridCell` handle long labels and wide grids, and per-entity search and
   resubmit examples are skipped or adjusted where the grant or a read-only field makes them invalid.
 - **Generator tooling** (Issues #618, #646, #786, #799, #582). `--prune-orphans` removes the pages, API routes and specs of a
   removed entity, `prj:sync` stops silently dropping generator-side Prisma models and fields, the nav group resolves non-schema
