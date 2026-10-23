@@ -5,7 +5,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [5.0.1] - 2026-10-23
 ### Security
-Five authorization and input-validation gaps in generated code are fixed. Three of them (bulk routes, uploads, approval) have been present since 1.0 and two (split, invalidate) since 3.0.0, all through 5.0.0; a fix release is pending.
+Five authorization and input-validation gaps in generated code are fixed. Three of them (bulk routes, uploads, approval) have been present since 1.0 and two (split, invalidate) since 3.0.0, all through 5.0.0.
 - **Bulk update and delete routes** now enforce organization scoping and the entity's record-level permission, as the single-record routes do.
 - **Split action routes** now enforce organization scoping and the entity's record-level permission, as the single-record routes do.
 - **The invalidate action** (`POST /api/{entity}/{id}/actions/invalidate` and the `invalidate<Entity>` Server Action) now resolves the `delete` permission against the record and restricts organization-scoped entities to the caller's organizations, matching `DELETE /api/{entity}/{id}`. A caller must hold the right grant; a record outside the caller's organizations returns 404.
