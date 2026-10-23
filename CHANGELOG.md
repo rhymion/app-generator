@@ -3,6 +3,10 @@ All notable changes to this project will be documented in this file.
 The format is based on Keep a Changelog (https://keepachangelog.com/),
 and this project adheres to Semantic Versioning (https://semver.org/).
 
+## [Unreleased]
+### Security
+- **Consumer `ci.yml` actions pinned to commit SHAs** (Issue #1099). `docs/consumer-commands/ci.yml` references each GitHub Action by full commit SHA with a version comment instead of a mutable tag. Each consumer's next submodule pointer bump must also copy the updated file into its `.github/workflows/ci.yml`, or its `Verify ci.yml` job fails.
+
 ## [5.0.2] - 2026-10-23
 ### Changed
 - Simplify descriptions in changelog and readme
