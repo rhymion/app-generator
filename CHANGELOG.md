@@ -5,6 +5,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 ### Security
+- **Consumer `ci.yml` actions pinned to commit SHAs** (Issue #1099). `docs/consumer-commands/ci.yml` references each GitHub Action by full commit SHA with a version comment instead of a mutable tag. Each consumer's next submodule pointer bump must also copy the updated file into its `.github/workflows/ci.yml`, or its `Verify ci.yml` job fails.
 - **Rate limits.** `POST /api/auth/register` is limited to 5 requests per IP per 10 minutes (`auth:register`). The MFA attempt budget (`auth:mfa:challenge`, 10 per user per 5 minutes) is now enforced inside `verifyMfaCode`, so the mobile token route (`POST /api/mobile/auth/token`) shares it with web sign-in; the web limit itself is unchanged. `authenticateApiKey` counts failed lookups in a new `auth:apikey` bucket (10 per presented key per minute, keyed by a hash of the key); valid keys are never throttled. A spent budget answers `429` with `Retry-After`.
 - **Env file permissions.** The deploy scripts set `.env.production.local` to mode `0600`.
 

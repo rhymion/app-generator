@@ -52,6 +52,25 @@ integration branch gets a completed run (Issue #882, Issue #605). A consumer's
 submodule commit it pins, so a consumer's copy must be updated in the same
 change as the pointer bump past a canonical edit.
 
+## Action pins
+
+Every `uses:` line in the canonical `ci.yml` references its action by a full
+40-character commit SHA followed by a `# vX.Y.Z` comment naming the release
+that SHA is, instead of a mutable `@vN` tag. A moved tag cannot change what a
+consumer's CI runs. `code_generator/tests/test_consumer_ci_action_pins.py`
+fails when any `uses:` line is not pinned or lacks the version comment.
+
+To update a pin, resolve the new tag to its commit with
+`gh api repos/<owner>/<action>/git/ref/tags/<tag>`; when the returned object
+type is `tag` (an annotated tag) dereference it with
+`gh api repos/<owner>/<action>/git/tags/<sha>` and use the commit it points
+at. Then copy the changed `ci.yml` into every consumer in the same change as
+the pointer bump (see "Concurrency").
+
+Dependabot's `github-actions` ecosystem only reads `.github/workflows/`, so it
+keeps this repo's own workflow current but does not see
+`docs/consumer-commands/ci.yml`. Canonical pins are refreshed by hand.
+
 ## Docs-only E2E skip
 
 Added a `detect-changes` job that classifies the diff by path and a
