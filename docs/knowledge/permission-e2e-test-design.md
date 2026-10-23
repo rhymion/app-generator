@@ -58,8 +58,13 @@ New `describe('Cross-organization isolation (G3)', ...)` block, gated on
   G3.2/G3.3's style.
 - **G3.2** — GET on a row in a foreign org returns 404, not 403 (existence hidden) (`{% if can_view %}`).
 - **G3.3** — PUT on a row in a foreign org returns 404 (`{% if can_edit %}`).
+- **G3.6** — bulk `PUT /bulk` naming a row in a foreign org answers 207 with that item failed as `Not found` and writes nothing (`{% if can_edit %}`).
+- **G3.7** — bulk `DELETE /bulk` naming a row in a foreign org answers 207 with that item failed as `Not found` and deletes nothing (`{% if can_delete %}`).
 
-All three use the default `TEST_API_KEY` (the main test user), who `db:createCrossOrgScenario`
+The bulk routes look their records up with the same organization scope as the single-record `PUT`/`DELETE`
+(`api_bulk_route.ts.jinja2`), so a foreign row is indistinguishable from a missing one.
+
+The G3 cases use the default `TEST_API_KEY` (the main test user), who `db:createCrossOrgScenario`
 enrolls in orgA only — so these tests exercise a *permitted, same-org-capable* actor reaching
 across an org boundary, not just an unauthenticated/unpermitted one.
 

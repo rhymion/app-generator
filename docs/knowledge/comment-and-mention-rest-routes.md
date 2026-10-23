@@ -130,7 +130,9 @@ includes `/api/mention/users` and the `MentionUserOption` schema when the search
   entity with a comment thread. Its Cypress spec covers authentication with an API key and a mobile
   access token, add, edit and delete, the mention notifications, `403` without `update` and for a
   non-author, `404` for a record or comment of another organization or record, message validation, and
-  the search's organization scope, the 20-user limit and the `permissionDenied` result. A test-only probe
+  the search's organization scope, the 20-user limit and the `permissionDenied` result. The fixture also holds an `x-splittable` entity scoped by organization (`cr_split`); `split_rest.cy.ts` covers
+  `POST /api/cr_split/{id}/actions/split`: `401` without credentials, `403` without `update`, `404` for a record of another
+  organization (and for a caller in no organization), and the permitted split. A test-only probe
   route (`probe_routes/action_probe_route.ts`, copied into the disposable app only) calls the Server Actions
   directly, without the REST pre-gates, to show that a caller without `update`, a non-author without
   `delete` and a caller outside the record's organization are refused by the actions themselves while a
