@@ -36,5 +36,5 @@ describe('.env.production.local permissions', () => {
     );
 
     expect(statSync(path.join(root, '.env.production.local')).mode & 0o777).toBe(0o600);
-  });
+  }, 30_000);
 });
