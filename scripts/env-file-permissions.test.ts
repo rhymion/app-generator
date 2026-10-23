@@ -32,7 +32,7 @@ describe('.env.production.local permissions', () => {
     spawnSync(
       'bash',
       ['-c', `SCRIPT_DIR="$PWD/scripts" PROJECT_ROOT="$PWD"; set -euo pipefail; source "scripts/${script}"`],
-      { cwd: root, env: { PATH: process.env.PATH, HOME: root } as NodeJS.ProcessEnv, input: '', encoding: 'utf8', timeout: 20_000 },
+      { cwd: root, env: { PATH: process.env.PATH, HOME: root } as unknown as NodeJS.ProcessEnv, input: '', encoding: 'utf8', timeout: 20_000 },
     );
 
     expect(statSync(path.join(root, '.env.production.local')).mode & 0o777).toBe(0o600);

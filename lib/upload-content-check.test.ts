@@ -3,6 +3,7 @@ import { contentMatchesDeclaredType, uploadContentMatchesDeclaredType } from './
 
 const enc = (s: string) => new TextEncoder().encode(s);
 const bytes = (...b: number[]) => Uint8Array.from(b);
+const asBlobPart = (b: Uint8Array) => b as unknown as BlobPart;
 const pad = (head: Uint8Array, total = 64) => {
   const out = new Uint8Array(total);
   out.set(head);
@@ -87,8 +88,8 @@ describe('contentMatchesDeclaredType', () => {
 
 describe('uploadContentMatchesDeclaredType', () => {
   it('reads the declared type and leading bytes from the File', async () => {
-    const png = new File([GENUINE['image/png']!], 'a.png', { type: 'image/png' });
-    const lying = new File([HTML], 'a.png', { type: 'image/png' });
+    const png = new File([asBlobPart(GENUINE['image/png']!)], 'a.png', { type: 'image/png' });
+    const lying = new File([asBlobPart(HTML)], 'a.png', { type: 'image/png' });
     expect(await uploadContentMatchesDeclaredType(png)).toBe(true);
     expect(await uploadContentMatchesDeclaredType(lying)).toBe(false);
   });
