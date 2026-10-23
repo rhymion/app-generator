@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { Storage } from '@google-cloud/storage';
 import { requireCaller, ApiError } from '@/lib/api-auth';
+import { checkUpload, loadUploadPolicy } from '@/lib/_upload_validation';
 
 const storage = new Storage();
 const bucketName = process.env.GCS_BUCKET_NAME!;
@@ -33,18 +34,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'No file uploaded' }, { status: 400 });
     }
 
-    const validTypes = [
-      'image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp',
-      'application/pdf',
-      'application/msword',
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      'application/vnd.ms-excel',
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      'text/csv',
-      'text/plain',
-      'application/zip',
-    ];
-    if (!validTypes.includes(file.type)) {
+    // The declared Content-Type and the file name's extension must both be on
+    // the allow-lists (UPLOAD_ALLOWED_MIME_TYPES / UPLOAD_ALLOWED_EXTENSIONS);
+    // the stored Content-Type is derived from the extension, not the request.
+    const uploadCheck = checkUpload(file, loadUploadPolicy());
+    if (!uploadCheck.ok) {
       return NextResponse.json({ error: 'Invalid file type.' }, { status: 400 });
     }
 
@@ -66,7 +60,7 @@ export async function POST(request: NextRequest) {
     const gcsFile = bucket.file(gcsPath);
     // UBLA: save without ACL; object remains private
     await gcsFile.save(buffer, {
-      metadata: { contentType: file.type },
+      metadata: { contentType: uploadCheck.contentType },
     });
 
     // Return internal proxy URL; /api/gcs route generates a fresh V4 signed URL per request
