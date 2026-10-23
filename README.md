@@ -4,7 +4,7 @@ Generate production-ready web applications from YAML schema definitions. Describ
 
 Built with [Next.js](https://nextjs.org/), [Prisma](https://www.prisma.io/), and [MUI](https://mui.com/).
 
-> **Upgrading from an earlier version?** See [docs/UPGRADE-3.0.md](docs/UPGRADE-3.0.md) for the 3.0 breaking changes and migration steps.
+> **Upgrading from an earlier version?** See [docs/UPGRADE-3.0.md](docs/UPGRADE-3.0.md) for the 3.0 breaking changes and migration steps. Breaking changes and migration steps of later releases are listed in [CHANGELOG.md](CHANGELOG.md).
 
 ---
 
@@ -63,7 +63,7 @@ Built with [Next.js](https://nextjs.org/), [Prisma](https://www.prisma.io/), and
 - **Cross-entity search** — `GET /api/search` with UNION ALL across searchable entities; facets, highlight, Japanese pg_bigm support; header search icon and full search page generated
 - **Approval event dispatch** — post-approval hooks (`x-approval.on_approved.set_fields`, `x-approval.on_approved.emit_hook`) with fire-once idempotency via `approvable.approved_at`; `x-approval-lines` generates matching pre-/post-create helpers that wire approval-line entities to inventory ledger operations
 - **Declarative write-locked values** (`x-write-locked-values`) — annotate an entity with `{field_name: [value, ...]}` to reject a plain create/update that writes one of those values directly (screen, REST API, Server Action, and CSV import all enforce it), while still rendering the value as a disabled — not hidden — form option; composes with `x-approval`'s own locked values as a union, so a field can be protected by either or both mechanisms at once, with no schema-authoring dependency between them; see [`docs/knowledge/x-write-locked-values-field-lockdown.md`](docs/knowledge/x-write-locked-values-field-lockdown.md)
-- **Versioned history** (`x-version-of`, opt-in) — declared on the version entity of an identity + `x-approval` version pair: the version number is assigned at approval (unique per identity), at most one open draft per identity, the identity's `current_version_id` follows each approval, a rejected or withdrawn draft is deleted with its child rows, a new version opens as a prefilled create screen (nothing is written until saved), and an identity with an approved version cannot be deleted; see [`docs/knowledge/schema-yaml-configuration.md`](docs/knowledge/schema-yaml-configuration.md) section 7.8
+- **Versioned history** (`x-version-of`, opt-in) — declared on the version entity of an identity + `x-approval` version pair: the version number is assigned at approval (unique per identity), at most one open draft per identity, the identity's `current_version_id` follows each approval, a terminally rejected version stays as a closed record that does not block the next one, a draft that is rejected without `terminal` or withdrawn stays open to be fixed and resubmitted, a new version opens as a prefilled create screen (nothing is written until saved), and an identity with an approved version cannot be deleted; see [`docs/knowledge/schema-yaml-configuration.md`](docs/knowledge/schema-yaml-configuration.md) section 7.8
 - **Terminal rejection** (`x-readonly-fields`) — annotate fields to lock them once an entity reaches a terminal rejected state; rejection fires a once-stub (`service_after_reject_stub.ts`) via `on_rejected_dispatch` for custom post-rejection logic (e.g. notifications, inventory adjustments)
 - **Stripe payments** (`x-payment`, opt-in) — declaring `x-payment: true` on an entity makes a new record provisional until Stripe Checkout confirms payment (created through the form or the REST API, confirmed or removed by the webhook), charged at a Stripe Price (`stripe_price_id`, on the entity or on a related entity) and a server-decided quantity, with promotion codes enabled; also generates write-once Stripe stubs and the `/payment/success` and `/payment/cancel` return pages, fail-closed on missing secrets; one-time purchases only — see [Payments](#payments-stripe-opt-in) below
 
@@ -90,7 +90,7 @@ Built with [Next.js](https://nextjs.org/), [Prisma](https://www.prisma.io/), and
 
 ### Audit & Compliance
 
-- **Audit log** — schema-agnostic, read-only viewer (`app/[locale]/audit_log/page.tsx`) over all generated entities' create/update/delete actions
+- **Audit log** — schema-agnostic, read-only viewer (`app/[locale]/audit_log/page.tsx`) over all generated entities' create/update/delete actions; the table is append-only, with chained daily digests for tamper detection (see [`docs/knowledge/audit-log-append-only.md`](docs/knowledge/audit-log-append-only.md))
 - **GDPR / data protection** — `x-pii` field classification (`direct`/`sensitive`/`indirect`), an `anonymizeUser()` erasure function, `x-gdpr-mode` data-subject-scope label (`internal`/`consumer`/`both`; schema-validated, no generated effect), AES-256-GCM at-rest attachment filename encryption, and `x-mention` user-mention parsing in comments
 - **Terms of Service / Privacy Policy** (`/[locale]/legal/terms`, `/[locale]/legal/privacy`) — Markdown template documents linked from the registration page; adding a document language is dropping a `content/legal/<doc>.<locale>.md` file, independent of the site's UI locale list (see `docs/knowledge/legal-documents.md`)
 
@@ -547,6 +547,7 @@ app-generator/
 │   ├── generated/            Auto-generated entity reference docs
 │   └── knowledge/            Hand-written architectural knowledge docs
 ├── messages/                 i18n translation files (en, ja)
+├── mobile/                   Generated Expo app (only when x-generator.mobile.enabled is true)
 ├── auth.ts                   Auth.js v5 configuration (hand-written)
 ├── proxy.ts                  Next.js middleware (hand-written)
 └── docker-compose.*.yml      Per-environment DB + Redis containers
@@ -590,6 +591,10 @@ All architectural documentation lives in `docs/knowledge/`:
 | [legal-documents.md](docs/knowledge/legal-documents.md) | Terms of Service / Privacy Policy pages: why document locale is decoupled from the site UI locale, Markdown-over-JSON/MDX rationale, and how to add a document language |
 | [generated-documentation-and-openapi-spec.md](docs/knowledge/generated-documentation-and-openapi-spec.md) | Generated per-entity docs' "Constraints" section (approval flow, write-locked fields) and the `docs/generated/openapi.json` OpenAPI 3.1 build artifact — list query parameters, `readOnly`, bulk requestBody, per-operation 4xx responses, and import/export paths; also `GET /api/openapi.json` (authenticated document route, every environment) and the `SWAGGER_UI_ENABLED`-gated `/swagger` explorer (development/staging only) |
 | [api-idempotency-and-rate-limiting.md](docs/knowledge/api-idempotency-and-rate-limiting.md) | `Idempotency-Key` support on single-record create endpoints (same-transaction database table, one-day retention) and the `api:read`/`api:write` per-API-key rate-limit buckets |
+| [mobile-executable.md](docs/knowledge/mobile-executable.md) | Building the generated Expo app as a release `.apk`, the iOS routes, and pointing a real device at the server |
+| [scheduled-task-operations.md](docs/knowledge/scheduled-task-operations.md) | Scheduled tasks: ordering with `depends_on`, the run guard and business date, the admin page, `task:run-all`, and running them on GCP |
+| [audit-log-append-only.md](docs/knowledge/audit-log-append-only.md) | Append-only `audit_log`: client guard, row trigger, monthly partitions, chained digests, write-once storage, switching to the restricted database role |
+| [list-panel-trigram-filter.md](docs/knowledge/list-panel-trigram-filter.md) | The list search box over trigram columns and the column-level `x-trigram-filter` |
 | [api-key-expiry.md](docs/knowledge/api-key-expiry.md) | Optional `user.api_key_expires_at` checked in `authenticateApiKey()`; `null` never expires, an expired key is rejected with `401 API key expired.` |
 
 ---
@@ -640,6 +645,11 @@ All architectural documentation lives in `docs/knowledge/`:
 | Attachment display opt-out (showImages/showFiles) | ✅ Implemented |
 | Performance hardening (statement_timeout, FK indexes, GIN indexes, COUNT opt-out) | ✅ Implemented |
 | Declarative write-locked values (x-write-locked-values) | ✅ Implemented |
+| Stripe payments (x-payment) | ✅ Implemented |
+| Versioned history (x-version-of) | ✅ Implemented |
+| Scheduled tasks (x-scheduled-task, run guard, admin page, GCP task runner) | ✅ Implemented |
+| OpenAPI document, row-level capabilities, idempotency keys, API key expiry | ✅ Implemented |
+| Expo mobile app (opt-in, x-generator.mobile.enabled) | ✅ Implemented |
 
 > **Backward compatibility (v1.4 → v1.5)**: Non-breaking. Existing schemas work unchanged. Cross-entity search is opt-in per entity (`x-generate.search: true`). Approval event dispatch activates only when `x-approval.on_approved` is set in the schema.
 

@@ -8,7 +8,7 @@ YAML スキーマ定義から本番対応の Web アプリケーションを生�
 
 [Next.js](https://nextjs.org/)、[Prisma](https://www.prisma.io/)、[MUI](https://mui.com/) で構築されています。
 
-> **旧バージョンからのアップグレードをお考えですか？** 3.0 の破壊的変更と移行手順は [docs/UPGRADE-3.0.md](docs/UPGRADE-3.0.md) を参照してください。
+> **旧バージョンからのアップグレードをお考えですか？** 3.0 の破壊的変更と移行手順は [docs/UPGRADE-3.0.md](docs/UPGRADE-3.0.md) を参照してください。以降のリリースの破壊的変更と移行手順は [CHANGELOG.md](CHANGELOG.md) に記載しています。
 
 ---
 
@@ -67,7 +67,7 @@ YAML スキーマ定義から本番対応の Web アプリケーションを生�
 - **エンティティ横断検索** — オプトインしたエンティティへの UNION ALL による `GET /api/search`；ファセット・ハイライト・日本語 pg_bigm 対応；ヘッダー検索アイコンと検索ページを生成
 - **承認後イベント発火** — `x-approval.on_approved.set_fields`（フィールド更新）および `x-approval.on_approved.emit_hook`（生成 `service_after_approve.ts` による カスタムロジック）；`approvable.approved_at` による冪等性保証。`x-approval-lines` は承認明細エンティティをインベントリ台帳操作に接続する作成前後のヘルパーを生成
 - **宣言的な書き込みロック値**（`x-write-locked-values`） — エンティティに `{field_name: [value, ...]}` 形式で注釈すると、通常の作成・更新がその値を直接書き込もうとした際に拒否される（画面・REST API・Server Action・CSV インポートすべてで強制）。値自体は選択肢として表示されたまま選択不可（disabled）になり、非表示にはならない；`x-approval` 由来のロック値との和集合として合成されるため、両方の仕組みが依存関係なく同一フィールドを同時に保護できる。詳細は [`docs/knowledge/x-write-locked-values-field-lockdown.md`](docs/knowledge/x-write-locked-values-field-lockdown.md) を参照してください
-- **版管理された履歴**（`x-version-of`、オプトイン） — 識別エンティティと `x-approval` を持つ版エンティティの組の版側に宣言する。版番号は承認時に採番（識別ごとに一意）、識別ごとの未決の下書きは最大1件、識別の `current_version_id` は承認ごとに更新、却下・取下げされた下書きは子行ごと削除、新版は初期値入りの新規作成画面で開く（保存するまで何も書き込まない）、承認済みの版を持つ識別は削除不可。詳細は [`docs/knowledge/schema-yaml-configuration.md`](docs/knowledge/schema-yaml-configuration.md) の 7.8 節を参照してください
+- **版管理された履歴**（`x-version-of`、オプトイン） — 識別エンティティと `x-approval` を持つ版エンティティの組の版側に宣言する。版番号は承認時に採番（識別ごとに一意）、識別ごとの未決の下書きは最大1件、識別の `current_version_id` は承認ごとに更新、終端却下された版は閉じた記録として残り次の版を妨げない、`terminal` 無しで却下された下書きと取下げられた下書きは未決のまま残り修正して再提出できる、新版は初期値入りの新規作成画面で開く（保存するまで何も書き込まない）、承認済みの版を持つ識別は削除不可。詳細は [`docs/knowledge/schema-yaml-configuration.md`](docs/knowledge/schema-yaml-configuration.md) の 7.8 節を参照してください
 - **終端却下**（`x-readonly-fields`） — エンティティが終端の却下状態に達した後にフィールドをロックするための注釈；却下時は `on_rejected_dispatch` 経由でワンスタブ（`service_after_reject_stub.ts`）を発火し、通知や在庫調整などのカスタムロジックに対応
 - **Stripe 決済**（`x-payment`、オプトイン） — エンティティへ `x-payment: true` を宣言すると、新規レコードは Stripe Checkout の支払いが確認されるまで仮の状態になり(フォームまたは REST API で作成、Webhook が確定または削除)、課金は Stripe Price(`stripe_price_id`。エンティティ自身または関連エンティティが持つ)とサーバー側で決める数量で行い、プロモーションコードに対応；あわせて write-once の Stripe スタブと戻り先ページ `/payment/success`・`/payment/cancel` を生成、鍵未設定時は fail-closed；対応は一回払いのみ — 詳細は後述の[決済](#決済stripeオプトイン)を参照
 
@@ -94,7 +94,7 @@ YAML スキーマ定義から本番対応の Web アプリケーションを生�
 
 ### 監査・コンプライアンス
 
-- **監査ログ** — 全エンティティの作成・更新・削除操作を横断表示する、スキーマ非依存の read-only ビューア（`app/[locale]/audit_log/page.tsx`）
+- **監査ログ** — 全エンティティの作成・更新・削除操作を横断表示する、スキーマ非依存の read-only ビューア（`app/[locale]/audit_log/page.tsx`）。テーブルは追記専用で、改ざん検知用に日次ダイジェストを連鎖させる（[`docs/knowledge/audit-log-append-only.md`](docs/knowledge/audit-log-append-only.md) を参照）
 - **GDPR / データ保護** — `x-pii` フィールド分類（`direct`/`sensitive`/`indirect`）、`anonymizeUser()` 消去関数、`x-gdpr-mode` によるデータ主体区分の分類（`internal`/`consumer`/`both`。スキーマ検証のみで生成コードへの影響なし）、添付ファイル名の AES-256-GCM at-rest 暗号化、コメント内の `x-mention` ユーザーメンション解析
 - **利用規約 / プライバシーポリシー**（`/[locale]/legal/terms`、`/[locale]/legal/privacy`）— 登録画面から導線を張ったMarkdown雛形文書。文書の言語追加は `content/legal/<doc>.<locale>.md` ファイルを追加するのみで、サイトUIの言語一覧とは独立（詳細は `docs/knowledge/legal-documents.md`）
 
@@ -527,6 +527,7 @@ app-generator/
 │   ├── generated/            自動生成されたエンティティリファレンスドキュメント
 │   └── knowledge/            手書きのアーキテクチャナレッジドキュメント
 ├── messages/                 i18n 翻訳ファイル（en、ja）
+├── mobile/                   生成される Expo アプリ（x-generator.mobile.enabled が true の場合のみ）
 ├── auth.ts                   Auth.js v5 設定（手書き）
 ├── proxy.ts                  Next.js ミドルウェア（手書き）
 └── docker-compose.*.yml      環境ごとの DB + Redis コンテナ
@@ -570,6 +571,10 @@ app-generator/
 | [legal-documents.md](docs/knowledge/legal-documents.md) | 利用規約・プライバシーポリシー画面: 文書の言語がサイトUIの言語一覧から独立している理由、Markdown採用（JSON/MDX不採用）の理由、文書の言語追加手順 |
 | [generated-documentation-and-openapi-spec.md](docs/knowledge/generated-documentation-and-openapi-spec.md) | 生成される各エンティティのドキュメントの「Constraints」節（承認フロー・書き込みロック）と `docs/generated/openapi.json`（OpenAPI 3.1 ビルド成果物）— 一覧クエリパラメータ、`readOnly`、bulkのrequestBody、操作別4xx応答、import/exportパス。加えて `GET /api/openapi.json`（認証付き配信route、全環境）と `SWAGGER_UI_ENABLED` で有効化する `/swagger` 画面（開発・ステージング限定） |
 | [api-idempotency-and-rate-limiting.md](docs/knowledge/api-idempotency-and-rate-limiting.md) | 単一レコード作成エンドポイントの `Idempotency-Key` 対応（対象レコードと同一トランザクションのDBテーブル・保持期間1日）と `api:read`/`api:write` の API キー単位流量制限 |
+| [mobile-executable.md](docs/knowledge/mobile-executable.md) | 生成される Expo アプリのリリース `.apk` のビルド、iOS の経路、実機からサーバーへ接続する設定 |
+| [scheduled-task-operations.md](docs/knowledge/scheduled-task-operations.md) | 定期タスク：`depends_on` による順序、実行ガードと業務日付、管理画面、`task:run-all`、GCP での実行 |
+| [audit-log-append-only.md](docs/knowledge/audit-log-append-only.md) | 追記専用の `audit_log`：クライアントガード、行トリガー、月次パーティション、連鎖ダイジェスト、書き込み一回限りのストレージ、制限付きデータベースロールへの切り替え |
+| [list-panel-trigram-filter.md](docs/knowledge/list-panel-trigram-filter.md) | トライグラム列に対する一覧の検索ボックスと、列単位の `x-trigram-filter` |
 | [api-key-expiry.md](docs/knowledge/api-key-expiry.md) | `authenticateApiKey()` でチェックする任意設定の `user.api_key_expires_at`。`null` は無期限、期限切れは `401 API key expired.` で拒否 |
 
 ---
@@ -620,6 +625,11 @@ app-generator/
 | 添付ファイル表示オプトアウト（showImages/showFiles） | ✅ 実装済み |
 | 性能ハードニング（statement_timeout, FK インデックス, GIN インデックス, COUNT オプトアウト） | ✅ 実装済み |
 | 宣言的な書き込みロック値（x-write-locked-values） | ✅ 実装済み |
+| Stripe 決済（x-payment） | ✅ 実装済み |
+| 版管理された履歴（x-version-of） | ✅ 実装済み |
+| 定期タスク（x-scheduled-task、実行ガード、管理画面、GCP タスクランナー） | ✅ 実装済み |
+| OpenAPI ドキュメント、行単位の capabilities、冪等キー、API キー有効期限 | ✅ 実装済み |
+| Expo モバイルアプリ（オプトイン、x-generator.mobile.enabled） | ✅ 実装済み |
 
 > **後方互換（v1.4 → v1.5）**: 非破壊的変更。既存のスキーマはそのまま動作します。エンティティ横断検索はエンティティごとのオプトイン（`x-generate.search: true`）です。承認後イベント発火はスキーマに `x-approval.on_approved` を設定した場合のみ有効になります。
 

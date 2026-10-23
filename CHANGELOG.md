@@ -3,7 +3,7 @@ All notable changes to this project will be documented in this file.
 The format is based on Keep a Changelog (https://keepachangelog.com/),
 and this project adheres to Semantic Versioning (https://semver.org/).
 
-## [Unreleased]
+## [5.0.1] - 2026-10-23
 ### Security
 Five authorization and input-validation gaps in generated code are fixed. Three of them (bulk routes, uploads, approval) have been present since 1.0 and two (split, invalidate) since 3.0.0, all through 5.0.0; a fix release is pending.
 - **Bulk update and delete routes** now enforce organization scoping and the entity's record-level permission, as the single-record routes do.
@@ -14,1511 +14,170 @@ Five authorization and input-validation gaps in generated code are fixed. Three 
 
 ## [5.0.0] - 2026-10-22
 ### Added
-- **`scripts/gcp-task-runner-teardown.sh` deletes what `gcp-task-runner.sh` created.** It removes, by name and in order, the
-  Cloud Scheduler job, the Cloud Run Job, the runtime service account's bucket bindings, the task-runner secrets, the two
-  service accounts and the task-runner images (`DELETE_IMAGES=all|none|keep:N`). It never deletes the project or the
-  Artifact Registry repository, skips resources that are already gone, asks for confirmation, and `DRY_RUN=true` calls
-  nothing. The audit-log bucket is deleted only with `DELETE_AUDIT_LOG_BUCKET=true`, after a check that stops, deleting
-  nothing, when an object is under Object Retention or a bucket retention period (locked or not) and prints the expiry.
-  Configuration loading and name derivation move to `scripts/gcp-task-runner-config.sh`, which both scripts source; the
-  create script's behavior and `DRY_RUN` output are unchanged. `docs/knowledge/gcp-task-runner-operations.md` describes
-  create, image replacement, staging versus production and deletion. No new schema key.
-- **List search box over trigram columns, `x-trigram-filter`** (Issue #1051). An entity that is a cross-entity search
-  target now has a search box on its list that matches its search trigram columns (the union of `text_fields` and
-  `bigm_fields`) as a case-insensitive substring, served by the existing `_v2` COALESCE trigram indexes. The new
-  column-level boolean `x-trigram-filter`, set on the column's entry under `properties:`, overrides it: `true` adds a column (also on an entity that
-  is not a search target) and indexes it, `false` removes it from the box. An entity that is not a search target and declares
-  nothing is unchanged. The list's `search` parameter and the `listQuery.searchKeys` spec replace the title-column
-  `searchKey`. See `docs/knowledge/list-panel-trigram-filter.md`.
-
-- **Related-list rows link to their record** (Issue #1075). Each row of a related list on a detail or edit screen (one-to-many
-  independent children, many-to-many lists, flattened item arrays) links to the related record's page on the Web screens, and the
-  native detail screen links both its references and its lists to the related record's screen. Only a target with a view page of its
-  own is linked; a reader without permission lands on the target's own 403, as with a single reference. No new schema key. See
-  `docs/knowledge/schema-yaml-configuration.md` (7.5) and `docs/knowledge/mobile-app.md`.
-
-### Changed
-- **Entity-level `required:` lists relation embeds only, and means the same on every entity** (Issue #1066). A name in
-  `required:` that is a Prisma column, or that Prisma does not know, is now a build error; a column is required when
-  Prisma makes it non-nullable without a default, or when its entry under `properties:` sets `_required: true`.
-  A standalone entity (one with no view-level key such as `x-generate`) used to have its derived required list replaced by
-  `required:`, which dropped `id`; it is now merged with the derived list, as for any other entity. The default schema's
-  stale `approval_flow` entry `preceding_transitions` is removed. Schemas that name a column in `required:` must drop it
-  (the column stays required through Prisma). See `docs/knowledge/schema-yaml-configuration.md`.
-- **The generated Expo app moves to SDK 58** (Issue #1073). `mobile/package.json` now pins the SDK 58 set (Expo 58, React 19.3,
-  React Native 0.88, `expo-router` 58). `expo-router` 58 no longer depends on `query-string`, so the vulnerable
-  `decode-uri-component` is no longer part of the app bundle. See `docs/knowledge/mobile-app.md`.
-- **`anonymizeUser()` erases the related records of the erased person and keeps the first erasure time** (Issue #1062). In the
-  same transaction it now deletes the avatar `attachment` row (when `image_id` is an `x-pii` column), sets
-  `mobile_session.device_name` to `null`, and deletes the person's `notification` and `idempotency_key` rows; after the
-  commit it removes the stored avatar file (local disk, Vercel Blob or GCS), reporting a failure in `errors` without undoing
-  the erasure. A repeated call keeps the first `anonymized_at` / `invalidated_at` and cleans up what an earlier call left.
-  No new schema key and no migration. Output of `lib/compliance/anonymize_user.ts` changes. See `docs/knowledge/x-pii.md`.
-- **An entity's columns and relations share one `properties:` map, and a proxy view names its model with `x-view-of`** (Issue #1065).
-  The entity-level `fields:` key is removed. Scalar and enum columns, relation objects and relation arrays are all entries
-  of `properties:`; the builder classifies each by the Prisma field kind of its name, so a column keeps its written order
-  and an explicit `<x>_id` still wins over the automatically completed foreign key. A name Prisma does not have, and a
-  leftover `fields:` key, are build errors. A proxy view is written `x-view-of: <model>` (the only new key); `allOf` is no
-  longer written in a user schema. The built intermediate schema is unchanged, so generated output is identical.
-  `code_generator/migrate_fields_into_properties.py` rewrites an existing schema, and `convert_to_user_schema.py` emits the
-  new form. See `docs/knowledge/schema-yaml-configuration.md`.
-- **The `version_of_e2e_gate` fixture covers an `x-version-of` identity with a virtual primary column and `x-generate.test: true`** (Issue #1049). 
-  The new `vo_page` / `vo_page_version` pair is built and run by `npm run test:version-of-e2e-gate`, including its generated UI and 
-  API specs. This exposed that the paired version was never created for such an identity in a real generated schema: the 
-  pairing required the identity to list `current_version_id` among its properties, which x-version-of does not add. The 
-  requirement is removed, so `populate<Identity>Data()` now creates the version and makes it current. No new schema key.
-- **`x-pii`, `x-retention` and `x-gdpr-mode` are documented against the generator's actual behavior.** Only `x-pii` on the
-  `user` entity changes generated code (the field set `anonymizeUser()` scrubs); `x-gdpr-mode` is validated and `x-retention`
-  is unchecked, and neither affects any generated file. The README entries and support table say so. See
-  `docs/knowledge/x-pii.md` and `docs/knowledge/x-gdpr-mode.md`.
-- **Generated autocomplete search resolves a two-hop `labelField`** (Issue #1050). `labelField: test_case_version.title` 
-  on a foreign key to an entity that points at a version used to be skipped, so the picker returned no option for any text. 
-  One extra hop through the target's own foreign key is now rendered as a two-level nested `where`; longer paths and paths 
-  whose first segment is not a foreign key of the target stay excluded. No new schema key. See 
-  `docs/knowledge/label-field-search-semantics.md`.
-- **Generated UI spec and helper for an `x-version-of` identity with a virtual primary column** (Issue #1049). 
-  `populate<Identity>Data()` and `populate<Identity>FullData()` now create a paired version per row (its primary column set 
-  to `<Title> <n>`) and make it the identity's current version, so the list assertions hold. A row created through the form 
-  has no version yet, so the create examples assert the row instead of a name and the primary-edit and view-field assertions 
-  are skipped. An optional foreign key that closes a required cycle (the identity's `current_version_id`) is left out of the 
-  create and edit form steps, matching the dependencies the helper creates. No new schema key.
-- **An `x-version-of` identity's detail screen links to the new version screen** (Issue #968). The Version history section 
-  now has a **New version** button that opens `/<version>/new?new_version_of=<id>`. It is shown only when the caller may 
-  create the version entity and the identity has a current version. `get<Version>VersionHistory` also returns 
-  `canCreateVersion`, and the `VersionHistory` messages gain `newVersion`. No new schema key.
-- **The task-runner image skips the Next.js build** (Issue #1036). The generated `Dockerfile` has a new `task-runner` 
-  stage (dependencies, `generate-code`, `prisma generate`) and the `builder` stage now extends it with `npm run build`, so 
-  the migrate image used by `gcp-deploy.sh` is unchanged. `scripts/gcp-task-runner.sh` builds `--target task-runner` by 
-  default (`TASK_RUNNER_DOCKER_TARGET=builder` restores the previous image). No new schema key. Build time and image size 
-  are in `docs/knowledge/scheduled-task-operations.md`.
-- **The business date comes from `app_setting`** (Issue #1037). `is_pinned: true` uses the stored `business_date`;
-  `is_pinned: false` uses today's date in the row's `timezone`; with no row the date is today in UTC. One resolver
-  (`lib/business-date.ts`, `getBusinessContext()`) serves every caller: the tenant-wide default row for scheduled tasks
-  and the scheduled-task admin page and REST route, an organization's own row first for callers that pass an
-  organization. The generated run guard (`businessDateOf()`, now async), `task:run-all` and its `not_due` check read
-  it instead of the UTC clock, and a task's cron `interval` is evaluated in the same time zone.
-  `app_setting.business_date` is now optional (`String?`): required (a real `YYYY-MM-DD` date) while `is_pinned` is
-  true and not read while it is false (no empty check), enforced by `lib/app_setting/service_validation_custom.ts`. While a date is pinned
-  it does not advance, so a daily task reports `already_succeeded` from the second night until the date is changed.
-  `scripts/seed-baseline.ts` writes the default row without a date. Existing databases run
-  `scripts/migrations/06_app_setting_business_date_optional.sql` once (nullable column, unpinned rows cleared;
-  `npm run test:business-date-migration` checks it against the previous schema).
-  A list primary field may now be a column that has a default, since such a column is never empty (`validate.py`).
-  The generated API/UI specs follow: a defaulted primary column is populated and sent like a required one, and a `*_date` text column
-  gets real `YYYY-MM-DD` sample values.
-- **`prj:sync` removes the old copy of a file renamed or deleted in `prj/`** (Issue #619). The script now records the files it copies verbatim in a gitignored `.prj-sync-manifest.json` and, on the next run, removes a recorded destination whose `prj/` source is gone, so a renamed route no longer leaves a stale twin that breaks the type check. A destination changed since the sync is kept with a warning; files the sync never copied, `messages/*.json` and everything when `../prj` is absent are never removed. No new schema key. See `docs/knowledge/prj-sync-stale-file-removal.md`.
-- **`vercel-setup.sh` reconciles the project Function Region** (Issue #589). Step 1.5 already set the Root Directory; it now also reads `serverlessFunctionRegion` through the Vercel Projects API and PATCHes it to the first `regions` entry of the committed `app-generator/vercel.json` when it differs (a new project starts on `iad1`). A project already on that region is left untouched, `DRY_RUN=true` only echoes the calls, and a missing `regions` entry skips the step. The token is passed to `curl` on stdin, not in argv. No `vercel.json` change and no schema key.
-- **Generated resubmit API examples omit read-only fields from the PUT body** (Issue #1046). The `14.3` and `14.5` examples sent a read-only field (for example a version number assigned on approval) with the value read before approval, so the route answered `400` instead of the expected lockdown `403`. The body now leaves read-only fields out, as the read-only preservation example already does; other examples and entities without read-only fields are unchanged. No new schema key.
-- **Generated API specs skip the per-entity search example when the seed grant denies read** (Issue #1044). An entity whose `SEED_ENTITY_GRANTS` read grant is false (neither `x-generate.list` nor `x-generate.view`) can never surface rows for the test API user, so the `N10` example is no longer emitted for it. Entities with either page keep it. No new schema key.
-- **Autocomplete search for an `x-version-of` identity also matches the row id** (Issue #1042). The generated `search<Identity>Options` matched only the identity's current-version columns, so an identity without a current version (and a version form's parent picker that shows the identity id) could never be found. The id is now one more `OR` alternative per search token; existing matches and entities that are not identities are unchanged. No new schema key. The generated view-page assertion for a foreign key labelled by `id` now expects the value the autocomplete was filled with instead of a fixed title.
-- **DataGrid date and date-time columns use MUI pickers** (Issue #764). The list-page filter value and the filter and edit cell of an embedded child grid for every `date` / `date-time` column now use MUI `DatePicker` / `DateTimePicker` instead of the browser's native date inputs, so the calendar follows the app locale (en/ja) rather than the browser's UI language. Filter values, saved values and time zones are unchanged. No new dependency and no schema key. `editDataGridCell()` in `cypress/support/datagrid-helpers.ts` types the same ISO values into the picker. See `docs/knowledge/i18n-locale-routing.md`.
-
-### Added
-- **Mobile search results open the record and use translated text** (Issue #870, part of #140). A result on the Search
-  screen opens the record's detail screen when the entity has one (the entity list otherwise); a result for an entity with
-  no native screens is marked "Not available in the app" and does not navigate. The screen text comes from the new `Search`
-  namespace of `messages/<locale>.json`, entity names from `EntityLabel`, and snippet match markers render in bold.
-- **Dockerfile and `.dockerignore` for scheduled tasks on any provider** (Issue #1029). `generate-code` writes both files
-  whenever the schema declares `x-scheduled-task` or `x-scheduled-tasks`, independent of `x-cloud.provider`, so
-  `scripts/gcp-task-runner.sh` Step 5 works for an app deployed on Vercel. `x-cloud:gcp` keeps its other behavior
-  (GCS upload route, `output: 'standalone'`, no `vercel.json` crons). No new schema key.
-- **Dashboard text and chart labels are translated** (Issue #913). Widget subtitles, "No data", "No widgets yet", the
-  CSV button and CSV headings use `messages/<locale>.json` (new `DashboardView` section, en and ja). Chart categories
-  and series show the same labels as lists and forms: enum option labels (the dashboard catalog now carries
-  `enum_namespace`), Yes / No, and the `(unspecified)` / `(unknown)` / `(unnamed)` placeholders; entity and field
-  names in the subtitle use their display labels.
-- **Documentation for Chrome's phishing warning on demo logins** (Issue #724). `docs/knowledge/vercel-demo-login-phishing-warning.md`
-  explains why a login page on a shared `*.vercel.app` subdomain can trigger Chrome's password-reuse warning and what to do about it
-  (custom domain, a distinct `SEED_ADMIN_PASSWORD` per deployment, Safe Browsing lookup and report flow);
-  `docs/knowledge/seed-baseline-credential-hardening.md` states the per-deployment password rule. No behavior change.
-- **Entity-name selects offer `audit_log` and show dictionary words** (Issues #1013, #1015). A field declared with
-  `x-entity-select` (`permission.name`, `approval_flow.entity_name`) now also offers `audit_log`, the system table a
-  permission can name. `approval_request` and entities without generated pages stay out on purpose: they are not
-  permission or approval targets. Every option has an `EntityLabel` key in every `messages/<locale>.json`, and the Web
-  edit, detail and list screens and the mobile chips, list cells and detail text show that word; the stored value stays
-  the entity name. Generated Cypress specs find a list row by the dictionary word.
-  `docs/knowledge/entity-select-options.md` states the rule.
-- **Bucket access for the task-runner Job** (Issue #1008). `scripts/gcp-task-runner.sh` accepts
-  `TASK_RUNNER_BUCKET_ROLES` (space-separated `BUCKET=ROLE` pairs) and grants the Job's runtime service account a
-  bucket-scoped role on each bucket; unset, nothing changes. `docs/knowledge/scheduled-task-operations.md` also states that
-  every variable reaches the Job as a Secret Manager secret.
-- **GCS and S3 write-once storage for audit_log digests** (Issue #991, part of #945). `lib/audit-log-integrity/storage-gcs.ts`
-  stores digests and archives in a Google Cloud Storage bucket with per-object retention (unlocked or locked) and create-if-absent
-  writes; the S3 Object Lock adapter moves here from the consumer template. Both load their SDK through a dynamic import with a
-  literal module name, only when selected. The new opt-in key `x-generator.audit-log-storage.enabled` generates
-  `lib/audit-log-ops/storage-factory.ts` (picks the storage from `AUDIT_LOG_GCS_*`, `AUDIT_LOG_S3_*` or `AUDIT_LOG_STORAGE_DIR`, and
-  fails when none is set) and `lib/audit-log-ops/jobs.ts`; absent or `false` generates nothing and no generated file refers to an
-  adapter. `AUDIT_LOG_GCS_AUTH=vercel-oidc` authenticates from Vercel without a key. `@aws-sdk/client-s3`, `@vercel/oidc` and `google-auth-library` are added to `dependencies`. See `docs/knowledge/audit-log-append-only.md`.
-- **Native end-to-end flows for the Expo app** (Issue #994, part of #140). `generate-code` writes one Maestro flow per entity
-  that has native screens to `mobile/e2e/generated/maestro/` (git-ignored), from the same decision that emits the screens: sign
-  in, open the list from the footer tabs, check the list, open the first row's detail screen, and create one record for an entity
-  whose required fields are simple. `scripts/run_mobile_native_e2e.sh` validates the flows with `maestro check-syntax` and, with
-  an APK and an attached Android device or emulator, runs them; it exits with status 3 (`UNAVAILABLE`) rather than passing when
-  the CLI, adb, the APK or a device is missing. `docs/knowledge/mobile-app.md` describes the flows, the entry script and the
-  order in which they grow. The flows are not part of the completion gate.
-- **Mobile executable guide** (Issue #987). `docs/knowledge/mobile-executable.md` documents building a release `.apk` locally 
-  with `expo prebuild` and Gradle (measured), the iOS routes and what each needs, setting `EXPO_PUBLIC_API_BASE_URL` for a real 
-  device, and the `app.json` / `eas.json` settings the generator does not emit. Documentation only.
-- **CI changes now exercise the mobile Playwright job**. `.github/workflows/ci.yml` is on the path list in
-  `scripts/mobile_pw_gate_applies.sh`, so a change to the workflow that defines the `mobile-playwright` job runs the suite instead of skipping it.
-- **Scheduled tasks on GCP, in dependency order**. `docs/knowledge/scheduled-task-operations.md` explains what to
-  register on GCP (one `task:run-all` Job versus one Scheduler job per task), that `task:run-all` honors `depends_on` order
-  and the UTC business date but not the time of day of an `interval`, how non-daily tasks are recorded as `not_due` and how a
-  missed month is recovered, how entity-level tasks are declared and ordered, how to run once by hand and read the result, and
-  a local dry run with a shifted clock. `docs/knowledge/audit-log-append-only.md` states what `verify` detects and does not.
-  Documentation only.
-- **Mobile Playwright entry point, gate step and CI job** (Issue #985, part of #140). `npm run test:e2e:mobile:pw` now runs
-  `scripts/run_mobile_entity_playwright.sh`, which runs the fixture, default and scheduled modes in turn and fails if any mode
-  fails; the bare Playwright invocation is `test:e2e:mobile:pw:raw` and refuses to run unless `MOBILE_PW_PRECONDITIONS_READY=1`
-  is set. The mobile specs sign in as `admin@example.com` by default (the `db:seed-baseline` administrator), the script refuses a
-  symlinked `node_modules`, and `docs/knowledge/mobile-app.md` describes the three modes, the manual recipe and why app-template
-  does not run these specs. The update-generator gate has a path-triggered step for the suite
-  (`scripts/mobile_pw_gate_applies.sh` holds the path list) and CI has a path-filtered `mobile-playwright` job.
-- **Dashboard guide, and corrected dashboard docs** (Issue #909, part of #904). `docs/knowledge/dashboard-guide.md` explains
-  how a schema author opts an entity in and which fields become groupable, what each widget setting does and which
-  combinations are valid, what each problem message means, how read permission and row scope apply, and the
-  `POST /api/dashboard/aggregate` request, response and errors. README, README_ja and the schema reference now describe the
-  one schema-wide aggregate endpoint (not a per-entity one), CSV export only (not Excel), and the full groupable-field list
-  including number and date/time fields and the always-added creator, updater and timestamp fields. Documentation only.
-- **Mobile: an unreachable server is explained.** The sign-in screen now catches a network failure (server down, device
-  offline, or a request the browser blocked) and shows "Could not reach the server" instead of an error screen; a failed
-  navigation lookup keeps the footer fail-closed but shows a notice that the menu could not be loaded, distinct from
-  missing permissions. `docs/knowledge/mobile-app.md` says to open the same-origin proxy URL, not the Expo dev server's
-  port. No new schema key.
-- **Dashboard widgets say why they cannot be drawn** (Issue #908, part of #904). A widget that cannot render now names
-  the wrong setting, why, and how to fix it, in English or Japanese, instead of showing a raw internal message or
-  "Failed to load". Distinct messages cover: no data source in the schema, a data source that is not available, no read
-  permission, an unknown or removed field, a time bucket or time zone on a field that is not a date/time, a stack mode
-  without a series, a line chart without a bucket, and a filter value that does not fit its field; a filter matching no rows
-  reads "No data matches this chart." `aggregateForWidget` returns the problem as data (`{ ok: false, problem }`) so it
-  survives a production build, and `POST /api/dashboard/aggregate` answers with HTTP 400 and `{ error, code, setting,
-  params }`. Saving a dashboard now rejects a widget that cannot be drawn with a field-level error (widgets saved earlier and
-  left unchanged are not re-judged), and the editor shows the same messages while editing. For this, owned child rows are now
-  passed to `validateCustomRules` as `data.<property_name>`, like connect-style children's ids; no existing key changes. The
-  call lives in the tracked `lib/dashboard/service_validation_custom.ts`; only an app that overrides that file from `prj/` needs
-  the call added by hand. No new schema
-  key. See `docs/knowledge/schema-yaml-configuration.md`.
-- **`scripts/check-migrations-match-schema.sh`: checks that the migrations build the schema.** On an empty local scratch
-  database it runs `prisma migrate deploy` and then `prisma migrate diff` against `prisma/schema.prisma`, and fails with the
-  missing SQL when they differ. This catches a generator-added model (for example `scheduled_task_run`) that a consumer has
-  no migration for, which `db:push` test databases never show. It refuses any non-loopback database host, passes
-  connection details through environment variables only, and reads known differences from an optional exceptions file
-  (`prisma/migration-schema-exceptions.txt`, none by default). It is run when preparing a `develop` merge or a deployment,
-  not per commit. No new schema key. See `docs/knowledge/migration-schema-check.md`.
-- **Audit log: steps for switching the application to the restricted database role** are listed in
-  `docs/knowledge/audit-log-append-only.md` (password, hand-assembled connection strings, one role per Neon branch,
-  verification), and `scripts/vercel-env.sh` reminds that its `DATABASE_URL` injection is the owner's pooled URL. The
-  scheduled-task documentation states that a consumer writes the migration for generator-injected models such as
-  `scheduled_task_run`.
-- **Dashboard widget editor: group-by and series fields are chosen from a list** (Issue #906, part of #904). `group_by_field`
-  and `series_field` are dropdowns of the selected data source's fields, with translated labels and the field kind, instead of
-  free text. Changing the data source clears the fields of the previous one. Options follow the chart: the time bucket only for
-  a date/time group-by field, the series not for pie, the stack mode only for bar / column with a series, and a line chart groups
-  by a date/time field and always has a bucket, so inapplicable combinations are corrected in the editor rather than found at
-  render time. Stored values are unchanged; a stored field the data source no longer offers is flagged. No new schema key.
-  See `docs/knowledge/schema-yaml-configuration.md`.
-- **Dashboard widget editor: the data source is chosen from a list** (Issue #905, part of #904). The dashboard edit form no
-  longer shows widgets as a grid of free-text cells; each widget is edited in a card, and `entity_name` is a dropdown of the
-  `x-display.dashboard` entities the user can read, with translated labels. Stored values do not change, so existing widgets
-  load as before; a stored data source that is no longer available is flagged. When no entity opts in, the editor says so and
-  links to the schema documentation. To make this possible, `x-custom-component` (target `upsert`) now also works on a child
-  array property: a hand-written component takes the place of the generated grid and keeps its row contract. No new schema key.
-  See `docs/knowledge/code-generation-custom-extensions.md`.
-- **Mobile app: insertion points for hand-written components** (Issue #873). The Expo app now reads
-  `x-custom-components` (entity level: `list`, `view`, `edit`) and `x-custom-component` (field level: `upsert`, `view`) as
-  they stand, with no new schema key, and mounts a native component of the same name at the position of the Web one: the
-  list's search / sort / filter row, the detail screen after the built-in sections, the form after the inputs (create form
-  included), and in place of a field's input or detail row. Each component gets a native stub, generated once and never
-  overwritten, that renders nothing; `generate-code` lists new stubs under `ACTION REQUIRED`. Entities left on the placeholder
-  screen only because of these components (in the default schema `user` and `dashboard`) now get native screens. The props
-  contract is generated into `mobile/lib/custom-component.ts`. A credential field (an upsert-only string) is not listed or
-  shown, and a field component is sent only once changed. `ApprovalSection` and `AttachmentSection` keep their native
-  support. See `docs/knowledge/mobile-app.md` and `docs/knowledge/code-generation-custom-extensions.md`.
-- **Mobile app: entities that own attachments through the `attachable` bridge get native screens** (Issue #949). An entity
-  with `attachable_id` (`one-to-one_bridge` to `attachable`) and the `AttachmentSection` component is no longer left on the
-  placeholder screen: the detail screen lists its images and files, and the edit form adds (system file picker), removes and
-  reorders them. A new generated route, `PUT /api/<entity>/<id>/attachments`, replaces one type's attachments through the Web
-  panel's own `setAttachmentsForBridge`, with the owner's `update` permission and organization checks, and refuses an id that is
-  not the record's own attachment. The `showImages` / `showFiles` props decide which lists are drawn. In an app where only the
-  bridge needs it, the file picker dependency is now added too. See `docs/knowledge/mobile-app.md`.
-- **`x-version-of`: identity + version entities with approval-backed history** (Issue #946). Declared on the version entity
-  (an `x-approval` entity), it generates the version number assigned at approval, at most one open draft per identity,
-  the identity's `current_version_id`, and a terminally rejected version kept as a closed record that does not block the next version.
-  The Prisma columns are declared by the app and checked at generation time. See `docs/knowledge/schema-yaml-configuration.md`
-  section 7.8.
-- **`x-version-of`: gate and CI cover the whole feature** (Refs #946). The `version-of-e2e-gate` fixture gate (local step 14e and the
-  `version-of-e2e-gate-fixture` CI job) now documents and runs the number assignment, the one-open-draft rule, the prefilled new
-  version screen and the identity tombstone; README.md / README_ja.md list the key. No generated output changes.
-- **`x-version-of`: new version screen** (Refs #946). `/<version>/new?new_version_of=<identity id>` opens the version
-  entity's create form filled with the current version's values, including child rows that have no screens of their own;
-  nothing is saved until the user saves it. Unique columns (including required ones on child rows) are left for the user,
-  and a new attachment bridge is created for the new record.
-- **`x-version-of`: identity tombstone** (Refs #946). An identity with an approved version can no longer be deleted
-  (retire it with `x-generate.invalidate`), and an invalidated identity takes no new draft. An identity that declares
-  `x-generate.invalidate` now needs an `invalidated_at DateTime?` column, checked at generation time.
-- **`x-version-of`: standard version list and two-version diff** (Issue #953). An identity with a version entity gets a
-  Version history section on its detail screen that lists every readable version, drafts included, and compares any
-  two of them, by default the current version against the open draft. Fields render with the detail screen's markup,
-  long text gets a word diff, and owned child rows are paired by `x-import-key`, else by `order`, else shown as
-  additions and removals. The reads use the version entity's own permission and organization filter. A draft's approval
-  section links to the diff. No new schema key; an explicit `x-custom-components` on the identity (`[]` included) opts
-  out. See `docs/knowledge/schema-yaml-configuration.md` section 7.8.
-- **Mobile app: entities with a self-referencing `children` list get native screens** (Issue #942). A one-to-many
-  `x-outputType: list` child attached through a nullable foreign key (for example `procedure.children`) no longer
-  makes an entity ineligible: it is drawn as the same chip picker as a many-to-many list and saved as `children_ids`.
-  The edit form sends the record's `id` with the picker's search so the options route leaves out the record itself and
-  its ancestors; records owned by another record are not offered. See `docs/knowledge/mobile-app.md`.
-- **Mobile app: entities with an `x-entity-select` field get native screens** (Issue #944). `entity_select` no longer
-  makes an entity ineligible: the field is drawn as chips labelled with the entity titles, the entity name is saved,
-  and the list and detail screens show the title. The mobile field spec gains `optionLabels`. In the default schema
-  `approval_flow` and `permission` get mobile screens. See `docs/knowledge/mobile-app.md`.
-- **Mobile app: entities that declare `x-reservation` get native screens** (Issue #937). `reservation_config` no longer
-  makes an entity ineligible, so a reservation entity without a child grid (item mode, for example a room reservation)
-  has list, detail, create, edit and delete screens. The generated REST routes now answer a request with no free
-  capacity with `{ error, code: 'CAPACITY' }` and a locked count-mode reservation with
-  `{ error, code: 'RESERVATION_LOCKED' }` (HTTP 409 as before; clients reading `error` are unaffected), so the app shows
-  the same texts as the Web instead of the stale-update warning. A count-mode reservation with `lines` still stays on the
-  placeholder screen because of its child grid. See `docs/knowledge/mobile-app.md`.
-- **`audit_log` is append-only, with tamper detection** (Issue #945). A Prisma Client guard rejects `update`, `updateMany`,
-  `upsert`, `delete` and `deleteMany` on `audit_log`; `prisma/sql/audit_log_append_only.sql` adds a row trigger that rejects
-  UPDATE and DELETE, partitions the table by month and creates `audit_log_digest`; `npm run audit-log:digest` closes daily
-  SHA-256 digests (chained, written to a storage interface with a local-directory implementation), verifies them, and exports a
-  month for the retention procedure. `audit_log` now has the primary key `(id, created_at)` and there is a new
-  `audit_log_digest` model. `npm run db:apply-audit-log-sql` runs after `db:push` in the test and setup scripts, and
-  `resetTestDatabase()` empties both tables with `TRUNCATE`. Consumers add the SQL to their own migrations, create the
-  restricted application role and the write-once bucket; see `docs/knowledge/audit-log-append-only.md`.
-### Changed
-- **The Cypress helper `grantAllEntityPermissions` grants what the real seed grants** (Issue #848). Instead of full CRUD
-  and import on every entity, it reads the generated `SEED_ENTITY_GRANTS` (the source of `npm run db:grant-all-permissions`),
-  so an entity with `x-generate.new: false` no longer gives the test user `create`. Entities outside that list, such as
-  `labelField` targets, keep full CRUD. A spec that needs a further right adds it explicitly. See
-  `docs/knowledge/grant-all-permissions-x-generate-gate.md`.
-- Completion gate documents (`generate-schema`, `update-code`, `update-generator`) now name `npm run db:generate` as a prerequisite of the vitest step on a fresh checkout (Issue #1006).
-- **List sort / filter panel no longer offers internal bridge foreign keys** (Issue #967). `Approvable Id`, `Attachable Id`,
-  `Commentable Id` and the like are dropped from the Web panel and from the Expo list's sort and filter keys, using the
-  generator's existing internal-bridge detection (no new schema key). The REST list still accepts them as sort / filter
-  parameters. See `docs/knowledge/list-search-panel.md`.
-- **Dashboard REST: `group_by_bucket` is the enum string literal** (Issue #912). `POST /api/dashboard/aggregate` now takes
-  `day`, `week`, `month`, `quarter` or `year`, like every other native enum in the REST API, and the integer form `0`-`4` is
-  removed. An unknown value returns `400` naming the allowed values instead of being ignored (which returned an unbucketed
-  result). A client that sent the integers must send the literals. The built-in dashboard UI already used the literals.
-- **`anonymizeUser()` no longer redacts `audit_log.metadata`** (Issue #945). `audit_log.metadata` must not contain personal
-  data, so the step never changed anything, and under the trigger an update would fail the erasure transaction.
-  `recordAuditEvent`'s documentation now says `metadata` must not contain personal data.
-- **Auth code no longer writes email addresses to `audit_log` or to auth `console.info` lines** (Issue #935). `auth:signIn`
-  and `auth:createUser` rows drop `metadata.email`; the `email_in_use_by_credentials` rejection drops it too and now
-  records the existing user's id as `target_id` (`actor_user_id` stays null); `domain_not_allowed` keeps only `reason`
-  and `provider`. The matching `[auth:*]` log lines no longer carry `email` / `oauthEmail`. The redaction step in
-  `anonymizeUser()` is unchanged. Rows already stored keep their `metadata.email` until a consumer cleans them up.
-  See `docs/knowledge/authentication.md`.
-### Fixed
-- **The generated Expo app type-checks against the Expo SDK 58 types** (Issue #1084, related to #1077). The entity list, audit log list, search screen and relation picker passed `null` to a FlatList `ListEmptyComponent` when nothing should show; the SDK 58 React Native types accept only an element, a component or `undefined`, so `npm run typecheck` of the generated `mobile/` failed with TS2322 and the `Mobile Playwright` job was red on `develop`. They pass `undefined` now, and `code_generator/tests/test_mobile_empty_component.py` fails if a mobile template passes `null` again. No schema key changes.
-- **The generated Expo app type-checks, enum filter choices show their labels, and a composite `labelField` names a related record** (Issue #1077). `npm run typecheck` of the generated `mobile/` failed on every schema: each entity list passed a `FieldSpec` list where the list panel wants a `ListFieldSpec` list, and a composite `labelField` (a list of paths) was typed as a single column. Besides the type errors, the panel looked enum labels up by member in a positional array, so the filter showed the raw member, and a relation picker or read-only screen fell back to the record id for a composite label. The new `lib/label-spec.ts` converts a form field to the panel's field type and joins a composite label's paths with a space, following dotted paths, as the Web does (a date segment shows its stored text). `scripts/run_mobile_entity_playwright.sh` now runs `npm run typecheck` on the generated app in every mode. No schema key changes.
-- **Generated test dependencies skip an optional FK that closes a required cycle** (Issue #1025, part of #946). An identity
-  entity's nullable `current_version_id` to its version entity is no longer pre-created as a dependency of the identity:
-  the version requires the identity, so the generated `populate<Entity>Dependencies()` created the version row without its
-  required parent FK and the API Cypress specs failed. The generated test helper also no longer returns an alias for a dependency that was skipped.
-- **`form_validation.ts` compiles for an entity with no required form field** (Issue #1026, part of #946). `REQUIRED_FIELDS`
-  has an explicit element type instead of `as const`, so an empty list no longer infers the empty tuple type.
-- **Generated API spec no longer expects a validation failure for an entity with no required field** (Issue #1031). The `5.1 fails when a required field is missing` and `8.2 bulk creates — partial failure when a required field is missing` examples are generated only when the entity has a required field to omit; otherwise the request is valid and the API correctly answers `201`.
-- **The generated OpenAPI record schema lists `created_at`, `updated_at` and `creator_id`** (Issue #762). Every response row
-  carries these base fields, but the record schema described only the entity's own declared properties. Each is now present
-  and marked `readOnly: true` (`creator_id` is nullable); an entity's own declaration of `id` is kept. The create-request
-  schema and filter parameters are unchanged. `docs/knowledge/generated-documentation-and-openapi-spec.md` states the rule.
-- **Dev-tooling dependency advisories cleared where a fix exists** (Issue #582). `npm audit fix` updates the lockfile, and `overrides` raise `@xmldom/xmldom` (pinned by `speech-rule-engine`), `basic-ftp`, `katex` and `postcss-selector-parser` (pinned by `@tailwindcss/typography`) to patched releases. `npm audit --omit=dev` now reports 0 vulnerabilities. `extract-zip` and `braces` still have no patched release; they are reachable only through dev tooling (`@marp-team/marp-cli`, `eslint-config-next`).
-- **Transient and missing-record Prisma errors no longer return 422** (Issue #747). The generated `add{Entity}` and
-  `update{Entity}` catch blocks now map `P2034` (write conflict under Serializable isolation) and `P2037` (too many
-  connections) to `CAPACITY` (409), and `P2025` (required record not found) to `NOT_FOUND` (404). Input-shaped codes still
-  return `VALIDATION` (422). See `docs/knowledge/p2028-capacity-misclassification-fix.md`.
-- **The Completion gate's UI Cypress step now runs `cypress/e2e/auth/**`** (Issue #580). `test:e2e:cy:ui` matched only 
-  `cypress/e2e/*.cy.ts` and `cypress/e2e/mobile/*.cy.ts`, so the auth specs (`mfa.cy.ts`, `settings_avatar_save.cy.ts`) ran 
-  in CI's `e2e-tests` job but in no gate step. The script's `--spec` now includes `cypress/e2e/auth/**`, and a pytest fails 
-  when a directory under `cypress/e2e/` holding specs is matched by no `test:e2e:cy:api` / `test:e2e:cy:ui` glob. The gate 
-  document notes that the MFA spec needs `MOCK_GOOGLE_OAUTH_TEST=true` in `.env.test.local`.
-- **Schema validation rejects an `x-state-machines` field whose enum has a value the diagram never mentions** (Issue #715). 
-  Previously a new enum value added without a diagram update generated cleanly, appeared as a UI option, and then failed every 
-  write with a generic "not a valid initial state" error. `generate-code` now fails and names the missing value(s) and the 
-  diagram file. A `null` member of a nullable enum is not a state and is ignored.
-- **`--prune-orphans` now removes the pages, API routes, flat Cypress specs and conditional component files of a removed entity** (Issue #618).
-  After an entity left the schema, `app/[locale]/<entity>/`, `app/api/<entity>/`, `cypress/e2e/**/<entity>.cy.ts` and
-  `components/<entity>/SplitActionSection.tsx` / `ImportModal.tsx` stayed on disk and broke the next build. Pages and routes are deleted only when they
-  import their own `@/lib/<entity>/` module; specs only with the `AUTO-GENERATED` header; the built-in `audit_log` routes are allowlisted.
-  `docs/knowledge/cleanup.md` lists the sweep.
-- **`x-autocomplete-context` is rejected where it generated broken or ignored output** (Issue #880). Schema validation now fails
-  when the key names a plain text, number, decimal or `format: uri` field (the form holds these in a ref, so the generated
-  `formValues` referred to an undeclared variable) and when it sits on a `one-to-one` or `one-to-one_bridge` FK (the picker
-  ignored it). The message names the entity, the FK and the field. See `docs/knowledge/x-autocomplete-context.md`.
-- **Generated populate helpers seed distinct numeric values when a column's `minimum` / `maximum` is tighter than the row spacing** 
-  (Issue #841). Indexed rows were clamped to the same value (`minimum: 500` seeded 500 for every row), so a row-specific label 
-  assertion could match several rows. Rows are now spaced 100 apart from `max(minimum, 100)`, and when `maximum` leaves no 
-  room for that spacing they take consecutive values from the lower bound (`minimum: 1, maximum: 50` seeds 1, 2, 3, ...). 
-  A column with no bound, or a wide range, seeds 100, 200, 300, ... as before. The populate helper and the expected label 
-  still derive from one rule.
-- **Mobile card list no longer shows delete controls for an entity with `x-generate.delete: false`** (Issue #578). 
-  `CardListClient` now requires `removeAction` in addition to the delete permission before rendering the toolbar delete 
-  button and the per-card checkbox, matching `DataGridClient`. The generated mobile list specs count cards through 
-  `[data-testid="mobile-card-list"] .MuiCard-root` instead of the delete checkboxes, so they hold for an entity with no 
-  delete action.
-- **Nav group resolution no longer breaks on non-schema nav entries** (Issue #799). `generators_i18n.py` and `cleanup.py` now pass
-  `entities + nav_extra_entities(schema)` to `build_nav_config`, the same list used for the nav labels and links, and `_entity_nav`
-  returns no `x-nav` for an entry without a schema definition instead of raising `KeyError: 'model'`. The scheduled-task admin
-  link stays a flat top-level link; placing it in an `x-nav-groups` group remains unsupported
-  (`docs/knowledge/nested-nav-menu-design.md` §4).
-- **Native app header no longer sits under the system UI and its actions are large enough to press** (Issue #1014). The 
-  header and footer now apply the top and bottom safe-area insets, and each header action is at least 44x44 points.
-- **Generated delete examples check the rows exist first for an entity with no unique primary link** (Issue #835). 
-  Examples 4.1, 4.2 and 4.3 in the generated UI spec now assert the populated row count before they delete, so an example 
-  that finds nothing to delete fails on its own precondition. Entities with a unique primary link are unchanged.
-- **Approve, Reject and Withdraw no longer fire without waiting** (Issue #500). `ApprovalSection` now awaits the Server Action,
-  disables every approve/reject/withdraw control (and keeps the confirmation dialog open) until the request settles, and shows an
-  error message when the request fails, so two quick clicks can no longer run overlapping approval transactions on the server.
-- **Mobile sign-in no longer fails in Expo Go** (Issue #1010, part of #140). The generated `lib/token-storage.ts` asked `expo-secure-store` for a biometric-locked refresh token, which Expo Go rejects because its `Info.plist` has no `NSFaceIDUsageDescription`. When `Constants.executionEnvironment` is `storeClient` the token is now saved and read without the lock; standalone and development builds lock it exactly as before, the choice is made once for save and read, and a rejected locked save is never retried unlocked. Face ID cannot be checked in Expo Go. See `docs/knowledge/mobile-executable.md`.
-- **Version Of E2E gate fixture: two flaky examples fixed** (Issue #1000). `version_of.cy.ts` looked the Save button up document-wide, so it found two submit buttons while React streamed the new-version screen (the revealed form plus a hidden copy in the streaming buffer, for about 30 ms); it now looks inside `main form`. `version_of_ui.cy.ts` and `version_of.cy.ts` read values with a one-shot `.then`, so the diff assertion could see the previous pair right after "Compare"; they now assert in a retried `.should`. Test fixtures only; generated code is unchanged. See `docs/knowledge/testing-cypress.md`.
-- **CI: a docs-only push no longer cancels or hides the E2E run of a preceding code push** (Issue #882). Push runs now use a
-  per-commit concurrency group and are never cancelled; pull_request runs keep the per-branch group with cancel-in-progress.
-  CI workflow change: see the note in `.github/workflows/ci.yml`.
-- **Consumer `ci.yml` canonical source: same concurrency fix** (Issue #605). `docs/consumer-commands/ci.yml` now carries the
-  concurrency block that `.github/workflows/ci.yml` has (per-commit group for push runs, never cancelled; per-head-branch
-  group for pull_request runs). A consumer's `Verify ci.yml` job fails after a submodule bump past this change until its own
-  `ci.yml` is copied from the canonical file.
-- **Dashboard aggregate: read permission and row-level scope on both entry points** (Issue #910). The `aggregateForWidget` 
-  Server Action now requires the user's `read` permission on the entity, as `POST /api/dashboard/aggregate` already did, 
-  and both paths limit every query (single and two-field group-by, bucketed queries, FK label lookups) to the rows the user 
-  can list: organization isolation, `x-self-only`, `x-filter-values` and Creator/Assignee-only read. FK labels are resolved 
-  through the target entity's permission and scope, and an unreadable label shows as `(unknown)`. `aggregateForWidgetCore` 
-  takes the acting user's id as its first argument. See `docs/knowledge/schema-yaml-configuration.md` §10.
-- **Mobile Playwright proxy no longer dies on a reset socket** (Issue #897). `mobile/scripts/same-origin-proxy.js` ended the whole process
-  when the API or web server reset its socket in the middle of a response, which made every later spec fail with
-  `ERR_CONNECTION_REFUSED`. A reset on either side now ends only that one request. Covered by `scripts/same-origin-proxy.test.ts`.
-- **Flattened one-to-one children no longer reference an undefined `userId`** (Issue #965). The create and upsert writes that 
-  `add<Entity>` / `update<Entity>` emit for a flattened child (a singular `$ref` with `x-outputType: flatten`, FK on the child) 
-  used `creator_id: userId, updater_id: userId`, but those service functions take the acting user as `actorId`, so the 
-  generated `service.ts` failed `tsc` with TS2304. They now use `actorId`.
-- **Dashboard UI specs no longer assume an empty dashboard catalog** (Issue #997). The generated `dashboard.cy.ts` now uses a 
-  real data source and fitting widget settings when the schema enables entities for the dashboard, and 
-  `dashboard_widget_editor.cy.ts` detects the catalog state and seeds widgets with an unavailable data source through the 
-  database instead of the validating API. Test code only; output for a schema with no dashboard entities is unchanged.
-- **Dashboard aggregate: read permission and row-level scope on both entry points** (Issue #910). The `aggregateForWidget` 
-  Server Action now requires the user's `read` permission on the entity, as `POST /api/dashboard/aggregate` already did, 
-  and both paths limit every query (single and two-field group-by, bucketed queries, FK label lookups) to the rows the user 
-  can list: organization isolation, `x-self-only`, `x-filter-values` and Creator/Assignee-only read. FK labels are resolved 
-  through the target entity's permission and scope, and an unreadable label shows as `(unknown)`. `aggregateForWidgetCore` 
-  takes the acting user's id as its first argument. See `docs/knowledge/schema-yaml-configuration.md` §10.
-- **MUI DataGrid and date picker text follows the app locale** (Issue #765, Refs #764). The theme in `app/[locale]/providers.tsx` is built per locale with the `jaJP` bundles of `@mui/material`, `@mui/x-data-grid` and `@mui/x-date-pickers` (new `lib/mui-locale.ts`), so the column menu, filter panel and "Manage columns" are Japanese on `/ja`. One app-wide `LocalizationProvider` carries the dayjs locale; the nested providers in `DateTimeWrapper`, `AppDatePicker` and `GanttChart` are removed so pickers no longer reset to English. The native date inputs of DataGrid date columns are unchanged. See `docs/knowledge/i18n-locale-routing.md`.
-- **`x-version-of`: a rejected version no longer blocks the next one, and the version number cannot be written** (Refs #946). A terminally
-  rejected version stays as a closed record and is not counted as an open draft; a version rejected without `terminal`, or
-  withdrawn, stays the open draft that is fixed and resubmitted. Neither is deleted any more. A number sent by a form or an API
-  client is dropped (create stores none, update keeps the stored value): an empty numeric field arrives as `0` and made the next
-  draft collide on `(identity, number)` with an earlier row holding `0`. See `docs/knowledge/schema-yaml-configuration.md`.
-- **`npm run test:flows` no longer destroys the working tree and runs serially.** `test/flows/cleanup.test.ts` ran
-  `npm run cleanup:all` (`--prune-orphans`) in the working tree itself, which deleted the generated code
-  (`lib/*/service.ts`, ...); it now runs on a disposable copy and asserts the working tree is unchanged.
-  `vitest.flows.config.ts` sets `fileParallelism: false`, and `startServer` removes only a stale `.next/dev/lock`
-  instead of the whole `.next` directory. `multistage_approval_rounds.test.ts` supplies its own
-  `on_withdrawn`-declaring approvable instead of relying on an entity of the consumer's schema. See
-  `docs/knowledge/flows-tests.md`.
-- The virtual column resolver stub was never announced in the `ACTION REQUIRED` summary: `_write_stub` returned `None`, so
-  the notice keyed on its result never fired. It now returns whether it created the file.
-- **Attachment bridge: `setAttachmentsForBridge` only accepts attachment ids of the record being edited** (Issue #958).
-  An id belonging to another record, in the same or another organization, or to another attachment type now rejects the
-  whole call with `NOT_FOUND` before anything is written, and the update filters on `attachable_id` as well.
-- **Generated Cypress helpers: `selectAutocomplete` and the DataGrid cell helpers work for long labels and wide grids.**
-  `selectAutocomplete` compared the option text with whitespace collapsed but the expected label as-is, so a label with
-  trailing empty segments (for example an inventory with no lot number or expiry date) never matched. The expected label
-  is now collapsed the same way. `getDataGridCell` (and so `editDataGridCell` / `fillDataGridRow`) now scrolls the grid
-  horizontally until the column is rendered, because MUI DataGrid virtualizes columns that are off screen (the
-  `dashboard_widget` grid lost `group_by_field` once `timezone` was added in front of it).
-- **Mobile: the Audit Log screen no longer shows "An unexpected error occurred"** (Issue #926). `GET /api/audit_log`
-  and `GET /api/audit_log/<id>` authenticated with `authenticateApiKey()`, which does not understand the mobile
-  access token, so the app's `Authorization: Bearer <jwt>` request was answered `401 Invalid API key.`. Both routes
-  now use `authenticate()` like every generated entity route (mobile access token or API key); permission checks
-  and the service API key path are unchanged.
-- **`audit_log` monthly partitions can be created by the restricted application role** (Issue #952). `audit_log_create_month_partition()`
-  is now `SECURITY DEFINER` with a pinned `search_path` and `EXECUTE` revoked from `PUBLIC`; `audit_log_app_role.sql` grants it to the
-  application role. Re-run `audit_log_append_only.sql` and `audit_log_app_role.sql` on existing databases. The docs now say the
-  consumer sets up the role's rights on other tables, and no longer claim every `neon_superuser` member can disable the trigger
-  (verified for the table owner only). See `docs/knowledge/audit-log-append-only.md`.
-
-### Added
-- **Mobile: entities with an editable child collection** (Issue #939). An entity whose form has an editable one-to-many
-  grid (for example `asn.lines`, `purchase_order.lines`) is no longer left on the "not available in the mobile app yet"
-  placeholder. The Expo form draws a row editor (add, remove, and each row's own fields, including relation pickers),
-  sends the rows as the property array of the existing POST and PUT routes, and the detail screen lists them. A child
-  that is independent, a `list` child that is not a many-to-many, or a row field with no native control still keeps the
-  placeholder; the generation log names the property and field. See `docs/knowledge/mobile-app.md`.
-- **Mobile: direct attachment fields** (Issue #931). An entity with an `x-relationship: {target: attachment,
-  type: direct}` field (for example `leave_request.medical_certificate_id`) is no longer left on the
-  "not available in the mobile app yet" placeholder. The Expo form picks a file with the system document picker
-  (`expo-document-picker`, added to `mobile/package.json` only when some entity has such a field), uploads it
-  through `POST /api/upload`, creates the `attachment` row through the new `POST /api/attachment/direct`, and
-  submits the row's id with the entity, as the Web form does; the detail screen shows the file name and opens the
-  file. `POST /api/upload` now accepts a mobile access token or API key in addition to the browser session (a
-  caller with no valid credential still gets `401 {"error": "Unauthorized"}`); `POST /api/attachment/direct` runs the
-  existing `createDirectAttachment` action as the authenticated caller, so permissions and organization
-  checks are unchanged: any authenticated user may store a file and create the unlinked row, and the entity's own
-  `create` / `update` permission decides whether the link is saved. Entities that also declare polymorphic
-  attachments, virtual columns or another unsupported feature keep the placeholder; the generation log still names
-  the reason. See `docs/knowledge/mobile-app.md`.
-- **Dashboard widget time zone and `created_at` / `updated_at` buckets** (Issue #911). `dashboard_widget` has a
-  new `timezone` column of the shared `Timezone` enum (default `utc`, the zone every bucket used before). Day,
-  week (Monday start), month, quarter and year boundaries of a date-time group-by field are computed in that
-  zone, following DST changes; date-only fields keep their stored calendar date (UTC), and a non-`utc` zone on
-  a field that is not a date-time is answered with `400` when the chart is computed. The zone is resolved only
-  through `TIMEZONE_IANA_NAME`. A non-UTC zone is named in the widget subheader. `POST /api/dashboard/aggregate`
-  accepts an optional `timezone` (the enum literal, for example `asia_tokyo`); an unknown value returns `400`.
-  Every dashboardable entity's catalog now lists `created_at` and `updated_at` as date-time fields, so they can
-  be time-bucketed. **Consumers with existing data** run `scripts/migrations/05_dashboard_widget_timezone.sql`
-  once, after `04_app_setting_timezone_enum.sql`. See `docs/knowledge/timezone-handling.md`.
-- **Report which entities are left out of the mobile app** (Issue #925). `generate-code` prints the entities that
-  keep the "not available in the mobile app yet" placeholder, grouped by reason, and writes the same list to
-  `mobile/MOBILE_ENTITIES.md`. Only generated `mobile/` output gains that one file (and only when
-  `x-generator.mobile.enabled` is true); no screen, schema key or Web file changes. See `docs/knowledge/mobile-app.md`.
-- **`app_setting.timezone` is a native `Timezone` enum** (Issue #921). The column was a free `String`; any
-  text could be stored through the form, REST, CSV import and the seed. It is now a Prisma enum of 54 zones
-  covering every standard-time UTC offset, with snake_case members (`asia_tokyo`) that are never renamed. The
-  IANA spelling (`Asia/Tokyo`) is written only in the generated `lib/_timezone.ts`
-  (`TIMEZONE_IANA_NAME`, also copied to `mobile/lib/`); display names come from the `Timezone` namespace of
-  `messages/*.json`. `TimeZoneSelect` lists the enum members and their labels, and the generated New/Edit form
-  now renders it for the field. **Consumers with existing `app_setting` rows** run
-  `scripts/migrations/04_app_setting_timezone_enum.sql` once (it records every coerced value in
-  `"_app_setting_timezone_coerced"`); `bash scripts/check_timezone_migration.sh` exercises it. See
-  `docs/knowledge/timezone-handling.md`.
-- **Mobile: sort and filter a list by a relation column** (Issue #923, sub-issue of #140). The Expo list's sort
-  and filter panel now offers the relation display columns the REST list already supports (for example Room >
-  Room Type), derived from the same `sort_filter_relation_fields` as the Web list. The Web list is unchanged.
-  See `docs/knowledge/mobile-app.md`.
-- **Mobile: write comments and mention users** (Issues #861, #862). On an entity that has the comment write
-  routes, the Expo detail screen's comment thread gets a comment box, Edit and Delete on comments, and, when
-  the schema has an `x-mention` field, a user lookup while typing `@`. It calls only
-  `POST` / `PATCH` / `DELETE /api/<entity>/<id>/comments` and `GET /api/mention/users`, so the server's
-  permission and organization checks apply. The REST detail now also lists each comment's `mentions` (`id` and
-  `name`, in order) so an edit keeps the mention markers. New `lib/comment-composer.ts` in `mobile/`; no schema
-  key is added and the Web screens are unchanged. See `docs/knowledge/mobile-app.md`.
-- **Search box, multi-column sort and multi-field filter on the Web entity lists** (Issue #899, Phase 1 of #898).
-  The Desktop Web grid and the Mobile Web cards get one shared panel above the list: a search box that matches
-  the list's title column, a sort panel that sorts by several columns in the order they are chosen (ascending,
-  descending, off), and a filter panel with a control for every text, number, decimal, boolean and enum column
-  (and each relation display column), all applied together. Until now the grid sorted and filtered one column at a
-  time (`@mui/x-data-grid`'s MIT build forces that) and the card list had no sort or filter at all. The panel is
-  `components/_standard/ListQueryPanel.tsx`, driven by a `listQuery` spec each generated list page builds from the
-  REST list's own allow-list (the same data `SORTABLE_FIELDS`, `FILTERABLE_FIELDS` and `FIELD_KINDS` render from); a
-  list without the spec is unchanged. The state and the request logic are `lib/_list_query.ts`, which the Expo list
-  now uses too (copied into `mobile/lib/` unchanged; the native list still sorts one column at a time). The REST
-  list's accepted columns are unchanged and no `x-*` key is added. See `docs/knowledge/list-search-panel.md`.
-- **Mobile access tokens are accepted by the dual-auth routes** (Issue #883). `resolveActorId()` and
-  `requireDualAuth()` in `lib/api-auth.ts` dispatch an `Authorization: Bearer` token by shape, the same way
-  `requireCaller()` does, so CSV export and import, `GET /api/openapi.json` and the
-  scheduled-task routes accept a mobile access token. `X-API-Key`, API-key bearer tokens and the session
-  cookie behave as before; permission and organization checks are unchanged. See
+- **Generated Expo mobile app (opt-in)** (Issues #140, #915). With `x-generator.mobile.enabled: true` (default `false`, validated)
+  `generate-code` renders an Expo SDK 58 Router project into `mobile/`: footer navigation from `x-nav`, native list, detail, form
+  and delete screens with relation pickers, child collections, attachments, comments and reactions, approval and split actions,
+  `x-create-inline`, payment checkout, a scheduled-task screen, read-only audit-log screens, and insertion points for hand-written
+  components (`x-custom-components`, `x-custom-component`). Entities it cannot draw keep a placeholder and are listed in
+  `mobile/MOBILE_ENTITIES.md`; run `npm run cleanup` after switching the key off. See `docs/knowledge/mobile-app.md`.
+- **Mobile sign-in and token access** (Issues #883, #926, #1010). `POST /api/mobile/auth/token`, `/refresh` (rotating, with reuse
+  detection), `DELETE` and `/api/mobile/auth/sessions` use the new `mobile_session` table. Generated routes call `authenticate()`
+  and accept a mobile access token or an API key; so do CSV export and import, `GET /api/openapi.json`, `POST /api/upload`,
+  `GET /api/mobile/nav` and `GET /api/mobile/permissions`. See `docs/knowledge/mobile-app.md` and
   `docs/knowledge/multi-tenancy-and-permissions.md`.
-- **Mobile: create the referenced record in place, and payment checkout** (Issues #877, #872). A
-  many-to-one foreign key that declares `x-create-inline` shows *Create new* in the native picker; it
-  opens the target's native create form over the hosting form, saves through the target's REST create
-  route and selects the new record. An `x-payment` entity now has native screens: saving opens the
-  create response's `checkoutUrl` in the in-app browser (`expo-web-browser`, added only for apps with an
-  `x-payment` entity) and the detail screen shows a returned notice. New `Payment.returnedMessage`
-  text. See `docs/knowledge/mobile-app.md`.
-- **Scheduled task administration screen in the Expo mobile app** (Issue #867). When the schema declares a
-  scheduled task, `generate-code` renders an overview screen into `mobile/` that reads
-  `GET /api/scheduled-task-runs` (status, times, message and the reason a task did not run, for a chosen business
-  date, plus failed or stuck runs of other dates) and offers rerun, mark resolved and skip through
-  `POST /api/scheduled-task-runs/<task>/<action>`. Only the actions the server marks open are shown, and the role
-  check stays on the server: the nav link is hidden by `GET /api/mobile/nav`, and a `403` is shown as the server's
-  answer. No schema key is added and the Web admin page is unchanged. `build_mobile_nav()` takes
-  `include_scheduled_tasks`. See `docs/knowledge/mobile-app.md`.
-- **Sort, filter, search and bulk delete on the Expo mobile list** (Issues #874, #856). The native list
-  gets a sort panel, a filter panel (text, number, decimal, boolean and enum fields) and a search box that
-  matches the row's title column, all through the REST list's `sort` and `f.<field>` parameters; a long press
-  starts a selection mode that deletes the selected records with `DELETE /api/{entity}/bulk`, with the single
-  delete's confirmation and error messages. New `Common.sort`, `Common.filter` and `Common.selectedCount`
-  messages. CSV export and import stay out until the export and import routes accept a mobile access token
-  (Issue #883). See `docs/knowledge/mobile-app.md`.
-- **Approval section and split action on the mobile detail screen** (Issues #858 and #859).
-  An entity that declares `x-approval` (the `approvable` bridge and the `ApprovalSection` view component)
-  now gets native screens in the Expo app. Its detail screen lists the current round's approval requests
-  with their status and shows approve, reject (with a reason and its kind) and withdraw under the same
-  conditions as the Web section; each action calls the existing `POST /api/approval_request/{id}/approve|reject|withdraw`
-  route. The app evaluates no role, order or ownership rule: `GET /api/{entity}/{id}/capabilities` now also
-  lists `approval.current_round_request_ids` and `approval.actionable_request_ids`, computed by the checks
-  the approval routes already run, and the buttons follow them. A row the server reports as locked
-  (`write_locks.edit_locked` / `delete_locked`) hides Edit and Delete, and values only the approval workflow
-  may write are not offered by the form. The shared `use_entity_approval_actions.ts` and
-  `submit_predicate.ts` are copied into `mobile/` unchanged. An approval entity with `x-splittable` and a
-  `quantityField` also gets a split section: parts with a quantity and the `perPartRequired` fields (relation
-  pickers for foreign keys), Split enabled only while the parts add up to the record's quantity, posted to
-  the existing `POST /api/{entity}/{id}/actions/split` route, whose refusal text is shown. The
-  Playwright proxy no longer exits on a reset browser socket. Submitting for approval from the app is not
-  implemented yet. See `docs/knowledge/mobile-app.md`.
-- **REST routes for the scheduled-task administration** (Issue #887). When the schema declares a scheduled task,
-  `GET /api/scheduled-task-runs` returns the admin page's overview (one row per task with its last-run status and the
-  open actions, plus failed or stuck runs of other dates) and `POST /api/scheduled-task-runs/{task}/{rerun|resolve|skip}`
-  runs the operator actions, so a client that cannot call Server Actions, such as the mobile app, can show and operate
-  them. The routes call the page's own loader and a new `performOperatorAction()` that the Server Actions now call too,
-  so validation, the run guard and the audit row are shared. They accept a mobile access token or an API key and answer
-  `403` without the `ScheduledTaskRunner` role. A new gate, `test:scheduled-task-e2e-gate`, runs their Cypress API specs
-  against a generated fixture app. See `docs/knowledge/scheduled-task-operations.md`.
-- **REST routes for comment writes and the @-mention user search** (Issue #885). An entity with a comment
-  thread gets `POST /api/{entity}/{id}/comments` and `PATCH` / `DELETE
-  /api/{entity}/{id}/comments/{commentId}`, and a schema with an `x-mention` field gets `GET
-  /api/mention/users?q=`, so a client that cannot call Server Actions, such as the mobile app, can post,
-  edit and delete comments and offer `@`-mention suggestions. The routes run the
-  `add/update/delete{Entity}Comment()` actions and `searchMentionUserOptions()` the web form calls, as the
-  authenticated caller (mobile access token or API key), so the stored message, the notifications, the
-  author-only edit and the delete rule are the web's own. Because the actions rely on the edit form for
-  access control, each comment route first requires `update` on the entity and finds the record through
-  `get{Entity}Detail()` (strict organization isolation); a comment of another record is `404`. The add
-  action now returns the id of the new comment. The OpenAPI document describes the routes. New
-  `npm run test:comment-rest-e2e-gate` builds and runs a fixture app with a commentable entity, because the
-  repository's own schema has none. See `docs/knowledge/comment-and-mention-rest-routes.md`.
-- **Read-only audit log screens in the Expo mobile app** (Issue #866). `generate-code` renders a paged list
-  (newest first) and a detail screen for the built-in audit log into `mobile/`, reading the existing
-  `GET /api/audit_log` and `GET /api/audit_log/<id>` routes only. The navigation gets an **Audit Log** link
-  in the `administration` group (a flat tab when the schema declares no such group), matching the desktop
-  sidebar; the link is hidden for a caller without `read` on `audit_log` (the existing `GET /api/mobile/nav`
-  rule), and a refused list request shows the shared permission message. No schema key is added and the Web
-  screens are unchanged. `build_mobile_nav()` takes `include_audit_log` for the new link. See
-  `docs/knowledge/mobile-app.md`. Scheduled task administration (#867) is not part of this change: the task
-  list and last-run status have no REST route for a client to call.
-- **Comment thread and reactions on the mobile detail screen** (Issue #863; the thread part of Issue #861
-  and the mention rendering of Issue #862). An entity that is commentable through the shared `commentable`
-  bridge keeps its native screens instead of the placeholder, and its detail screen lists the comments the
-  REST detail embeds (author, time, message, with an `@mention` shown as the user's name) and a reaction
-  bar per comment. The bar shows the counts and the reactions the signed-in user made, and adds or removes
-  one through `/api/comment/{id}/reactions/toggle`; the labels are the web's `ReactionType` messages. The
-  composer, editing and deleting a comment and the `@` user lookup are not part of it yet: there is no
-  REST route for them. See `docs/knowledge/mobile-app.md`.
-- **Documentation for the `x-autocomplete-context` schema key**: where it goes, what it changes in the generated form and split action, how it relates to `autocomplete_filter.ts`, and what validation rejects. See `docs/knowledge/x-autocomplete-context.md`. `docs/knowledge/relation-picker-rest-route.md` now compares the options route with the list API.
-- **REST route for relation pickers: `GET /api/{entity}/options`** (Issue #852). Every entity with a REST
-  surface gets a route that searches (`q`, `limit`) or looks up by id (`ids`) the records a many-to-one,
-  one-to-one or many-to-many field can select, so a client that cannot call Server Actions, such as the
-  mobile app, can build the picker. The route calls the `search{Entity}Options()` function the web
-  forms call, as the authenticated caller, so read permission, strict organization isolation, the entity's
-  autocomplete filter and the row shape are the web's own; it accepts a mobile access token, an API key
-  or the session cookie and answers `403` without read on the entity. New `requireCaller()` and
-  `withActor()` in `lib/api-auth.ts` (with `runAsActor()` in `lib/_request_scope.ts`) let a route run a
-  session-based function as the caller it authenticated. The OpenAPI document describes the route. See
-  `docs/knowledge/relation-picker-rest-route.md`.
-- **Generated Expo mobile app with footer navigation from `x-nav`** (restart of the mobile line).
-  `generate-code` renders an Expo Router project into `mobile/`. Its footer tabs are the desktop
-  sidebar's root level — flat entity links, then top-level groups — built by the new
-  `code_generator/mobile_nav.py` from `build_nav_config()`, so no schema key is added. Tapping a group
-  tab lists its sub-groups and entity links on the main screen (one pushed screen per level, to the
-  maximum nesting depth); the bar scrolls horizontally past the visible width and a fixed Search tab
-  follows the schema tabs when the app has a search route. Group icons map to `@expo/vector-icons`;
-  `WorkOutlined`, `PeopleOutlined` and `SettingsOutlined` use similar `-outline` glyphs. The header keeps
-  the title, language switcher, notification bell and sign-out. `GET /api/mobile/nav` hides entity
-  links the caller cannot read, using the desktop sidebar's rule. Entity screens are not part of the
-  app yet. See `docs/knowledge/mobile-app.md`.
-- **Native entity screens in the Expo app for entities without relations.** `generate-code` renders a
-  paged list, a detail screen, a create/edit form and a single-record delete (with confirmation) for
-  every entity that has REST routes and no relation, child, custom component or similar feature
-  (`code_generator/mobile_entities.py`; other entities keep the placeholder screen). The screens draw
-  native controls and call the same generated modules the Web screens call —
-  `use_entity_form`, `use_entity_capabilities` and `form_validation` are rendered from the same
-  templates into `mobile/` — so state, validation, submit and permission-based show/hide are not
-  re-implemented. A per-entity `lib/<entity>/mobile_client.ts` has the Web function names and calls the
-  existing REST routes. New `GET /api/mobile/permissions?entity=<name>` returns the caller's
-  model-level flags so the app can hide "New" before any record exists. The Web screens and routes are
-  unchanged. The app moves to Expo SDK 57 (React 19.2, React Native 0.86, one pinned set)
-  because the shared form hook starts an async transition, which needs React 19.
-  `scripts/run_mobile_entity_playwright.sh` runs the Playwright specs against a build with
-  fixture entities (`mobile/e2e/entity-crud.spec.ts`) or the default schema. See
-  `docs/knowledge/mobile-app.md`.
-- **Relation pickers in the Expo app's entity screens.** A many-to-one foreign key, a one-to-one
-  selector and a many-to-many declared with `x-outputType: list` are drawn as native pickers (search, select,
-  clear; chips for a set) whose candidates come from `GET /api/{entity}/options`, so an entity with
-  such fields now gets native list, detail and form screens (`code_generator/mobile_entities.py`;
-  in the default schema `role`, `organization` and `app_setting` now qualify). The shared form modules still do the work: the
-  required-foreign-key check is the Web form's `form_validation.ts`, and the picker forwards the hosting
-  entity and the form values a field names with `x-autocomplete-context`. A target the caller cannot read
-  shows the field disabled with the Web message; the detail screen shows related records by label.
-  `Common` gains `select`, `clear`, `done`, `search` and `noOptions` in both locales.
-  `mobile/e2e/relation-pickers.spec.ts` runs through `scripts/run_mobile_entity_playwright.sh`.
-  Creating a referenced record in place and the one-to-one bridge grid are not part of the app yet.
-  See `docs/knowledge/mobile-app.md`.
-- **Email/password token authentication for the mobile app.** `POST /api/mobile/auth/token`
-  (password grant, MFA-aware, rate-limited), `POST /api/mobile/auth/refresh` (rotating refresh token
-  with reuse detection), `DELETE /api/mobile/auth/token` and device-session routes under
-  `/api/mobile/auth/sessions`, backed by the new `mobile_session` table. Generated REST routes now call
-  `authenticate()`, which accepts a mobile access token or an API key; `GET /api/notifications` also
-  accepts the bearer token. Existing API-key callers are unchanged. The Playwright base for the mobile
-  web bundle lives in `mobile/e2e` and runs with `npm run test:e2e:mobile:pw`.
-- **Create the referenced record in place from a foreign-key field** (issue #846, stage 1). A
-  many-to-one FK field that declares the new `x-create-inline: true` key (on the field, beside
-  `x-relationship`) also offers *Create new* in its autocomplete. It opens the target entity's own
-  generated form in a dialog and selects the saved record in the field. The dialog saves through the
-  target's own `upsert` action, which gains a return-id mode (`__return_id`) that returns
-  `{ ok: true, id }` instead of redirecting and runs after the same permission check, validation and
-  organisation check as the target's own form. Schema validation rejects, naming the entity and
-  field: a field that is not many-to-one, a target with `x-approval`, `x-payment`, `x-self-only` or
-  `x-internal`, a target with no generated create form, a target that itself declares the key
-  (nesting depth is 1) and a non-boolean value. The created record stays if the parent form is never
-  saved, and the field says so (`Common.createdInlineNotice`); `Common.createNew` is the other new
-  message. Generated for a target only when some field offers it: `lib/<target>/inline_create.ts`,
-  `components/<target>/InlineCreateDialog.tsx`; `components/_standard/InlineCreate.tsx` is the
-  shared dialog context. Not covered yet: FK cells of an embedded child DataGrid, many-to-many fields
-  and the independent-children "add existing" list. See
+- **REST routes for clients that cannot call Server Actions** (Issues #852, #885, #887, #931, #949). `GET /api/{entity}/options`
+  (relation pickers), comment writes and `GET /api/mention/users`, `GET /api/scheduled-task-runs` with the rerun, resolve and skip
+  actions, `PUT /api/<entity>/<id>/attachments` and `POST /api/attachment/direct`. They run the web actions as the authenticated
+  caller, so permission and organization checks are unchanged. See `docs/knowledge/relation-picker-rest-route.md`,
+  `docs/knowledge/comment-and-mention-rest-routes.md` and `docs/knowledge/scheduled-task-operations.md`.
+- **Mobile build and test tooling** (Issues #985, #987, #994). `npm run test:e2e:mobile:pw` runs the Playwright modes through
+  `scripts/run_mobile_entity_playwright.sh` (gate step and `mobile-playwright` CI job; the bare invocation needs
+  `MOBILE_PW_PRECONDITIONS_READY=1`), and `scripts/run_mobile_native_e2e.sh` runs the generated Maestro flows, exiting with
+  status 3 when a prerequisite is missing. See `docs/knowledge/mobile-app.md` and `docs/knowledge/mobile-executable.md`.
+- **`x-version-of`: identity and version entities with approval-backed history** (Issues #946, #953, #968, #1042, #1049).
+  Declared on an `x-approval` version entity, it assigns the version number at approval, allows one open draft per
+  identity, keeps `current_version_id`, and keeps a terminally rejected version as a closed record. The identity gets a
+  Version history section with a two-version diff and a **New version** button, a prefilled `/<version>/new` screen, and a
+  tombstone (an identity with an approved version cannot be deleted; `x-generate.invalidate` needs `invalidated_at DateTime?`).
+  Covered by `test:version-of-e2e-gate` and its CI job. See `docs/knowledge/schema-yaml-configuration.md` section 7.8.
+- **`x-exclusive-parents`: a child owned by exactly one of several parents** (Issues #811, #814). Declared on the child, it hides
+  the other parents' FK columns in the embedded DataGrid and rejects, on every write path, a save with no owner or more than one
+  (`Errors.exclusiveParentsMissing`, `exclusiveParentsInvalid`). Generated tests write exactly one owner. See
+  `docs/knowledge/schema-yaml-configuration.md` section 7.7.
+- **`x-create-inline`: create the referenced record from a foreign-key field** (Issue #846). A many-to-one field that declares
+  it offers *Create new* in its autocomplete, which opens the target's own form in a dialog and selects the saved record.
+  Validation rejects unsupported targets (`x-approval`, `x-payment`, `x-self-only`, `x-internal`) and nesting. See
   `docs/knowledge/create-fk-record-in-place.md`.
-- **"Save and continue editing" button on generated forms** (issue #832). A second submit button
-  beside Save saves the record and stays on it: after a create the URL moves from `/new` to
-  `/edit/[id]`, so attachments and comments can be used straight away; after an update the same
-  edit screen reloads with the saved values. A failed save keeps the form and its values. The
-  button is not generated for `x-generate.edit: false`, `x-payment` and approval-lockable
-  entities, and on `/new` it is shown only to a user with update permission (a user whose update
-  right comes only from the Creator role does not get it there). The edit page keys the form on a
-  `saved` search parameter so embedded child grids are re-seeded from the saved record. No new
-  `x-*` key; `Common.saveAndContinue` is the new message. See
+- **"Save and continue editing" button on generated forms** (Issue #832). It saves and stays on the record (a create moves from
+  `/new` to `/edit/[id]`); it is not generated for `x-generate.edit: false`, `x-payment` or approval-lockable entities. See
   `docs/knowledge/save-and-continue-editing.md`.
+- **List search box, multi-column sort and multi-field filter** (Issues #898, #899, #967, #1051). One panel
+  (`components/_standard/ListQueryPanel.tsx`, `lib/_list_query.ts`) serves the Web grid, the Web cards and the Expo list; internal
+  bridge foreign keys are not offered. The new column-level `x-trigram-filter` adds or removes a column from the search box of an
+  entity that is a cross-entity search target. See `docs/knowledge/list-search-panel.md` and
+  `docs/knowledge/list-panel-trigram-filter.md`.
+- **Generated OpenAPI 3.1 document and Swagger UI** (Issues #707, #762, #768, #769). `docs/generated/openapi.json` describes
+  every `api: true` entity (parameters, request bodies, real error responses, `readOnly` base fields, export and import).
+  `GET /api/openapi.json` serves it to API-key or session callers in every environment; `/swagger` exists only when
+  `SWAGGER_UI_ENABLED=true` and must never be set on Production. Generated entity docs gain a Constraints section. See
+  `docs/knowledge/generated-documentation-and-openapi-spec.md`.
+- **Row-level `GET /api/{entity}/[id]/capabilities`** (Issue #707). It answers which operations, writes and transitions are legal
+  for one row and caller, and lists `approval.current_round_request_ids` and `approval.actionable_request_ids`. See
+  `docs/knowledge/generated-documentation-and-openapi-spec.md`.
+- **`Idempotency-Key`, rate limits and API key expiry** (Issues #707, #717). A create `POST` with an `Idempotency-Key` replays
+  the original result (new `idempotency_key` table, one-day retention; a different body is a 409). API-key routes enforce
+  per-caller limits of 300/min read and 60/min write (`RATE_LIMIT_API_READ_LIMIT`, `RATE_LIMIT_API_WRITE_LIMIT`). The nullable
+  `user.api_key_expires_at` makes an expired key answer `401 API key expired.`. See `docs/knowledge/api-idempotency-and-rate-limiting.md`
+  and `docs/knowledge/api-key-expiry.md`.
+- **Scheduled tasks on GCP** (Issues #712, #1008, #1029, #1036). `scripts/gcp-task-runner.sh` provisions a Cloud Run Job and a
+  Cloud Scheduler job that run `task:run-all` nightly (`DRY_RUN=true` previews; `TASK_RUNNER_BUCKET_ROLES` grants bucket roles),
+  and `scripts/gcp-task-runner-teardown.sh` deletes what it created (`DELETE_IMAGES`, `DELETE_AUDIT_LOG_BUCKET=true`). The
+  `Dockerfile` has a `task-runner` stage that skips the Next.js build (`TASK_RUNNER_DOCKER_TARGET=builder` restores the old
+  image), and `generate-code` writes it with `.dockerignore` for any schema that declares a scheduled task, whatever
+  `x-cloud.provider` is. See `docs/knowledge/gcp-task-runner-operations.md` and `docs/knowledge/scheduled-task-operations.md`.
+- **Hand-written hooks for generated tests and validation** (Issues #817, #819). Every `test: true` entity gets a write-once
+  `cypress/support/<entity>/helper_custom.ts` with `dependencyValues(key, defaults)` (kept at
+  `prj/cypress/support/<entity>/helper_custom.ts`), and an `AppError` takes `messageKey` and `messageArgs` so a hand-written rule
+  shows a translated message from the consumer's `ValidationMessages` namespace. See `docs/knowledge/code-generation-custom-extensions.md`.
+- **`scripts/check-migrations-match-schema.sh`** (migration check). It runs `prisma migrate deploy` and `prisma migrate diff` against
+  `prisma/schema.prisma` on an empty local scratch database and prints the missing SQL; run it when preparing a `develop` merge or
+  a deployment. See `docs/knowledge/migration-schema-check.md`.
+- **`x-state-machines` diagram check** (Issue #715). `generate-code` fails and names the missing value and the diagram file when a
+  governed enum field has a value the diagram never mentions; a `null` member is ignored.
+- **Documentation**: `docs/knowledge/dashboard-guide.md` (Issue #909), `docs/knowledge/x-autocomplete-context.md`,
+  `docs/knowledge/vercel-demo-login-phishing-warning.md` (Issue #724), the restricted-role steps in
+  `docs/knowledge/audit-log-append-only.md`, and `docs/knowledge/scheduled-task-operations.md`.
 
 ### Changed
-- **Mobile app generation is opt-in** (Issue #915). `generate-code` no longer renders the Expo app into
-  `mobile/` unless the schema sets `x-generator.mobile.enabled: true` (default `false`); the key is
-  validated (boolean only, unknown sub-keys rejected). A project that wants to keep `mobile/` must set the
-  key in its own schema. The hand-written mobile token routes under `app/api/mobile/` stay in place. After
-  switching the key to `false`, run `npm run cleanup` to remove the previously generated `mobile/` files.
-  `scripts/run_mobile_entity_playwright.sh` enables the key in every mode and fails if `mobile/` is absent.
-  See `docs/knowledge/mobile-app.md`.
-- **Generated entity screens call framework-neutral UI hooks.** The form state and submit
-  orchestration, error-message mapping, permission-derived show/hide decisions and approval wiring
-  that `FormUpsert.tsx` and `FormView.tsx` carried inline now live in `lib/<entity>/use_entity_form.ts`,
-  `use_entity_capabilities.ts` and (for entities that render `ApprovalSection`)
-  `use_entity_approval_actions.ts`, which import no Next.js, `next-intl`, DOM or UI-library module,
-  so another client can reuse them. `ApprovalSection`'s per-row approve/reject check is the exported
-  pure function `canActOnApprovalRequest` in `lib/approval_request/submit_predicate.ts`. Generated Web
-  behaviour is unchanged. See `docs/knowledge/shared-ui-hooks.md`.
-- **A list-view entity must declare an `x-display.table` column with `primary: true`**
-  (issue #837). Schema validation now fails, naming the entity, when an entity that has a list page
-  declares none; a shown column merely named `name` no longer stands in for it. Entities with
-  `x-generate.list: false`, a chart-only `x-display`, `x-internal` entities and child-only
-  entities are not affected, and there is no exception by entity name. The default schema's
-  `role`, `organization` and `permission` declare it (the list link and card title stay on `name`;
-  `role` and `organization` now declare their `name` and `description` columns explicitly, with
-  `@@index` entries on both), so every consumer picks this up on its next generator update and
-  must add the declaration to any entity of its own that lacks one.
-  The generated specs no longer guess when no primary is declared: the UI spec's `name`-column
-  fallback and its no-primary navigation-by-record-id variant (issues #698, #831) and the API
-  spec's `name` assertion are removed, and a UI spec for an entity that has a list view but no primary column is
-  refused (an entity with `x-generate.list: false` needs no primary and gets no list steps). The shared list components still default `primaryField` to `name`; that default is
-  not changed here.
+- **Schema authoring is stricter and `properties:` holds columns and relations** (Issues #837, #880, #1065, #1066). The
+  entity-level `fields:` key is removed: columns, relation objects and arrays are entries of `properties:`, and a proxy view is
+  written `x-view-of: <model>`; `code_generator/migrate_fields_into_properties.py` rewrites an existing schema. Entity-level
+  `required:` lists relation embeds only (naming a Prisma column is a build error; use `_required: true`). An entity with a list
+  page must declare an `x-display.table` column with `primary: true`. `x-autocomplete-context` is rejected on a plain text,
+  number, decimal or `format: uri` field and on a one-to-one FK. See `docs/knowledge/schema-yaml-configuration.md`.
+- **Scheduled tasks are enforced at run time** (Issues #712, #713, #774, #1037). `depends_on` is validated and enforced by a
+  generated run guard backed by the `scheduled_task_run` table (consumers write the migration), `npm run task:run` and
+  `task:run-all` run tasks in order, `interval` is optional, and `/scheduled_task_run` lets the `ScheduledTaskRunner` role rerun,
+  resolve or skip. The business date comes from `app_setting` (`getBusinessContext()` in `lib/business-date.ts`; `businessDateOf()`
+  is async), and `app_setting.business_date` is optional (existing databases run `scripts/migrations/06_app_setting_business_date_optional.sql`).
+  See `docs/knowledge/scheduled-task-operations.md`.
+- **`app_setting.timezone` is a native `Timezone` enum** (Issue #921). Existing rows run `scripts/migrations/04_app_setting_timezone_enum.sql`
+  once (`bash scripts/check_timezone_migration.sh` checks it); the IANA spelling lives in `lib/_timezone.ts`. See `docs/knowledge/timezone-handling.md`.
+- **Dashboard** (Issues #904-#913). The widget editor chooses the data source and group-by and series fields from lists, widgets
+  that cannot be drawn say why (`POST /api/dashboard/aggregate` answers 400 with `{ error, code, setting, params }`), text is
+  translated, and `dashboard_widget.timezone` buckets date-time fields (existing data runs `scripts/migrations/05_dashboard_widget_timezone.sql`
+  after 04). `group_by_bucket` is now `day`, `week`, `month`, `quarter` or `year`; the integers `0`-`4` are removed. See
+  `docs/knowledge/dashboard-guide.md` and `docs/knowledge/timezone-handling.md`.
+- **`audit_log` is append-only with tamper detection, and personal data handling is tightened** (Issues #935, #945, #952, #991,
+  #1062). A Prisma guard and a database trigger reject updates and deletes, the table is partitioned by month, `npm run audit-log:digest` chains
+  daily digests into GCS or S3 write-once storage (opt-in `x-generator.audit-log-storage.enabled`), auth code no longer writes email
+  addresses, and `anonymizeUser()` erases the person's related records and keeps the first erasure time. `x-pii` changes
+  generated code only on `user`; `x-retention` and `x-gdpr-mode` do not affect generated files. Consumers add the SQL to their
+  migrations. See `docs/knowledge/audit-log-append-only.md`, `docs/knowledge/x-pii.md` and `docs/knowledge/x-gdpr-mode.md`.
+- **`x-payment` creates a provisional record that Stripe Checkout confirms or removes** (Issues #775, #776, #786, #788, #789).
+  A `pending` row in the generated `payable` table (consumers write the migration) is marked `paid` by the webhook or by the
+  success page, and removed when the session expires; the API answers `{ "record", "checkoutUrl" }`. The Stripe Price is a required
+  `stripe_price_id`, specs pass without Stripe keys (`PAYMENT_FAKE_STRIPE=1`), and the success and cancel pages are write-once.
+  See `docs/knowledge/stripe-payment-integration.md`.
+- **Built-in administration entities share one `administration` sidebar group**. `user`, `role`, `permission`, `organization`,
+  `approval_flow`, `dashboard`, `app_setting` and Audit Log sit under one heading declared with `x-nav` and `x-nav-groups`; run
+  `npm run cleanup` before `generate-code` to pick it up in an existing app.
+- **Relation pickers and related lists** (Issues #1013, #1015, #1050, #1075). Rows of a related list link to their record, an
+  autocomplete `labelField` may go two hops (`test_case_version.title`), and `x-entity-select` also offers `audit_log` with
+  dictionary words. See `docs/knowledge/schema-yaml-configuration.md` (7.5), `docs/knowledge/label-field-search-semantics.md`
+  and `docs/knowledge/entity-select-options.md`.
+- **DataGrid date and date-time columns use MUI pickers and the app locale** (Issues #764, #765). The list filter and the
+  embedded child grid cells use `DatePicker` / `DateTimePicker`, and the theme follows `en` / `ja`. See `docs/knowledge/i18n-locale-routing.md`.
+- **Query performance and indexing** (Issues #726, `docs/knowledge/performance-improvements.md`). `getModelPermissions` issues one
+  `permission.findMany` per request and user, embedded relations use `relationLoadStrategy: 'join'`, and a column in
+  `x-display.table` or `x-filter-values` needs an `@@index` unless it is an enum or boolean. See `docs/knowledge/prisma-schema-conventions.md`.
+- **`prj:sync` removes the old copy of a renamed or deleted file** (Issue #619), and **`vercel-setup.sh` sets the project Function
+  Region** (Issue #589) from the first `regions` entry of `vercel.json`. See `docs/knowledge/prj-sync-stale-file-removal.md`.
+- **Generated entity screens call framework-neutral UI hooks.** `use_entity_form.ts`, `use_entity_capabilities.ts` and
+  `use_entity_approval_actions.ts` hold the logic the Web and Expo screens share; Web behavior is unchanged. See
+  `docs/knowledge/shared-ui-hooks.md`.
+- **The Cypress helper `grantAllEntityPermissions` grants what the real seed grants** (Issue #848), and the gate documents name
+  `npm run db:generate` as a prerequisite of the vitest step (Issue #1006). See `docs/knowledge/grant-all-permissions-x-generate-gate.md`.
 
 ### Removed
-- **Stopped generating the standalone Checkout Session route
-  `app/api/payment/checkout/route.ts` for `x-payment`** (issue #785). Any signed-in
-  user or API key could POST an arbitrary `price_id` to it and get a Checkout
-  Session for any Price. Nothing generated called it: Checkout starts from the
-  `x-payment` entity's own create path (`lib/payment/checkout.ts`), which reads
-  the Price from the entity, so the payment flow is unchanged. An app generated
-  earlier keeps its copy unless `npm run cleanup` removes it (only when it is
-  unedited); delete `app/api/payment/checkout/route.ts` by hand if it is still
-  there and the app does not use it.
+- **The standalone Checkout Session route `app/api/payment/checkout/route.ts` for `x-payment`** (Issue #785) is no longer
+  generated: any signed-in user could POST an arbitrary `price_id` to it. Nothing generated called it. An app generated earlier
+  keeps its copy unless `npm run cleanup` removes it (only when unedited); delete it by hand if the app does not use it.
 
 ### Fixed
-- **Date, date-time and time values are validated; the mobile inputs check them** (Issue #924, sub-issue of #140).
-  A date-time field on the Expo form was a plain text box: typing `test` passed the client check and the server
-  failed with an HTTP 500 from Prisma. A date / date-time / time column is now checked by one module,
-  `lib/_date_value.ts`, in the Web form validation, in the server write guard (`service_validation.ts`; the REST
-  routes and Server Actions now return a `VALIDATION` error, HTTP 400, instead of a 500) and in the new mobile
-  `DateValueInput`, which normalizes typed text to the shared value shape, shows a field error and offers a
-  *Today* / *Now* button. The module is copied into `mobile/lib/` unchanged. No `x-*` key is added. See
-  `docs/knowledge/mobile-app.md`.
-- **Comment Server Actions check permission and organization scope** (Issue #890). `add`, `update` and
-  `delete{Entity}Comment()` only checked that a session user existed (plus the author rule), so a Server
-  Action call that skipped the edit form could comment on, edit or delete a comment of a record the caller
-  could not update or that belongs to another organization. Each action now reads the parent record through
-  the caller's organization scope (and `x-self-only` / `x-filter-values`) and calls `requirePermission()` for
-  `update` on it, like `upsert{Entity}()`; delete by a non-author still needs `delete`. A caller who may
-  edit the record sees no change. See `docs/knowledge/comment-and-mention-rest-routes.md`.
-- **Generated test data wrote several owner columns of an `x-exclusive-parents` entity** (issue #849).
-  Dependency rows of such an entity (for example the `parameter` and `step_placement` rows another
-  entity's helper creates) and the child rows added by `populate<Parent><Child>Data` set every owner
-  FK, a row the entity's own rule forbids; the generated API specs reuse the same rows. They now set
-  one owner: the first declared parent's column for a dependency row, the populated parent's column for
-  a child row. The generated specs and helpers skip the empty label segment and close the gap, and the
-  shared `selectAutocomplete` / `checkField` Cypress commands compare with whitespace collapsed. The
-  runtime label is unchanged.
-- **`code-generation-custom-extensions.md` no longer shows `target: [new, ...]` for
-  `x-custom-components`.** The generator reads only `list`, `view` and `edit`; `new` was silently
-  ignored. The examples drop it, and the page now says which values `target` accepts and that an
-  `edit` component shows on `/new` too (the create page renders the same form).
-- **Matched the integer segment of a relation label in the generated autocomplete search**
-  (issue #842). When a relation's `labelField` ends in an integer property (for example a step
-  number), typing the label as displayed never found the option: the last token matched no
-  string column. The generated `search<Entity>Options()` now also matches a token of 1-9 digits
-  by equality against those integer fields. Only entities whose label has such a segment change.
-- **Skipped the child grid column that `x-exclusive-parents` hides in a parent's generated UI
-  spec** (issue #822). A listed parent's form hides the other parents' FK columns in the
-  embedded child grid, but the parent's generated UI spec still selected them, so
-  "creates with full data (all fields and children)" timed out waiting for a cell that
-  does not exist. The spec now skips every column the form hides. Entities without the
-  declaration generate identical output.
-- **Wrote exactly one owner in the generated tests of a child that declares
-  `x-exclusive-parents`** (issue #819). The generated helper rows, API create bodies
-  and form fills left the owner columns empty or set all of them, so the save-time
-  validator from #816 rejected the generated PUT and create requests. They now use
-  the owner column of the first declared parent that has a resolvable column, as a
-  required field, and skip the other owner columns. Entities without the declaration
-  generate identical output.
-- **Returned the second instance of the primary display FK from the generated test
-  helper when its entity has two FKs to the same model** (issue #813). The API spec
-  reads `deps.<fk>2` for `PUT /:id` and both bulk `PUT` examples, but the helper only
-  returned `<fk>` (and `<fk>Alias`), so those three examples failed with
-  `TypeError: Cannot read properties of undefined (reading 'id')`. Entities
-  without two FKs to the same model generate byte-identical output.
-- **Kept a list child's second FK to the parent's model in the fetched data**
-  (issue #801). A child embedded with `x-outputType: list` that had a structural
-  FK to the parent plus a separate FK to the same model lost both from the parent
-  detail query, so anything reading the second FK (for example a label
-  `[name, rel_par.name]`) rendered empty; a sibling list child's own FK to the
-  parent's model was dropped the same way. Only the structural parent FK is
-  excluded now, and a many-to-many list child, which has none, keeps all of its FKs.
-  Added `code_generator/tests/test_list_child_combination_matrix.py` (every
-  combination of the seven child axes, with and without the second FK) and the
-  `list-child-e2e-gate` fixture gate (`npm run test:list-child-e2e-gate`), which also
-  pins that removing a child with no pages, or with read-only pages, from the parent
-  screen deletes the child record, and that a child with editable pages and a required
-  link to its parent cannot be added to or taken out of the parent's list (screen,
-  server action or REST route).
-- **A one-to-many list child that already has a parent is no longer moved to
-  another parent** (issue #807; behaviour change). For a child embedded with
-  `x-outputType: list` that has its own pages and a nullable link to the parent,
-  the parent's picker offered children of other parents, and adding one (from the
-  screen, the Server Action or the REST route) silently took it away from its
-  original parent. The picker now offers only children without a parent, and the
-  service rejects any other child with a validation error. For a self-referencing
-  child the record itself and all of its ancestors are also excluded and rejected,
-  so no cycle can be created. Many-to-many children are unchanged: a child may
-  still belong to several parents.
-- **Declared the option props of a list child whose link to the parent is
-  nullable** (issue #805). `FormUpsertProps` left out `initial{Child}s` and
-  `search{Child}Options` for such a child (looked up on the view entity instead
-  of the raw one), although the form and the edit and new pages pass and read
-  them, so the generated app failed to compile.
-- **Started a nullable date, time or date-time column in a new child DataGrid
-  row empty** (issue #804) instead of filling it with the current time. A required one still
-  starts with a value, and nullable numbers, decimals and enums already started
-  empty, so an untouched optional date used to be saved as "now".
-- **Stopped one child grid from removing the form props another child grid
-  needs** (issue #802). When a read-only independent child, a read-only parent
-  FK, or an FK left out of `x-display.form` shared a relation target with an
-  editable inline child grid, the parent form dropped that target's
-  `initial{Target}s` / `search{Target}Options` props while the grid still used
-  them, and the generated app failed to compile (`Cannot find name
-  'initial{Target}s'`). The props are now kept whenever an editable child grid
-  needs them.
-- **Kept a child DataGrid's second FK to the parent's model in the fetched data**
-  (issue #800). When an embedded child had a structural FK to the parent plus a
-  separate FK to the same model, the parent detail query dropped both, so the
-  second FK's grid column rendered empty. Only the structural parent FK is
-  excluded now.
-- **Stopped asking adopters of `x-payment` to copy the `payable` model into
-  `prj/prisma/schema.prisma`** (issue #786). The second `generate-code` in an
-  app failed in `prj:sync` with `model payable` reported as dropped, because
-  the model is appended by the generator and the consumer snapshot had no copy.
-  `prj:sync` now treats the models `generate.py` appends itself (`payable`,
-  `scheduled_task_run`) as expected and lets the next `generate-code` append
-  them again. Every other missing model or field is still reported.
-- **Made the bulk routes reject read-only fields like the single routes do**
-  (issue #787). `POST .../bulk` used to drop a read-only field from an item and
-  report it as a success, while `POST` answered 400. A bulk create now fails an
-  item that carries a read-only field, and a bulk update fails an item whose
-  read-only value differs from the stored one, each with the single route's
-  message. This applies to every `x-readonly` / `x-readonly-fields` field, not
-  only payment fields. A client that relied on a bulk item silently ignoring a
-  read-only value now gets that item reported as failed.
-- **Made the `x-payment` cancel and success pages settle the record
-  themselves, and shortened the Checkout Session lifetime** (issue #789).
-  Cancelling used to delete the record only when a later
-  `checkout.session.expired` webhook arrived, so nothing was removed where no
-  webhook is delivered. The generated cancel page now expires the session and
-  removes the record when Stripe reports it expired (a session still open or
-  already complete removes nothing). The success page retrieves the session and
-  marks the record paid when Stripe reports it paid. The webhook stays as an
-  idempotent backstop. Sessions are created with `expires_at` 31 minutes ahead
-  (Stripe's 30-minute minimum plus one minute of slack) instead of Stripe's
-  24-hour default. The cancel and success pages are write-once, so an existing
-  app keeps its old pages until it adds the `removeUnpaidPayable` and
-  `retrievePaidSession`/`confirmPaidSession` calls by hand.
-- **Made the generated `delete{Entity}()` do nothing for rows that are already
-  gone.** It used to write an audit event and run `afterDelete` for every id it
-  was given, so deleting the same record twice (or two deletes racing) recorded
-  the delete twice. Now only rows the call actually deleted get an audit event
-  and hook run.
-
-### Added
-- **Hand-written dependency values for the generated test helper** (issue #819).
-  Every entity generated with `test: true` gets a write-once
-  `cypress/support/<entity>/helper_custom.ts` exporting `dependencyValues(key, defaults)`;
-  a consumer keeps its copy at `prj/cypress/support/<entity>/helper_custom.ts`. The
-  generated `helper.ts` passes the values of every dependency row it creates, and the
-  `where` of every find-or-create lookup, through it, so a rule on a dependency
-  (for example a type column that must hold a particular value while its default stays
-  unchanged) is written by hand and the rest of the helper stays generated. Plain
-  columns may be set; foreign-key and system columns may not be reassigned, and anything
-  else throws naming the dependency and the column. No new schema key. Behavior is
-  unchanged while the hook returns the defaults, but the text of every generated
-  `helper.ts` changes (an import and a call at each dependency create) and each test
-  entity gets one new `helper_custom.ts`. Consumers do not track generated output, so
-  nothing needs committing. The child-datagrid gate now also runs the generated specs of
-  a test-enabled exclusive child and of an entity with a hand-written hook.
-- **Hand-written validation can pass an i18n message key to the form** (issue #817).
-  An `AppError` takes optional `messageKey` and `messageArgs`. They travel on the Server
-  Action failure and in the REST error body (only when present), and the generated form
-  shows the translated text instead of "{field} has an invalid or disallowed value."
-  Keys for hand-written rules live in the consumer's `ValidationMessages` namespace; a
-  missing key falls back to the generic text. Behavior without a key is unchanged, but
-  the emitted failure-return lines and the custom-rule wrapper gain the optional fields,
-  so regenerated `actions.ts`, `FormUpsert.tsx` and `service_validation.ts` differ.
-- **Added `x-exclusive-parents` to hide the other parents' FK columns in an
-  embedded child DataGrid** (issue #811). A child owned by exactly one of several
-  parents, each through its own nullable FK, declares
-  `x-exclusive-parents: [parent_a, parent_b]`. On a listed parent's view and
-  create/edit screens the grid omits the other listed parents' parent-link columns;
-  other FKs, the child's own pages and a schema without the key are unchanged.
-  Validation rejects unknown or duplicate names, fewer than two parents, a parent
-  that does not embed the child as a one-to-many DataGrid, and a required parent FK.
-  See `docs/knowledge/schema-yaml-configuration.md` §7.7.
-- **Rejected saves of an `x-exclusive-parents` child that do not have exactly one
-  owner** (issue #814, follow-up to #811). A save that leaves none of the listed
-  parents' FK columns set (`missing`) or two or more (`invalid`) now fails with a
-  422 `VALIDATION` error on every write path: the child's own service (REST,
-  Server Action, CSV import), a parent's nested child create/update, and approval
-  `set_fields` that write a listed column. An update is judged on the row as it will
-  be after the save. A parent-screen update no longer writes the hidden other-parent
-  FK columns, so a row that already holds two owners is rejected there instead of
-  being cleared. Application-level only: no schema rule, Prisma change or database
-  constraint, and a child without the key is unchanged. Adds the
-  `Errors.exclusiveParentsMissing` / `exclusiveParentsInvalid` messages (en, ja).
-- **Grouped the built-in administration entities in the sidebar under one
-  `administration` group.** `user`, `role`, `permission`, `organization`,
-  `approval_flow`, `dashboard` and `app_setting` now sit under a single
-  collapsible "Administration" heading, declared in the default schema with the
-  same `x-nav` / `x-nav-groups` keys business entities use. Audit Log joins the
-  same group as its last entry; it is not a schema entity, so its placement is
-  set on its static row in `lib/site-config.ts` rather than through `x-nav`.
-  Only Home stays at the top level. A consumer schema moves or reorders the
-  seven entities by redeclaring `x-nav`, and edits the Audit Log row in
-  `lib/site-config.ts` directly; the heading is hidden when the viewer can read
-  none of the eight. Because the generator skips a link that already has a row,
-  run `npm run cleanup` before `generate-code` to pick the grouping up in an
-  existing app.
-- **Added an admin page for scheduled task runs** (issue #774, follow-up to
-  #712). When a schema declares a scheduled task, `generate-code` now also
-  writes `/scheduled_task_run`: per task and business date it lists the
-  status, times and recorded error, says why a task did not run (blocked by a
-  named predecessor, already running, stuck, not due), and offers rerun (for
-  the recorded date, through the same guard), mark resolved and skip (with a
-  reason) for members of the `ScheduledTaskRunner` role. Every action is
-  written to the audit log. `app_setting` gains two nullable columns,
-  `scheduled_task_stuck_after_minutes` (when a `running` record counts as
-  stuck, default 60) and `scheduled_task_recheck_minutes` (stored, not read
-  yet); a consumer writes the migration when it deploys. The run guard accepts
-  an optional `businessDate`. See `docs/knowledge/scheduled-task-operations.md`.
-
-- **Made `x-payment` create a provisional record that Stripe Checkout then
-  confirms or removes** (issue #775). Creating a record of an `x-payment`
-  entity, through the form or `POST /api/{entity}`, now stores it with a
-  `pending` row in a new generated `payable` table and opens a Checkout
-  Session. The form redirects to Stripe, and the API answers
-  `{ "record", "checkoutUrl" }` instead of the bare record. The webhook marks the
-  row `paid` on success and deletes the record through the entity's own delete
-  function when the session expires or the payment fails; a repeated event is
-  ignored, and several `x-payment` entities share one webhook. The Stripe Price is
-  a required `stripe_price_id` field on the entity or on the one related
-  entity that declares it, and `generate-code` fails otherwise; the quantity
-  comes from a generated write-once hook (default 1), and Checkout accepts
-  promotion codes. A consumer writes its migration for
-  `payable` at deploy time, and an existing `app/api/webhooks/stripe/route.ts`
-  is refreshed on regeneration only if it is unedited and recorded in the
-  manifest; otherwise add the `dispatchPaymentEvent(event)` call by hand.
-
-- **Made `depends_on` between scheduled tasks enforced at run time, and
-  added direct-execution scripts and a GCP nightly trigger** (issue #712,
-  follow-up to the generate-time validation from #713/#714). Every run of a
-  scheduled task now goes through a generated guard
-  (`lib/scheduled-tasks/run-guard.ts`) backed by a new `scheduled_task_run`
-  table (one row per `task_id` and UTC business date; generated into
-  `prisma/schema.prisma` only when a task is declared, so a consumer writes
-  its migration at deploy time). The guard suppresses duplicate runs,
-  refuses a task whose predecessor has no `succeeded` record for the day,
-  and records `failed` handlers; the HTTP route returns 409 for a blocked or
-  in-progress task. New `npm run task:run -- <task_id>` and
-  `npm run task:run-all` run tasks directly against the database in
-  `depends_on` order (a task with an `interval` is skipped on nights it is
-  not due; exit codes are documented). `interval` is now optional, and a
-  task without one is only run by `task:run-all`. New
-  `scripts/gcp-task-runner.sh` provisions a Cloud Run Job and a Cloud
-  Scheduler job that run `task:run-all` nightly (`DRY_RUN=true` previews it).
-  A consumer must declare `depends_on` in its own schema for any ordering
-  to apply. See `docs/knowledge/scheduled-task-operations.md`.
-
-- **Served the generated OpenAPI document at an authenticated route, and
-  added a development/staging-only Swagger UI page** (issues #768/#769,
-  fifth stage of AI-agent-facing API improvements). `GET
-  /api/openapi.json` returns the exact `docs/generated/openapi.json` the
-  generator already writes — no second copy — reading it at request time
-  via `lib/openapi/document.ts` (`fs.readFileSync` with a runtime-built
-  path, listed in `next.config.ts`'s `outputFileTracingIncludes` so it
-  survives Vercel's build-output pruning). Authentication is
-  `requireDualAuth` (API key or session); no further permission check,
-  since the document only reveals schema shape, never row data. Runs in
-  every environment, including production. `GET /swagger`
-  (`app/[locale]/swagger`) is a separate, `swagger-ui-dist`-based
-  interactive explorer that reads its spec from this same route
-  (same-origin, no CORS) and lets a developer exercise the API through its
-  Authorize dialog. Gated on `SWAGGER_UI_ENABLED === 'true'` (never
-  `NODE_ENV`): unset makes the page 404, the same fail-closed treatment
-  `TEST_RESET_TOKEN` gives `app/api/test-utils/reset-caches`. Not wired
-  into `vercel-setup.sh`/`vercel-env.sh` — enabling it on a Preview
-  deployment is a manual, one-off step, and it must never be set on
-  Production (every "Try it out" call runs with the caller's own role
-  permissions, unrestricted). `openapi.json`'s `info.description` no
-  longer says the document goes unserved. See
-  `docs/knowledge/generated-documentation-and-openapi-spec.md`.
-
-- **Added durable, schema-independent regression coverage for the list-page
-  filter/sort feature (issues #753/#755/#756), plus a wiring-check layer
-  that runs against each consumer repo's own real data**: a new
-  `lib/_pagination.test.ts` vitest unit-test file exercises
-  `buildFilter`/`buildOrderBy` against every `ColumnFilterKind` × its real
-  operator table directly (schema-independent, runs in every consumer
-  repo's own `test:vitest`); a new generated, single, cross-entity Cypress
-  spec (`cypress/e2e/api/_filter_sort_matrix_gen.cy.ts`) auto-selects one
-  representative entity/column per `ColumnFilterKind` found in a schema's
-  own (`api`+`test`+`list`) entities and exercises the real REST `GET`
-  wiring against that data — no new `x-*` key, and a kind absent from a
-  given schema is stated explicitly in the file's own header rather than
-  silently skipped; and a new `filter_sort_gate` fixture
-  (`test:filter-sort-gate`, `tsc`-only, ~6-7s) closes this repo's own
-  generate-code/build blind spot for a single entity carrying every kind
-  at once (this repo's own schema has zero enum/boolean/decimal/date-kind
-  columns). See `docs/knowledge/list-filter-sort-typed-columns.md`.
-
-- **Added optional expiry for API keys** (issue #717, fourth stage of
-  AI-agent-facing API improvements — Stage 2 of
-  `ai-agent-integration-design.md`). A new nullable `user.api_key_expires_at`
-  column (`null` = never expires, matching every existing key's current
-  behavior unchanged) is checked in the single shared
-  `authenticateApiKey()` (`lib/api-auth.ts`); a request made with an
-  expired key is rejected with `401 API key expired.`. No new principal
-  type — an agent is an ordinary `user` account, human or agent alike. See
-  `docs/knowledge/api-key-expiry.md`.
-
-- **Added `Idempotency-Key` support on single-record API create endpoints
-  and per-API-key `api:read`/`api:write` rate-limit buckets** (issue #707,
-  third stage of AI-agent-facing API improvements — the "Idempotency keys
-  and rate limiting — resolved design" section of
-  `ai-agent-integration-design.md`). A client-supplied `Idempotency-Key`
-  header on a create `POST` is checked and recorded in a new
-  `idempotency_key` table (one-day retention, enforced logically at lookup
-  time), written in the *same* transaction as the record it guards — a
-  retry with the same key and body replays the original result without
-  re-running any create side effects; the same key with a different body
-  is rejected as a 409 conflict. Every REST route that authenticates
-  exclusively via `authenticateApiKey()` (`api_route.ts.jinja2`,
-  `api_detail_route.ts.jinja2`, `api_bulk_route.ts.jinja2`) now also
-  enforces a per-caller rate-limit ceiling on the existing
-  `lib/rate-limit/` mechanism — 300/min read, 60/min write, both
-  env-overridable (`RATE_LIMIT_API_READ_LIMIT`/
-  `RATE_LIMIT_API_WRITE_LIMIT`) — keyed by the caller's resolved user id,
-  not IP. See `docs/knowledge/api-idempotency-and-rate-limiting.md`.
-
-- **Added an entity-level "Constraints" section to generated docs
-  (`doc_entity.md.jinja2`) and a new `docs/generated/openapi.json` OpenAPI
-  3.1 build artifact** (issue #707), the first stage of AI-agent-facing
-  API improvements. The Constraints section documents, for an entity that
-  declares `x-approval` and/or a write-locked field, the approval flow's
-  static shape (which stage writes which field/value, whether a rejection
-  is terminal) and which (field, value) pairs are system-only — entity-
-  level facts true for every row, never row-level truth about a specific
-  record's current state. `docs/generated/openapi.json` reuses the same
-  static data (field type/required/enum, relationship shape, approval
-  flow, write-lock capability, as `x-relationships`/`x-approval`/
-  `x-write-locked-values` vendor extensions) to describe every `api: true`
-  entity's REST + bulk surface — a build artifact only, never served by a
-  deployed app by default. This repo's own `json_schema.yaml` declares no
-  `x-approval`/`x-write-locked-values` entity, so the Constraints section
-  is exercised only by `test:approval-lockdown-gate`'s fixture. See
-  `docs/knowledge/generated-documentation-and-openapi-spec.md` and
-  `app-generator-project-docs/planning/ai-agent-integration-design.md`.
-
-- **Added a row-level `GET /api/{entity}/[id]/capabilities` endpoint**
-  (issue #707, second stage of AI-agent-facing API improvements),
-  generated per `can_view` entity alongside the existing detail route.
-  Answers, for one specific row, which operations/writes/transitions are
-  legal right now given this row's current data and this caller's
-  permissions -- the row-level half the OpenAPI spec above deliberately
-  leaves out. Every judgment reuses an already-generated function
-  (`canAccess()`, `assertEditAllowed()`/`assertDeleteAllowed()`,
-  `assertTransitionAllowed()`, `canSubmitForApproval()`/
-  `canWithdrawApproval()`, `assertApprovalOrder()`) rather than a second,
-  divergent derivation. See
-  `docs/knowledge/generated-documentation-and-openapi-spec.md`'s "The
-  row-level capabilities endpoint" section, including a disclosed
-  coverage gap on the approvable-bridge branch.
-
-- **Added an optional `depends_on: [task_id, ...]` ordering key to
-  `x-scheduled-task` (entity-level) and `x-scheduled-tasks` (top-level)
-  declarations** (issue #713), naming other `task_id`s (from either
-  mechanism — one shared namespace) that a task is declared to run after.
-  `generate-code` validates the resulting dependency graph and fails
-  closed on self-dependency, a dangling reference to an undeclared
-  `task_id`, and any cycle (however many hops long) — the same
-  generation-time fail-closed discipline `x-state-machines` already
-  applies to its own diagrams. A straight chain through this key is how
-  strict one-at-a-time ordering across a set of tasks is expressed, with
-  no separate "serialize these tasks" mechanism needed. This change is
-  schema validation only: no generated handler reads or waits on
-  `depends_on` yet, and no completion-record mechanism exists yet to check
-  a predecessor's actual runtime completion — see
-  `docs/knowledge/scheduled-task-operations.md`'s new "Declaring ordering
-  between tasks" section and `planning/batch-ordering-design.md`
-  (app-generator-project-docs) for the full design and the staged
-  follow-up work.
-
-- **Closed five gaps in the generated OpenAPI 3.1 build artifact** (issue
-  #762, follow-up to #707): `GET /api/{parent}` now declares `page`/
-  `pageSize`/`sort`/`f.<field>` query parameters; the record schema marks
-  system/server-managed fields `readOnly: true`; bulk `PUT`/`DELETE` at
-  `/api/{parent}/bulk` declare a `requestBody`; every operation declares
-  the real `400`/`401`/`403`/`404`/`409`/`422`/`429` responses its own
-  route/service code can actually return (traced to specific template
-  lines, not assumed from the status code alone); and `/api/{parent}/
-  export`/`/api/{parent}/import` now have their own `paths` entries. A
-  sixth gap (per-operation role/permission detail) is deliberately left
-  open — the role/permission mapping is runtime database state a static
-  generator cannot read, and expressing more than "a 403 is possible"
-  would need a new vendor-extension key, left as a separate decision. A
-  Spectral/Redocly re-run confirms 0 structural/schema errors and that
-  Redocly's `operation-4xx-response` warning (26 occurrences before this
-  change) is now zero. See
-  `docs/knowledge/generated-documentation-and-openapi-spec.md`.
-
-### Changed
-- **Generated specs of an `x-payment` entity now pass without Stripe keys**
-  (issue #788). The `test:e2e:cy:*` npm scripts set `PAYMENT_FAKE_STRIPE=1`,
-  which makes `lib/payment/stripe_client.ts` hand out a generated in-memory
-  Checkout Session fake (`lib/payment/fake_stripe.ts`) and resolve a missing
-  Price id to a placeholder. Without the variable the real client is used as
-  before, so hand runs against Stripe test keys and production are unchanged;
-  with it set in a live environment the client throws instead of faking. An
-  adopter can drop an `x-generate.test: false` workaround on its `x-payment`
-  entity once its app-generator pointer includes this change.
-- **Documented how to run `x-payment` payments locally.** The webhook forwarding
-  section of `docs/knowledge/stripe-payment-integration.md` now says what
-  happens without `stripe listen` (the record stays `pending`, a cancelled
-  reservation is not removed), which port and env file to use (the gitignored
-  `.env.test.local` under `NODE_ENV=test`), that the signing secret is stable
-  per Stripe account, and how a 400, a refused connection or a 500 shows up.
-  The webhook route's missing-secret error and `.env.example` name the right
-  file and list all four events.
-- **Added a "Production setup" section to the `x-payment` documentation**
-  (`docs/knowledge/stripe-payment-integration.md`): what is specific to this
-  app in a deployed environment (separate test and live mode objects, a
-  `stripe_price_id` on every row that supplies a Price, one webhook endpoint
-  and signing secret per environment, the environment variables, and
-  `NEXTAUTH_URL` for the Checkout return URLs), with links to Stripe's and
-  Vercel's own documentation for the Dashboard steps.
-- **`getModelPermissions` (`lib/authz.ts`) now issues one `permission.findMany`
-  query per (request, user) instead of one per model queried**, from a
-  request-scoped permission-check performance investigation. A cross-entity
-  search touching N entities used to fire N separate permission queries for
-  the same user; the `name: model` filter is now dropped from the query (a
-  new `getPermissionRowsForUser(userId)`, cached by `userId` alone, fetches
-  every relevant row across all models in one call) and each caller filters
-  the batched result to its own model client-side. Existing 3-branch
-  role/global OR clause, and every existing special case (audit_log admin
-  bypass, `SELF_ONLY_ADMIN_BYPASS_ENTITIES` no-rows fallback,
-  Creator/Assignee aggregation), is unchanged — only how the underlying
-  rows are fetched changed, not which rows apply to a given model. See
-  `docs/knowledge/performance-improvements.md` §6.
-
-- **Every generated detail/list getter that embeds a relation now opts
-  into Prisma's `relationLoadStrategy: 'join'`**, folding what used to be
-  one separate query per embedded relation into the main query via a
-  database-level JOIN (`previewFeatures = ["relationJoins"]` added to
-  `prisma/schema.prisma`'s `generator client` block, and to every gate
-  fixture's own schema). Live-DB measurement: `getDashboardDetail`
-  dropped from 5 queries to 1, `getOrganizationDetail` from 4 to 1. See
-  `docs/knowledge/performance-improvements.md` §7.
-
-- **A column exposed for filtering/sorting in generated UI now gets an
-  automatic `@@index`** (issue #726) — any column that appears in an
-  entity's `x-display.table` (the generated list page's columns), or is
-  referenced by a view's `x-filter-values`, joins the existing
-  `creator_id`/`assignee_id`/`organization_id`/FK-column index
-  requirement enforced by `validate_prisma_indexes()`. Derived
-  mechanically from the schema by a new `derive_ui_exposed_index_columns()`
-  (`code_generator/validate.py`) — no hand-maintained column-name list.
-  `scripts/add_required_indexes.py` patches `prisma/schema.prisma`
-  accordingly; this repo's own dogfood schema needed 8 new indexes across
-  6 models (`user.name`, `permission.name`, `dashboard.name`,
-  `approval_flow.entity_name`, `approval_request.status`,
-  `app_setting.business_date`/`is_pinned`/`timezone`). Distinct from
-  issue #742 (ad hoc composite indexes for specific filtered/sorted
-  business queries, still deferred pending load-test evidence) — see
-  `docs/knowledge/prisma-schema-conventions.md` §5 for how the two
-  relate. No consumer-repo migration is included in this change; per the
-  standing migration-cadence policy, the actual `@@index` DDL reaches
-  each downstream consumer repo only at that repo's own next deploy.
-
-- **Issue #726's UI-exposed indexing requirement no longer applies to
-  enum- or boolean-typed columns** — `derive_ui_exposed_index_columns()`
-  (`code_generator/validate.py`) excludes a column whose Prisma type is a
-  native enum or `Boolean` from the required-index set it derives. This is
-  a demo-simplicity decision, not a technical claim that these columns
-  never benefit from an index — load-test measurement found that actual
-  selectivity of the filtered value, not the column's type, determines
-  whether an index helps, and that an enum or boolean column can still see
-  a substantial win (e.g. filtering a minority value). Declaring `@@index`
-  on such a column is still permitted, only no longer required; existing
-  indexes on enum/boolean columns (e.g. `approval_request.status`,
-  `app_setting.is_pinned`) are unaffected. See
-  `docs/knowledge/prisma-schema-conventions.md` §5.
-
-### Fixed
-- **The detail view of an `x-reservation` `mode: item` entity no longer shows
-  the allocated foreign key twice** (issue #790). `FormView.tsx` appended a
-  raw-id text field for `result.allocatedField` after the normal related-record
-  field, and its label rendered as the untranslated key `Fields.room_id`. The
-  related record is now shown once; the edit form is unchanged.
-- **The `x-payment` stubs no longer reject API keys or send buyers to a 404,
-  and the `stripe listen` instructions work with current Stripe CLI versions**
-  (issue #776). The generated `app/api/payment/checkout/route.ts` now
-  authenticates with `resolveActorId` (API key or session) instead of the
-  session only; `app/[locale]/payment/success/page.tsx` and
-  `app/[locale]/payment/cancel/page.tsx` are now written, with copy in a new
-  `Payment` i18n namespace; `.env.example` and
-  `docs/knowledge/stripe-payment-integration.md` give the `--events` form of
-  `stripe listen` and note that the CLI is installed separately from the
-  `stripe` SDK; and that doc now records the completed Stripe test-mode
-  verification instead of calling it pending. `test:payment-gate` also
-  type-checks the return pages.
-- **A REST update that omitted a relation or child-list field cleared it**
-  (issue #777): `PUT /api/{parent}/{id}` and bulk `PUT` passed
-  `<field> ?? []` to `update{Parent}`, so, e.g., renaming a role via the
-  API removed all of its users, updating a user removed all of their
-  roles, and updating a purchase order without `lines` deleted every
-  line. CSV import's update path passed `[]` unconditionally with the
-  same effect. An omitted field now leaves the relation unchanged; an
-  explicitly supplied list (including `[]`) still replaces it. The
-  OpenAPI request schemas (`{Parent}CreateRequest`,
-  `{Parent}BulkUpdateItem`) now document these fields (`<child>_ids` id
-  lists and owned child-row arrays), which were previously absent, so the
-  accepted field names were not discoverable from Swagger. See
-  `docs/knowledge/generated-documentation-and-openapi-spec.md`.
-
-- **A decimal-kind column's filter crashed on a non-numeric value instead
-  of returning zero rows** (found via a real consumer schema): unlike the
-  `number`/`date`/`enum` kinds, `buildFilter`'s `'decimal'` branch never
-  validated a value before handing it to Prisma's Decimal filter, so a
-  malformed query param (e.g. a garbage `f.<field>=` value) crashed with a
-  500 instead of dropping the clause. Fixed with the same
-  `Number.isNaN(Number(v))` guard every other kind already had. See
-  `docs/knowledge/list-filter-sort-typed-columns.md`.
-
-- **Generated list page sort/filter was not column-type-aware** (issue
-  #753): an FK/relation display column (e.g. `policy`, `assignee`) was
-  silently dropped from every filter/sort request (no error, just a
-  no-op), and a native enum, `DateTime`, or `Decimal` column crashed the
-  whole page with `PrismaClientValidationError: Unknown argument
-  \`contains\`` the moment a user opened its column filter — `buildFilter`
-  (`lib/_pagination.ts`) always emitted a generic string `contains` clause
-  regardless of the target column's real type, and the flat
-  `FILTERABLE_FIELDS`/`SORTABLE_FIELDS` allow-list had no way to represent
-  "filter by a relation's labelField" at all. Fixed with a runtime,
-  per-column clause-shape dispatch: `buildFilter`/`buildOrderBy` now take a
-  `kinds` map (`'string' | 'enum' | 'boolean' | 'number' | 'decimal' |
-  'date'`, computed at generate time in `build_context.py` from the same
-  `_prisma_native_enum_type`/`_prisma_decimal_type`/`format: date-time`
-  markers schema_deriver.py already derives) and a `relations` map (FK
-  display columns in `x-display.table` with a simple, single-column
-  labelField — composite/dotted labelFields are out of scope) that routes
-  a filter/sort through the relation's target column via a nested Prisma
-  clause. Every existing plain-string column's behavior is unchanged
-  (`kinds[field]` defaults to `'string'`), and the 8 hand-maintained
-  built-in-entity `getters.ts` files (dashboard/permission/user/role/
-  setting/organization/audit_log/approval_flow) call the old 2-argument
-  form unmodified thanks to default parameters. Deliberately scoped to the
-  crash/no-op fix only — the MUI filter panel's `operator`
-  (contains/equals/after/before/...) is still ignored server-side, so an
-  enum/date/number/decimal column always applies one fixed exact-match
-  clause per kind regardless of which operator the user picks in the UI; a
-  later pass can wire `GridColDef.type` + the real operator through. See
-  `docs/knowledge/list-filter-sort-column-type-dispatch.md`.
-
-- **Column-type-aware list filter still crashed for date-only, boolean, and
-  invalid-enum-literal values, and never presented the real per-type filter
-  control the MUI operator UX implies** (issue #756, follow-on gap in
-  #753/#755): (1) `_column_filter_kind()` only recognized `format:
-  date-time`, so a plain `format: date` column (`@db.Date`, e.g.
-  `effective_date`) fell through to the `'string'` kind and crashed with
-  the same `Unknown argument \`contains\`` #753 already fixed for
-  date-time; (2) `buildFilter`'s `'boolean'` branch had no value coercion,
-  so a real user's only input surface (a plain text box, since no
-  `GridColDef.type: 'boolean'` was wired) sent the raw string `"true"` and
-  crashed against Prisma's `BoolFilter`; (3) the `'enum'` branch passed an
-  unvalidated string straight to Prisma, crashing on any value that wasn't
-  independently known to be a valid raw enum literal — including a
-  column's own *translated display label* (e.g. `"In Force"` for
-  `in_force`), which is what a real user actually sees and types. Fixed
-  by extending the scope #753 left explicit ("full `GridColDef.type`/
-  operator wiring... for later"): `page_list_context()`
-  (`generators.py`) now emits `type`/`valueOptions` per column kind
-  (`singleSelect` for enum, reusing the same i18n label source as the
-  cell's own display so the two can never drift; `boolean`; `date`/
-  `dateTime`; `number` for number/decimal), giving every list page's
-  filter panel the real per-type control (a value dropdown, a date
-  picker, a checkbox) instead of a plain text box for every column.
-  `DataGridClient.tsx`'s `reload()` now forwards the MUI filter panel's
-  actual `operator` (previously discarded) to the server; `buildFilter`
-  dispatches on it per kind (enum: `is`/`not`/`isAnyOf`, validated
-  against a new generate-time `ENUM_MEMBERS` const so an invalid value —
-  translated label included — drops the clause instead of crashing;
-  boolean: coerced `is`; date: `is`/`not`/`after`/`onOrAfter`/`before`/
-  `onOrBefore`; number/decimal: `=`/`!=`/`>`/`>=`/`<`/`<=`; string:
-  `contains`/`equals`/`startsWith`/`endsWith`/`isAnyOf`) — an
-  unrecognized operator still falls back to that kind's existing default
-  clause, never a new crash source. `FilterMap`'s value type widens to
-  `FilterValue | { operator, value }`, kept backward compatible:
-  `parsePageOpts()` (REST) still emits bare scalars, and the 4 remaining
-  hand-maintained built-in-entity `getters.ts` files (dashboard/
-  permission/user/role/setting/organization/approval_flow are in fact
-  template-generated and already receive the new `kinds` argument like
-  any other entity — `audit_log` is the one that still calls the old
-  2-argument form, correcting #753's own "8 hand-maintained" count)
-  degrade to the pre-existing default clause with no code change. Also
-  fixes a real precision bug found only through actual Cypress UI
-  interaction, not caught by design review: a `GridColDef.type: 'number'`
-  filter's native `<input type="number">` round-trips a typed Decimal
-  value through the browser's own IEEE-754 double (`'99.99'` arrives at
-  the server as `99.98999999999999488...`), silently breaking exact-match
-  filtering against a column whose stored value is exact — a new
-  generate-time `DECIMAL_SCALES` const lets `buildFilter` re-quantize a
-  JS-number-typed decimal value back to the column's real scale before it
-  reaches Prisma. Also extends the same fix to `format: time`
-  (Prisma `DateTime @db.Timetz`, previously left untyped and falling
-  through to the crash-prone `'string'`/`contains` default like the other
-  gaps above): `_column_filter_kind` now dispatches `time` through the
-  identical `'date'` clause shape used for `date`/`date-time` unchanged —
-  empirically verified that Postgres casts any timestamp-shaped
-  comparison value to `timetz` before comparing, discarding its date part
-  regardless of what date a full date+time picker attaches, so no
-  separate clause shape or date-part normalization is needed —
-  and `page_list_context()` wires `type: 'dateTime'` for it (MUI has no
-  dedicated time-only `GridColDef` type). This repo's own dogfood schema
-  had, and still has, zero enum/boolean/date-only/date-time/decimal/time
-  columns anywhere in `x-display.table` to exercise any of this through a
-  real list page — rather than adding a fixture entity to this repo's own
-  schema for that purpose (an earlier iteration of this change did add
-  one, `list_filter_gate`; removed as inconsistent with this repo's own
-  fail-closed guard against dogfood test-only entities), coverage is
-  template-level regression tests
-  (`code_generator/tests/test_list_filter_typed_columns.py`, entity-free)
-  plus one-off real-UI verification against an already-real consumer
-  entity in a throwaway isolated worktree. See
-  `docs/knowledge/list-filter-sort-typed-columns.md`.
-- **Generated `addEntity`/`updateEntity` service functions
-  (`service.ts.jinja2`) misclassified Prisma's `P2028` error ("Unable to
-  start a transaction in the given time" — a transaction/connection-pool
-  timeout) as a client-input validation error, returning `422 VALIDATION`
-  instead of the existing `409 CAPACITY` error code.** The catch block
-  special-cased only `P2002` (unique constraint) before falling through
-  every other `PrismaClientKnownRequestError` — P2028 included — into a
-  generic `AppError('VALIDATION', 'One or more fields have an invalid
-  value')`. `CAPACITY` (409) already existed in `lib/_errors.ts` and was
-  already mapped in `lib/api-auth.ts`'s `APP_ERROR_STATUS_MAP`, but
-  nothing in the generated service layer ever threw it. Found while
-  investigating elevated 422 rates in load testing under high
-  concurrency: response bodies for these 422s carried no `field`/`reason`
-  key (unlike a real validation failure), and Prisma's own raw error log
-  in the same run window showed every one of them was `P2028`. Fixed by
-  adding a dedicated `e.code === 'P2028'` branch, mirroring the existing
-  `P2002` special case, in both `addEntity` and `updateEntity`. A
-  follow-up issue tracks three other codes reaching the same catch-all
-  that look similarly misclassified (`P2025`, `P2034`, `P2037`) but were
-  kept out of this fix to stay narrowly scoped.
-
-- **`lib/prisma.ts` created a new, independent Prisma Client (and its own
-  connection pool) on every module evaluation in production, instead of
-  reusing one cached instance per process.** The dev-only `globalThis`
-  caching guard (`if (process.env.NODE_ENV !== "production") ...`) assumed
-  every production request runs in a fresh process — an assumption that
-  breaks under an execution model that evaluates this module's bundle more
-  than once within one long-lived process (a warm instance handling
-  multiple concurrent invocations, each with its own bundle-scoped copy of
-  the module). Empirically confirmed: one process evaluated the module 4
-  times across a single login + search flow (route handler, Server Action,
-  client-page render, and `instrumentation.ts`'s cold-start hook each
-  getting their own bundle-scoped copy), and — before this fix — 3 of those
-  4 evaluations held simultaneous, distinct live backend connections,
-  multiplying the real per-process connection ceiling by up to 4x beyond
-  what `PRISMA_POOL_MAX` alone implies. The cache now applies
-  unconditionally in every environment (extracted into a small,
-  dependency-free `lib/global-singleton.ts` helper, unit-tested
-  independently of the generated Prisma client). Re-measured the identical
-  flow after the fix, in the same environment: still 4 module evaluations,
-  but exactly 1 real connection pool created and 1 live connection group
-  observed throughout.
-- **Search/DB-bootstrap code used `$executeRawUnsafe` for statements that
-  never needed it, and the generator's own raw-SQL guard couldn't have
-  caught a repeat** (issue #737). PR #727 had briefly introduced a
-  `tx.$executeRawUnsafe('SET LOCAL pg_trgm.similarity_threshold = ...')`
-  call (removed by PR #729 for an unrelated reason); the interpolated value
-  was a generate-time constant, never reachable from a runtime request, so
-  the call carried no actual injection risk — but `check_generated.py`
-  never flagged it, for two independent reasons: its regex required a
-  literal `prisma.` receiver (missing a `$transaction` callback param like
-  `tx`), and its file-enumeration walk never visited schema-wide generated
-  files (`lib/db-init.ts`, `lib/search/helpers.ts`) at all, only per-entity
-  ones. Both are fixed, with regression tests. Every remaining
-  `$executeRawUnsafe` call with no runtime-supplied value (`lib/db-init.ts`,
-  `cypress.config.ts`, `scripts/seed-baseline.ts`) is now the tagged
-  `$executeRaw` form instead — empirically confirmed `CREATE INDEX
-  CONCURRENTLY` still works correctly (including re-run idempotency)
-  through that form. The two pre-existing, legitimate tagged-template raw
-  queries this broadened scan now sees (`lib/search/helpers.ts`'s
-  cross-entity search UNION, `lib/<entity>/service.ts`'s scheduled-task
-  advisory lock) are unchanged and now carry an explicit
-  `check_generated_allowlist.yaml` entry. See
-  `docs/knowledge/raw-sql-policy.md`.
-
-- **Cross-entity search's trigram/bigm indexes were never used at runtime**
-  (issue #725 fix (d)). `generate.py`'s `sim_where_single`/
-  `bigm_where_single` wrap every searchable field in `COALESCE(field, '')`
-  before applying the `%`/`ILIKE` operators, but `create_gin_indexes.sql.
-  jinja2`/`db_init.ts.jinja2` built the trigram GIN index on the bare
-  column — a GIN index only matches a query expression syntactically
-  identical to the one it was built on, so the index was permanently
-  unusable regardless of cold-start state or data volume. Confirmed via
-  `EXPLAIN ANALYZE` on a 60,000-row table: the real generated predicate
-  forced a full-table `Seq Scan` (`Disabled: true` even with
-  `enable_seqscan = off`), 582ms for a single-row-match query, vs. 0.4ms
-  (`BitmapOr` over `Bitmap Index Scan`s) once fixed. Fixed by adding a
-  second, `_v2`-suffixed expression index per field matching the query's
-  `COALESCE(field, '')` form verbatim — query-side (`generate.py`) is
-  untouched, so no search-result behavior changes for any entity. The old
-  bare-column index is left in place (dead weight, harmless) to avoid a
-  blocking `DROP INDEX`; removing it is a separate, non-urgent follow-up.
-  Also reconciled an unrelated pre-existing drift between the two index
-  templates (different index name and field set for what was meant to be
-  the same index) found while implementing this fix. See
-  `docs/knowledge/search.md`.
-
-- **`prj:sync` could silently drop a generator-side Prisma model/field
-  when a consumer's `prj/prisma/schema.prisma` predated it** (issue
-  #646). `prj:sync` copies `prisma/schema.prisma` from a consumer's
-  `../prj` verbatim over this generator's own file; when this generator
-  adds a new `model` or field (e.g. the `idempotency_key` model and
-  `user.api_key_expires_at` field added at commit `f06d2a0b`), a
-  consumer whose `prj/prisma/schema.prisma` was captured before that
-  addition would have it silently reverted away on the next sync, with
-  no warning — confirmed to have happened identically across
-  app-template, insurance-app, and inventory-app. `scripts/prj_sync.py`
-  now diffs the destination's current model/field set against the
-  incoming consumer file before overwriting `prisma/schema.prisma`;
-  when the incoming file is missing generator-side content, the copy
-  for that file is skipped (destination left untouched) and the run
-  exits non-zero naming exactly what would have been dropped, rather
-  than proceeding silently. Content present only in the consumer's file
-  (its own models/fields) is never flagged. See
-  `docs/knowledge/prj-sync-schema-drop-guard.md`.
-
-- **Cross-entity search could fail with `P2028` (transaction timeout) at
-  real data scale**, a regression from the issue #725/#727 GIN-index fix
-  above: `buildSearchQuery()` wrapped its count/facet/main-select queries
-  in `prisma.$transaction(...)` with no explicit `timeout`, so Prisma's
-  5000ms default applied — at N=30,000 scale the full 25-entity search
-  UNION could exceed 5000ms end-to-end (reproduced 3/3 times against a
-  clean test database with no other load). Checked directly against a live
-  Postgres instance (`SHOW pg_trgm.similarity_threshold;` /
-  `pg_settings.source`): the GUC the `%` operator reads its threshold from
-  already defaults to 0.3 — identical to the generator's own constant, with
-  no per-schema override that could ever set it differently — so the
-  `SET LOCAL`/transaction wrapper was defensive scaffolding for a case that
-  cannot occur today. Removed the transaction entirely; count, facet, and
-  main select now run as three independent queries via `Promise.all`
-  (each its own pooled connection), restoring and improving on the
-  pre-#727 parallel behavior (measured ~35-55% faster than pre-#727 at the
-  same data scale, since the GIN index is now actually used) with zero
-  P2028s across 5 repeated runs post-fix. See `docs/knowledge/search.md`.
-
-- **List-page pagination (`get{Parent}Page()`) could fail with `P2028`
-  (transaction timeout) under concurrent load at real data scale**, a
-  separate failure mode from the search fix above with the same root
-  shape: `findMany`+`count` were bundled into `prisma.$transaction([...])`
-  (the batch/array form), which needs to acquire connections for both
-  member queries atomically before either can start — Prisma's default
-  `maxWait` for that acquisition step is 2000ms (confirmed via
-  `@prisma/client/runtime/client.d.ts`'s `PrismaClientBaseOptions
-  .transactionOptions` doc comment: `"maxWait ?= 2000"`). Under
-  `PRISMA_POOL_MAX=5` with concurrent search load also competing for
-  pooled connections, the batch transaction could not always acquire both
-  connections within 2000ms — reproduced at N=30,000 scale: `GET
-  /api/policy` 21.55% error rate, `GET /api/service_request` 22.10%,
-  `DELETE /api/provider/:id` 20.59%, while list/detail endpoints without
-  this transaction wrapper stayed at 0% error under the identical load.
-  Removed the transaction wrapper; `findMany` and `count` now run as two
-  independent queries via `Promise.all` (each its own pooled connection,
-  acquired independently instead of atomically) — confirmed zero P2028s
-  across the full API and UI Cypress suites post-fix. This trades exact
-  `findMany`/`count` snapshot consistency (already an accepted trade for
-  every non-transactional list/detail read path) for eliminating the
-  `maxWait` bottleneck. See
-  `docs/knowledge/performance-improvements.md` §5.
-
-- **GCP (Cloud Run) deployment required manually pasting Neon connection
-  strings, had no committed env template, could silently pick up a stale
-  ambient `gcloud` project, and printed a deploy-complete URL that 404s**
-  (issues #685, #683, #686) — `scripts/gcp-env.sh` now falls back to the
-  `DATABASE_URL_PROD`/`DATABASE_URL_UNPOOLED_PROD` values `scripts/vercel-
-  setup.sh` already writes into the same `.env.production.local` (no manual
-  Neon console lookup needed when a Vercel deployment for the same app
-  already exists), warns loudly and names the resolved project when
-  `PROJECT_ID` falls back to the ambient `gcloud config` state instead of
-  silently reusing it, and a new `.env.gcp.production.local.example`
-  template is committed (renamed from the never-committed
-  `.env.production.local.example` both `gcp-env.sh` and `vercel-env.sh`
-  referenced in their error messages, which collided with the unrelated
-  `.env.vercel.production.local.example` when a consumer symlinked the
-  generic name). `scripts/gcp-deploy.sh`'s final "Deploy complete" message
-  now also prints a `/en/login` link, since the bare Cloud Run origin URL
-  404s without a locale prefix (the i18n middleware's root-path redirect
-  behavior is unchanged and correct — Vercel deployments hit the exact same
-  307 redirect — this is a printed-message fix only). All three traced to
-  root cause via direct commit inspection: the Neon-paste requirement was
-  introduced by PR#617 (2026-09-18, Cloud SQL→Neon reconnection) as an
-  explicit, acknowledged scope cut; the stale-project fallback and missing
-  template predate PR#617 (present since the first GCP automation commit,
-  2026-07-02).
-
-- **Cross-entity search's GIN/trigram indexes were never actually created,
-  and the generated query would not have used them even if they were**
-  (issue #725, found via load testing at N=30,000-row realistic scale —
-  every entity in the search UNION ran a full table scan, 130-250ms
-  per-entity). Three parts, all required together (confirmed empirically —
-  any one alone leaves search performance unchanged):
-  1. A new generated `instrumentation.ts` calls `lib/db-init.ts`'s
-     `ensureSearchIndexes()` from Next.js's `register()` hook on every
-     server cold start (Vercel and GCP/Cloud Run both reach it, since both
-     dispatch through this same Next.js mechanism) — previously this
-     function had no call site anywhere in the generated output.
-     `scripts/create-gin-indexes.sql` (manual `psql` application) remains
-     as a fallback.
-  2. The generated search predicate's fuzzy-match half changed from
-     `similarity(field, query) > threshold` to the `field % query` operator
-     form, with `SET LOCAL pg_trgm.similarity_threshold` scoping the
-     threshold to the enclosing `prisma.$transaction(...)` — the
-     function-call form is opaque to the Postgres planner and never uses a
-     trigram GIN index, regardless of whether the index exists; only `%` is
-     recognized as trigram-indexable.
-  3. `create_gin_indexes.sql.jinja2` and `db_init.ts.jinja2` now also
-     create a GIN index on the `to_tsvector(...)` expression itself (not
-     only the trigram index) — the FTS half of the search predicate had no
-     backing index of any kind before this. Both mechanisms use `CREATE
-     INDEX CONCURRENTLY IF NOT EXISTS` throughout (non-blocking, cheap
-     no-op once the index exists).
-
-  See `docs/knowledge/search.md`.
+- **List filter and sort crashed or ignored columns by type** (Issues #753, #756). Relation, enum, date, time, boolean and decimal
+  columns, and a non-numeric decimal value, now filter and sort per column kind with the MUI operator, with regression tests. See
+  `docs/knowledge/list-filter-sort-typed-columns.md` and `docs/knowledge/list-filter-sort-column-type-dispatch.md`.
+- **Database connections, transactions and search indexes** (Issues #725, #747). `P2028` no longer returns 422 or fails list
+  pagination and cross-entity search (no `$transaction` wrapper; `P2034` and `P2037` map to 409, `P2025` to 404), `lib/prisma.ts`
+  caches one client in every environment, and the trigram and full-text indexes of cross-entity search are created at cold start
+  in the `COALESCE` form the query uses. See `docs/knowledge/search.md` and `docs/knowledge/p2028-capacity-misclassification-fix.md`.
+- **Generated writes and permissions** (Issues #500, #777, #787, #790, #890, #924, #958). A REST update that omitted a relation
+  or child list no longer clears it, bulk routes reject read-only fields like the single routes, comment Server Actions check
+  `update` permission and organization scope, `setAttachmentsForBridge` accepts only the record's own attachments, date values
+  are validated (a `VALIDATION` error, not a 500), Approve, Reject and Withdraw wait for the request, `delete{Entity}()` skips
+  rows already gone, and the `x-reservation` item detail shows the allocated FK once.
+- **Dashboard aggregate checks read permission and row scope on both entry points** (Issue #910). The `aggregateForWidget` Server
+  Action requires `read`, and every query is limited to the rows the user can list. See `docs/knowledge/schema-yaml-configuration.md` section 10.
+- **One-to-many list children** (Issues #800-#802, #804, #805, #807). A child that already has a parent is no longer moved to
+  another parent (the picker offers children without a parent, and the service rejects others), the second FK to the parent's
+  model is kept in fetched data, a nullable date starts empty, and the form props of a shared target are kept.
+- **Generated code, specs and test helpers** (Issues #813, #835, #841, #842, #965, #1026, #1031, #1044, #1046, #997). Flattened
+  one-to-one writes use `actorId`, `form_validation.ts` compiles and the API spec holds for an entity with no required field, delete
+  and numeric populate examples hold, the autocomplete search matches an integer label segment, and per-entity search and
+  resubmit examples are skipped or adjusted where the grant or a read-only field makes them invalid.
+- **Generator tooling** (Issues #618, #646, #786, #799, #582). `--prune-orphans` removes the pages, API routes and specs of a
+  removed entity, `prj:sync` stops silently dropping generator-side Prisma models and fields, the nav group resolves non-schema
+  entries, a virtual column resolver stub is announced under `ACTION REQUIRED`, and dev-tooling advisories are cleared where a fix exists. See
+  `docs/knowledge/cleanup.md` and `docs/knowledge/prj-sync-schema-drop-guard.md`.
+- **Gate and CI** (Issues #580, #605, #882). The UI Cypress step runs `cypress/e2e/auth/**`, a docs-only push no longer cancels the
+  E2E run of a preceding code push (a consumer's `Verify ci.yml` fails after a bump until its `ci.yml` is copied from
+  `docs/consumer-commands/ci.yml`), and `npm run test:flows` runs on a disposable copy. See `docs/knowledge/flows-tests.md`.
+- **Raw SQL and GCP deployment** (Issues #685, #683, #686, #737). Remaining `$executeRawUnsafe` calls without a runtime value use
+  the tagged form and `check_generated.py` now flags a repeat. `scripts/gcp-env.sh` falls back to the Neon URLs that
+  `vercel-setup.sh` wrote, warns on an ambient `gcloud` project, and `gcp-deploy.sh` prints a `/en/login` link. See `docs/knowledge/raw-sql-policy.md`.
+- **`code-generation-custom-extensions.md` no longer shows `target: [new, ...]` for `x-custom-components`.** The generator reads only
+  `list`, `view` and `edit`, and an `edit` component also shows on `/new`.
 
 ## [4.1.0] - 2026-09-19
 ### Added
