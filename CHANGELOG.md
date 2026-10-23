@@ -3,6 +3,10 @@ All notable changes to this project will be documented in this file.
 The format is based on Keep a Changelog (https://keepachangelog.com/),
 and this project adheres to Semantic Versioning (https://semver.org/).
 
+## [5.0.2] - 2026-10-23
+### Changed
+- Simplify descriptions in changelog and readme
+
 ## [5.0.1] - 2026-10-23
 ### Security
 Five authorization and input-validation gaps in generated code are fixed. Three of them (bulk routes, uploads, approval) have been present since 1.0 and two (split, invalidate) since 3.0.0, all through 5.0.0.
