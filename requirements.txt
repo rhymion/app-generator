@@ -12,5 +12,5 @@ fonttools[woff]>=4.67.0
 # surface known CVEs in the Python tooling. Even though nothing here ships
 # to end users, the generator runs in CI and on dev laptops; keeping pip
 # deps clean is policy.
-pip-audit>=2.10.0
+pip-audit>=2.10.1
 
