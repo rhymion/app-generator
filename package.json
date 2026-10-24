@@ -187,7 +187,7 @@
     "start-server-and-test": "^3.0.13",
     "tailwindcss": "^4.1.18",
     "tsx": "^4.23.15",
-    "typescript": "^5",
+    "typescript": "^7",
     "vitest": "^5.0.0"
   },
   "allowScripts": {
