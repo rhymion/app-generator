@@ -147,16 +147,20 @@ def _collect_custom_component_sections(entities: list, schema: dict) -> dict[str
     """Return {namespace: {key: label}} contributed via _CUSTOM_COMPONENT_SECTIONS
     by every entity's x-custom-components list."""
     result: dict[str, dict[str, str]] = {}
+    # The VersionHistory messages are read by the identity's history section and by
+    # the version entity's ApprovalSection (compareWithCurrent), whatever
+    # x-custom-components the author declared on either entity.
+    version_of_keys = {
+        key for v in version_of_entities(schema) for key in (v['identity'], v['version'])
+    }
     for entity in entities:
         def_key = entity.get('definition_key', '')
         entity_def = schema['definitions'].get(def_key, {})
         custom_comps = entity_def.get('x-custom-components') or []
         if not isinstance(custom_comps, list):
-            continue
-        if 'x-custom-components' not in entity_def and any(
-            v['identity'] == def_key for v in version_of_entities(schema)
-        ):
-            custom_comps = [{'name': 'VersionHistory'}]
+            custom_comps = []
+        if def_key in version_of_keys:
+            custom_comps = [*custom_comps, {'name': 'VersionHistory'}]
         for custom_comp in custom_comps:
             if not isinstance(custom_comp, dict):
                 continue

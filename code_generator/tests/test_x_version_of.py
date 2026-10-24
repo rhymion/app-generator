@@ -406,3 +406,16 @@ def test_version_history_messages_include_the_new_version_label():
     from generators_i18n import _collect_custom_component_sections
     sections = _collect_custom_component_sections([{'definition_key': 'product'}], _schema())
     assert sections['VersionHistory']['newVersion'] == 'New version'
+
+
+def test_version_i18n_section_survives_the_identity_declaring_its_own_components():
+    from generators_i18n import _collect_custom_component_sections
+    entities = [{'definition_key': 'product'}, {'definition_key': 'product_version'}]
+    for own in ([{'name': 'Mine', 'path': '@/c/mine', 'target': ['view']}], []):
+        schema = _schema()
+        schema['definitions']['product']['x-custom-components'] = own
+        sections = _collect_custom_component_sections(entities[:1], schema)
+        assert 'compareWithCurrent' in sections['VersionHistory']
+    # the version entity's ApprovalSection reads the section even without the identity
+    sections = _collect_custom_component_sections(entities[1:], _schema())
+    assert 'compareWithCurrent' in sections['VersionHistory']

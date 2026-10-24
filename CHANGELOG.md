@@ -3,9 +3,7 @@ All notable changes to this project will be documented in this file.
 The format is based on Keep a Changelog (https://keepachangelog.com/),
 and this project adheres to Semantic Versioning (https://semver.org/).
 
-## [Unreleased]
-### Fixed
-- **`anonymizeUser()` scrub fits each column, and a failed erasure is reported** (Issue #1060). A `user` property with `x-pii: none` is left untouched instead of being scrubbed. The scrub value follows the column type and nullability from the Prisma `user` model, and generation fails with a message naming the column when no value fits. The generated invalidate server action throws, and the invalidate REST route answers HTTP 500, when the handler returns `success: false`; a handler that returns nothing is unaffected.
+## [5.0.3] - 2026-10-24
 ### Security
 - **Dependency advisories cleared.** An `overrides` entry moves the `zod` nested under `@vercel/cli-config` (reached through `@vercel/blob`) to `^4.6.6`, which fixes GHSA-mrhx-c7xc-m3w5 (high, memory exhaustion on oversized constrained collections); the lockfile also picks up the patched `undici` and `fast-uri`. `npm audit --omit=dev --audit-level=high` reports no vulnerabilities.
 - **Upload type check no longer trusts the client-declared Content-Type** (Issue #1097). `POST /api/upload` (GCS and Vercel Blob routes) now requires the declared MIME type AND the file name's extension to be on allow-lists, and stores the Content-Type derived from the extension. The lists default to the previous 13 types plus their 13 extensions and can be narrowed with `UPLOAD_ALLOWED_MIME_TYPES` / `UPLOAD_ALLOWED_EXTENSIONS`. A file with no extension, or an extension outside the list, is now rejected.
@@ -14,7 +12,9 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 - **Env file permissions.** The deploy scripts set `.env.production.local` to mode `0600`.
 
 ### Fixed
+- **`anonymizeUser()` scrub fits each column, and a failed erasure is reported** (Issue #1060). A `user` property with `x-pii: none` is left untouched instead of being scrubbed. The scrub value follows the column type and nullability from the Prisma `user` model, and generation fails with a message naming the column when no value fits. The generated invalidate server action throws, and the invalidate REST route answers HTTP 500, when the handler returns `success: false`; a handler that returns nothing is unaffected.
 - `npm run check:generated` now scans the scheduled-task service files and `lib/audit-log-ops/jobs.ts`, which it previously skipped.
+- **`VersionHistory` messages generated for every `x-version-of` identity** (Issue #1088). The `VersionHistory` section of `messages/*.json` was skipped when the identity declared its own `x-custom-components`, so the version screens failed with `MISSING_MESSAGE: VersionHistory`.
 
 ## [5.0.2] - 2026-10-23
 ### Changed
