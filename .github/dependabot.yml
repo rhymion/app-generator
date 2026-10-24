@@ -27,26 +27,28 @@
 # so the audit also fires on every non-Dependabot change. Dependabot is the
 # proactive half; the gate is the continuous half.
 #
-# target-branch: develop — this copy is NOT the one Dependabot reads
-# --------------------------------------------------------------------
+# target-branch: every ecosystem is listed twice (develop and main)
+# -------------------------------------------------------------------
 # Dependabot always reads its configuration from the repository's
-# GitHub-configured default branch (`main`), regardless of where
-# `target-branch` points version-update PRs (confirmed empirically: PR
-# #246 was raised against `main` on 2026-08-02T23:04Z, ~14h after this
-# exact config had already been merged into `develop` via PR #238 — the
-# develop-only copy was never read). The AUTHORITATIVE copy lives on
-# `main` (`.github/dependabot.yml` there); keep both in sync when editing
-# either. This copy exists on `develop` only for readability/consistency
-# in that branch's tree.
+# default branch (`main`), regardless of where `target-branch` points
+# version-update PRs (confirmed empirically: PR #246 was raised against
+# `main` on 2026-08-02T23:04Z, ~14h after a develop-only copy of this
+# config had been merged into `develop` via PR #238 and never read). So
+# the copy on `main` is the one that takes effect; `develop` receives the
+# same file through the regular `main` -> `develop` back-merge.
 #
-# All three ecosystems raise routine version-update PRs against `develop`
-# (the repo's actual merge target — see CLAUDE.md D009 / develop-is-
-# standard-merge-target policy), not `main`. Per GitHub's documented
-# `target-branch` semantics, this applies to version updates only:
-# security-update PRs (triggered by vulnerability alerts) are always
-# raised against the default branch regardless of `target-branch`. As
-# long as the default branch stays `main`, a security-advisory PR will
-# still land on `main` and needs manual retargeting/porting to `develop`.
+# Each ecosystem has two entries with identical settings except
+# `target-branch`: one raises routine version-update PRs against
+# `develop` (the integration branch), the other against `main`, which is
+# what running systems deploy from. Per GitHub's documented
+# `target-branch` semantics, "only manifest files on the target branch
+# are checked for version updates", so each entry scans its own branch.
+# Security-update PRs (triggered by vulnerability alerts) always use the
+# default branch (`main`) and ignore `target-branch`.
+#
+# Keep the `develop` and `main` entries of an ecosystem in sync when
+# editing either: groups, `ignore` rules and `open-pull-requests-limit`
+# are configured per entry, so they must be changed in both places.
 #
 # Exception: cypress is excluded from routine minor/patch grouping/updates
 # (cmd_561, 2026-08-05). Root cause (cmd_551, confirmed via a single-variable
@@ -135,6 +137,58 @@ updates:
       - "dependencies"
       - "npm"
 
+  - package-ecosystem: "npm"
+    directory: "/"
+    target-branch: "main"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "08:00"
+      timezone: "Asia/Tokyo"
+    open-pull-requests-limit: 10
+    groups:
+      npm-minor-and-patch:
+        applies-to: version-updates
+        update-types:
+          - "minor"
+          - "patch"
+        exclude-patterns:
+          - "cypress"
+          - "jsdom"
+      npm-mui-major:
+        applies-to: version-updates
+        update-types:
+          - "major"
+        patterns:
+          - "@mui/*"
+      npm-security:
+        applies-to: security-updates
+        update-types:
+          - "minor"
+          - "patch"
+          - "major"
+    ignore:
+      # cmd_561, 2026-08-05: cypress minor/patch version-update alone broke
+      # dashboard.cy.ts (see comment block above / testing-cypress.md).
+      # Held back until a follow-up cmd re-verifies dashboard.cy.ts against
+      # a newer cypress. Does not suppress security-update PRs.
+      - dependency-name: "cypress"
+        update-types:
+          - "version-update:semver-minor"
+          - "version-update:semver-patch"
+      # cmd_1128, 2026-09-21: jsdom 30.1.0 regression (see comment block
+      # above / this cmd's report). Held back until jsdom ships a release
+      # containing jsdom/jsdom#4345 (or its successor) and the three
+      # affected test files are re-verified. Does not suppress
+      # security-update PRs.
+      - dependency-name: "jsdom"
+        update-types:
+          - "version-update:semver-minor"
+          - "version-update:semver-patch"
+    labels:
+      - "dependencies"
+      - "npm"
+
   - package-ecosystem: "pip"
     directory: "/"
     target-branch: "develop"
@@ -160,9 +214,53 @@ updates:
       - "dependencies"
       - "python"
 
+  - package-ecosystem: "pip"
+    directory: "/"
+    target-branch: "main"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "08:00"
+      timezone: "Asia/Tokyo"
+    open-pull-requests-limit: 5
+    groups:
+      pip-minor-and-patch:
+        applies-to: version-updates
+        update-types:
+          - "minor"
+          - "patch"
+      pip-security:
+        applies-to: security-updates
+        update-types:
+          - "minor"
+          - "patch"
+          - "major"
+    labels:
+      - "dependencies"
+      - "python"
+
   - package-ecosystem: "github-actions"
     directory: "/"
     target-branch: "develop"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "08:00"
+      timezone: "Asia/Tokyo"
+    open-pull-requests-limit: 5
+    groups:
+      actions-all:
+        update-types:
+          - "minor"
+          - "patch"
+          - "major"
+    labels:
+      - "dependencies"
+      - "github-actions"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    target-branch: "main"
     schedule:
       interval: "weekly"
       day: "monday"
