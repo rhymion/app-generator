@@ -20,6 +20,33 @@ describe('generateRecoveryCodes', () => {
     expect(plaintexts.size).toBe(codes.length);
   });
 
+  it('uses only the look-alike-free alphabet and keeps the 4-4 format', async () => {
+    const codes = await generateRecoveryCodes();
+    for (const c of codes) {
+      expect(c.plaintext).toMatch(/^[abcdefghjkmnpqrstuvwxyz23456789]{4}-[abcdefghjkmnpqrstuvwxyz23456789]{4}$/);
+    }
+  });
+
+  it('draws every alphabet character at a roughly uniform rate (no modulo bias)', async () => {
+    const counts = new Map<string, number>();
+    let total = 0;
+    // 8 codes x 8 chars per call; bcrypt cost makes many calls slow, so
+    // sample the generator through plaintext only from a bounded number of calls.
+    for (let i = 0; i < 60; i++) {
+      for (const c of await generateRecoveryCodes()) {
+        for (const ch of c.plaintext.replace('-', '')) {
+          counts.set(ch, (counts.get(ch) ?? 0) + 1);
+          total++;
+        }
+      }
+    }
+    expect(counts.size).toBe(31);
+    const expected = total / 31;
+    for (const n of counts.values()) {
+      expect(Math.abs(n - expected) / expected).toBeLessThan(0.35);
+    }
+  }, 120_000);
+
   it('formats plaintext with a single dash separator', async () => {
     const codes = await generateRecoveryCodes();
     for (const c of codes) {

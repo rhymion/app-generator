@@ -1,7 +1,7 @@
 /**
  * Recovery codes — the "I lost my phone" escape hatch.
  *
- * Eight 10-character base32 codes per enrolment, displayed once to the
+ * Eight 8-character base32 codes per enrolment, displayed once to the
  * user and stored bcrypt-hashed. Single-use: a successful verification
  * marks the row's `used_at`, after which the same code can never sign
  * the user in again. When all codes are consumed, the user has to
@@ -11,20 +11,22 @@
  * readability; verification strips it back out so users who copy the
  * code from a manager that strips punctuation still get through.
  */
-import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { randomInt, timingSafeEqual } from 'node:crypto';
 import bcrypt from 'bcryptjs';
 
 const CODE_COUNT = 8;
-const CODE_BYTES = 8; // ~10 base32 chars after encoding
+const CODE_LENGTH = 8; // characters per code, before the display dash
 const BCRYPT_COST = 10;
 
 /** Base32 alphabet without I/L/O/0/1 to avoid look-alikes. */
 const ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 
-function encodeBase32(buf: Buffer): string {
+/** Draws `length` characters from ALPHABET. `randomInt` rejection-samples
+ *  internally, so every character is equally likely (no modulo bias). */
+function randomCode(length: number): string {
   let out = '';
-  for (let i = 0; i < buf.length; i++) {
-    out += ALPHABET[buf[i] % ALPHABET.length];
+  for (let i = 0; i < length; i++) {
+    out += ALPHABET[randomInt(ALPHABET.length)];
   }
   return out;
 }
@@ -48,7 +50,7 @@ export type RecoveryCodePair = {
 export async function generateRecoveryCodes(): Promise<RecoveryCodePair[]> {
   const pairs: RecoveryCodePair[] = [];
   for (let i = 0; i < CODE_COUNT; i++) {
-    const raw = encodeBase32(randomBytes(CODE_BYTES)).slice(0, 10);
+    const raw = randomCode(CODE_LENGTH);
     const plaintext = formatForDisplay(raw);
     // bcrypt operates on the *normalized* form so verification doesn't have
     // to guess at the user's punctuation/case habits.

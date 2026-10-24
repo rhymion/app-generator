@@ -21,6 +21,7 @@ import Paper from '@mui/material/Paper';
 import Box from '@mui/material/Box';
 import CircularProgress from '@mui/material/CircularProgress';
 import Link from '@mui/material/Link';
+import { isSafeUrl } from '@/lib/_safe_url';
 import type { EntitySearchAction } from './EntityAutocomplete';
 
 export type ItemType = 'text' | 'autocomplete' | 'file';
@@ -326,8 +327,7 @@ const EditableListWrapper = forwardRef<EditableListWrapperHandle, EditableListWr
       }
     };
 
-    const isUrlValue = (v: unknown): v is string =>
-      typeof v === 'string' && (v.startsWith('/') || v.startsWith('http'));
+    const isUrlValue = isSafeUrl;
 
     const defaultRenderItem = (item: EditableListWrapperItem) => {
       if (itemType === 'file' && isUrlValue(item.value)) {

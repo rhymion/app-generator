@@ -284,6 +284,11 @@ Acceptable for a generated-app baseline; revisit with caching (careful —
 caching would reintroduce the exact revocation delay this field exists
 to close) if it shows up in profiling for a specific deployment.
 
+**Recovery code generation:** `lib/mfa/recovery.ts` draws each of the eight
+8-character codes from a 31-character look-alike-free alphabet with
+`crypto.randomInt`, which rejection-samples internally, so every character is
+equally likely. Codes are shown as `abcd-efgh` and stored bcrypt-hashed.
+
 **Rate limiting the challenge itself (Issue #588):** `proxy.ts`'s
 rate-limit matcher only covers `/api/auth/*` — `/mfa-challenge` is a
 normal page route whose Server Action (`completeMfaChallenge`,

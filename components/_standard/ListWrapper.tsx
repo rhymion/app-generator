@@ -5,6 +5,7 @@ import ListItem from '@mui/material/ListItem';
 import ListItemText from '@mui/material/ListItemText';
 import Paper from '@mui/material/Paper';
 import Link from '@mui/material/Link';
+import { isSafeUrl } from '@/lib/_safe_url';
 
 export type ItemType = 'text' | 'autocomplete' | 'file';
 
@@ -42,8 +43,7 @@ function ListWrapper(
   const recordLink = (item: ListWrapperItem) =>
     typeof item.href === 'string' && item.href ? <Link href={item.href}>{item.label || item.value}</Link> : (item.label || item.value);
 
-  const isUrlValue = (v: unknown): v is string =>
-    typeof v === 'string' && (v.startsWith('/') || v.startsWith('http'));
+  const isUrlValue = isSafeUrl;
 
   const defaultRenderItem = (item: ListWrapperItem) => {
     if (itemType === 'file' && isUrlValue(item.value)) {
