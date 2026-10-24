@@ -86,7 +86,10 @@ current schema — both per-entity files (`lib/<entity>/*`,
 the schema-wide files gated on a project-wide condition rather than any one
 entity (`lib/comment/service.ts`/`lib/reaction/service.ts` when reactions are
 enabled; `lib/db-init.ts`/`lib/search/helpers.ts` when any entity is
-searchable) — and flags `$queryRaw`/`$executeRaw`/`$queryRawUnsafe`/
+searchable; `lib/<entity>/service_scheduled.ts` for each `x-scheduled-task`
+entity and `lib/scheduled-tasks/<task_id>/service_scheduled.ts` for each
+top-level `x-scheduled-tasks` entry; `lib/audit-log-ops/storage-factory.ts`/
+`jobs.ts` when `x-generator.audit-log-storage.enabled` is true) — and flags `$queryRaw`/`$executeRaw`/`$queryRawUnsafe`/
 `$executeRawUnsafe` on **any** receiver (`prisma.`, a `$transaction` callback
 param, or any other identifier — the rule is about which method is called,
 not what it's called on).

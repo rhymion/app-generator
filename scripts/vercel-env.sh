@@ -59,6 +59,8 @@ _sed_replacement_escape() {
 }
 
 if [[ -f "$_ENV_FILE" ]]; then
+  # The file holds secrets; keep it readable by the owner only.
+  chmod 600 "$_ENV_FILE"
   set -a
   # shellcheck disable=SC1090
   source "$_ENV_FILE"

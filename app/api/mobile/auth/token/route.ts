@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import prisma from '@/lib/prisma';
 import { ApiError, handleApiError, requireMobileAuth } from '@/lib/api-auth';
 import { verifyMfaCode } from '@/lib/mfa/verify';
+import { MfaRateLimitedError } from '@/lib/mfa/errors';
 import { getRateLimiter } from '@/lib/rate-limit';
 import {
   ACCESS_TOKEN_TTL_SECONDS,
@@ -76,7 +77,18 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
       if (mfaCode.length === 0) {
         return NextResponse.json({ error: 'MFA_REQUIRED' }, { status: 403 });
       }
-      const mfaOk = await verifyMfaCode(user.id, mfaCode);
+      let mfaOk = false;
+      try {
+        mfaOk = await verifyMfaCode(user.id, mfaCode);
+      } catch (e) {
+        if (e instanceof MfaRateLimitedError) {
+          return NextResponse.json(
+            { error: 'rate_limited', retryAfter: e.retryAfterSeconds },
+            { status: 429, headers: { 'Retry-After': String(e.retryAfterSeconds) } },
+          );
+        }
+        throw e;
+      }
       if (!mfaOk) {
         throw new ApiError(401, 'Invalid credentials');
       }

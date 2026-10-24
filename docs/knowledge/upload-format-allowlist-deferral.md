@@ -1,79 +1,54 @@
-# Upload Format Allow-list Tightening: Deferred (2026-09-02)
+# Upload Format Allow-list
 
-## Current state (as implemented today)
+## Behavior
 
-Both upload routes already validate file type against an allow-list
-before accepting a file:
+`POST /api/upload` (generated from `code_generator/templates/upload_route_vercel.ts.jinja2`
+for Vercel Blob and `upload_route_gcs.ts.jinja2` for GCS; the local-disk fallback of the
+Vercel route shares the same check) validates every file through
+`lib/_upload_validation.ts` before any I/O:
 
-- `code_generator/templates/upload_route_vercel.ts.jinja2` (`validTypes`,
-  lines 22-36)
-- `code_generator/templates/upload_route_gcs.ts.jinja2` (`validTypes`,
-  lines 22-35)
+- the declared multipart `Content-Type` must be on the MIME allow-list, AND
+- the file name's extension must be on the extension allow-list.
 
-The two templates carry an identical, 13-entry list:
+Both must match; either one failing returns `400 Invalid file type.` A file with no
+extension is rejected.
+
+The Content-Type stored with the object (and therefore served for it) is derived from the
+extension, not copied from the request. For example `image/jpg` is stored as `image/jpeg`
+and a `.csv` declared as `application/vnd.ms-excel` is stored as `text/csv`.
+
+## Configuration
+
+| Variable | Meaning | Default |
+|---|---|---|
+| `UPLOAD_ALLOWED_MIME_TYPES` | Comma-separated MIME allow-list | the 13 types below |
+| `UPLOAD_ALLOWED_EXTENSIONS` | Comma-separated extension allow-list (leading dot optional) | the 13 extensions below |
+
+Unset or blank falls back to the default. The default keeps common business documents
+working:
 
 ```
-image/jpeg, image/jpg, image/png, image/gif, image/webp,
-application/pdf,
-application/msword,
-application/vnd.openxmlformats-officedocument.wordprocessingml.document,
-application/vnd.ms-excel,
-application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,
-text/csv, text/plain,
-application/zip
+MIME:       image/jpeg, image/jpg, image/png, image/gif, image/webp, application/pdf,
+            application/msword, application/vnd.openxmlformats-officedocument.wordprocessingml.document,
+            application/vnd.ms-excel, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,
+            text/csv, text/plain, application/zip
+Extensions: jpg, jpeg, png, gif, webp, pdf, doc, docx, xls, xlsx, csv, txt, zip
 ```
 
-`image/svg+xml` is **not** in this list, so SVG upload is already
-rejected -- the script-execution hole an SVG allow would open is
-already closed.
+`image/svg+xml` and HTML are not on either list. A locked-down deployment narrows both
+lists to images and PDF, for example
+`UPLOAD_ALLOWED_MIME_TYPES=image/jpeg,image/png,image/gif,image/webp,application/pdf` and
+`UPLOAD_ALLOWED_EXTENSIONS=jpg,jpeg,png,gif,webp,pdf`. An extension added to the extension
+list that has no entry in `UPLOAD_CONTENT_TYPE_BY_EXTENSION` is stored with its declared
+(allow-listed) MIME type.
 
-The check is a straight `!validTypes.includes(file.type)` against the
-browser-supplied `File.type` (MIME), performed immediately after
-`formData.get('file')`, before any I/O. There is no check against the
-file's extension, and no inspection of the file's actual bytes. Since
-`file.type` is client-supplied, a caller hitting the API route
-directly (bypassing the browser upload UI) can set any `Content-Type`
-it likes and defeat this check entirely -- e.g. send an
-`audio/mpeg` file labeled `image/png`.
+## Limits
 
-## Decision: deferred, not unimplemented
+The file's bytes are not inspected (no magic-byte check). The extension and declared type
+must agree with the allow-lists, and the served type comes from the extension, but a file's
+content is not verified to match its extension.
 
-**Product decision (2026-09-02): tightening the allow-list further is
-deferred.** Magic-byte (file-signature) inspection is also **not
-being implemented**.
-
-This is a deliberate deferral of a design that already exists, not a
-gap that hasn't been looked at yet. The allow-list and the MIME-only
-check described above are the shipped, working behavior; narrowing
-the list further and/or adding content-sniffing were evaluated and
-put off, not left undone by oversight.
-
-Rationale for the deferral: narrowing to "images + PDF only" would
-also block legitimate business documents (`.doc`/`.docx`/`.xls`/
-`.xlsx`), which may still be wanted for attachments. Magic-byte
-inspection adds real implementation cost (a file-signature library,
-tests) for a gap whose main abuse vector (direct API calls with a
-spoofed `Content-Type`) is a narrower threat than an open allow-list
-would be.
-
-## If this is revisited
-
-A fuller design was already worked out and does not need to be
-redone from scratch if stricter validation is wanted later. The
-shape of it:
-
-- an environment-variable-configurable MIME allow-list AND a
-  separate environment-variable-configurable extension allow-list,
-  checked together (both must match, not just one) -- following the
-  same env-var pattern already used elsewhere in this codebase for
-  import size/row limits
-- a recommended default of images + PDF only for a locked-down
-  deployment
-- a matching gap on the CSV import route: no server-side check today
-  that request body content sent as CSV under an `application/json`
-  wrapper is actually well-formed CSV text; a `Content-Type` header
-  check plus a null-byte check (no magic-byte parsing) was the
-  proposed fix there too
-
-None of this is implemented; it is a design to reuse later, not a
-description of current code.
+Tests: `lib/_upload_validation.test.ts` (every allow-listed extension and MIME type, the
+rejection cases, the environment variables) and
+`code_generator/tests/test_upload_route_content_type.py` (both routes use the shared check
+and store the derived type).

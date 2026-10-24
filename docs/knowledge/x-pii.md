@@ -24,13 +24,16 @@ value with a generation error.
 
 | Value | Meaning | Scrub value written by `anonymizeUser()` |
 |---|---|---|
-| `direct` | Identifies a person on its own (name, email). | the string `'[deleted]'`; for a column named `email`, the placeholder email (below) |
+| `direct` | Identifies a person on its own (name, email). | the string `'[deleted]'` for a string column; `false` for a boolean column; `null` for any other nullable column; for a column named `email`, the placeholder email (below) |
 | `sensitive` | Special-category or authentication data (password, API key, MFA flag). | `null`; `false` for a boolean column; placeholder email for a column named `email` |
 | `indirect` | Identifies a person only in combination with other data (avatar). | `null`; `false` for a boolean column; placeholder email for a column named `email` |
-| `none` | Documented as "no PII". | Treated like the other values: the column is scrubbed with `null` (`false` for a boolean). See [Known limitations](#known-limitations). |
+| `none` | Documented as "no PII". | None: the column is treated like a column without the annotation and is left untouched. |
 
-The scrub value depends on the value of `x-pii` and on the column type only as listed. It does not look at whether the
-column accepts `null`.
+The scrub value depends on the value of `x-pii` and on the column type and nullability, which the generator reads from
+the Prisma `user` model (from the property when the model has no such column). A column that no value fits fails
+generation with a message naming the column: a `sensitive` or `indirect` column that is not nullable and not boolean,
+a `direct` column that is neither string nor boolean nor nullable, and a `Json` column. Make such a column nullable or
+mark it `x-pii: none`.
 
 The default schema annotates these `user` columns:
 
@@ -90,6 +93,10 @@ Nothing runs it automatically. There is no schedule and no retention job. It run
 - The `invalidateUser` server action behind the invalidate button of the user list page, which needs the same permission.
 - Any code that imports and calls `anonymizeUser(userId)` directly.
 
+When `anonymizeUser()` returns `success: false`, the `invalidateUser` server action throws and the REST route answers
+HTTP 500 with the result body. This applies to every entity whose invalidate handler returns a result with
+`success: false`; a handler that returns nothing is unaffected.
+
 A `user` entity that declares no `x-generate.invalidate` with this handler still gets the function, but no route or
 button calls it.
 
@@ -112,5 +119,3 @@ Checked on a generated and started application with the default schema:
 ## Known limitations
 
 - Sessions and tokens issued before the erasure keep working: #1061.
-- `x-pii: none` is scrubbed like the other values, a scrub value that does not fit the column type or nullability makes
-  the whole erasure roll back, and `invalidateUser` does not report that failure: #1060.

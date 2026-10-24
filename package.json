@@ -91,7 +91,7 @@
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.11.3",
-    "@aws-sdk/client-s3": "^3.1152.0",
+    "@aws-sdk/client-s3": "^3.1154.0",
     "@base-ui/react": "^1.9.0",
     "@emotion/react": "^11.14.0",
     "@emotion/styled": "^11.14.1",
@@ -101,9 +101,9 @@
     "@mui/icons-material": "^9.5.0",
     "@mui/material": "^9.2.0",
     "@mui/material-nextjs": "^9.5.0",
-    "@mui/x-charts": "^9.15.0",
-    "@mui/x-data-grid": "^9.15.0",
-    "@mui/x-date-pickers": "^9.15.0",
+    "@mui/x-charts": "^9.16.0",
+    "@mui/x-data-grid": "^9.16.0",
+    "@mui/x-date-pickers": "^9.16.0",
     "@next/mdx": "^16.4.2",
     "@paralleldrive/cuid2": "^3.3.0",
     "@prisma/adapter-better-sqlite3": "^7.10.1",
@@ -122,7 +122,7 @@
     "cron-parser": "^5.10.2",
     "google-auth-library": "^11.3.1",
     "ioredis": "^6.0.0",
-    "jose": "^6.2.12",
+    "jose": "^6.2.13",
     "js-yaml": "^5.5.0",
     "next": "^16.4.2",
     "next-auth": "^5.0.0-beta.32",
@@ -154,7 +154,10 @@
     "@xmldom/xmldom": "^0.9.12",
     "basic-ftp": "^6.2.3",
     "katex": "^0.19.0",
-    "postcss-selector-parser": "^7.1.6"
+    "postcss-selector-parser": "^7.1.6",
+    "@vercel/cli-config": {
+      "zod": "^4.6.6"
+    }
   },
   "devDependencies": {
     "@fontsource/noto-sans-jp": "^5.3.1",
