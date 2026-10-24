@@ -20,21 +20,21 @@ pre-existing) with:
 - **7.5** — GET export denied (`{% if can_list and can_export %}`)
 - **7.6** — POST import denied (`{% if import_eligible %}`)
 
-### 7.5/7.6 use session auth, not X-API-Key — a correction from the original design sketch
+### 7.5/7.6 use session auth, although the routes accept an API key too
 
-The original design doc sketched 7.5/7.6 using `db:createLimitedApiUser` +
-`X-API-Key`, mirroring 7.1–7.4. That assumption doesn't hold: `api_export_route.ts.jinja2` and
-`api_import_route.ts.jinja2` resolve the actor exclusively via `getSessionUserId()`
-(`lib/authz.ts`) — they never read `X-API-Key` at all. A request with only an API-key header has
-no session, so `getModelPermissions()` falls back to an unauthenticated/empty-permission result
-and the route rejects with 401 or 403 regardless of what permissions the API-key-bearing user
-actually holds — the test would pass but wouldn't be testing what it claims to test (it would
-be indistinguishable from testing "no key = 401").
+The export and import routes (`api_export_route.ts.jinja2`, `api_import_route.ts.jinja2`) resolve
+the actor with `resolveActorId(request)` (`lib/api-auth.ts`): an `X-API-Key` header, or an
+`Authorization: Bearer` header, when present, and the session cookie otherwise. A request with a
+credential header that is invalid is rejected with 401; a request with no credential at all gets 401
+from the routes' own check.
 
-7.5/7.6 therefore use `db:createSessionUserWithPermission` (an existing helper, already used by
+7.1–7.4 build an API-key user with `db:createLimitedApiUser`. 7.5/7.6 instead use
+`db:createSessionUserWithPermission` (an existing helper, also used by
 `cypress/e2e/api/import_batch2.cy.ts`) + `cy.login(email, TEST_CREDENTIALS.password)` to get a
-real session cookie for a user with `{}` (all-false) permissions on the entity. This mirrors the
-mechanism the pre-existing `import_batch2.cy.ts` custom spec already used for the same reason.
+real session cookie for a user with `{}` (all-false) permissions on the entity. Both paths reach the
+same `getModelPermissions()` / `assertPermission()` check, so the session form exercises the denial
+the same way an API key would; it is kept because the pre-existing `import_batch2.cy.ts` custom spec
+already used it.
 
 ## Group 3: cross-organization isolation (G3)
 
