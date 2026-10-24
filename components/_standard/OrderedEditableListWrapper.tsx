@@ -24,6 +24,7 @@ import Box from '@mui/material/Box';
 import CircularProgress from '@mui/material/CircularProgress';
 import Typography from '@mui/material/Typography';
 import Link from '@mui/material/Link';
+import { isSafeUrl } from '@/lib/_safe_url';
 
 import type { ItemType, EditableListWrapperItem, AutocompleteOption } from './EditableListWrapper';
 import type { EntitySearchAction } from './EntityAutocomplete';
@@ -344,8 +345,7 @@ const OrderedEditableListWrapper = forwardRef<OrderedEditableListWrapperHandle, 
       }
     };
 
-    const isUrlValue = (v: unknown): v is string =>
-      typeof v === 'string' && (v.startsWith('/') || v.startsWith('http'));
+    const isUrlValue = isSafeUrl;
 
     const defaultRenderItem = (item: EditableListWrapperItem) => {
       if (itemType === 'file' && isUrlValue(item.value)) {
