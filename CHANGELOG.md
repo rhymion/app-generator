@@ -11,6 +11,9 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 - **Rate limits.** `POST /api/auth/register` is limited to 5 requests per IP per 10 minutes (`auth:register`). The MFA attempt budget (`auth:mfa:challenge`, 10 per user per 5 minutes) is now enforced inside `verifyMfaCode`, so the mobile token route (`POST /api/mobile/auth/token`) shares it with web sign-in; the web limit itself is unchanged. `authenticateApiKey` counts failed lookups in a new `auth:apikey` bucket (10 per presented key per minute, keyed by a hash of the key); valid keys are never throttled. A spent budget answers `429` with `Retry-After`.
 - **Env file permissions.** The deploy scripts set `.env.production.local` to mode `0600`.
 
+### Changed
+- Dependabot ignores TypeScript major version updates (both npm entries in `.github/dependabot.yml`) until typescript-eslint supports TypeScript 7.
+
 ### Fixed
 - **`anonymizeUser()` scrub fits each column, and a failed erasure is reported** (Issue #1060). A `user` property with `x-pii: none` is left untouched instead of being scrubbed. The scrub value follows the column type and nullability from the Prisma `user` model, and generation fails with a message naming the column when no value fits. The generated invalidate server action throws, and the invalidate REST route answers HTTP 500, when the handler returns `success: false`; a handler that returns nothing is unaffected.
 - `npm run check:generated` now scans the scheduled-task service files and `lib/audit-log-ops/jobs.ts`, which it previously skipped.

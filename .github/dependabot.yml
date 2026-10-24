@@ -83,6 +83,16 @@
 # re-verify the three test files above before removing this ignore entry.
 # Scoped to `update-types` minor/patch only, so a jsdom CVE still reaches us
 # via `npm-security` (ignore does not apply to security-update PRs).
+# Exception: typescript major bumps are ignored (see the `ignore:` entries
+# below). typescript-eslint 8.72.0 rejects TypeScript >= 7 at load time
+# (supported range >=4.8.4 <6.1.0), so the bump fails `npm run lint`
+# regardless of product code. Revisit once a typescript-eslint release
+# supports the TypeScript 7.x we adopt (typescript-eslint/typescript-eslint#10940)
+# and lint is green on a trial bump.
+# Security updates: GitHub's options reference says `update-types` (under
+# `allow`) "only affects version updates, not security updates"; it has no
+# equivalent sentence for `ignore`, so a security fix that exists only in a new
+# TypeScript major is not independently verified to bypass this ignore.
 version: 2
 updates:
   - package-ecosystem: "npm"
@@ -133,6 +143,17 @@ updates:
         update-types:
           - "version-update:semver-minor"
           - "version-update:semver-patch"
+      # typescript major: typescript-eslint 8.72.0 (pulled in through
+      # eslint-config-next) rejects TypeScript >= 7 at load time; its
+      # supported range is >=4.8.4 <6.1.0, so a TypeScript 7 bump turns
+      # `npm run lint` red. Held back until a typescript-eslint release
+      # supports the TypeScript 7.x we adopt (tracking issue:
+      # typescript-eslint/typescript-eslint#10940) and lint is green on a
+      # trial bump. Scoped to semver-major only; minor/patch TypeScript
+      # updates still flow normally.
+      - dependency-name: "typescript"
+        update-types:
+          - "version-update:semver-major"
     labels:
       - "dependencies"
       - "npm"
@@ -185,6 +206,17 @@ updates:
         update-types:
           - "version-update:semver-minor"
           - "version-update:semver-patch"
+      # typescript major: typescript-eslint 8.72.0 (pulled in through
+      # eslint-config-next) rejects TypeScript >= 7 at load time; its
+      # supported range is >=4.8.4 <6.1.0, so a TypeScript 7 bump turns
+      # `npm run lint` red. Held back until a typescript-eslint release
+      # supports the TypeScript 7.x we adopt (tracking issue:
+      # typescript-eslint/typescript-eslint#10940) and lint is green on a
+      # trial bump. Scoped to semver-major only; minor/patch TypeScript
+      # updates still flow normally.
+      - dependency-name: "typescript"
+        update-types:
+          - "version-update:semver-major"
     labels:
       - "dependencies"
       - "npm"
