@@ -3,6 +3,10 @@ All notable changes to this project will be documented in this file.
 The format is based on Keep a Changelog (https://keepachangelog.com/),
 and this project adheres to Semantic Versioning (https://semver.org/).
 
+## [Unreleased]
+### Changed
+- Dependabot ignores TypeScript major version updates (both npm entries in `.github/dependabot.yml`) until typescript-eslint supports TypeScript 7.
+
 ## [5.0.3] - 2026-10-24
 ### Security
 - **Dependency advisories cleared.** An `overrides` entry moves the `zod` nested under `@vercel/cli-config` (reached through `@vercel/blob`) to `^4.6.6`, which fixes GHSA-mrhx-c7xc-m3w5 (high, memory exhaustion on oversized constrained collections); the lockfile also picks up the patched `undici` and `fast-uri`. `npm audit --omit=dev --audit-level=high` reports no vulnerabilities.
