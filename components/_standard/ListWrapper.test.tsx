@@ -52,4 +52,25 @@ describe('ListWrapper', () => {
     expect(screen.queryByRole('link', { name: 'Item Two' })).not.toBeInTheDocument();
     expect(screen.getByText('Item Two')).toBeInTheDocument();
   });
+
+  it('renders a file URL as a link and image only when it is a safe http(s) or root-relative URL', () => {
+    const { container } = render(
+      <ListWrapper
+        itemType="file"
+        fileVariant="image"
+        items={[
+          { id: '1', value: '/uploads/ok.png', label: 'safe' },
+          { id: '2', value: 'javascript:alert(1)', label: 'unsafe-js' },
+          { id: '3', value: '//evil.example/x.png', label: 'unsafe-protocol-relative' },
+        ]}
+      />
+    );
+
+    expect(screen.getByText('safe').closest('a')).toHaveAttribute('href', '/uploads/ok.png');
+    const srcs = Array.from(container.querySelectorAll('img')).map((i) => i.getAttribute('src'));
+    expect(srcs).toEqual(['/uploads/ok.png']);
+    expect(container.querySelector('a[href^="javascript:"]')).toBeNull();
+    expect(container.querySelector('a[href^="//"]')).toBeNull();
+    expect(screen.queryByRole('link', { name: 'unsafe-js' })).not.toBeInTheDocument();
+  });
 });
