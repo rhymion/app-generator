@@ -160,29 +160,61 @@ describe('API: Mobile Auth (mobile token auth)', () => {
       // (both requests reading the same pre-rotation hash before either
       // commits) is only reachable via a Node-side Promise.all, hence the
       // dedicated task.
-      login(TEST_CREDENTIALS.email, TEST_CREDENTIALS.password).then((loginRes) => {
-        const original = loginRes.body as TokenPair;
-        cy.task<[{ status: number; body: TokenPair | { error: string } }, { status: number; body: TokenPair | { error: string } }]>(
-          'raceRefresh',
-          { baseUrl: Cypress.config('baseUrl'), refreshToken: original.refresh_token },
-        ).then(([a, b]) => {
-          const statuses = [a.status, b.status].sort();
-          expect(statuses).to.deep.equal([200, 401]);
-          const winner = a.status === 200 ? a : b;
-          const winningPair = winner.body as TokenPair;
+      //
+      // Whether the two requests really overlap depends on timing: when the
+      // server's database connections are cold, the second request can only
+      // start after the first has finished. Such a serialised pair is an
+      // ordinary reuse of a rotated-away token (401, no revocation — covered
+      // by the sequential-reuse example above), not the race this example
+      // is about. So each round starts from a fresh login, and a round only
+      // counts once the pair demonstrably overlapped; a serialised round is
+      // discarded and retried. The example fails if no round overlaps within
+      // MAX_RACE_ROUNDS, rather than asserting on a round that never raced.
+      const MAX_RACE_ROUNDS = 8;
+      type RaceResult = { status: number; body: TokenPair | { error: string } };
 
-          // The whole session was revoked as a result of the detected race
-          // — even the winning, freshly-rotated refresh token is now dead.
-          cy.request({
-            method: 'POST',
-            url: REFRESH_URL,
-            body: { refresh_token: winningPair.refresh_token },
-            failOnStatusCode: false,
-          }).then((res) => {
-            expect(res.status).to.eq(401);
-          });
+      const runRound = (round: number): Cypress.Chainable<void> =>
+        login(TEST_CREDENTIALS.email, TEST_CREDENTIALS.password).then((loginRes) => {
+          const original = loginRes.body as TokenPair;
+          return cy
+            .task<[RaceResult, RaceResult]>('raceRefresh', {
+              baseUrl: Cypress.config('baseUrl'),
+              refreshToken: original.refresh_token,
+            })
+            .then(([a, b]) => {
+              // Never acceptable in any round: two winners, or no winner.
+              const statuses = [a.status, b.status].sort();
+              expect(statuses, `round ${round}: response statuses`).to.deep.equal([200, 401]);
+              const winner = a.status === 200 ? a : b;
+              const winningPair = winner.body as TokenPair;
+
+              return cy
+                .request({
+                  method: 'POST',
+                  url: REFRESH_URL,
+                  body: { refresh_token: winningPair.refresh_token },
+                  failOnStatusCode: false,
+                })
+                .then((res) => {
+                  if (res.status === 401) {
+                    // Overlapping pair: the loser lost the compare-and-swap,
+                    // the whole session was revoked, and even the winner's
+                    // freshly-rotated refresh token is now dead.
+                    return;
+                  }
+                  // 200: the loser arrived after the rotation had committed,
+                  // so the session was never revoked. Not an overlap.
+                  expect(res.status, `round ${round}: follow-up status`).to.eq(200);
+                  expect(
+                    round,
+                    `no round produced a truly overlapping refresh pair within ${MAX_RACE_ROUNDS} rounds`,
+                  ).to.be.lessThan(MAX_RACE_ROUNDS);
+                  return runRound(round + 1);
+                });
+            });
         });
-      });
+
+      runRound(1);
     });
 
     it('rejects an unknown refresh token with 401', () => {

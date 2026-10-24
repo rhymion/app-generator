@@ -253,6 +253,18 @@ export default defineConfig({
         // either commits): a simple sequential reuse of an already-rotated
         // token never reaches that branch.
         async 'raceRefresh'(params: { baseUrl: string; refreshToken: string }) {
+          // Open several server-side database connections first, so the two
+          // racing requests are more likely to run at the same time. Unknown
+          // tokens only trigger a read and are answered with 401.
+          await Promise.all(
+            [1, 2, 3, 4].map(() =>
+              fetch(`${params.baseUrl}/api/mobile/auth/refresh`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ refresh_token: 'warm-up' }),
+              }).then((res) => res.text()),
+            ),
+          );
           const [a, b] = await Promise.all(
             [1, 2].map(async () => {
               const res = await fetch(`${params.baseUrl}/api/mobile/auth/refresh`, {

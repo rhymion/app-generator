@@ -5,6 +5,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 ### Fixed
+- **Concurrent double-refresh Cypress example no longer depends on request timing.** The example in `cypress/e2e/api/mobile_auth.cy.ts` now retries with a fresh login until the two requests truly overlap, and fails if none does within a bounded number of rounds; a vitest example covers the revoking and non-revoking branches of the refresh route, whose docstring now matches its behaviour. No change to the route's behaviour.
 - **`anonymizeUser()` scrub fits each column, and a failed erasure is reported** (Issue #1060). A `user` property with `x-pii: none` is left untouched instead of being scrubbed. The scrub value follows the column type and nullability from the Prisma `user` model, and generation fails with a message naming the column when no value fits. The generated invalidate server action throws, and the invalidate REST route answers HTTP 500, when the handler returns `success: false`; a handler that returns nothing is unaffected.
 ### Security
 - **Dependency advisories cleared.** An `overrides` entry moves the `zod` nested under `@vercel/cli-config` (reached through `@vercel/blob`) to `^4.6.6`, which fixes GHSA-mrhx-c7xc-m3w5 (high, memory exhaustion on oversized constrained collections); the lockfile also picks up the patched `undici` and `fast-uri`. `npm audit --omit=dev --audit-level=high` reports no vulnerabilities.
