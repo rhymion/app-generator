@@ -69,11 +69,16 @@ export async function POST(
     {% endif %}
 
     {% if invalidate_module %}
-    const result = await {{ invalidate_handler }}(id);
+    const result: unknown = await {{ invalidate_handler }}(id);
     {% else %}
-    const result = await invalidate{{ parent_pascal }}(id);
+    const result: unknown = await invalidate{{ parent_pascal }}(id);
     {% endif %}
 
+    // A handler may report a failure as a { success: false, errors } result
+    // instead of throwing (anonymizeUser does): answer it with a server error.
+    if (typeof result === 'object' && result !== null && (result as { success?: unknown }).success === false) {
+      return NextResponse.json(result, { status: 500 });
+    }
     return NextResponse.json(result ?? { success: true });
   } catch (error) {
     return handleApiError(error);

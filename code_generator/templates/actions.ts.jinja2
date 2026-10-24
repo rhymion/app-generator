@@ -182,11 +182,16 @@ export async function invalidate{{ parent_pascal }}(id: string): Promise<void> {
   const _invalidateGuardRow = await prisma.{{ model }}.findUnique({ where: { id }, select: { {{ lockdown_field }}: true } });
   assertInvalidateAllowed(_invalidateGuardRow);
   {% endif %}
+  // A handler may report a failure as a { success: false, errors } result
+  // instead of throwing (anonymizeUser does); a void handler is unaffected.
   {% if invalidate_module %}
-  await {{ invalidate_handler }}(id);
+  const _invalidateResult: unknown = await {{ invalidate_handler }}(id);
   {% else %}
-  await _invalidate{{ parent_pascal }}Stub(id);
+  const _invalidateResult: unknown = await _invalidate{{ parent_pascal }}Stub(id);
   {% endif %}
+  if (typeof _invalidateResult === 'object' && _invalidateResult !== null && (_invalidateResult as { success?: unknown }).success === false) {
+    throw new AppError('UNKNOWN', `invalidate {{ parent }} failed: ${((_invalidateResult as { errors?: unknown }).errors as string[] | undefined)?.join('; ') ?? 'no error reported'}`);
+  }
   revalidatePath('/[locale]/{{ parent }}', 'page');
 }
 {% endif %}

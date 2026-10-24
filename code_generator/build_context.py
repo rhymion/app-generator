@@ -1744,6 +1744,53 @@ def canonicalize_bridges(entity_schema: dict, all_defs: dict) -> dict:
     return {**entity_schema, 'properties': props}
 
 
+_PRISMA_SCALAR_FOR_JSON_TYPE = {
+    'string': 'String', 'boolean': 'Boolean', 'integer': 'Int', 'number': 'Float',
+}
+
+
+def _anonymize_scrub_value(field_name: str, prop_def: dict, pii_type: str,
+                           actual_type: str | None, required: list) -> str:
+    """TypeScript expression anonymizeUser() writes into one x-pii column.
+
+    The column type and nullability come from the parsed Prisma `user` model
+    when it is registered (the schema.prisma column is what rejects a wrong
+    value), and from the JSON schema property otherwise. A column that cannot
+    take a value fitting its type and nullability fails generation, because
+    the scrub would otherwise roll the whole erasure back at run time.
+    """
+    pf = (_prisma_models.get('user').fields.get(field_name)
+          if _prisma_models.get('user') else None)
+    is_fk = bool(prop_def.get('x-relationship'))
+    if pf is not None:
+        prisma_type, nullable = pf.prisma_type, pf.nullable
+    else:
+        prisma_type = _PRISMA_SCALAR_FOR_JSON_TYPE.get(actual_type or 'string', 'unknown')
+        if prisma_type == 'String' and prop_def.get('format') in ('date', 'date-time', 'time'):
+            prisma_type = 'DateTime'
+        types = prop_def.get('type')
+        nullable = (
+            (isinstance(types, list) and 'null' in types)
+            or bool(prop_def.get('nullable'))
+            or field_name not in required
+        )
+
+    if field_name == 'email':
+        return 'placeholderEmail'
+    if prisma_type == 'Boolean':
+        return 'false'
+    if prisma_type == 'String' and not is_fk and pii_type == 'direct':
+        return "'[deleted]'"
+    if nullable and prisma_type != 'Json':
+        return 'null'
+    raise ValueError(
+        f"x-pii on user.{field_name} (x-pii: {pii_type}) cannot be scrubbed: the column is "
+        f"{'a ' + prisma_type if prisma_type != 'unknown' else 'of an unknown type'}"
+        f"{' and not nullable' if not nullable else ''}, and no scrub value fits it. "
+        f"Make the column nullable, or set x-pii: none to leave it untouched."
+    )
+
+
 def build_anonymize_user_context(schema: dict) -> dict:
     """Build context for anonymize_user.ts generation.
 
@@ -1770,21 +1817,13 @@ def build_anonymize_user_context(schema: dict) -> dict:
         if not isinstance(prop_def, dict):
             continue
         pii_type = prop_def.get('x-pii')
-        if pii_type is None:
-            continue
+        if pii_type is None or pii_type == 'none':
+            continue  # 'none' documents "no PII": the column is left untouched
 
         actual_type = _get_actual_type(prop_def)
-        is_email = (field_name == 'email')
-        is_boolean = (actual_type == 'boolean')
-
-        if is_email:
-            scrub_value = 'placeholderEmail'
-        elif pii_type == 'direct':
-            scrub_value = "'[deleted]'"
-        elif is_boolean:
-            scrub_value = 'false'
-        else:
-            scrub_value = 'null'
+        scrub_value = _anonymize_scrub_value(
+            field_name, prop_def, pii_type, actual_type, user_def.get('required') or [],
+        )
 
         pii_fields.append({
             'name': field_name,
