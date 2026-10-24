@@ -15,6 +15,7 @@ vi.mock('@/lib/mobile-auth', () => ({
   MobileAuthError: class MobileAuthError extends Error {},
 }));
 vi.mock('@/lib/prisma', () => ({ default: { user: { findFirst: userFindFirst } } }));
+vi.mock('@/lib/rate-limit', async () => (await import('@/test/helpers/real-rate-limiter')).realRateLimiterModule());
 vi.mock('@/lib/authz', () => ({ requirePermission, getSessionUserId: vi.fn() }));
 vi.mock('@/lib/audit_log/getters', () => ({ getAuditLogPage, getAuditLogDetail }));
 

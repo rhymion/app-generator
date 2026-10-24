@@ -69,3 +69,15 @@ exemptions:
     reason: >-
       Id lookup on the COALESCE expression the trigram GIN index is built on; the SQL is a
       generation-time literal and the search text is bound via Prisma.sql.
+  # lib/audit-log-ops/jobs.ts's ensurePartitions() asks the database to create
+  # the current and next month's audit_log partitions. The statement is a fixed
+  # tagged-template literal with no `${}` substitution: it calls the
+  # audit_log_create_month_partition() SQL function with now() and
+  # now() + interval '1 month', so no runtime value reaches the query text.
+  # Prisma has no query-builder form for calling a database function.
+  - path: lib/audit-log-ops/jobs.ts
+    pattern: raw:queryRaw
+    substring: "$queryRaw<{ name: string }[]>"
+    reason: >-
+      Fixed literal calling audit_log_create_month_partition(), zero runtime
+      interpolation; not expressible with the Prisma query builder.

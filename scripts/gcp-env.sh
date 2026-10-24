@@ -7,6 +7,8 @@ _SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 _ENV_FILE="${_SCRIPT_DIR}/../.env.production.local"
 
 if [[ -f "$_ENV_FILE" ]]; then
+  # The file holds secrets; keep it readable by the owner only.
+  chmod 600 "$_ENV_FILE"
   set -a
   # shellcheck disable=SC1090
   source "$_ENV_FILE"

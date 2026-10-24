@@ -15,6 +15,8 @@ DRY_RUN=${DRY_RUN:-false}
 
 _ENV_FILE="${PROJECT_ROOT}/.env.production.local"
 if [[ -f "$_ENV_FILE" ]]; then
+  # The file holds secrets; keep it readable by the owner only.
+  chmod 600 "$_ENV_FILE"
   set -a
   # shellcheck disable=SC1090
   source "$_ENV_FILE"

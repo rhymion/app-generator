@@ -290,14 +290,29 @@ normal page route whose Server Action (`completeMfaChallenge`,
 `app/[locale]/mfa-challenge/actions.ts`) sat entirely outside it, so an
 attacker holding a stolen first-factor session could brute-force the
 TOTP/recovery code with no rate limit at all. `completeMfaChallenge` now
-checks a dedicated `auth:mfa:challenge` bucket (`lib/rate-limit/index.ts`,
-10 attempts / 5 min) before calling `verifyMfaCode`. Unlike every other
+spends a dedicated `auth:mfa:challenge` bucket (`lib/rate-limit/index.ts`,
+10 attempts / 5 min) through `verifyMfaCode`. Unlike every other
 bucket in that module, it's keyed by the session's **user id**, not IP:
 the attacker in this scenario already holds a valid session (so IP
 rotation is trivial) but can't change which user id that session belongs
-to. A blocked attempt returns `{ ok: false, error: 'RATE_LIMITED',
-retryAfterSeconds }` without ever calling `verifyMfaCode` — no guess is
-spent against the DB while blocked.
+to. The bucket is enforced inside `verifyMfaCode` itself
+(`lib/mfa/verify.ts`), so every caller shares one per-user budget: the
+credentials sign-in, the challenge action, the mobile token route
+(`POST /api/mobile/auth/token`), and the enrollment helpers. Once the budget
+is spent `verifyMfaCode` throws `MfaRateLimitedError` (`lib/mfa/errors.ts`)
+before evaluating the code, so no guess is spent against the DB while
+blocked. The challenge action maps it to `{ ok: false, error: 'RATE_LIMITED',
+retryAfterSeconds }`, the mobile token route to `429` with `Retry-After`, and
+credentials sign-in reports it as an invalid code.
+
+**Self-registration and API keys.** `POST /api/auth/register` is limited per
+client IP by the `auth:register` bucket (5 requests / 10 min) and answers
+`429` with `Retry-After` when it is spent. `authenticateApiKey`
+(`lib/api-auth.ts`) spends the `auth:apikey` bucket (10 failures / min) each
+time a presented key matches no user; the limiter key is the SHA-256 of the
+presented key, never the key itself. Only failures are counted, so a valid
+key is never throttled by this bucket. Once the budget for a key is spent the
+rejection is `429` with `Retry-After` instead of `401`.
 
 The same "Server Action outside the `/api/auth/*` matcher" shape exists
 in `lib/mfa/enrollment.ts`'s `completeEnrollment`/`disableMfa`/
