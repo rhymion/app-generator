@@ -511,6 +511,33 @@ other change is needed.
 
 ---
 
+## Every API route must authenticate
+
+`code_generator/tests/test_api_route_authentication_enumeration.py` enumerates
+every route source that can end up under `app/api/`: the `*route*.jinja2`
+templates and the hand-written `app/api/**/route.ts` files. Each must call an
+authentication helper from `lib/api-auth.ts` (`authenticate`,
+`authenticateApiKey`, `requireCaller`, `requireDualAuth`, `requireMobileAuth`,
+`requireSession`, `requireScheduledTaskRole`, `requireScheduledTaskOperator`,
+`resolveActorId`), `getSessionUserId`, or `auth()`. The test also checks that
+every route template `generate.py` writes as a `route.ts` is covered.
+
+A route that is reachable without a user session or API key is listed by name in
+`_ALTERNATE_CREDENTIAL` in that test, with the marker that proves what it checks
+instead (a webhook signature, a refresh token, a test token) or `None` when it is
+intentionally public (sign-up, public uploads). The list is checked for stale
+entries and for routes that now authenticate. When adding a route:
+
+1. Authenticate the caller with one of the helpers above.
+2. Only if the route is deliberately open, add it to `_ALTERNATE_CREDENTIAL` with a
+   reason.
+
+The check is a source-level guard: it proves an authentication call is present, not
+that every code path uses its result. Route-specific behaviour stays covered by the
+Cypress API specs.
+
+---
+
 ## Out of scope
 
 The following are explicitly out of scope for the current implementation:
