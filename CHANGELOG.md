@@ -3,6 +3,10 @@ All notable changes to this project will be documented in this file.
 The format is based on Keep a Changelog (https://keepachangelog.com/),
 and this project adheres to Semantic Versioning (https://semver.org/).
 
+## [Unreleased]
+### Internal
+- Dependabot version updates now also target `main` (Issue #1108), alongside the existing `develop` entries in `.github/dependabot.yml`.
+
 ## [5.0.2] - 2026-10-23
 ### Changed
 - Simplify descriptions in changelog and readme
