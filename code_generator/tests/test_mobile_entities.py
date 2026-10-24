@@ -987,8 +987,9 @@ def test_attachment_helpers_upload_then_create_the_row_through_rest(out):
     assert "'/api/attachment/direct'" in helper
     assert "form.append('file', picked.file, picked.name)" in helper
     # Every type the upload route accepts is offered by the picker.
-    server = (out / 'app' / 'api' / 'upload' / 'route.ts').read_text()
-    for mime in re.findall(r"'((?:image|application|text)/[^']+)'", server.split('validTypes')[1].split(']')[0]):
+    policy = (REPO / 'lib' / '_upload_validation.ts').read_text()
+    default_mimes = policy.split('DEFAULT_UPLOAD_MIME_TYPES')[1].split('];')[0]
+    for mime in re.findall(r"'((?:image|application|text)/[^']+)'", default_mimes):
         if mime != 'image/jpg':
             assert f"'{mime}'" in helper, mime
 
