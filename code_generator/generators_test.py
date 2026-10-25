@@ -337,8 +337,12 @@ def _seed_relation_label_value(
     *,
     unique_index: int | None = None,
     name_title: str | None = None,
+    scalar_overrides: dict | None = None,
 ) -> str:
     """Expected UI label for a populated FK target.
+
+    `scalar_overrides` maps a column of the target to the literal its dependency row
+    was given when the FK shares its target with another FK (see _vary_sibling_key).
 
     `name_title` overrides the title used for a bare `name` label field. The
     populate helper names a dependency row after the foreign-key stem, which
@@ -364,7 +368,10 @@ def _seed_relation_label_value(
     if resolved:
         parts = []
         for r in resolved:
-            parts.append(_seed_path_part(target, r, schema, unique_index=unique_index, name_title=name_title))
+            parts.append(_seed_path_part(
+                target, r, schema, unique_index=unique_index, name_title=name_title,
+                scalar_overrides=scalar_overrides,
+            ))
         if _exclusive_dropped_owner_columns(target, schema):
             # A row of an x-exclusive-parents entity leaves the other owners empty:
             # their label segments are skipped and the gap is closed.
@@ -392,6 +399,7 @@ def _seed_path_part(
     *,
     unique_index: int | None,
     name_title: str | None = None,
+    scalar_overrides: dict | None = None,
 ) -> str:
     """Expected UI value of a single resolved labelField path on the target row.
 
@@ -481,6 +489,8 @@ def _seed_path_part(
         return f'Test {title} 0_{unique_index}' if unique_index is not None else f'Test {title} A'
     if prop_type in ('integer', 'number'):
         if unique_index is None:
+            if cursor_entity == target and final_field in (scalar_overrides or {}):
+                return scalar_overrides[final_field]
             return str(label_prop.get('minimum', 0))
         return str(_numeric_unique_seed(label_prop, unique_index))
     if prop_type == 'boolean':
@@ -768,6 +778,98 @@ def _render_lookup_where(columns: list[dict], value_key: str, fk_prefix: str = '
         else:
             parts.append(f"{col['prop_name']}: {col[value_key]}")
     return '{ ' + ', '.join(parts) + ' }'
+
+
+def _vary_sibling_key(
+    extra_required_fields: list[dict],
+    lookup_columns: list[dict],
+    index: int,
+    count: int,
+) -> tuple[list[dict], bool]:
+    """Give one of several same-target FK deps its own find-or-create key.
+
+    Several FK fields of one entity may point at the same target (a main and a
+    "source" placement, say). Each becomes its own dep, but when the target's
+    find-or-create key is a scalar other than `name` (a `step_no` inside a
+    `@@unique([parent_id, step_no])`), every dep renders the same literal and the
+    lookup resolves them all to ONE row. A rule such as "the source comes strictly
+    before the main one" can then never hold.
+
+    The deps keep the order of the entity's FK fields. The first FK is the main one
+    and gets the highest value; each later sibling gets one less (an integer key),
+    or a numbered suffix (a plain string key). Keys that already differ per dep
+    (`name` carries the dep's own title) and FK-column keys are left alone.
+
+    Returns the (possibly rewritten) `extra_required_fields` and whether any
+    column was changed.
+    """
+    key_props = {
+        col['prop_name'] for col in lookup_columns
+        if 'dep_var_name' not in col and col['prop_name'] != 'name'
+    }
+    if not key_props or count < 2:
+        return extra_required_fields, False
+
+    def _vary(literal: str) -> str:
+        if re.fullmatch(r'-?\d+', literal):
+            return str(int(literal) + (count - 1 - index))
+        if index and re.fullmatch(r"'[^'$`]*'", literal):
+            return f"'{literal[1:-1]} {index + 1}'"
+        return literal
+
+    varied = False
+    result = []
+    for ef in extra_required_fields:
+        if ef['prop_name'] in key_props:
+            new_ef = {
+                **ef,
+                'prisma_val': _vary(ef['prisma_val']),
+                'prisma_val_second': _vary(ef['prisma_val_second']),
+            }
+            varied = varied or new_ef != ef
+            result.append(new_ef)
+        else:
+            result.append(ef)
+    return result, varied
+
+
+def _split_key_overrides(model_name: str, relationships: list[dict], schema: dict) -> dict[str, dict]:
+    """{fk prop_name: {column: literal}} for FKs whose dependency row got its own key.
+
+    Mirrors the variation helper_context applies in its dependency helper, so the
+    spec's expected labels name the row the helper really created.
+    """
+    deps = resolve_dependencies(model_name, schema)
+    entity_fk_deps = get_entity_fk_deps(model_name, schema, deps)
+    deps, entity_fk_deps, _, _ = split_same_target_fk_deps(model_name, relationships, deps, entity_fk_deps)
+    siblings = _split_dep_siblings(deps)
+    prop_by_var = {fk['dep_var_name']: fk['prop_name'] for fk in entity_fk_deps}
+    overrides: dict[str, dict] = {}
+    for dep in deps:
+        if not dep.get('is_split_fk_dep') or dep['var_name'] not in prop_by_var:
+            continue
+        group = siblings[dep['target']]
+        title = dep.get('_title_override') or dep.get('title') or to_title_case(dep['target'])
+        fields = _get_dep_populate_fields(
+            dep['target'], dep['var_name'], title, schema, is_self_ref=(dep['target'] == model_name),
+        )
+        fk_deps = _exclusive_owner_fk_deps(dep['target'], dep.get('fk_deps'), schema)
+        columns = _dep_lookup_columns(dep['target'], fields, fk_deps)
+        new_fields, varied = _vary_sibling_key(fields, columns, group.index(dep['var_name']), len(group))
+        if varied:
+            overrides[prop_by_var[dep['var_name']]] = {
+                f['prop_name']: f['prisma_val'] for f, old in zip(new_fields, fields) if f != old
+            }
+    return overrides
+
+
+def _split_dep_siblings(deps: list[dict]) -> dict[str, list[str]]:
+    """{target: [var_name, ...]} for the deps split off a multi-FK target, in FK order."""
+    siblings: dict[str, list[str]] = {}
+    for d in deps:
+        if d.get('is_split_fk_dep'):
+            siblings.setdefault(d['target'], []).append(d['var_name'])
+    return siblings
 
 
 def _get_dep_extra_required_fields(dep_target: str, schema: dict) -> list[dict]:
@@ -1942,8 +2044,11 @@ def gen_empty_assert_command(field: dict, indent: str) -> str:
 def gen_fill_commands(
     fields: list, entity_title: str, indent: str, fk_dep_vars: dict | None = None,
     dep_search_info: dict | None = None,
+    record_dep_vars: set | None = None,
 ) -> list[str]:
-    """fk_dep_vars: optional {prop_name: dep_var_name} for prop-name-based dep var lookup.
+    """record_dep_vars: dep vars whose row the populate helper created for the record
+    itself (`records[0].sourceDeps.<var>`); the fill selects that row, not `deps.<var>`.
+    fk_dep_vars: optional {prop_name: dep_var_name} for prop-name-based dep var lookup.
     dep_search_info: optional {prop_name: {search_differs}} — when search_differs is
     True, the dep's labelField mixes non-string segments (e.g. date), so the test
     must type the string-only deps.X.searchName but still click deps.X.name (the
@@ -1957,13 +2062,14 @@ def gen_fill_commands(
             if dep_target:
                 dep_var = (fk_dep_vars or {}).get(field['prop_name']) or to_camel_case(dep_target)
                 info = (dep_search_info or {}).get(field['prop_name'], {})
+                ref = f'records[0].sourceDeps.{dep_var}' if dep_var in (record_dep_vars or ()) else f'deps.{dep_var}'
                 if info.get('search_differs'):
                     lines.append(
                         f"{indent}cy.selectAutocomplete('{field['label']}', "
-                        f"deps.{dep_var}.searchName, deps.{dep_var}.name);"
+                        f"{ref}.searchName, {ref}.name);"
                     )
                 else:
-                    lines.append(f"{indent}cy.selectAutocomplete('{field['label']}', deps.{dep_var}.name);")
+                    lines.append(f"{indent}cy.selectAutocomplete('{field['label']}', {ref}.name);")
         else:
             value = cypress_create_value(field, entity_title)
             lines.append(gen_fill_command(field, value, indent))
@@ -1977,6 +2083,7 @@ def gen_assert_commands(
     fk_dep_vars: dict | None = None,
     flatten_m2o_props: set | None = None,
     schema: dict | None = None,
+    key_overrides: dict | None = None,
 ) -> list[str]:
     """fk_dep_vars: optional {prop_name: dep_var_name} for prop-name-based dep var lookup.
     flatten_m2o_props: optional set of FK prop names whose target is rendered as a
@@ -2013,6 +2120,7 @@ def gen_assert_commands(
                         field.get('dep_label_field_is_date', False),
                         schema,
                         name_title=to_title_case(prop_stem) if dep_var else None,
+                        scalar_overrides=(key_overrides or {}).get(field['prop_name']),
                     )
                 elif dep_var:
                     dep_title = f'Test {to_title_case(prop_stem)} A'
@@ -2915,6 +3023,7 @@ def helper_context(
         for fk in entity_fk_deps
         if rel_by_prop.get(fk['prop_name'])
     }
+    _split_sibling_vars = _split_dep_siblings(deps)
     enriched_deps = []
     for dep in deps:
         dep = {**dep, 'fk_deps': _exclusive_owner_fk_deps(dep['target'], dep.get('fk_deps'), schema)}
@@ -2944,6 +3053,18 @@ def helper_context(
         lookup_columns = _dep_lookup_columns(
             dep['target'], extra_required_fields, dep.get('fk_deps'),
         )
+        # Several FKs to one target (main + source): give each its own key so the
+        # lookup finds a distinct row per FK instead of one shared row.
+        _siblings = _split_sibling_vars.get(dep['target'], [])
+        key_varied = False
+        if dep.get('is_split_fk_dep') and dep['var_name'] in _siblings and lookup_columns:
+            extra_required_fields, key_varied = _vary_sibling_key(
+                extra_required_fields, lookup_columns, _siblings.index(dep['var_name']), len(_siblings),
+            )
+            if key_varied:
+                lookup_columns = _dep_lookup_columns(
+                    dep['target'], extra_required_fields, dep.get('fk_deps'),
+                )
         lookup_field = lookup_columns[0]['prop_name'] if lookup_columns else None
         lookup_where = _render_lookup_where(lookup_columns, 'prisma_val') if lookup_columns else None
         lookup_where_second = (
@@ -3036,6 +3157,7 @@ def helper_context(
             'lookup_field': lookup_field,
             'lookup_where': lookup_where,
             'lookup_where_second': lookup_where_second,
+            'key_varied': key_varied,
             # True if dep entity has updater_id (user-visible entities do; leaf/bridge entities may not)
             'has_updater_id': _entity_has_updater_id(dep['target'], schema),
         })
@@ -3617,6 +3739,56 @@ def helper_context(
         extra_oto_fk_deps.append({**_pick, 'composite_unique_member': True})
     extra_oto_fk_dep_vars = {d['var_name'] for d in extra_oto_fk_deps}
 
+    # An optional FK that shares its target with another FK (the "source" of a
+    # main/source pair) and whose row hangs under the same parent the primary FK
+    # gets a fresh copy of per iteration: the shared dependency row sits under a
+    # different parent than the iteration's primary row, so a rule tying both to
+    # one parent could never hold. Create the row under the iteration's parent,
+    # and hand the created row (with its label) back on the record.
+    fresh_source_deps = []
+    if primary_fk_dep is not None and not primary_fk_dep.get('is_user_account') and primary_fk_dep.get('nested_fk_deps'):
+        _fresh_parent_vars = {n['dep_var_name'] for n in primary_fk_dep['nested_fk_deps']}
+        _populate_props = {f['prop_name'] for f in required_fields_prisma_for_populate_data}
+        _prop_by_var = {fk['dep_var_name']: fk['prop_name'] for fk in entity_fk_deps}
+        for d in enriched_deps:
+            _prop = _prop_by_var.get(d['var_name'])
+            if (
+                not d.get('is_split_fk_dep') or d['var_name'] == primary_fk_dep['var_name']
+                or _prop is None or _prop in _populate_props
+                or d['target'] == 'user' or d.get('has_user_accounts') or d.get('is_actor_delegated')
+                or not any(fk['dep_var_name'] in _fresh_parent_vars for fk in d.get('fk_deps') or [])
+            ):
+                continue
+            fresh_source_deps.append({
+                'var_name': d['var_name'],
+                'target': d['target'],
+                'prop_name': _prop,
+                'internal_fk_deps': d.get('internal_fk_deps') or [],
+                # An integer key stays the dep's own (distinct) literal: the loop's
+                # unique form is the primary row's own number under the same parent.
+                'fields': [
+                    {
+                        'prop_name': ef['prop_name'],
+                        'value': ef['prisma_val'] if re.fullmatch(r'-?\d+', ef['prisma_val']) else ef['prisma_val_unique'],
+                    }
+                    for ef in d.get('extra_required_fields') or []
+                ],
+                'fk_deps': [
+                    {
+                        'prop_name': fk['prop_name'],
+                        'ref': f"{fk['dep_var_name']}Fresh" if fk['dep_var_name'] in _fresh_parent_vars
+                        else f"deps.{fk['dep_var_name']}",
+                    }
+                    for fk in d.get('fk_deps') or []
+                ],
+                'has_updater_id': d.get('has_updater_id'),
+                'prisma_include_str': d.get('prisma_include_str'),
+                'label_expression': d.get('label_expression'),
+                'search_differs': d.get('search_differs'),
+                'search_label_expression': d.get('search_label_expression'),
+            })
+    fresh_source_dep_vars = {d['var_name'] for d in fresh_source_deps}
+
     # Whether the helper numbers its per-iteration rows with a module-level call
     # counter (`_<Entity>CallSeq`). One predicate, shared by the helper (declares
     # and increments the counter), the three spec templates (reset it in
@@ -3675,6 +3847,10 @@ def helper_context(
         f['category'] == 'autocomplete' and f.get('dep_var_name')
         for f in all_fields_prisma
     )
+
+    if fresh_source_deps:
+        needs_deps_in_populate = True
+        needs_deps_in_populate_full = True
 
     has_approvable = any(d['target'] == 'approvable' for d in internal_fk_deps)
 
@@ -3867,6 +4043,8 @@ def helper_context(
         'extra_oto_fk_deps': extra_oto_fk_deps,
         'uses_call_seq': uses_call_seq,
         'extra_oto_fk_dep_vars': sorted(extra_oto_fk_dep_vars),
+        'fresh_source_deps': fresh_source_deps,
+        'fresh_source_dep_vars': sorted(fresh_source_dep_vars),
         'internal_fk_deps': internal_fk_deps,
         'has_approvable': has_approvable,
         'flatten_test_rels': flatten_test_rels,
@@ -4005,6 +4183,21 @@ def spec_context(
         if r['target'] != 'user' and r['prop_name'] not in ('creator_id', 'updater_id'):
             prop_stem = re.sub(r'_id$', '', r['prop_name'])
             fk_dep_vars[r['prop_name']] = to_camel_case(prop_stem)
+
+    # FKs sharing a target get their own dependency-row key (see _vary_sibling_key);
+    # the expected labels below follow it.
+    key_overrides = _split_key_overrides(model_name, relationships, schema)
+    # Source-side FK rows the populate helper creates per record (see helper_context's
+    # fresh_source_deps); only entities with several FKs to one target can have them.
+    fresh_source_vars = set()
+    if key_overrides or any(
+        len([r for r in relationships if r['target'] == t]) > 1
+        for t in {r['target'] for r in relationships} - {'user', model_name}
+    ):
+        fresh_source_vars = set(
+            helper_context(parent, children, schema, model_name, definition_key, generate_config)
+            .get('fresh_source_dep_vars') or []
+        )
 
     # dep_search_info: {prop_name: {search_differs}} — mirrors the same
     # label_field-derived computation helper_context() does per dep, so
@@ -4176,10 +4369,10 @@ def spec_context(
                 )
     required_assert_cmds_no_bool = gen_assert_commands(
         [f for f in required_field_metas if f['category'] != 'boolean'], title, I, fk_dep_vars,
-        flatten_m2o_props=flatten_m2o_props_view, schema=schema)
+        flatten_m2o_props=flatten_m2o_props_view, schema=schema, key_overrides=key_overrides)
     all_assert_cmds_no_bool = gen_assert_commands(
         [f for f in fields if f['category'] != 'boolean'], title, I, fk_dep_vars,
-        flatten_m2o_props=flatten_m2o_props_view, schema=schema)
+        flatten_m2o_props=flatten_m2o_props_view, schema=schema, key_overrides=key_overrides)
 
     # Append user_account FK fill/assert commands (required UA for req_cmds; all UA for all_cmds)
     for ua in req_ua_spec:
@@ -4251,6 +4444,7 @@ def spec_context(
             primary_rel.get('label_field_is_date', False),
             schema,
             name_title=dep_title,
+            scalar_overrides=key_overrides.get(f'{prim}_id'),
         ) if primary_rel else list_id_1) if not prim_is_server_value else list_id_1
         has_edit_primary = not prim_is_server_value
         edit_field_label = dep_title
@@ -4637,7 +4831,7 @@ def spec_context(
     ]
     opt_fill_cmds_3_1_ac = gen_fill_commands(
         [f for f in optional_field_metas if f['category'] == 'autocomplete'],
-        title, '        ', fk_dep_vars, dep_search_info,
+        title, '        ', fk_dep_vars, dep_search_info, record_dep_vars=fresh_source_vars,
     ) if use_deps_in_3_1 else []
     # Optional UA FK fields (excluded from field_metas; appended separately via all_ua_spec)
     opt_ua_spec = [ua for ua in all_ua_spec if ua['prop_name'] not in required_fields]
