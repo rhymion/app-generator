@@ -536,11 +536,16 @@ def _get_child_parent_id_props(child_name: str, model: str, parent_rels_raw: lis
                                schema: dict, child_entry: dict | None = None) -> set[str]:
     """What FK props in the child definition point back to the parent?
 
-    For self-referential children, uses the parent's own many-to-one rels to itself.
+    For self-referential children, uses the recorded `parent_fk` (`x-parent-fk`)
+    when the entry carries one (DataGrid children, as in `resolve_parent_fk_props`),
+    else the parent's own many-to-one rels to itself.
     Otherwise scans the child's x-relationship annotations via get_parent_fk_props,
     falling back to the '{model}_id' convention if no annotated FK is found.
     """
     if child_name == model:
+        declared = (child_entry or {}).get('parent_fk')
+        if declared and child_entry.get('output_type') not in ('list', 'comments'):
+            return set(declared)
         return {r['prop_name'] for r in parent_rels_raw if r['target'] == model}
     child_def = _raw_def(child_name, schema)
     if child_entry is not None:
