@@ -1873,6 +1873,8 @@ marked) and shows the changes between any two of them, by default the current ve
   `/<version>/new?new_version_of=<identity id>` (the new version screen below). It appears only when the caller may
   create the version entity (`get<Version>VersionHistory` returns `canCreateVersion`) and the identity has a current
   version; without one the screen would only show an alert. An open draft is not hidden here: the screen reports it.
+  An identity that starts new versions from a component of its own lists the section itself with the button off:
+  `- {name: VersionHistory, target: [view], props: {showNewVersionLink: false}}` in its `x-custom-components`.
 - **Messages.** The text lives in the `VersionHistory` section of `messages/*.json`. The section is always generated for an identity and for its version entity (the version entity's
   `ApprovalSection` reads `compareWithCurrent`), whether or not the identity declares its own `x-custom-components`.
 

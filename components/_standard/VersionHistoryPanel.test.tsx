@@ -17,15 +17,16 @@ const rows = [
   { id: 'v1', version_no: 1, created_at: '2026-01-01', body: 'x', lines: [] },
 ];
 
-function setup(opts: { canCreateVersion?: boolean; currentVersionId?: string | null; rows?: typeof rows } = {}) {
+function setup(opts: { canCreateVersion?: boolean; currentVersionId?: string | null; rows?: typeof rows; newVersionHref?: string } = {}) {
   const { canCreateVersion = true, currentVersionId = 'v2', rows: data = rows } = opts;
+  const newVersionHref = 'newVersionHref' in opts ? opts.newVersionHref : '/doc_version/new?new_version_of=i1';
   const getHistory = vi.fn().mockResolvedValue({ rows: data, currentVersionId, canCreateVersion });
   const getDiff = vi.fn(async (_i: string, l: string, r: string) => ({
     left: rows.find((x) => x.id === l)!, right: rows.find((x) => x.id === r)!,
   }));
   render(
     <VersionHistoryPanel
-      identityId="i1" newVersionHref="/doc_version/new?new_version_of=i1" numberField="version_no" fields={['body']}
+      identityId="i1" newVersionHref={newVersionHref} numberField="version_no" fields={['body']}
       childSpecs={[{ property_name: 'lines', title_key: 'lines', fields: ['note'], match: 'none', key_fields: [] }]}
       getHistory={getHistory} getDiff={getDiff}
       renderField={(row, f) => <span>{String(row[f])}</span>}
@@ -72,6 +73,12 @@ describe('VersionHistoryPanel', () => {
 
   it('hides the new version link while no version is current', async () => {
     setup({ currentVersionId: null, rows: [rows[0]] });
+    await waitFor(() => expect(screen.getByTestId('version-history')).toBeTruthy());
+    expect(screen.queryByTestId('new-version-link')).toBeNull();
+  });
+
+  it('hides the new version link when no new version screen is given', async () => {
+    setup({ newVersionHref: undefined });
     await waitFor(() => expect(screen.getByTestId('version-history')).toBeTruthy());
     expect(screen.queryByTestId('new-version-link')).toBeNull();
   });
