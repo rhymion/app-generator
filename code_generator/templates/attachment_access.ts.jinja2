@@ -7,13 +7,8 @@
 // attached) can only be read by the user who uploaded it.
 import prisma from '@/lib/prisma';
 import { getModelPermissions, resolvePermissions } from '@/lib/authz';
-{% for o in bridge_owners %}
+{% for o in getter_owners %}
 import { get{{ o.pascal }}Detail } from '@/lib/{{ o.name }}/getters';
-{% endfor %}
-{% for o in direct_owners %}
-{% if o.name not in bridge_owners | map(attribute='name') | list %}
-import { get{{ o.pascal }}Detail } from '@/lib/{{ o.name }}/getters';
-{% endif %}
 {% endfor %}
 
 /**

@@ -90,6 +90,7 @@ from validate import (
     validate_schema, validate_prisma_indexes,
     validate_self_only_creator_id_columns, validate_defaults_cross_schema,
     validate_submit_on_default_matches_prisma, validate_version_of_prisma,
+    validate_attachment_provenance_columns,
     validate_direct_attachment_prerequisite,
     validate_direct_attachment_reverse_fields,
     validate_write_once_stub_asymmetry,
@@ -1520,6 +1521,7 @@ def generate(schema_path: str, output_dir: str) -> None:
         validate_defaults_cross_schema(schema, Path(output_dir) / 'prisma' / 'schema.prisma')
         validate_submit_on_default_matches_prisma(schema, Path(output_dir) / 'prisma' / 'schema.prisma')
         validate_version_of_prisma(schema, Path(output_dir) / 'prisma' / 'schema.prisma')
+        validate_attachment_provenance_columns(Path(output_dir) / 'prisma' / 'schema.prisma')
         validate_direct_attachment_prerequisite(schema, Path(output_dir) / 'prisma' / 'schema.prisma')
         validate_direct_attachment_reverse_fields(schema, Path(output_dir) / 'prisma' / 'schema.prisma')
     except SchemaValidationError as exc:
@@ -2599,6 +2601,11 @@ def generate(schema_path: str, output_dir: str) -> None:
         _render(env, 'attachment_access.ts.jinja2', {
             'bridge_owners': _bridge_read_owners,
             'direct_owners': direct_attachment_owners,
+            # Each owner entity's detail getter is imported once, however many of its fields point at attachments.
+            'getter_owners': sorted(
+                {o['name']: o for o in [*_bridge_read_owners, *direct_attachment_owners]}.values(),
+                key=lambda o: o['name'],
+            ),
         }),
     )
     print(f'  Attachment access → lib/attachment/access.ts ({len(_bridge_read_owners)} bridge owners, '

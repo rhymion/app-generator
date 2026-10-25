@@ -52,6 +52,8 @@ model attachment {
   attachable_id String?
   attachable    attachable? @relation(fields: [attachable_id], references: [id], onDelete: SetNull)
   user_image    user?       @relation("UserImage")
+  uploader_id   String?
+  uploader_organization_id String?
   @@index([attachable_id])
 }
 

@@ -384,6 +384,43 @@ def validate_version_of_prisma(schema: dict, prisma_schema_path: str | Path) -> 
     _validate_version_of_prisma(schema, prisma_schema_path, SchemaValidationError)
 
 
+_UPLOADER_ID = re.compile(r'^\s*uploader_id\s+String\?', re.MULTILINE)
+_UPLOADER_ORGANIZATION_ID = re.compile(r'^\s*uploader_organization_id\s+String\?', re.MULTILINE)
+
+
+def validate_attachment_provenance_columns(prisma_schema_path: str | Path) -> None:
+    """Verify that prisma/schema.prisma's `attachment` model records who uploaded a file.
+
+    POST /api/upload creates the `attachment` row as soon as the file is stored and records the
+    uploader (`uploader_id`) and the uploader's organization (`uploader_organization_id`). Reading
+    an attachment that no record references yet, and attaching an upload to a record, are both
+    decided from that provenance, so the generated code cannot work without the two columns.
+    Checked here, at generate time, with an actionable message instead of a type error or a
+    database error deep inside the generated code. A schema without an `attachment` model at all is
+    not asked to add one.
+    """
+    path = Path(prisma_schema_path)
+    if not path.exists():
+        return
+    body = dict(_iter_model_blocks(path.read_text())).get('attachment')
+    if body is None:
+        return
+    if _UPLOADER_ID.search(body) and _UPLOADER_ORGANIZATION_ID.search(body):
+        return
+    raise SchemaValidationError(
+        "Attachment provenance validation failed — prisma/schema.prisma's `attachment` model must "
+        "record who uploaded each file. Add to the `attachment` model:\n\n"
+        "  uploader_id              String?\n"
+        "  uploader                 user?   @relation(\"AttachmentUploader\", fields: [uploader_id], "
+        "references: [id], onDelete: SetNull)\n"
+        "  uploader_organization_id String?\n"
+        "  @@index([uploader_id])\n\n"
+        "and to the `user` model:\n\n"
+        "  uploaded_attachments attachment[] @relation(\"AttachmentUploader\")\n\n"
+        "See docs/knowledge/attachment-storage.md."
+    )
+
+
 _ATTACHABLE_ID_NULLABLE = re.compile(r'^\s*attachable_id\s+String\?\s*$', re.MULTILINE)
 
 

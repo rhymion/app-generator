@@ -221,6 +221,7 @@ lib/dashboard/use_entity_approval_actions.ts
 !lib/attachment/storage.ts
 !lib/attachment/upload_core.ts
 !lib/attachment/link.ts
+!lib/attachment/orphan_cleanup.ts
 !lib/attachment/url.ts
 !lib/attachment/*.test.ts
 !lib/approval_flow/autocomplete_filter.ts

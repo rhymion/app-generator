@@ -1,5 +1,27 @@
 // GENERATED ONCE — safe to edit (will not be overwritten on regeneration)
 // x-scheduled-tasks (bulk) handler for task_id: {{ task_id }}
+{% if task_id == 'attachment_orphan_cleanup' %}
+
+import { UNLINKED_ATTACHMENT_WHERE } from '@/lib/attachment/access';
+import { deleteOrphanAttachments } from '@/lib/attachment/orphan_cleanup';
+
+/**
+ * Deletes uploads (the attachment record and its stored object) that were never attached to a
+ * record and are older than 24 hours. `attachment_orphan_cleanup` is a reserved task id: declare it
+ * under `x-scheduled-tasks` (with an `interval`, for example daily) and this handler does the work.
+ * See docs/knowledge/attachment-storage.md.
+ *
+ * @param systemActorId - the scheduled-task service account's user id
+ */
+export async function {{ handler }}(systemActorId: string): Promise<void> {
+  void systemActorId;
+  const { deleted, objectsNotRemoved } = await deleteOrphanAttachments(UNLINKED_ATTACHMENT_WHERE);
+  console.log(`attachment_orphan_cleanup: deleted ${deleted} upload(s)`);
+  if (objectsNotRemoved.length > 0) {
+    console.warn(`attachment_orphan_cleanup: ${objectsNotRemoved.length} stored object(s) could not be removed`);
+  }
+}
+{% else %}
 
 /**
  * Called once per scheduled run of the `{{ task_id }}` task — bulk mode: no
@@ -19,3 +41,4 @@ export async function {{ handler }}(systemActorId: string): Promise<void> {
   // TODO: implement scheduled-task side effects here
   void systemActorId;
 }
+{% endif %}
