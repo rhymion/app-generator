@@ -4,7 +4,7 @@ import { authenticate, ApiError } from '@/lib/api-auth';
 import { getSessionUserId } from '@/lib/authz';
 import prisma from '@/lib/prisma';
 import { authorizeAttachmentRead } from '@/lib/attachment/access';
-import { serveStoredObject } from '@/lib/attachment/storage';
+import { isStorageKey, serveStoredObject } from '@/lib/attachment/storage';
 import { decryptFileName } from '@/lib/compliance/attachment_name_crypto';
 import { UPLOAD_CONTENT_TYPE_BY_EXTENSION, extensionOf } from '@/lib/_upload_validation';
 
@@ -46,6 +46,9 @@ export async function GET(request: NextRequest, { params }: Params) {
     select: { id: true, path: true, attachable_id: true, uploader_id: true, encrypted_original_name: true },
   });
   if (!attachment) return new NextResponse(null, { status: 404 });
+
+  // A row whose `path` is not a storage key (a record stored before the key format) has no object to read.
+  if (!isStorageKey(attachment.path)) return new NextResponse(null, { status: 404 });
 
   const decision = await authorizeAttachmentRead(actorId, attachment);
   if (decision === 'forbidden') return new NextResponse(null, { status: 403 });
