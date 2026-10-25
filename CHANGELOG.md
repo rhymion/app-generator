@@ -14,6 +14,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 - **Generator test that every `/api/` route authenticates** (Issue #1132). `code_generator/tests/test_api_route_authentication_enumeration.py` enumerates every route template and hand-written `app/api/**/route.ts` and fails if one has no authentication call and is not listed with the alternate credential it checks. See `docs/knowledge/authentication.md`.
 
 ### Changed
+- **Mobile: URL columns with `x-uri-kind: image` or `file` keep the native screens** (Issue #860). The generated mobile app draws such a column as a plain URL text input, in forms and in editable child rows, and no longer leaves the entity on the placeholder screen. A URL column takes a pasted URL only; a file that needs uploading is a `type: direct` attachment FK. Web behavior is unchanged.
 - **`VersionHistory` messages generated for every `x-version-of` identity** (Issue #1088). The `VersionHistory` section of `messages/*.json` was skipped when the identity declared its own `x-custom-components`, so the version screens failed with `MISSING_MESSAGE: VersionHistory`.
 
 ### Fixed
