@@ -1,11 +1,11 @@
 import { useState } from 'react';
-import { ActivityIndicator, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
 import { useMessages } from '@/lib/messages';
 import type { FieldSpec } from '@/lib/entity-http';
-import { resolveApiUrl } from '@/lib/api-base';
 import {
   ATTACHMENT_MIME_TYPES,
+  openAttachment,
   uploadAttachment,
   uploadErrorMessage,
   type AttachmentRow,
@@ -15,7 +15,7 @@ import {
 export function AttachmentValue({ row, testID }: { row: AttachmentRow | null | undefined; testID: string }) {
   if (!row) return <Text style={styles.empty} testID={testID}>-</Text>;
   return (
-    <Pressable onPress={() => void Linking.openURL(resolveApiUrl(row.path))} accessibilityRole="link">
+    <Pressable onPress={() => void openAttachment(row.path).catch(() => undefined)} accessibilityRole="link">
       <Text style={styles.link} testID={testID}>{row.name}</Text>
     </Pressable>
   );

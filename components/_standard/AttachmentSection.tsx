@@ -39,6 +39,14 @@ type Props = {
 
 type ListHandle = { getItems: () => EditableListWrapperItem[] };
 
+// The attachment an editable-list item stands for: a saved row's own id, or the id the upload of a
+// newly added file answered with.
+function attachmentIdOf(item: EditableListWrapperItem): string {
+  const id = typeof item.id === 'string' && !item.id.startsWith('temp-') ? item.id : item.originalId;
+  if (typeof id !== 'string' || id === '') throw new Error('Attachment is missing its id');
+  return id;
+}
+
 function toItem(a: Attachment): EditableListWrapperItem {
   return {
     id: a.id,
@@ -144,19 +152,16 @@ export default function AttachmentSection({
     startTransition(async () => {
       try {
         if (showImages) {
-          const imageItems = (imagesRef.current?.getItems() ?? []).map((i) => ({
-            id: typeof i.id === 'string' && !i.id.startsWith('temp-') ? i.id : i.originalId ?? null,
-            name: i.label ?? '',
-            path: String(i.value ?? ''),
+          const imageItems = (imagesRef.current?.getItems() ?? []).map((i, idx) => ({
+            id: attachmentIdOf(i),
+            order: idx,
           }));
           await setAttachmentsForBridge(attachableId, TYPE_IMAGE, imageItems);
         }
         if (showFiles) {
           const fileItems = (filesRef.current?.getItems() ?? []).map((i, idx) => ({
-            id: typeof i.id === 'string' && !i.id.startsWith('temp-') ? i.id : i.originalId ?? null,
+            id: attachmentIdOf(i),
             order: typeof i.order === 'number' ? i.order : idx,
-            name: i.label ?? '',
-            path: String(i.value ?? ''),
           }));
           await setAttachmentsForBridge(attachableId, TYPE_FILE, fileItems);
         }

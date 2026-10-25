@@ -1,9 +1,11 @@
 'use client';
 
-import { useState } from 'react';
 import TextField from '@mui/material/TextField';
 import { useTranslations } from 'next-intl';
 
+// A URL field with an image preview. The value is a plain URL string (an external image address);
+// files are uploaded through a direct-attachment field (x-relationship type: direct) instead, which
+// stores the file as an attachment delivered by an authorized route.
 interface ImageUploadProps {
   value: string;
   onChange: (url: string) => void;
@@ -11,106 +13,40 @@ interface ImageUploadProps {
   helperText?: string;
 }
 
-export default function ImageUpload({ 
-  value, 
-  onChange, 
+export default function ImageUpload({
+  value,
+  onChange,
   label = 'imageUrl',
-  helperText = 'You can paste a URL or upload a file'
+  helperText = 'You can paste a URL'
 }: ImageUploadProps) {
-  const [uploading, setUploading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const tf = useTranslations('Fields');
-  
-  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
-    setUploading(true);
-    setError(null);
-
-    try {
-      const formData = new FormData();
-      formData.append('file', file);
-
-      const response = await fetch('/api/upload', {
-        method: 'POST',
-        body: formData,
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Upload failed');
-      }
-
-      const data = await response.json();
-      onChange(data.url);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Upload failed');
-    } finally {
-      setUploading(false);
-    }
-  };
 
   return (
     <div style={{ margin: '16px 0' }}>
-      <input
-        accept="image/*"
-        style={{ display: 'none' }}
-        id="image-upload-button"
-        type="file"
-        onChange={handleFileUpload}
-        disabled={uploading}
+      <TextField
+        label={tf(label)}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        fullWidth
+        margin="normal"
+        helperText={helperText}
       />
-      <label htmlFor="image-upload-button">
-        <TextField
-          label={tf(label)}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          fullWidth
-          margin="normal"
-          helperText={error || helperText}
-          error={!!error}
-          slotProps={{
-            input: {
-              endAdornment: (
-                <span style={{ marginLeft: '8px', whiteSpace: 'nowrap' }}>
-                  <button
-                    type="button"
-                    onClick={() => document.getElementById('image-upload-button')?.click()}
-                    disabled={uploading}
-                    style={{
-                      padding: '8px 16px',
-                      backgroundColor: uploading ? '#ccc' : '#1976d2',
-                      color: 'white',
-                      border: 'none',
-                      borderRadius: '4px',
-                      cursor: uploading ? 'not-allowed' : 'pointer',
-                    }}
-                  >
-                    {uploading ? 'Uploading...' : 'Upload'}
-                  </button>
-                </span>
-              ),
-            },
-          }}
-        />
-      </label>
       {value && (
         <div style={{ marginTop: '8px' }}>
-          {/* value is an arbitrary uploaded-file URL of unknown origin/dimensions; next/image
+          {/* value is an arbitrary image URL of unknown origin/dimensions; next/image
               needs a configured remote pattern and fixed dimensions, out of scope here. */}
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={value}
-            alt="Preview" 
-            style={{ 
-              maxWidth: '200px', 
-              maxHeight: '200px', 
+            alt="Preview"
+            style={{
+              maxWidth: '200px',
+              maxHeight: '200px',
               objectFit: 'contain',
               border: '1px solid #ddd',
               borderRadius: '4px',
               padding: '4px'
-            }} 
+            }}
           />
         </div>
       )}

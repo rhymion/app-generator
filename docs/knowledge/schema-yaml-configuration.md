@@ -550,7 +550,7 @@ under the column's entry in `properties:`.
 | `format: date` | Renders MUI X DatePicker |
 | `format: time` | Renders MUI X TimePicker |
 | `format: uri` | Renders image preview or link (see `x-uri-kind` below) |
-| `x-uri-kind: image` \| `link` \| `file` | Only meaningful on a `format: uri` field. Default `image`: renders `ImageUpload` (create/edit) and an image preview on the single-record view page only — an image is never drawn inside any DataGrid cell (list page, BridgeGrid, or an inline editable child DataGrid, §7.1). `link`: renders a plain URL text input (create/edit, `type="url"`) and a clickable external link (`AppFieldExternalLink`) on the single-record view page; also renders as a clickable link wherever the field is listed in `x-display.table` (the list page's DataGrid and a BridgeGrid's read-only embedded grid share the same `uriKind` wiring). `file`: uploads via the same `/api/upload` route as `image`, but renders as a download link/icon instead of an `<img>` — shares its display components with the direct-attachment FK (`type: direct`, below) rather than with plain `image`/`link`. Any other value raises a schema-validation error (`x-uri-kind must be 'image', 'link', or 'file'`). Inside an inline editable child DataGrid (§7.1) all three kinds fall through to a plain editable text cell — a URL is legitimately editable as text, unlike an image. |
+| `x-uri-kind: image` \| `link` \| `file` | Only meaningful on a `format: uri` field. Default `image`: renders `ImageUpload` (create/edit: a URL text input with an image preview; the value is a URL typed or pasted by the user, not an uploaded file) and an image preview on the single-record view page only — an image is never drawn inside any DataGrid cell (list page, BridgeGrid, or an inline editable child DataGrid, §7.1). `link`: renders a plain URL text input (create/edit, `type="url"`) and a clickable external link (`AppFieldExternalLink`) on the single-record view page; also renders as a clickable link wherever the field is listed in `x-display.table` (the list page's DataGrid and a BridgeGrid's read-only embedded grid share the same `uriKind` wiring). `file`: a URL text input (create/edit) that renders as a download link/icon instead of an `<img>`; a file is uploaded through a direct-attachment field (`type: direct`), not through this key — shares its display components with the direct-attachment FK (`type: direct`, below) rather than with plain `image`/`link`. Any other value raises a schema-validation error (`x-uri-kind must be 'image', 'link', or 'file'`). Inside an inline editable child DataGrid (§7.1) all three kinds fall through to a plain editable text cell — a URL is legitimately editable as text, unlike an image. |
 | `format: regex` | Hint that the value is a regex; rendered as text input |
 | `default` | Pre-fills the field in new form. **Not** auto-derived from Prisma's `@default(...)` even when one exists — the legacy schema sometimes omitted it even where Prisma had a default, so its presence is always a deliberate, user-authored column entry. |
 
@@ -1027,10 +1027,12 @@ The same condition emits `app/api/attachment/direct/route.ts`, the REST form of 
 browser session. The generated Expo app uses both to draw the field as a file input
 (`docs/knowledge/mobile-app.md`, "Direct attachment fields"); the Web form is unchanged.
 
-`POST /api/upload` never uses the client-supplied filename as a path. The stored name is the filename's last path
-segment (either separator style, control characters removed; `file` when nothing is left), placed under a generated
-directory, and on the local-disk fallback the final path must resolve inside `public/uploads/` or the upload is refused.
-`GET /api/uploads/...` applies the same confinement when reading.
+`POST /api/upload` never uses the client-supplied filename as a path or as part of a storage key. The object is stored
+under a random UUID key, the filename's last path segment (either separator style, control characters removed; `file`
+when nothing is left) is kept only as the encrypted display name, and the response is `{ id, name }`: the id of the
+`attachment` record that was created. A direct-attachment field's value is that id, and only the user who uploaded the
+file can attach it. Files are read from `GET /api/attachments/<id>`. See
+[attachment-storage.md](attachment-storage.md).
 
 Implementation-internals notes from when this feature was built (why the generator's TS-type
 resolution for `attachment.type` must read the raw entity definition rather than the plain

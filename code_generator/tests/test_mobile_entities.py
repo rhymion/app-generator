@@ -751,8 +751,10 @@ def test_attachments_route_is_generated_for_the_owner_only(out):
     assert "requireApiPermission(actorId, 'mobile_asset', 'update')" in route
     assert 'resolvePermissions(basePerms, item, actorId)' in route
     assert "setAttachmentsForBridge(attachableId, type as AttachmentType, parsed)" in route or 'setAttachmentsForBridge(attachableId' in route
-    # A listed id must already belong to this record, so another record's attachment cannot be taken over.
-    assert 'held.has(entry.id)' in route
+    # Items are attachment ids only; a path is not accepted, and the action itself checks each id (the
+    # record's own row, or an unlinked upload by the caller).
+    assert 'parsed.push({ id: entry.id, order: index })' in route
+    assert 'entry.path' not in route
     assert 'const ATTACHMENT_TYPES: readonly string[] = ["image", "file", "video", "audio"]' in route
     assert not (out / 'app/api/mobile_note/[id]/attachments/route.ts').exists()
     assert not (out / 'app/api/mobile_thread/[id]/attachments/route.ts').exists()
@@ -977,14 +979,18 @@ def test_attachment_detail_shows_the_file_name_as_a_link(out):
     assert "import { AttachmentValue } from '@/components/native/AttachmentInput';" in view
     assert 'testID={`view-field-${spec.key}`}' in view
     widget = _read(out, 'components/native/AttachmentInput.tsx')
-    assert 'Linking.openURL(resolveApiUrl(row.path))' in widget
+    # The file route needs the access token, which a link handed to the system browser cannot carry.
+    assert 'openAttachment(row.path)' in widget
+    assert 'Linking.openURL' not in widget
     assert "from 'expo-document-picker'" in widget
 
 
 def test_attachment_helpers_upload_then_create_the_row_through_rest(out):
     helper = _read(out, 'lib/attachment-http.ts')
-    assert "apiFetch<{ url: string }>('/api/upload', { method: 'POST', body: form })" in helper
+    assert "apiFetch<UploadedFile>('/api/upload', { method: 'POST', body: form })" in helper
     assert "'/api/attachment/direct'" in helper
+    # The row is prepared from the id the upload answered with; no path travels to the server.
+    assert 'JSON.stringify({ id, type: attachmentKind(picked.mimeType) })' in helper
     assert "form.append('file', picked.file, picked.name)" in helper
     # Every type the upload route accepts is offered by the picker.
     policy = (REPO / 'lib' / '_upload_validation.ts').read_text()
@@ -1051,7 +1057,7 @@ def test_direct_attachment_fields_alone_do_not_write_the_bridge_list(tmp_path):
 def test_upload_route_accepts_the_browser_session_and_a_mobile_token(out):
     route = (out / 'app' / 'api' / 'upload' / 'route.ts').read_text()
     assert "import { requireCaller, ApiError } from '@/lib/api-auth';" in route
-    assert 'await requireCaller(request);' in route
+    assert 'requireCaller(request)' in route
     # A refused caller still gets the 401 body the Web form already handles.
     assert "{ error: 'Unauthorized' }, { status: 401 }" in route
     assert "from '@/auth'" not in route
@@ -1064,7 +1070,9 @@ def test_direct_attachment_rest_route_runs_the_web_action_as_the_caller(out):
     assert "import { createDirectAttachment } from '@/lib/attachment/direct_actions';" in route
     # The enum members of attachment.type are checked before Prisma sees the value.
     assert 'const ATTACHMENT_TYPES: readonly string[] = ["image", "file", "video", "audio"];' in route
-    assert 'createDirectAttachment(name, path, type as' in route
+    assert 'createDirectAttachment(id, type as' in route
+    # Only the id of an uploaded attachment and its kind are read from the body; no path is accepted.
+    assert 'const { id, type } = (body ?? {}) as Record<string, unknown>;' in route
 
 
 

@@ -12,8 +12,7 @@ const mocks = vi.hoisted(() => ({
   accountCount: vi.fn(),
   sessionDeleteMany: vi.fn(),
   recoveryDeleteMany: vi.fn(),
-  unlink: vi.fn(),
-  rmdir: vi.fn(),
+  deleteStoredObject: vi.fn(),
 }));
 
 vi.mock('@/lib/prisma', () => {
@@ -29,19 +28,22 @@ vi.mock('@/lib/prisma', () => {
   };
   return { default: { $transaction: async (fn: (t: typeof tx) => unknown) => fn(tx) } };
 });
-vi.mock('fs/promises', () => ({ unlink: mocks.unlink, rmdir: mocks.rmdir }));
-vi.mock('@vercel/blob', () => ({ del: vi.fn() }));
+vi.mock('@/lib/attachment/storage', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/attachment/storage')>()),
+  deleteStoredObject: mocks.deleteStoredObject,
+}));
 
 import { anonymizeUser } from './anonymize_user';
+
+const STORED_KEY = '3f2b8c1e-5d4a-4e6f-9a7b-1c2d3e4f5a6b';
 
 describe('anonymizeUser related records', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.accountCount.mockResolvedValue(0);
-    mocks.unlink.mockResolvedValue(undefined);
-    mocks.rmdir.mockResolvedValue(undefined);
+    mocks.deleteStoredObject.mockResolvedValue(undefined);
     mocks.userFindUnique.mockResolvedValue({ anonymized_at: null, invalidated_at: null, image_id: 'att1' });
-    mocks.attachmentFindUnique.mockResolvedValue({ path: '/uploads/1-abc/me.png' });
+    mocks.attachmentFindUnique.mockResolvedValue({ path: STORED_KEY });
   });
 
   it('scrubs device names, deletes the avatar row and its stored file', async () => {
@@ -51,8 +53,8 @@ describe('anonymizeUser related records', () => {
     expect(mocks.notificationDeleteMany).toHaveBeenCalledWith({ where: { user_id: 'u1' } });
     expect(mocks.idempotencyDeleteMany).toHaveBeenCalledWith({ where: { actor_user_id: 'u1' } });
     expect(mocks.attachmentDeleteMany).toHaveBeenCalledWith({ where: { id: 'att1' } });
-    expect(mocks.unlink).toHaveBeenCalledTimes(1);
-    expect(String(mocks.unlink.mock.calls[0][0])).toMatch(/public\/uploads\/1-abc\/me\.png$/);
+    expect(mocks.deleteStoredObject).toHaveBeenCalledTimes(1);
+    expect(mocks.deleteStoredObject).toHaveBeenCalledWith(STORED_KEY);
   });
 
   it('keeps the first erasure time on a repeated call', async () => {
@@ -64,11 +66,11 @@ describe('anonymizeUser related records', () => {
     expect(data.anonymized_at).toEqual(first);
     expect(data.invalidated_at).toEqual(first);
     expect(mocks.attachmentDeleteMany).not.toHaveBeenCalled();
-    expect(mocks.unlink).not.toHaveBeenCalled();
+    expect(mocks.deleteStoredObject).not.toHaveBeenCalled();
   });
 
   it('reports a failed file removal without undoing the erasure', async () => {
-    mocks.unlink.mockRejectedValue(Object.assign(new Error('denied'), { code: 'EACCES' }));
+    mocks.deleteStoredObject.mockRejectedValue(Object.assign(new Error('denied'), { code: 'EACCES' }));
     const res = await anonymizeUser('u1');
     expect(res.success).toBe(true);
     expect(res.errors?.[0]).toContain('Stored avatar file was not removed');

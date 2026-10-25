@@ -23,6 +23,7 @@ import CircularProgress from '@mui/material/CircularProgress';
 import Link from '@mui/material/Link';
 import { isSafeUrl } from '@/lib/_safe_url';
 import type { EntitySearchAction } from './EntityAutocomplete';
+import { attachmentUrl } from '@/lib/attachment/url';
 
 export type ItemType = 'text' | 'autocomplete' | 'file';
 
@@ -216,6 +217,9 @@ const EditableListWrapper = forwardRef<EditableListWrapperHandle, EditableListWr
     const handleAdd = async () => {
       let value: string | number;
       let label: string = '';
+      // For an uploaded file: the id of the attachment the upload created (the file itself is
+      // delivered from /api/attachments/<id>).
+      let uploadedId: string | undefined;
 
       switch (itemType) {
         case 'text':
@@ -256,7 +260,8 @@ const EditableListWrapper = forwardRef<EditableListWrapperHandle, EditableListWr
               throw new Error(errorData.error || 'Upload failed');
             }
             const data = await response.json();
-            value = data.url;
+            uploadedId = data.id;
+            value = attachmentUrl(data.id);
             label = selectedFile.name;
           } catch (err) {
             setError(err instanceof Error ? err.message : 'Upload failed');
@@ -282,6 +287,7 @@ const EditableListWrapper = forwardRef<EditableListWrapperHandle, EditableListWr
         value,
         label,
         type: itemType,
+        ...(uploadedId ? { originalId: uploadedId } : {}),
       };
 
       updateItems([...items, newItem]);
