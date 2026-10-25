@@ -3,7 +3,7 @@ All notable changes to this project will be documented in this file.
 The format is based on Keep a Changelog (https://keepachangelog.com/),
 and this project adheres to Semantic Versioning (https://semver.org/).
 
-## [Unreleased]
+## [5.1.0] - 2026-10-25
 ### Security
 - **Upload type check no longer trusts the client-declared Content-Type** (Issue #1097). `POST /api/upload` (GCS and Vercel Blob routes) now requires the declared MIME type AND the file name's extension to be on allow-lists, and stores the Content-Type derived from the extension. The lists default to the previous 13 types plus their 13 extensions and can be narrowed with `UPLOAD_ALLOWED_MIME_TYPES` / `UPLOAD_ALLOWED_EXTENSIONS`. A file with no extension, or an extension outside the list, is now rejected.
 - **Consumer `ci.yml` actions pinned to commit SHAs** (Issue #1099). `docs/consumer-commands/ci.yml` references each GitHub Action by full commit SHA with a version comment instead of a mutable tag. Each consumer's next submodule pointer bump must also copy the updated file into its `.github/workflows/ci.yml`, or its `Verify ci.yml` job fails.
