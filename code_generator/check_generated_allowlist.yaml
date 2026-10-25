@@ -1,7 +1,10 @@
 # check_generated_allowlist.yaml — exemptions for code_generator/check_generated.py
 #
 # Each exemption lifts a single (path, pattern, substring) tuple. The path is
-# the file's POSIX-style location relative to the project root. `pattern` is
+# the file's POSIX-style location relative to the project root. Use
+# `path_glob` instead of `path` only for a generated file whose location
+# depends on an entity name (`*` matches one path segment, never a `/`).
+# `pattern` is
 # one of:
 #
 #   raw:queryRaw / raw:executeRaw / raw:queryRawUnsafe / raw:executeRawUnsafe
@@ -81,3 +84,19 @@ exemptions:
     reason: >-
       Fixed literal calling audit_log_create_month_partition(), zero runtime
       interpolation; not expressible with the Prisma query builder.
+  # lib/<entity>/service_scheduled.ts (code_generator/templates/
+  # service_scheduled.ts.jinja2): every entity that declares `x-scheduled-task`
+  # claims each due row with a transaction-scoped advisory lock before it runs
+  # the handler, so two overlapping cron deliveries cannot both process the
+  # row. Prisma's query builder has no advisory lock. The statement is a tagged
+  # $executeRaw whose only substitution is the row id, bound as a query
+  # parameter; the SQL text is a fixed literal. The path differs per entity,
+  # hence path_glob. The bulk template (lib/scheduled-tasks/<task_id>/) has no
+  # raw SQL and needs no entry.
+  - path_glob: lib/*/service_scheduled.ts
+    pattern: raw:executeRaw
+    substring: "SELECT pg_advisory_xact_lock(hashtextextended(${row.id}, 0))"
+    reason: >-
+      Transaction-scoped advisory lock Prisma cannot express; fixed SQL text,
+      row id bound as a parameter. See
+      code_generator/templates/service_scheduled.ts.jinja2.

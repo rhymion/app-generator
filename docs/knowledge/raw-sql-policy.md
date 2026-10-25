@@ -52,12 +52,14 @@ A handful of statements have no Prisma query-builder equivalent at all:
   `generate-code` time from the project's own `schema.yaml` (developer-
   controlled), never from a runtime request.
 - **Postgres-specific functions with no Prisma equivalent**
-  (`lib/<entity>/service.ts`, from `service_scheduled.ts.jinja2`'s scheduled-
-  task claim path) — `pg_advisory_xact_lock(...)`, with the row id bound via
+  (`lib/<entity>/service_scheduled.ts`, from `service_scheduled.ts.jinja2`'s
+  scheduled-task claim path) — `pg_advisory_xact_lock(...)`, with the row id bound via
   `${row.id}`.
 
 Each of these is a tagged-template call, listed with a reason in
-`code_generator/check_generated_allowlist.yaml`, and commented in its own
+`code_generator/check_generated_allowlist.yaml` (the scheduled-task lock is
+listed by `path_glob: lib/*/service_scheduled.ts`, because its path depends on
+the entity name; `*` matches one path segment and never a `/`), and commented in its own
 template explaining why the query builder doesn't reach and (if there is no
 runtime-supplied value at all) where every interpolated value actually comes
 from.
@@ -101,6 +103,11 @@ trip the check). It is a narrower, allowlist-free backstop for whoever runs
 `pytest code_generator/tests` locally after `generate-code`; `check_generated.py`
 (step 15, also exercised by CI's `e2e-tests` job) is the check the gate and
 CI actually rely on.
+
+`test_check_generated_scheduled_advisory_lock.py` renders the real scheduled-task
+templates and runs the checker with the real allowlist, because the default
+schema declares no scheduled task and `npm run check:generated` alone never
+reaches that file.
 
 ## Why this policy exists
 
