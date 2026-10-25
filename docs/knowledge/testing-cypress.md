@@ -375,8 +375,9 @@ Consequences when writing a schema:
   repeated helper calls can still collide; give it a required unique column.
 - Unique-column values are derived from the *field* name (`'Test Po Number'`),
   not from the dep's role title the way `name` is (`'Test Assignee'` vs
-  `'Test Creator'`). Two deps of the same `name`-less target inside one helper
-  therefore resolve to the *same* row instead of two.
+  `'Test Creator'`). Two deps of the same `name`-less target would therefore
+  resolve to the *same* row; see "Several FKs to one target" below for how the
+  generator separates them.
 
 The Prisma facts behind rules 2 and 3 come from
 `schema_deriver.collect_unique_columns()`, which `generate.py` reads off
@@ -384,6 +385,29 @@ The Prisma facts behind rules 2 and 3 come from
 Uniqueness deliberately does not enter the derived JSON schema — it constrains
 writes, not the JSON shape, and the Stage 2/4 golden references assert that
 shape byte-for-byte.
+
+### Several FKs to one target (main and source)
+
+An entity can have more than one FK to the same target, for example `placement_id` and
+`source_placement_id`. Each FK gets its own dep (`deps.placement`, `deps.sourcePlacement`), and the
+generator keeps them as different rows:
+
+- **Dependency rows.** When the find-or-create key is a scalar other than `name` (a `step_no` in
+  `@@unique([parent_id, step_no])`), the deps would render the same literal. The first FK keeps the
+  highest value and each later FK gets one less (an integer key), or a numbered suffix (a plain string
+  key). A source FK is therefore strictly below the main one. Keys that already differ per dep
+  (`name`) and FK-column keys are not changed (`_vary_sibling_key` in `generators_test.py`).
+- **Expected labels.** The spec's `checkField` and edit-step labels for such a FK use the varied value
+  (`_split_key_overrides`), so they name the row the helper created.
+- **Source rows made per record.** `populate{Entity}Data` / `FullData` give each iteration its own
+  parent when the primary FK's label is reached through it (for example `test_case_version.title`). An
+  optional FK that shares its target with another FK, and whose row hangs under that same parent, is
+  created under the iteration's parent too (`fresh_source_deps`), not under the shared dependency
+  row's parent. `populate{Entity}Data` returns the created rows on the record as `sourceDeps`
+  (`records[0].sourceDeps.sourcePlacement.name`), the 3.1 edit example selects them, and
+  `populate{Entity}FullData` points the FK at them.
+
+Entities without two FKs to one target generate the same files as before.
 
 ### `beforeEach` Pattern
 
