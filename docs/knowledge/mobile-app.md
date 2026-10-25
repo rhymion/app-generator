@@ -157,7 +157,7 @@ child that is neither a picker nor an [editable child collection](#child-rows) (
 or a row with a field the row editor cannot draw), a one-to-one bridge other than the ones to `approvable` (with `ApprovalSection`), `commentable` and `attachable` (with `AttachmentSection`), an `ApprovalSection` or `AttachmentSection` component without its bridge, virtual
 columns, `x-splittable` without the approval section, a state machine, edit/delete
 guards without an approval or `x-self-only`, relates to an entity that has no
-REST routes, or has a field with no native widget (image or file URI). Hand-written components
+REST routes. A URL column (`format: uri`, including `x-uri-kind: image` and `file`) is not a reason: the app draws it as a plain text input that takes a pasted URL and has no file upload path (a file that needs uploading is a `type: direct` attachment FK). Hand-written components
 (`x-custom-components`, `x-custom-component`) are not a reason: they get an [insertion point](#hand-written-components).
 In the default schema every entity qualifies except `setting` (no list screen). The fixture schema in `code_generator/tests/fixtures/mobile_entity_gate/` covers the rest.
 
@@ -585,7 +585,7 @@ without `x-outputType`) is drawn as a row editor, so the parent keeps its native
   by its label.
 - **Not covered.** A child that is independent (it has its own screens and writes itself), a many-to-many without
   `x-outputType: list`, a `list` child that is not a many-to-many (such as a self-referencing `children` list) and a row
-  field the editor cannot draw (image, file URI, entity select, custom upsert component) keep the entity on the placeholder
+  field the editor cannot draw (entity select, custom upsert component) keep the entity on the placeholder
   screen; the generation log names the property and, for a row field, the field.
 
 The fixture entity is `mobile_invoice` (`lines`: text, number, enum with a default, date and a required foreign key);
@@ -897,8 +897,7 @@ The Playwright specs under `mobile/e2e/` already cover each of these on the web 
 - Entity screens for an entity that declares anything beyond plain fields, the relation pickers, direct attachment
   fields, the attachments of an `attachable` bridge, the approval section, the comment thread with its comment box and
   mentions, creating the referenced record in place, payment checkout and the insertion points for
-  [hand-written components](#hand-written-components): child grids. A plain URL
-  field with `x-uri-kind: file` or `image` is not drawn either.
+  [hand-written components](#hand-written-components): child grids.
 - Submitting a record for approval (the "(re)submit" button). Resubmitting is a Server Action
   (`submit_for_approval.ts`) with no REST route, so the app has nothing to call.
 - The one-to-one bridge grid (`x-bridge`).

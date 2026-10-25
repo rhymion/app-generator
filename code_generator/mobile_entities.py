@@ -74,6 +74,10 @@ KIND_CHILD_ROWS = 'child_rows'
 _CATEGORY_KIND = (
     ('text', KIND_TEXT),
     ('link_uri', KIND_TEXT),
+    # A URL column takes a pasted URL only; the app has no file upload path for it. A file that
+    # needs uploading is a direct-attachment FK instead.
+    ('image', KIND_TEXT),
+    ('file_uri', KIND_TEXT),
     ('number', KIND_NUMBER),
     ('decimal', KIND_DECIMAL),
     ('boolean', KIND_BOOLEAN),
@@ -81,12 +85,6 @@ _CATEGORY_KIND = (
     ('enum_integer', KIND_ENUM),
     ('entity_select', KIND_ENUM),
 )
-
-# Categories that need a widget the mobile app does not have yet (file / image
-# upload); an entity with one is not eligible. A field replaced by a custom component
-# (`x-custom-component` with an `upsert` target) is not in this list: the component draws it.
-_UNSUPPORTED_CATEGORIES = ('image', 'file_uri')
-
 
 # Context keys whose presence means the entity carries a feature that lives
 # beyond plain CRUD (relations, children, comments, attachments, ...).
@@ -185,9 +183,6 @@ def _row_field_kinds(child: dict) -> tuple[dict[str, str], str | None]:
         else:
             plain[name] = defn
     cats = _categorize_form_fields(plain, [], {})
-    for key in _UNSUPPORTED_CATEGORIES:
-        if cats.get(key):
-            return {}, cats[key][0]
     for category, kind in _CATEGORY_KIND:
         for name in cats.get(category, []):
             kinds[name] = kind
@@ -372,10 +367,6 @@ def mobile_ineligible_reason(ctx: dict, api_entities: set[str] | None = None) ->
     # entity without one keeps the placeholder.
     if ctx.get('is_splittable') and not has_approval_section(ctx):
         return 'declares is_splittable'
-    cats = ctx.get('field_categories') or {}
-    for key in _UNSUPPORTED_CATEGORIES:
-        if cats.get(key):
-            return f'has a {key} field'
     return None
 
 

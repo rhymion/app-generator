@@ -7,7 +7,8 @@ x-generator:
 
 # Fixture design note: entities without relations, which is the set that gets
 # native list / detail / form screens in the Expo app (mobile_entities.py).
-#  - mobile_note: full CRUD, one field of every kind the native form draws.
+#  - mobile_note: full CRUD, one field of every kind the native form draws, including two URL columns
+#    (`x-uri-kind` image and file) that take a pasted URL.
 #  - mobile_log: read-only (list and view only), to prove the screens follow the
 #    entity's own x-generate flags.
 #  - mobile_group / mobile_tag / mobile_profile / mobile_task: the relation pickers (a required
@@ -61,6 +62,12 @@ definitions:
         format: date-time
       remind_time:
         format: time
+      # URL columns: the mobile form draws a plain URL input for each (no upload path).
+      photo_url:
+        format: uri
+      datasheet_url:
+        format: uri
+        x-uri-kind: file
 
   mobile_log:
     x-generate:
