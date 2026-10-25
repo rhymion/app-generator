@@ -80,6 +80,10 @@ model user {
 No `x-*` schema key is involved. As with every generated or built-in model, the migration is written when the
 application is deployed.
 
+## URL columns versus file fields
+
+A `format: uri` column, whatever its `x-uri-kind` (`image`, the default; `link`; or `file`), is a paste-a-URL field: the form shows a URL text input and the stored value is the URL the user typed or pasted. A column that still declares `x-uri-kind: file` renders the same way, with a download link on the view page. A file that needs uploading is stored through a direct-attachment field (`x-relationship: { target: attachment, type: direct }`), which references an attachment row.
+
 ## Scheduled cleanup of uploads that were never attached
 
 A form that is abandoned after an upload leaves an attachment record and a stored object that no record

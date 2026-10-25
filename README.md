@@ -291,6 +291,8 @@ See [docs/knowledge/appendix/comment-bridge.md](docs/knowledge/appendix/comment-
 
 File and image upload via a polymorphic bridge, backed by Vercel Blob by default (GCS-backed when `x-cloud` GCP deployment is enabled — see [Deployment](#deployment)). Any entity that opts in receives a file attachment panel on its view page. Image and file previews can each be hidden independently per entity (`AttachmentSection` `showImages`/`showFiles` props, both default `true`).
 
+A `format: uri` column (`x-uri-kind: image`, `link` or `file`) is a paste-a-URL field: users type or paste a URL, and no file is uploaded into it. A file that needs uploading is stored through a direct-attachment field (`x-relationship: { target: attachment, type: direct }`), which references an attachment row.
+
 ### Inventory Reservation, Split & Receiving
 
 Generic primitives — `x-reservation`, `x-splittable`, `x-ledger-source` — that any entity can opt into; not inventory-specific. `x-reservation` covers two roles: inventory allocation (`count` mode, reserving a quantity out of a numeric pool) and specific-resource reservation (`item` mode, e.g. reserving a hotel room). `x-splittable` divides a line item into parts, each drawing from an explicit or auto-allocated pool row. `x-ledger-source` generates an `inventory_transaction` ledger entity plus write/adjust/move stub templates for receiving-receipt or billing-detail entities. Approval and rejection of the owning entity go through the Approval Flow System above, not a bespoke reservation lifecycle.
