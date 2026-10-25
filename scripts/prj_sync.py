@@ -18,6 +18,11 @@ place with a warning, and a file this sync never copied is never touched.
 removed. A destination copied before the manifest existed is not tracked until
 the next sync rewrites it.
 
+A generator unit test that exercises a script a consumer may replace is not
+carried into the consumer's vitest run when the consumer replaces that script
+without shipping its own test for it (Issue #1070). See
+`GENERATOR_TESTS_OF_OVERRIDABLE_SCRIPTS` and `EXCLUDED_TESTS_NAME` below.
+
 Path resolution is anchored on this file's own location
 (`Path(__file__).resolve().parent.parent`), not on the invoking cwd.
 This project is typically consumed as a git submodule with a sibling
@@ -51,6 +56,19 @@ PRJ_DIR = PROJECT_ROOT.parent / "prj"
 # (path -> sha256), so a later run can remove the ones whose source is gone
 # (Issue #619). Gitignored: it describes this checkout's own sync history.
 MANIFEST_NAME = ".prj-sync-manifest.json"
+
+# Generator unit tests that assert the contract of one specific generator
+# script (script -> its test). When prj/ replaces the script, the generator
+# test would run against the consumer's variant and fail on a contract the
+# consumer deliberately does not follow (Issue #1070). The sync therefore
+# lists the test in EXCLUDED_TESTS_NAME, which vitest.config.ts reads, unless
+# prj/ also ships a test of its own for that script. The list is rewritten on
+# every sync, so removing the override from prj/ brings the generator test
+# back on the next run. Gitignored: it describes this checkout's own sync.
+GENERATOR_TESTS_OF_OVERRIDABLE_SCRIPTS = {
+    "scripts/grant-all-permissions.ts": "scripts/grant-all-permissions.test.ts",
+}
+EXCLUDED_TESTS_NAME = ".prj-sync-excluded-tests.json"
 
 # Matches `model Name {` ... `}` blocks where the closing brace is alone on
 # its own line at column 0 -- the convention this repo's own
@@ -234,6 +252,21 @@ def _remove_stale(prj_dir: Path, dst_dir: Path, previous: dict[str, str]) -> Non
             parent = parent.parent
 
 
+def _write_excluded_tests(prj_dir: Path, dst_dir: Path) -> None:
+    """List generator tests whose script prj/ replaces without its own test."""
+    excluded = [
+        test
+        for script, test in sorted(GENERATOR_TESTS_OF_OVERRIDABLE_SCRIPTS.items())
+        if (prj_dir / script).is_file() and not (prj_dir / test).is_file()
+    ]
+    payload = {"version": 1, "tests": excluded}
+    tmp = dst_dir / (EXCLUDED_TESTS_NAME + ".tmp")
+    tmp.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    tmp.replace(dst_dir / EXCLUDED_TESTS_NAME)
+    for test in excluded:
+        print(f"prj:sync: generator test {test} excluded (prj/ replaces its script)")
+
+
 def prj_sync(prj_dir: Path, dst_dir: Path) -> int:
     """Run the sync. Returns 0 normally, 1 if any drop guard fired."""
     if not prj_dir.is_dir():
@@ -287,6 +320,7 @@ def prj_sync(prj_dir: Path, dst_dir: Path) -> int:
             print(f"prj:sync: copied {rel}")
 
     _write_manifest(dst_dir, copied)
+    _write_excluded_tests(prj_dir, dst_dir)
     return 1 if had_drop else 0
 
 
