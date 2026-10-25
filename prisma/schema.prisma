@@ -77,6 +77,7 @@ model user {
   // image (see lib/auth/create-user.ts).
   image_id                  String?             @unique
   image                     attachment?         @relation("UserImage", fields: [image_id], references: [id], onDelete: SetNull)
+  uploaded_attachments      attachment[]        @relation("AttachmentUploader")
   emailVerified             DateTime?
   // 1.2: every user belongs to exactly one tenant. The `@default("default")`
   // matches the bootstrap tenant id seeded by scripts/seed-its.ts and the
@@ -524,9 +525,17 @@ model attachment {
   // "Direct Attachment FK". These are hand-written, not generator-injected
   // (validate_direct_attachment_reverse_fields checks them at generate time).
   user_image             user?      @relation("UserImage")
+  // Provenance, set once when the file is stored. `path` holds the opaque
+  // storage key (a random UUID), never a URL. A row that is not linked to an
+  // owner yet is readable only by its uploader; once linked, reads follow the
+  // owner record's own permission and organization checks.
+  uploader_id              String?
+  uploader                 user?      @relation("AttachmentUploader", fields: [uploader_id], references: [id], onDelete: SetNull)
+  uploader_organization_id String?
   created_at             DateTime   @default(now()) @db.Timestamptz(0)
   updated_at             DateTime   @updatedAt @db.Timestamptz(0)
   @@index([attachable_id])
+  @@index([uploader_id])
 }
 
 model dashboard {

@@ -5,12 +5,8 @@
 // Does NOT physically delete the user row to preserve referential integrity.
 
 import prisma from '@/lib/prisma';
-{% if scrubs_avatar and storage == 'gcs' %}
-import { Storage } from '@google-cloud/storage';
-{% elif scrubs_avatar %}
-import { unlink, rmdir } from 'fs/promises';
-import path from 'path';
-import { del } from '@vercel/blob';
+{% if scrubs_avatar %}
+import { deleteStoredObject, isStorageKey } from '@/lib/attachment/storage';
 {% endif %}
 
 export interface AnonymizeUserResult {
@@ -21,30 +17,11 @@ export interface AnonymizeUserResult {
 }
 
 {% if scrubs_avatar %}
-// Removes the stored bytes behind an attachment path after the database
-// transaction has committed. The path forms are the ones the upload route of
-// this application writes.
-async function removeStoredFile(storedPath: string): Promise<void> {
-{% if storage == 'gcs' %}
-  const prefix = '/api/gcs/';
-  if (!storedPath.startsWith(prefix)) return;
-  const bucket = new Storage().bucket(process.env.GCS_BUCKET_NAME!);
-  await bucket.file(storedPath.slice(prefix.length)).delete({ ignoreNotFound: true });
-{% else %}
-  if (/^https?:\/\//.test(storedPath)) {
-    await del(storedPath);
-    return;
-  }
-  const uploadRoot = path.resolve(process.cwd(), 'public', 'uploads');
-  const target = path.resolve(uploadRoot, storedPath.replace(/^\/uploads\//, ''));
-  if (!target.startsWith(uploadRoot + path.sep)) return;
-  try {
-    await unlink(target);
-    await rmdir(path.dirname(target));
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException)?.code !== 'ENOENT') throw err;
-  }
-{% endif %}
+// Removes the stored object behind an attachment after the database transaction has committed.
+// `storedKey` is the attachment's opaque storage key.
+async function removeStoredFile(storedKey: string): Promise<void> {
+  if (!isStorageKey(storedKey)) return;
+  await deleteStoredObject(storedKey);
 }
 {% endif %}
 

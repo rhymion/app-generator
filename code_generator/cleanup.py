@@ -725,6 +725,10 @@ def _clean_schema_driven(out: Path, entities: list, test_entities: list,
     _try_rmdir(out / 'app' / 'api' / 'dashboard' / 'aggregate')
     _try_rmdir(out / 'app' / 'api' / 'dashboard')
     _delete_if_generated(out / 'lib' / 'attachment' / 'bridge_actions.ts')
+    _delete_if_generated(out / 'lib' / 'attachment' / 'access.ts')
+    _delete_if_generated(out / 'app' / 'api' / 'attachments' / '[id]' / 'route.ts')
+    _try_rmdir(out / 'app' / 'api' / 'attachments' / '[id]')
+    _try_rmdir(out / 'app' / 'api' / 'attachments')
     _try_rmdir(out / 'lib' / 'attachment')
 
     _try_rmdir(out / 'docs' / 'generated')

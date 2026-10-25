@@ -89,7 +89,7 @@ next-env.d.ts
 # applied by the app-migrate Job via `prisma migrate deploy`.
 /prisma/migrations/
 # Uploaded files
-/public/uploads/
+/.uploads/
 
 # non-technical docs
 /docs/slides
@@ -218,6 +218,11 @@ lib/dashboard/use_entity_form.ts
 lib/dashboard/use_entity_capabilities.ts
 lib/dashboard/use_entity_approval_actions.ts
 !lib/organization/getters_associated.ts
+!lib/attachment/storage.ts
+!lib/attachment/upload_core.ts
+!lib/attachment/link.ts
+!lib/attachment/url.ts
+!lib/attachment/*.test.ts
 !lib/approval_flow/autocomplete_filter.ts
 !lib/approval_flow/service_validation_custom.ts
 !lib/app_setting/service_validation_custom.ts
@@ -285,12 +290,8 @@ app/api/*/
 !app/api/notifications/**
 !app/api/test-utils/
 !app/api/test-utils/**
-# app/api/upload/route.ts is a full generate-code target in both modes
-# (generate.py: base emits the Vercel Blob version, x-cloud:gcp overwrites it
-# with the GCS version), so it is intentionally NOT negated here — it stays
-# ignored to avoid generated-vs-VCS drift (cmd_269/cmd_272, decided 2026-07-04).
-!app/api/uploads/
-!app/api/uploads/**
+# app/api/upload/route.ts is a generate-code target, so it is intentionally NOT
+# negated here — it stays ignored to avoid generated-vs-VCS drift.
 !app/api/approval_request/
 !app/api/approval_request/**
 app/api/approval_request/route.ts

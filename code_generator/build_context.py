@@ -4179,7 +4179,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     # (TS2322/TS2551). Branch on the *consuming* schema's own `user` entity
     # rather than assuming the shape unconditionally.
     _creator_avatar_select = (
-        "image: { select: { path: true } }"
+        "image: { select: { id: true } }"
         if any(r['relation_name'] == 'image' for r in get_direct_attachment_fk_props(_raw_def('user', schema)))
         else "image: true"
     )

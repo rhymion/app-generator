@@ -6,16 +6,19 @@
 
 {% if owners %}import { revalidatePath } from 'next/cache';
 {% endif %}import prisma from '@/lib/prisma';
-{% if owners %}import { getSessionUserIdOrThrow, getModelPermissions, resolvePermissions, type RichPermissions } from '@/lib/authz';
-{% endif %}
+import { getSessionUserIdOrThrow{% if owners %}, getModelPermissions, resolvePermissions, type RichPermissions{% endif %} } from '@/lib/authz';
 import { AppError } from '@/lib/_errors';
-import { encryptFileName } from '@/lib/compliance/attachment_name_crypto';
+import { UNLINKED_ATTACHMENT_WHERE } from '@/lib/attachment/access';
+import { deleteStoredObject, isStorageKey } from '@/lib/attachment/storage';
 
+/**
+ * One attachment of the record, by id: either a row the record already holds (it keeps its row) or a
+ * file the caller just uploaded through POST /api/upload (it is linked to the record). The file name and
+ * location were recorded at upload time and are not part of this input.
+ */
 export type AttachmentItemInput = {
-  id?: string | null;
+  id: string;
   order?: number;
-  name: string;
-  path: string;
 };
 
 /**
@@ -94,52 +97,42 @@ export async function setAttachmentsForBridge(
   items: AttachmentItemInput[],
 ): Promise<void> {
   await assertCanEditBridge(attachable_id);
+  const actorId = await getSessionUserIdOrThrow();
+  const removedKeys: string[] = [];
   await prisma.$transaction(async (tx) => {
     const existing = await tx.attachment.findMany({
       where: { attachable_id, type },
-      select: { id: true },
+      select: { id: true, path: true },
     });
-    // The caller is authorized for `attachable_id` only. Every id in `items`
-    // must therefore be one of this attachable's own rows of this type;
-    // otherwise the call would rewrite an attachment of another record (in
-    // this or another organization). Reject the whole call before any write.
-    const existingIds = new Set(existing.map((e) => e.id));
-    if (items.some((i) => i.id && !existingIds.has(i.id))) {
-      throw new AppError('NOT_FOUND', 'Attachment does not belong to this record');
+    const existingById = new Map(existing.map((e) => [e.id, e]));
+    const keepIds = new Set(items.map((i) => i.id));
+    if (keepIds.size !== items.length) {
+      throw new AppError('VALIDATION', 'Attachment listed more than once');
     }
-    const keepIds = new Set(items.map((i) => i.id).filter((x): x is string => !!x));
-    const toDelete = existing.filter((e) => !keepIds.has(e.id)).map((e) => e.id);
+    const toDelete = existing.filter((e) => !keepIds.has(e.id));
     if (toDelete.length > 0) {
-      await tx.attachment.deleteMany({ where: { id: { in: toDelete } } });
+      await tx.attachment.deleteMany({ where: { id: { in: toDelete.map((e) => e.id) } } });
+      removedKeys.push(...toDelete.map((e) => e.path));
     }
     for (const [idx, item] of items.entries()) {
       const order = item.order ?? idx;
-      const encrypted = encryptFileName(item.name);
-      if (item.id && keepIds.has(item.id)) {
-        await tx.attachment.update({
-          where: { id: item.id, attachable_id },
-          data: {
-            name: encrypted.uuid,
-            encrypted_original_name: encrypted.encryptedName,
-            name_iv: encrypted.iv,
-            path: item.path,
-            order,
-          },
-        });
-      } else {
-        await tx.attachment.create({
-          data: {
-            attachable_id,
-            type,
-            name: encrypted.uuid,
-            encrypted_original_name: encrypted.encryptedName,
-            name_iv: encrypted.iv,
-            path: item.path,
-            order,
-          },
-        });
+      if (existingById.has(item.id)) {
+        await tx.attachment.update({ where: { id: item.id, attachable_id }, data: { order } });
+        continue;
+      }
+      // Not one of this record's own rows: it must be a file the caller uploaded and has not
+      // attached anywhere yet. Any other id (another record's or organization's attachment, or
+      // another user's upload) is reported as not found, and nothing is written.
+      const linked = await tx.attachment.updateMany({
+        where: { id: item.id, uploader_id: actorId, ...UNLINKED_ATTACHMENT_WHERE },
+        data: { attachable_id, type, order },
+      });
+      if (linked.count !== 1) {
+        throw new AppError('NOT_FOUND', 'Attachment not found');
       }
     }
   });
+  // The rows are gone; remove their stored files too.
+  await Promise.all(removedKeys.filter(isStorageKey).map((key) => deleteStoredObject(key).catch(() => undefined)));
   await revalidateForBridge(attachable_id);
 }

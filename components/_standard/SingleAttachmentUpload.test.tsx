@@ -71,12 +71,12 @@ describe('SingleAttachmentUpload — mode="fk" (cmd_788)', () => {
     const createAttachment = vi.fn().mockResolvedValue({
       id: 'att_1',
       name: 'photo.png',
-      path: 'https://cdn.example.com/uploaded.png',
+      path: '/api/attachments/att_1',
       type: 'image',
     });
     global.fetch = vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({ url: 'https://cdn.example.com/uploaded.png' }),
+      json: async () => ({ id: 'att_1', name: 'photo.png' }),
     } as Response);
 
     render(<SingleAttachmentUpload mode="fk" value={null} onChange={onChange} createAttachment={createAttachment} />);
@@ -85,13 +85,13 @@ describe('SingleAttachmentUpload — mode="fk" (cmd_788)', () => {
     fireEvent.change(fileInput, { target: { files: [file] } });
 
     await waitFor(() => {
-      expect(createAttachment).toHaveBeenCalledWith('photo.png', 'https://cdn.example.com/uploaded.png', 'image');
+      expect(createAttachment).toHaveBeenCalledWith('att_1', 'image');
     });
     await waitFor(() => {
       expect(onChange).toHaveBeenCalledWith({
         id: 'att_1',
         name: 'photo.png',
-        path: 'https://cdn.example.com/uploaded.png',
+        path: '/api/attachments/att_1',
         type: 'image',
       });
     });

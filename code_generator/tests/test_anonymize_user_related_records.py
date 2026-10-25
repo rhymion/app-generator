@@ -38,12 +38,14 @@ def test_first_erasure_time_is_kept() -> None:
     assert 'invalidated_at: invalidatedAt,' in text
 
 
-def test_stored_file_is_removed_after_commit_for_each_storage() -> None:
-    vercel = _render_anonymize(_default_schema(), 'vercel')
-    assert "from '@vercel/blob'" in vercel and 'unlink(target)' in vercel
-    gcs = _render_anonymize(_default_schema(), 'gcs')
-    assert "from '@google-cloud/storage'" in gcs and 'ignoreNotFound: true' in gcs
-    assert vercel.index('removeStoredFile(avatar.path)') > vercel.index('} catch (err)', vercel.index('prisma.$transaction'))
+def test_stored_file_is_removed_after_commit_through_the_shared_storage_module() -> None:
+    # One storage module serves every backend, so the generated code no longer branches per storage.
+    for storage in ('vercel', 'gcs'):
+        text = _render_anonymize(_default_schema(), storage)
+        assert "from '@/lib/attachment/storage'" in text
+        assert 'await deleteStoredObject(storedKey);' in text
+        assert "from '@vercel/blob'" not in text and "from '@google-cloud/storage'" not in text
+        assert text.index('removeStoredFile(avatar.path)') > text.index('} catch (err)', text.index('prisma.$transaction'))
 
 
 def test_no_avatar_handling_when_image_id_is_not_scrubbed() -> None:

@@ -53,6 +53,12 @@ export function resolveApiUrl(path: string): string {
   return /^https?:\/\//.test(path) ? path : `${BASE_URL}${path}`;
 }
 
+/** An image source for a server path that needs the access token (an attachment's file route). */
+export function authorizedImageSource(path: string): { uri: string; headers?: Record<string, string> } {
+  const accessToken = getAccessTokenSync();
+  return { uri: resolveApiUrl(path), ...(accessToken ? { headers: { Authorization: `Bearer ${accessToken}` } } : {}) };
+}
+
 // A multipart body (a file upload) carries its own Content-Type with the boundary; every other body is JSON.
 function buildHeaders(accessToken: string | null, init: RequestInit): Record<string, string> {
   const headers: Record<string, string> = {};

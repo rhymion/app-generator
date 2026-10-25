@@ -1,0 +1,80 @@
+// AUTO-GENERATED - DO NOT EDIT
+// Who may read an attachment, and which attachments no owner references yet.
+//
+// An attachment is read through the record that owns it: either the polymorphic `attachable` bridge
+// or a direct-attachment foreign key. The reader needs the same read permission and organization
+// scope as that record's own detail page. An attachment no owner references (uploaded, not yet
+// attached) can only be read by the user who uploaded it.
+import prisma from '@/lib/prisma';
+import { getModelPermissions, resolvePermissions } from '@/lib/authz';
+{% for o in bridge_owners %}
+import { get{{ o.pascal }}Detail } from '@/lib/{{ o.name }}/getters';
+{% endfor %}
+{% for o in direct_owners %}
+{% if o.name not in bridge_owners | map(attribute='name') | list %}
+import { get{{ o.pascal }}Detail } from '@/lib/{{ o.name }}/getters';
+{% endif %}
+{% endfor %}
+
+/**
+ * Prisma filter for an attachment that no owner references: not on the bridge and not the target of
+ * any direct-attachment foreign key.
+ */
+export const UNLINKED_ATTACHMENT_WHERE = {
+  attachable_id: null,
+{% for o in direct_owners %}
+  {{ o.back_relation }}: null,
+{% endfor %}
+};
+
+export type AttachmentReadDecision = 'allow' | 'forbidden' | 'not_found';
+
+type AttachmentRef = { id: string; attachable_id: string | null; uploader_id: string | null };
+
+/** Read decision for one owner record, mirroring the owner's REST detail route. */
+async function readOwner(
+  actorId: string,
+  model: string,
+  load: () => Promise<(Record<string, unknown> & { id: string }) | null>,
+): Promise<AttachmentReadDecision> {
+  const base = (await getModelPermissions(model, actorId)).permissions;
+  if (!base.read) return 'forbidden';
+  const item = await load();
+  // A record outside the caller's organizations (or, for a self-only entity, not the caller's own)
+  // is not found, exactly as on the record's own detail route.
+  if (!item) return 'not_found';
+  const resolved = await resolvePermissions(base, item as Parameters<typeof resolvePermissions>[1], actorId);
+  return resolved.read ? 'allow' : 'forbidden';
+}
+
+export async function authorizeAttachmentRead(actorId: string, attachment: AttachmentRef): Promise<AttachmentReadDecision> {
+  if (attachment.attachable_id) {
+{% if bridge_owners %}
+    const owner = await prisma.attachable.findUnique({
+      where: { id: attachment.attachable_id },
+      select: {
+{% for o in bridge_owners %}
+        {{ o.name }}: { select: { id: true } },
+{% endfor %}
+      },
+    });
+{% for o in bridge_owners %}
+    if (owner?.{{ o.name }}) {
+      const ownerId = owner.{{ o.name }}.id;
+      return readOwner(actorId, '{{ o.name }}', () => get{{ o.pascal }}Detail(ownerId{% if o.user_arg %}, actorId{% endif %}) as never);
+    }
+{% endfor %}
+{% endif %}
+    return 'not_found';
+  }
+{% for o in direct_owners %}
+  {
+    const owner = await prisma.{{ o.model }}.findFirst({ where: { {{ o.fk_prop }}: attachment.id }, select: { id: true } });
+    if (owner) {
+      return readOwner(actorId, '{{ o.name }}', () => get{{ o.pascal }}Detail(owner.id{% if o.user_arg %}, actorId{% endif %}) as never);
+    }
+  }
+{% endfor %}
+  // Not attached to anything yet: only the uploader.
+  return attachment.uploader_id !== null && attachment.uploader_id === actorId ? 'allow' : 'not_found';
+}

@@ -46,7 +46,7 @@ type SingleAttachmentUploadProps =
       mode: 'fk';
       value: SingleAttachmentFk | null;
       onChange: (next: SingleAttachmentFk | null) => void;
-      createAttachment: (name: string, path: string, type: SingleAttachmentDisplayKind) => Promise<SingleAttachmentFk>;
+      createAttachment: (id: string, type: SingleAttachmentDisplayKind) => Promise<SingleAttachmentFk>;
       label?: string;
       helperText?: string;
     };
@@ -100,7 +100,7 @@ export default function SingleAttachmentUpload(props: SingleAttachmentUploadProp
       if (props.mode === 'url') {
         props.onChange(data.url);
       } else {
-        const attachment = await props.createAttachment(file.name, data.url, detectKind(file));
+        const attachment = await props.createAttachment(data.id, detectKind(file));
         props.onChange(attachment);
       }
     } catch (err) {

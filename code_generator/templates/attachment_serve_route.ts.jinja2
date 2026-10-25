@@ -1,0 +1,71 @@
+// AUTO-GENERATED - DO NOT EDIT
+import { NextRequest, NextResponse } from 'next/server';
+import { authenticate, ApiError } from '@/lib/api-auth';
+import { getSessionUserId } from '@/lib/authz';
+import prisma from '@/lib/prisma';
+import { authorizeAttachmentRead } from '@/lib/attachment/access';
+import { serveStoredObject } from '@/lib/attachment/storage';
+import { decryptFileName } from '@/lib/compliance/attachment_name_crypto';
+import { UPLOAD_CONTENT_TYPE_BY_EXTENSION, extensionOf } from '@/lib/_upload_validation';
+
+// GET /api/attachments/<id>
+//
+// The only way a stored file is read. The caller is the signed-in user (browser session) or a mobile
+// access token / API key. Access follows the record the file is attached to: the same read permission
+// and organization scope as the record's own detail page, and a file that is not attached yet can only
+// be read by the user who uploaded it. A record outside the caller's organizations answers 404.
+
+type Params = { params: Promise<{ id: string }> };
+
+const INLINE_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp']);
+
+function contentDisposition(kind: 'inline' | 'attachment', filename: string): string {
+  const ascii = filename.replace(/[^\x20-\x7e]|["\\]/g, '_');
+  return `${kind}; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
+}
+
+async function resolveActorId(request: NextRequest): Promise<string | null> {
+  if (request.headers.get('Authorization') || request.headers.get('X-API-Key')) {
+    try {
+      return (await authenticate(request)).userId;
+    } catch (error) {
+      if (error instanceof ApiError) return null;
+      throw error;
+    }
+  }
+  return getSessionUserId();
+}
+
+export async function GET(request: NextRequest, { params }: Params) {
+  const actorId = await resolveActorId(request);
+  if (!actorId) return new NextResponse(null, { status: 401 });
+
+  const { id } = await params;
+  const attachment = await prisma.attachment.findUnique({
+    where: { id },
+    select: { id: true, path: true, attachable_id: true, uploader_id: true, encrypted_original_name: true },
+  });
+  if (!attachment) return new NextResponse(null, { status: 404 });
+
+  const decision = await authorizeAttachmentRead(actorId, attachment);
+  if (decision === 'forbidden') return new NextResponse(null, { status: 403 });
+  if (decision !== 'allow') return new NextResponse(null, { status: 404 });
+
+  let filename = 'file';
+  try {
+    if (attachment.encrypted_original_name) filename = decryptFileName(attachment.encrypted_original_name);
+  } catch {
+    // An unreadable name is not a reason to withhold the file.
+  }
+  const contentType = UPLOAD_CONTENT_TYPE_BY_EXTENSION[extensionOf(filename)] ?? 'application/octet-stream';
+  try {
+    const response = await serveStoredObject(attachment.path, {
+      contentType,
+      disposition: contentDisposition(INLINE_TYPES.has(contentType) ? 'inline' : 'attachment', filename),
+    });
+    return response ?? new NextResponse(null, { status: 404 });
+  } catch (error) {
+    console.error('Attachment delivery error:', error);
+    return new NextResponse(null, { status: 500 });
+  }
+}

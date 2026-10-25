@@ -1,11 +1,12 @@
 {% raw %}
 import { useState } from 'react';
-import { ActivityIndicator, Image, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
 import { useMessages } from '@/lib/messages';
-import { resolveApiUrl } from '@/lib/api-base';
 import {
   ATTACHMENT_MIME_TYPES,
+  attachmentImageSource,
+  openAttachment,
   uploadErrorMessage,
   uploadFile,
   type BridgeAttachment,
@@ -60,9 +61,9 @@ export function AttachmentList({ types, items, onChange, disabled, error }: Prop
     const asset = result.assets[0];
     setUploading(type);
     try {
-      const path = await uploadFile({ uri: asset.uri, name: asset.name, mimeType: asset.mimeType, file: asset.file });
+      const uploaded = await uploadFile({ uri: asset.uri, name: asset.name, mimeType: asset.mimeType, file: asset.file });
       const order = attachmentsOfType(items, type).length;
-      onChange([...items, { name: asset.name, path, type, order }]);
+      onChange([...items, { id: uploaded.id, name: uploaded.name, path: `/api/attachments/${uploaded.id}`, type, order }]);
     } catch (err) {
       setPickError(uploadErrorMessage(err) ?? terr('unknown'));
     } finally {
@@ -96,9 +97,9 @@ export function AttachmentList({ types, items, onChange, disabled, error }: Prop
             {list.map((item, index) => (
               <View key={item.id ?? `${item.path}-${index}`} style={styles.row} testID={`attachment-row-${type}-${index}`}>
                 {type === 'image' ? (
-                  <Image source={{ uri: resolveApiUrl(item.path) }} style={styles.thumb} accessibilityLabel={item.name} />
+                  <Image source={attachmentImageSource(item.path)} style={styles.thumb} accessibilityLabel={item.name} />
                 ) : null}
-                <Pressable style={styles.name} onPress={() => void Linking.openURL(resolveApiUrl(item.path))} accessibilityRole="link">
+                <Pressable style={styles.name} onPress={() => void openAttachment(item.path).catch(() => setPickError(terr('unknown')))} accessibilityRole="link">
                   <Text style={styles.link} testID={`attachment-name-${type}-${index}`}>{item.name}</Text>
                 </Pressable>
                 {editable ? (

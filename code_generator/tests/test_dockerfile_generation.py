@@ -70,7 +70,9 @@ def test_x_cloud_gcp_still_generates_both_files_and_gcp_output(tmp_path):
     out = _build(tmp_path, False, {'enabled': True, 'provider': 'gcp'})
     assert (out / 'Dockerfile').exists()
     assert (out / '.dockerignore').exists()
-    assert (out / 'app' / 'api' / 'gcs' / '[...path]' / 'route.ts').exists()
+    # Files are read through the one authorized route; no GCS-specific proxy route exists any more.
+    assert (out / 'app' / 'api' / 'attachments' / '[id]' / 'route.ts').exists()
+    assert not (out / 'app' / 'api' / 'gcs').exists()
 
 
 def test_both_files_are_tracked_by_the_manifest_and_cleaned_up(tmp_path, monkeypatch):
