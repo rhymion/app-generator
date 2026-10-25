@@ -67,7 +67,7 @@ from __future__ import annotations
 import re
 import sys
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import yaml
 
@@ -332,17 +332,35 @@ def _load_allowlist(path: Path = _ALLOWLIST_PATH) -> list[dict]:
         data = yaml.safe_load(f) or {}
     entries = data.get('exemptions', []) or []
     for i, entry in enumerate(entries):
-        for field in ('path', 'pattern', 'substring', 'reason'):
+        for field in ('pattern', 'substring', 'reason'):
             if field not in entry:
                 raise SystemExit(
                     f'{path}: exemptions[{i}] missing required field {field!r}'
                 )
+        if ('path' in entry) == ('path_glob' in entry):
+            raise SystemExit(
+                f'{path}: exemptions[{i}] needs exactly one of "path" or "path_glob"'
+            )
     return entries
+
+
+def _path_matches(entry: dict, rel: str) -> bool:
+    """`path` is an exact project-relative POSIX path. `path_glob` is for
+    generated files whose location depends on an entity name (for example
+    lib/<entity>/service_scheduled.ts): `*` matches one path segment and never
+    crosses a `/`, so the glob's depth must equal the file's depth."""
+    if 'path' in entry:
+        return entry['path'] == rel
+    glob = entry['path_glob']
+    return (
+        len(glob.split('/')) == len(rel.split('/'))
+        and PurePosixPath(rel).match(glob)
+    )
 
 
 def _is_exempt(v: Violation, source_line: str, allowlist: list[dict]) -> bool:
     for entry in allowlist:
-        if entry['path'] != v.path:
+        if not _path_matches(entry, v.path):
             continue
         if entry['pattern'] != v.rule:
             continue
