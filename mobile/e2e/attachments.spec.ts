@@ -133,16 +133,24 @@ test.describe('Direct attachment fields', () => {
     await expect(page.getByTestId('attachment-name-file_id')).toHaveText('-');
   });
 
-  test('the detail screen opens the attached file from its name', async ({ page, context }) => {
+  test('the detail screen opens the attached file from its name', async ({ page }) => {
     await openNew(page);
     await page.getByTestId('field-title').fill('Openable');
     await attach(page, 'contract_id', 'openable.pdf', 'application/pdf');
     await expect(page.getByTestId('attachment-name-contract_id')).toHaveText('openable.pdf');
     await page.getByTestId('form-save').click();
     await expect(page.getByTestId('view-field-contract_id')).toHaveText('openable.pdf');
-    const popup = context.waitForEvent('page');
+    await page.evaluate(() => {
+      const w = window as unknown as { __opened?: string };
+      window.open = (url) => {
+        w.__opened = String(url);
+        return null;
+      };
+    });
     await page.getByTestId('view-field-contract_id').click();
     // The file route needs the access token, so the app fetches the file with it and opens the local copy.
-    expect((await popup).url()).toMatch(/^blob:/);
+    await expect
+      .poll(() => page.evaluate(() => (window as unknown as { __opened?: string }).__opened ?? ''))
+      .toMatch(/^blob:/);
   });
 });

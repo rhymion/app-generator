@@ -137,15 +137,23 @@ test.describe('Attachments of an entity with the attachable bridge', () => {
     await expect(page.getByTestId('attachment-remove-file-0')).toHaveCount(0);
   });
 
-  test('the attached file opens from its name', async ({ page, context }) => {
+  test('the attached file opens from its name', async ({ page }) => {
     await createAsset(page, 'Openable');
     await page.getByTestId('view-edit').click();
     await add(page, 'file', 'openable.pdf', 'application/pdf');
     await page.getByTestId('form-save').click();
     await expect(page.getByTestId('attachment-name-file-0')).toHaveText('openable.pdf');
-    const popup = context.waitForEvent('page');
+    await page.evaluate(() => {
+      const w = window as unknown as { __opened?: string };
+      window.open = (url) => {
+        w.__opened = String(url);
+        return null;
+      };
+    });
     await page.getByTestId('attachment-name-file-0').click();
     // The file route needs the access token, so the app fetches the file with it and opens the local copy.
-    expect((await popup).url()).toMatch(/^blob:/);
+    await expect
+      .poll(() => page.evaluate(() => (window as unknown as { __opened?: string }).__opened ?? ''))
+      .toMatch(/^blob:/);
   });
 });

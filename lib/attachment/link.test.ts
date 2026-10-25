@@ -10,7 +10,7 @@ function fakeTx(rows: Row[]) {
   return {
     attachment: {
       findFirst: async ({ where }: { where: Record<string, unknown> }) => {
-        const row = rows.find((r) => r.id === where.id && r.uploader_id === where.uploader_id && (where.attachable_id !== null || !r.linked));
+        const row = rows.find((r) => r.id === where.id && (where.uploader_id === undefined || r.uploader_id === where.uploader_id) && (where.attachable_id !== null || !r.linked));
         return row ? { id: row.id } : null;
       },
     },
