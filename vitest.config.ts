@@ -23,6 +23,19 @@ const dashboardGeneratedFallback = {
   },
 };
 
+// prj:sync lists generator tests whose script the consumer replaces (Issue #1070); a
+// checkout that never ran prj:sync has no list, so every generator test runs.
+function prjSyncExcludedTests(): string[] {
+  try {
+    const parsed = JSON.parse(
+      fs.readFileSync(path.resolve(__dirname, ".prj-sync-excluded-tests.json"), "utf-8"),
+    );
+    return Array.isArray(parsed.tests) ? parsed.tests.filter((t: unknown) => typeof t === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
 export default defineConfig({
   plugins: [react(), dashboardGeneratedFallback],
   test: {
@@ -57,6 +70,8 @@ export default defineConfig({
       // .generated-attachment-bridge-test/).
       "code_generator/tests/fixtures/attachment_bridge_actions/**",
       ".generated-attachment-bridge-test/**",
+      // Generator tests of a script the consumer's prj/ replaces (written by prj:sync).
+      ...prjSyncExcludedTests(),
     ],
   },
   resolve: {

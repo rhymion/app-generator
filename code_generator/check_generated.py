@@ -67,11 +67,12 @@ from __future__ import annotations
 import re
 import sys
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import yaml
 
 from generate_types import extract_entities, extract_named_constants
+from validate import audit_log_storage_enabled
 
 
 # ---------------------------------------------------------------------------
@@ -261,6 +262,39 @@ def _search_and_db_init_files(root: Path) -> list[Path]:
     ]
 
 
+# Scheduled-task service files (lib/<entity>/service_scheduled.ts for an
+# entity-level `x-scheduled-task`, lib/scheduled-tasks/<task_id>/
+# service_scheduled.ts for a top-level `x-scheduled-tasks` entry) are emitted
+# from generate.py's scheduled-task block, which scans the schema's own
+# `x-scheduled-task` declarations -- they belong to no entity in
+# extract_entities(), so _generated_files_for_entity never reaches them. This
+# mirrors that block's selection (same declaration scan, same bulk path rule)
+# and, like the other bespoke helpers, leaves existence to the caller.
+def _scheduled_task_files(schema: dict, root: Path) -> list[Path]:
+    out: list[Path] = []
+    for def_key, def_val in (schema.get('definitions') or {}).items():
+        if not def_key.startswith('__') or not isinstance(def_val, dict):
+            continue
+        if def_val.get('x-scheduled-task'):
+            out.append(root / 'lib' / def_key[2:] / 'service_scheduled.ts')
+    for bulk in (schema.get('x-scheduled-tasks') or []):
+        out.append(root / 'lib' / 'scheduled-tasks' / bulk['task_id'] / 'service_scheduled.ts')
+    return out
+
+
+# lib/audit-log-ops/{storage-factory,jobs}.ts are schema-wide files gated by
+# `x-generator.audit-log-storage.enabled` (generate.py's "audit_log storage
+# factory and jobs" block), not by any entity. Same gate as generate.py, via
+# the shared audit_log_storage_enabled() so the two cannot drift.
+def _audit_log_ops_files(schema: dict, root: Path) -> list[Path]:
+    if not audit_log_storage_enabled(schema):
+        return []
+    return [
+        root / 'lib' / 'audit-log-ops' / 'storage-factory.ts',
+        root / 'lib' / 'audit-log-ops' / 'jobs.ts',
+    ]
+
+
 def _enumerate_generated_files(entities: list[dict], root: Path) -> list[Path]:
     out: list[Path] = []
     seen: set[Path] = set()
@@ -298,17 +332,35 @@ def _load_allowlist(path: Path = _ALLOWLIST_PATH) -> list[dict]:
         data = yaml.safe_load(f) or {}
     entries = data.get('exemptions', []) or []
     for i, entry in enumerate(entries):
-        for field in ('path', 'pattern', 'substring', 'reason'):
+        for field in ('pattern', 'substring', 'reason'):
             if field not in entry:
                 raise SystemExit(
                     f'{path}: exemptions[{i}] missing required field {field!r}'
                 )
+        if ('path' in entry) == ('path_glob' in entry):
+            raise SystemExit(
+                f'{path}: exemptions[{i}] needs exactly one of "path" or "path_glob"'
+            )
     return entries
+
+
+def _path_matches(entry: dict, rel: str) -> bool:
+    """`path` is an exact project-relative POSIX path. `path_glob` is for
+    generated files whose location depends on an entity name (for example
+    lib/<entity>/service_scheduled.ts): `*` matches one path segment and never
+    crosses a `/`, so the glob's depth must equal the file's depth."""
+    if 'path' in entry:
+        return entry['path'] == rel
+    glob = entry['path_glob']
+    return (
+        len(glob.split('/')) == len(rel.split('/'))
+        and PurePosixPath(rel).match(glob)
+    )
 
 
 def _is_exempt(v: Violation, source_line: str, allowlist: list[dict]) -> bool:
     for entry in allowlist:
-        if entry['path'] != v.path:
+        if not _path_matches(entry, v.path):
             continue
         if entry['pattern'] != v.rule:
             continue
@@ -383,6 +435,9 @@ def check(schema_path: Path, root: Path,
         if p.exists() and p not in files:
             files.append(p)
     for p in _search_and_db_init_files(root):
+        if p.exists() and p not in files:
+            files.append(p)
+    for p in _scheduled_task_files(schema, root) + _audit_log_ops_files(schema, root):
         if p.exists() and p not in files:
             files.append(p)
     allowlist = _load_allowlist(allowlist_path)

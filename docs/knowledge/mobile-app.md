@@ -643,7 +643,7 @@ The mobile app signs in with email and password and holds an access/refresh toke
 
 | Route | Purpose |
 |---|---|
-| `POST /api/mobile/auth/token` | Password grant. Returns `{ access_token, refresh_token, token_type, expires_in }`. A user with MFA enabled gets `403 MFA_REQUIRED` until `mfa_code` is sent. Rate-limited per IP and email (`mobile:auth:token`). |
+| `POST /api/mobile/auth/token` | Password grant. Returns `{ access_token, refresh_token, token_type, expires_in }`. A user with MFA enabled gets `403 MFA_REQUIRED` until `mfa_code` is sent. Rate-limited per IP and email (`mobile:auth:token`); the MFA code is also limited per user (`auth:mfa:challenge`), and a spent budget answers `429` with `Retry-After`. |
 | `DELETE /api/mobile/auth/token` | Sign out: revokes the calling session. |
 | `POST /api/mobile/auth/refresh` | Rotates the refresh token. Presenting a rotated-away token, or losing a concurrent rotation race, revokes the whole session. |
 | `GET /api/mobile/auth/sessions` | Lists the caller's active devices. |

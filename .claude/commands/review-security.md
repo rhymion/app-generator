@@ -28,11 +28,11 @@ Minimum docs to read before starting:
 - [ ] API key authentication covered — `lib/api-auth.ts` `authenticateApiKey()` reads `X-API-Key` or `Authorization: Bearer`; negative results cached in TTL-LRU to limit DB probes
 - [ ] Session id propagation — `session` callback forwards `user.id` (OAuth) or `token.id` (credentials/JWT) into `Session.user.id` (`auth.ts:~238`)
 
-### Tenant isolation
+### Organization and tenant isolation
 
+- [ ] Org-scoped entities filter every read and mutation lookup on `organization_id` in the actor's organizations — the boundary generated code enforces today; see `docs/knowledge/multi-tenancy-and-permissions.md` §1/§4/§5 and run the `review-tenancy` checklist for the detail
 - [ ] New OAuth users bound to default tenant — `lib/auth/create-user.ts:DEFAULT_TENANT_ID` always writes `tenant_id = "default"` on `createUser`
-- [ ] Tenant-level sign-in suspension — `tenant.status` column exists with `'active'`/`'suspended'` states (schema comment: "wired in ticket 1.4"); verify `signIn()` callback actually rejects `status = 'suspended'` users
-- [ ] Generated entity models have **no** `tenant_id` column — `db_table`, `field`, and all other generated models rely solely on RBAC for row-level isolation; no DB constraint prevents cross-tenant reads
+- [ ] Deployment-level `tenant` is a documented limitation: `tenant.status` exists but verify whether the `signIn()` callback rejects `status = 'suspended'` users, and that generated code does not rely on `tenant_id` for isolation
 
 ### SQL injection
 
@@ -74,14 +74,14 @@ Minimum docs to read before starting:
 
 **Rate limiting**: sliding-window buckets per IP in `lib/rate-limit/`. In dev/test, `in-memory.ts` is used (counters reset on restart). In prod (`REDIS_URL` set), `redis.ts` uses ioredis for cross-replica state. The ioredis import is dynamic so it is absent from the client bundle when Redis is not configured.
 
-**Tenant creation**: `lib/auth/create-user.ts:createTenantBoundUser` always assigns `tenant_id = "default"` to new OAuth users. Phase 4.1 will introduce invite-based tenant assignment; current phase treats all sign-ups as single-tenant.
+**Isolation**: row-level isolation is the `organization_id` filter in generated getters, routes and actions (`docs/knowledge/multi-tenancy-and-permissions.md`). `lib/auth/create-user.ts:createTenantBoundUser` always assigns `tenant_id = "default"` to new OAuth users; deployment-level tenant scoping is not enforced in generated code.
 
 **Audit log**: `lib/audit-log.ts:recordAuditEvent()` is called on signIn, signOut, createUser, signIn.reject, and account linking events. Stored in `audit_log` table (`prisma/schema.prisma:~280`).
 
 ## Known gaps / improvement areas
 
 - **No server-side session revocation** — JWT strategy means tokens remain valid until expiry even after password reset or account suspension. Mitigation requires either SSO-only (no credentials) or a custom session-revocation shim writing a `Session` row from `authorize()`.
-- **Generated entity models have no `tenant_id`** — isolation relies on RBAC. A misconfigured role or a future admin API endpoint could expose cross-tenant data. Adding `tenant_id` to the code generator's Prisma schema template and `WHERE tenant_id = $session.tenant_id` to getters is the structural fix.
+- **Isolation is app-level** — organization filtering is enforced by Prisma `where` clauses, not database row-level security; a hand-written query that omits the filter would expose cross-organization data. Deployment-level `tenant_id` is not used for isolation.
 - **`api_key` stored in plaintext** — exposure of the `user` table reveals all API keys. Consider HMAC prefix storage.
 - **`/api/*` routes not covered by middleware** — each API route file must remember to call `authenticateApiKey()`. Missing it on a new route is a silent auth bypass. A shared route handler wrapper or a test that enumerates `/api/` routes and asserts auth headers required would close this.
 - **In-memory rate limiter in prod without REDIS_URL** — no visible error at startup; only discovered under attack. Add a startup check that logs a warning when `NODE_ENV=production` and `REDIS_URL` is absent.

@@ -57,6 +57,13 @@ export async function run(systemActorId: string): Promise<void> {
       // second precision) as identical values, making an updated_at-based
       // compare-and-swap silently ineffective for exactly the near-
       // simultaneous double-delivery case this guard exists for.
+      //
+      // Raw SQL is needed because Prisma's query builder has no advisory
+      // lock. It is safe because this is the tagged-template form with a
+      // fixed SQL text: the row id is the only substitution and Prisma
+      // sends it as a bound parameter, never as part of the query string.
+      // The allowlist entry for this line is in
+      // code_generator/check_generated_allowlist.yaml.
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${row.id}, 0))`;
       const stillEligible = await tx.{{ snake_name }}.count({
         where: {

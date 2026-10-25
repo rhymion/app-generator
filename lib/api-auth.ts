@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { createHash } from 'node:crypto';
 import prisma from '@/lib/prisma';
+import { getRateLimiter } from '@/lib/rate-limit';
 import { requirePermission, getSessionUserId, type RichPermissions, type Operation, type ItemContext } from '@/lib/authz';
 import { TtlLruCache } from '@/lib/_ttl_lru';
 import { AppError, type ErrorCode } from '@/lib/_errors';
@@ -11,6 +13,7 @@ export class ApiError extends Error {
   constructor(
     public statusCode: number,
     message: string,
+    public retryAfterSeconds?: number,
   ) {
     super(message);
     this.name = 'ApiError';
@@ -57,6 +60,24 @@ export function clearApiKeyCache(): void {
   apiKeyCache.clear();
 }
 
+/**
+ * Rejects a presented key that matches no user. Each rejection spends one
+ * attempt from the `auth:apikey` bucket, keyed by a hash of the presented key
+ * (never the raw secret), so a key that keeps failing is answered with 429
+ * instead of 401. Only failures are counted: a valid key is never throttled
+ * here, and `api:read` / `api:write` still bound authenticated traffic.
+ */
+async function rejectUnknownApiKey(apiKey: string): Promise<never> {
+  const decision = await getRateLimiter().check(
+    'auth:apikey',
+    createHash('sha256').update(apiKey).digest('hex'),
+  );
+  if (!decision.allowed) {
+    throw new ApiError(429, 'Too many API key attempts.', decision.retryAfterSeconds);
+  }
+  throw new ApiError(401, 'Invalid API key.');
+}
+
 export async function authenticateApiKey(request: NextRequest): Promise<{ userId: string }> {
   enterRequestScope();
   const apiKey =
@@ -70,7 +91,7 @@ export async function authenticateApiKey(request: NextRequest): Promise<{ userId
   if (apiKeyCacheEnabled) {
     const cached = apiKeyCache.get(apiKey);
     if (cached !== undefined) {
-      if (cached === null) throw new ApiError(401, 'Invalid API key.');
+      if (cached === null) return rejectUnknownApiKey(apiKey);
       if (cached.expiresAt && cached.expiresAt <= new Date()) {
         throw new ApiError(401, 'API key expired.');
       }
@@ -88,7 +109,7 @@ export async function authenticateApiKey(request: NextRequest): Promise<{ userId
   }
 
   if (!user) {
-    throw new ApiError(401, 'Invalid API key.');
+    return rejectUnknownApiKey(apiKey);
   }
 
   if (user.api_key_expires_at && user.api_key_expires_at <= new Date()) {
@@ -252,7 +273,15 @@ const APP_ERROR_STATUS_MAP: Record<ErrorCode, number> = {
 
 export function handleApiError(error: unknown): NextResponse {
   if (error instanceof ApiError) {
-    return NextResponse.json({ error: error.message }, { status: error.statusCode });
+    return NextResponse.json(
+      { error: error.message },
+      {
+        status: error.statusCode,
+        ...(error.retryAfterSeconds !== undefined
+          ? { headers: { 'Retry-After': String(error.retryAfterSeconds) } }
+          : {}),
+      },
+    );
   }
   if (error instanceof AppError) {
     return NextResponse.json(

@@ -14,9 +14,11 @@ import {
  *
  * Rotation is unconditional on every call: the old hash is replaced with a
  * new one inside a compare-and-swap `updateMany`. A reused (already
- * rotated-away) refresh token either finds no matching row (ordinary case)
- * or loses the CAS race against a concurrent legitimate rotation —
- * either way the whole session is revoked and the caller gets 401.
+ * rotated-away) refresh token has one of two outcomes, and both answer 401:
+ * - It finds no matching row (ordinary case, the rotation had already
+ *   committed): the session is left as it is.
+ * - It loses the CAS race against a concurrent rotation of the same token:
+ *   the whole session is revoked.
  */
 export async function POST(request: NextRequest) {
   return handlePost(request);

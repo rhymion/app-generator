@@ -22,7 +22,9 @@ vi.mock('@/lib/authz', () => ({
   getSessionUserId,
 }));
 
-import { ApiError, authenticateApiKey, requireCaller, requireDualAuth, requireScheduledTaskRole, resolveActorId } from './api-auth';
+vi.mock('@/lib/rate-limit', async () => (await import('@/test/helpers/real-rate-limiter')).realRateLimiterModule());
+import { _resetForTests as resetRateLimiter } from './rate-limit';
+import { ApiError, authenticateApiKey, handleApiError, requireCaller, requireDualAuth, requireScheduledTaskRole, resolveActorId } from './api-auth';
 import { SCHEDULED_TASK_ROLE_NAME } from './scheduled-tasks/system-actor';
 
 function makeRequest(headers: Record<string, string> = {}) {
@@ -30,6 +32,7 @@ function makeRequest(headers: Record<string, string> = {}) {
 }
 
 beforeEach(() => {
+  resetRateLimiter();
   userFindFirst.mockReset();
   roleCount.mockReset();
   getSessionUserId.mockReset();
@@ -125,6 +128,37 @@ describe('authenticateApiKey', () => {
       statusCode: 401,
       message: 'Invalid API key.',
     } satisfies Partial<ApiError>);
+  });
+
+  it('answers 429 with Retry-After once one unknown key has failed 10 times in a minute', async () => {
+    userFindFirst.mockResolvedValue(null);
+    const request = makeRequest({ 'X-API-Key': 'mk_probe' });
+    for (let i = 0; i < 10; i++) {
+      await expect(authenticateApiKey(request)).rejects.toMatchObject({ statusCode: 401 });
+    }
+
+    const blocked = await authenticateApiKey(request).catch((e: unknown) => e);
+
+    expect(blocked).toMatchObject({ statusCode: 429 });
+    expect(handleApiError(blocked).headers.get('Retry-After')).toMatch(/^[1-9]\d*$/);
+  });
+
+  it('never throttles a valid key, however often it is used', async () => {
+    userFindFirst.mockResolvedValue({ id: 'user-9', api_key_expires_at: null });
+    for (let i = 0; i < 30; i++) {
+      await expect(authenticateApiKey(makeRequest({ 'X-API-Key': 'mk_valid' }))).resolves.toEqual({ userId: 'user-9' });
+    }
+  });
+
+  it('keys the limiter by a hash of the presented key, never the raw key', async () => {
+    const { getRateLimiter } = await import('./rate-limit');
+    const check = vi.spyOn(getRateLimiter(), 'check');
+    userFindFirst.mockResolvedValue(null);
+
+    await authenticateApiKey(makeRequest({ 'X-API-Key': 'mk_secret_value' })).catch(() => undefined);
+
+    expect(check).toHaveBeenCalledWith('auth:apikey', expect.stringMatching(/^[0-9a-f]{64}$/));
+    expect(JSON.stringify(check.mock.calls)).not.toContain('mk_secret_value');
   });
 
   it('throws 401 when no key header is present', async () => {

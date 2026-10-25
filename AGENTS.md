@@ -325,6 +325,18 @@ changelog entry is a signpost to it). Product-change entries keep the existing
 level of detail — they're the only ones a consumer reads when a release note
 gets cut from this file.
 
+### Cutting a release
+
+The release commit (`chore(release): X.Y.Z`) must, before the `vX.Y.Z` tag is created:
+
+1. Move the `[Unreleased]` entries in `CHANGELOG.md` under a new `## [X.Y.Z] - date` heading.
+2. Set `version` to `X.Y.Z` in `package.json` and in both places it appears at the top of
+   `package-lock.json` (`npm version X.Y.Z --no-git-tag-version` does all three).
+3. Update `format-version` in `code_generator/json_schema.yaml` when the major or minor number changes.
+
+`package.json` is the only machine-readable version of the app; leaving it behind makes the
+tag, the changelog and the package disagree.
+
 ## Sanity check
 
 Before stopping, review the change and answer:

@@ -4,6 +4,25 @@ import userEvent from '@testing-library/user-event';
 import EditableListWrapper from './EditableListWrapper';
 
 describe('EditableListWrapper', () => {
+  it('renders a file URL as a link and image only when it is a safe http(s) or root-relative URL', () => {
+    const { container } = render(
+      <EditableListWrapper
+        itemType="file"
+        fileVariant="image"
+        initialItems={[
+          { id: '1', value: '/uploads/ok.png', label: 'safe' },
+          { id: '2', value: 'javascript:alert(1)', label: 'unsafe-js' },
+          { id: '3', value: '//evil.example/x.png', label: 'unsafe-protocol-relative' },
+        ]}
+      />
+    );
+    expect(screen.getByText('safe').closest('a')).toHaveAttribute('href', '/uploads/ok.png');
+    const srcs = Array.from(container.querySelectorAll('img')).map((i) => i.getAttribute('src'));
+    expect(srcs).toEqual(['/uploads/ok.png']);
+    expect(container.querySelector('a[href^="javascript:"]')).toBeNull();
+    expect(container.querySelector('a[href^="//"]')).toBeNull();
+  });
+
   it('renders empty state when there are no items', () => {
     render(<EditableListWrapper initialItems={[]} itemType="text" />);
     expect(screen.getByText('No items yet')).toBeInTheDocument();

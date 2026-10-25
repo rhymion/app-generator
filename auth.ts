@@ -10,6 +10,7 @@ import bcrypt from "bcryptjs";
 import { siteConfig } from "@/lib/site-config";
 import { recordAuditEvent } from "@/lib/audit-log";
 import { verifyMfaCode } from "@/lib/mfa/verify";
+import { MfaRateLimitedError } from "@/lib/mfa/errors";
 import { createTenantBoundUser } from "@/lib/auth/create-user";
 import { isMockGoogleOAuthTestEnabled } from "@/lib/auth/mock-oauth-gate";
 
@@ -96,7 +97,13 @@ function buildProviders(): Provider[] {
           if (code.length === 0) {
             throw new MfaRequiredError();
           }
-          const ok = await verifyMfaCode(user.id, code);
+          let ok = false;
+          try {
+            ok = await verifyMfaCode(user.id, code);
+          } catch (e) {
+            // A spent second-factor budget is reported like a wrong code.
+            if (!(e instanceof MfaRateLimitedError)) throw e;
+          }
           if (!ok) {
             throw new InvalidMfaError();
           }

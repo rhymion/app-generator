@@ -1,3 +1,33 @@
+{% macro fresh_source_rows(sources) %}
+{% for src in sources %}
+    // {{ src.target }} ({{ src.var_name }}) shares its target with another foreign key: create it
+    // under this iteration's own parent rather than the shared dependency row's parent.
+{% for fk in src.internal_fk_deps %}
+    const {{ src.var_name }}Fresh{{ fk.var_name | pascal_case }} = await prisma.{{ fk.target }}.create({ data: {{ fk.create_data }} });
+{% endfor %}
+    const {{ src.var_name }}Record = await prisma.{{ src.target }}.create({
+      data: _dep('{{ src.target }}.{{ src.var_name }}', '{{ src.target }}', {
+{% for fk in src.internal_fk_deps %}
+        {{ fk.prop_name }}: {{ src.var_name }}Fresh{{ fk.var_name | pascal_case }}.id,
+{% endfor %}
+{% for f in src.fields %}
+        {{ f.prop_name }}: {{ f.value }},
+{% endfor %}
+{% for fk in src.fk_deps %}
+        {{ fk.prop_name }}: {{ fk.ref }}.id,
+{% endfor %}
+        creator_id: testUser.id,
+{% if src.has_updater_id %}
+        updater_id: testUser.id,
+{% endif %}
+      }),
+{% if src.prisma_include_str %}
+      include: { {{ src.prisma_include_str }} },
+{% endif %}
+    });
+    const {{ src.var_name }}Fresh = { ...{{ src.var_name }}Record{% if src.label_expression %}, name: {{ src.label_expression }}{% if src.search_differs %}, searchName: {{ src.search_label_expression }}{% endif %}{% endif %} };
+{% endfor %}
+{% endmacro %}
 // AUTO-GENERATED - DO NOT EDIT
 import { prisma{% if has_approvable %}, ALL_ENTITIES{% endif %} } from '../db-helpers';
 import { TEST_CREDENTIALS } from '../test-credentials';
@@ -677,7 +707,7 @@ export async function populate{{ pascal }}Data(length: number) {
       }),
     });
 {% endfor %}
-{% for fk in internal_fk_deps %}
+{{ fresh_source_rows(fresh_source_deps) }}{% for fk in internal_fk_deps %}
     const {{ fk.var_name }}Item = await prisma.{{ fk.target }}.create({ data: {{ fk.create_data }} });
 {% endfor %}
     const record = await prisma.{{ model_name }}.create({
@@ -738,7 +768,12 @@ export async function populate{{ pascal }}Data(length: number) {
     });
     records.push(currentRecord);
 {% else %}
+{% if fresh_source_deps %}
+    // The rows created for this record's source-side foreign keys, for specs that select them.
+    records.push({ ...record, sourceDeps: { {% for src in fresh_source_deps %}{{ src.var_name }}: {{ src.var_name }}Fresh{% if not loop.last %}, {% endif %}{% endfor %} } });
+{% else %}
     records.push(record);
+{% endif %}
 {% endif %}
   }
   // Serialize Dates to ISO strings so Cypress cy.task can JSON-transfer results
@@ -892,7 +927,7 @@ export async function populate{{ pascal }}FullData(length: number) {
       }),
     });
 {% endfor %}
-{% for fk in internal_fk_deps %}
+{{ fresh_source_rows(fresh_source_deps) }}{% for fk in internal_fk_deps %}
     const {{ fk.var_name }}Item = await prisma.{{ fk.target }}.create({ data: {{ fk.create_data }} });
 {% endfor %}
     const record = await prisma.{{ model_name }}.create({
@@ -904,6 +939,8 @@ export async function populate{{ pascal }}FullData(length: number) {
 {% if field.category == 'autocomplete' and field.dep_var_name %}
 {% if (primary_fk_dep and field.dep_var_name == primary_fk_dep.var_name) or field.dep_var_name in extra_oto_fk_dep_vars %}
         {{ field.prop_name }}: {{ field.dep_var_name }}Item.id,
+{% elif field.dep_var_name in fresh_source_dep_vars %}
+        {{ field.prop_name }}: {{ field.dep_var_name }}Fresh.id,
 {% else %}
         {{ field.prop_name }}: deps.{{ field.dep_var_name }}.id,
 {% endif %}

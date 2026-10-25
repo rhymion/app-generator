@@ -169,7 +169,7 @@ This function:
    - All `Creator` and `Assignee` role definitions (fetched for deferred item-level resolution)
 4. Merges flags into `general`, `creator`, `assignee` sub-objects
 
-**Default grant**: if no permission rows match the model at all, all four operations are granted. This is the "no explicit deny" default that lets new entities work without first configuring permissions.
+**Default deny**: if no permission rows match the model at all, `deriveRichPermissionsFromRows` returns all-false flags, so every operation is denied. A new entity is unusable until a role is granted permission rows for it (see [authorization-default-deny.md](authorization-default-deny.md)); the only exceptions are the read-only shortcuts for the `Administrator` role on `audit_log` and on `x-self-only` entities with `admin_bypass: true`.
 
 ### Creator and Assignee roles
 

@@ -70,10 +70,15 @@ describe('API: upload keeps the stored file inside the uploads directory', () =>
     });
   });
 
-  it('falls back to a generated name when the filename has no usable last segment', () => {
+  it('refuses a filename with no usable last segment (it has no allow-listed extension)', () => {
     upload('../').then((res) => {
-      expect(res.status).to.eq(200);
-      expect(res.body.url).to.match(/^\/uploads\/[^/]+\/file$/);
+      expect(res.status).to.eq(400);
+    });
+  });
+
+  it('refuses a file whose extension is not allow-listed even when the declared type is', () => {
+    upload('page.html').then((res) => {
+      expect(res.status).to.eq(400);
     });
   });
 });
