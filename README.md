@@ -326,7 +326,7 @@ See [docs/knowledge/multi-tenancy-and-permissions.md](docs/knowledge/multi-tenan
 **GDPR / data protection**:
 - `x-pii` field classification (`direct` / `sensitive` / `indirect`) drives which `user` fields `anonymizeUser()` scrubs on erasure (GDPR Art. 17 right to erasure). The scrub is transactional and irreversible; it does not delete the user row, to preserve referential integrity, and records `anonymized_at` on the `user` model. It runs from the user's `invalidate` action, not from a reversible deactivation. See [docs/knowledge/x-pii.md](docs/knowledge/x-pii.md).
 - `x-gdpr-mode` (`internal` / `consumer` / `both`) classifies a model/field's data-subject scope for compliance bookkeeping. It is schema-validated (`code_generator/validate.py`) but no codegen template reads it, so it has no effect on generated code. `x-retention` is not read either. See [docs/knowledge/x-gdpr-mode.md](docs/knowledge/x-gdpr-mode.md).
-- Attachment filenames are encrypted at rest with AES-256-GCM (`lib/compliance/attachment_name_crypto.ts`).
+- Attachment filenames are encrypted in the database with AES-256-GCM (`lib/compliance/attachment_name_crypto.ts`); the file contents themselves are not encrypted by the application. Files are stored under random keys in private storage and are delivered only through an authorized route that applies the owning record's read permission and organization scope — see [docs/knowledge/attachment-storage.md](docs/knowledge/attachment-storage.md).
 - `x-mention` enables `@[user_id:uuid]` mention syntax in comments, with generated mention-parser utilities.
 
 ---
@@ -474,7 +474,7 @@ automatic crawler protection (unlike a preview deployment). `lib/site-config.ts`
 When enabled, `generate-code` additionally emits:
 - A multi-stage, non-root `Dockerfile` with a `HEALTHCHECK`, plus `.dockerignore`
 - `next.config.ts` with `output: 'standalone'`
-- A GCS Signed URL upload route (overrides the default Vercel Blob upload route) and a V4 Signed URL proxy route (`app/api/gcs/[...path]/route.ts`)
+- Attachments in a private GCS bucket, delivered by the authorized attachments route through a short-lived V4 signed URL (the upload route is the same for every storage backend)
 - `proxy.ts` header rewriting so Cloud Run's internal `:8080` port never leaks into a redirect `Location` header
 
 Idempotent automation scripts in `scripts/` drive the GCP side, run in this

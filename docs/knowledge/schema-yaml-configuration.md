@@ -1027,10 +1027,12 @@ The same condition emits `app/api/attachment/direct/route.ts`, the REST form of 
 browser session. The generated Expo app uses both to draw the field as a file input
 (`docs/knowledge/mobile-app.md`, "Direct attachment fields"); the Web form is unchanged.
 
-`POST /api/upload` never uses the client-supplied filename as a path. The stored name is the filename's last path
-segment (either separator style, control characters removed; `file` when nothing is left), placed under a generated
-directory, and on the local-disk fallback the final path must resolve inside `public/uploads/` or the upload is refused.
-`GET /api/uploads/...` applies the same confinement when reading.
+`POST /api/upload` never uses the client-supplied filename as a path or as part of a storage key. The object is stored
+under a random UUID key, the filename's last path segment (either separator style, control characters removed; `file`
+when nothing is left) is kept only as the encrypted display name, and the response is `{ id, name }`: the id of the
+`attachment` record that was created. A direct-attachment field's value is that id, and only the user who uploaded the
+file can attach it. Files are read from `GET /api/attachments/<id>`. See
+[attachment-storage.md](attachment-storage.md).
 
 Implementation-internals notes from when this feature was built (why the generator's TS-type
 resolution for `attachment.type` must read the raw entity definition rather than the plain

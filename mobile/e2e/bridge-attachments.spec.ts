@@ -6,7 +6,7 @@ import { login } from './helpers';
 // detail screen lists the attachments; the edit form adds, removes and reorders them and saves the whole
 // set through PUT /api/mobile_asset/<id>/attachments after the record itself is saved.
 
-type Put = { type: string; items: { id?: string; name: string; path: string }[] };
+type Put = { type: string; items: { id: string }[] };
 
 async function createAsset(page: Page, title: string) {
   await login(page);
@@ -67,7 +67,9 @@ test.describe('Attachments of an entity with the attachable bridge', () => {
     // One request for the type that changed, in the listed order, and none for the other.
     expect(puts).toHaveLength(1);
     expect(puts[0].type).toBe('file');
-    expect(puts[0].items.map((i) => i.name)).toEqual(['b.pdf', 'a.pdf']);
+    // Items are attachment ids only (the ids the uploads answered with); no name or path is sent.
+    expect(puts[0].items).toHaveLength(2);
+    for (const item of puts[0].items) expect(Object.keys(item)).toEqual(['id']);
     expect(await names(page, 'file')).toEqual(['b.pdf', 'a.pdf']);
 
     // Reopened, the edit form starts from the saved set; saving it unchanged sends nothing.
@@ -143,6 +145,7 @@ test.describe('Attachments of an entity with the attachable bridge', () => {
     await expect(page.getByTestId('attachment-name-file-0')).toHaveText('openable.pdf');
     const popup = context.waitForEvent('page');
     await page.getByTestId('attachment-name-file-0').click();
-    expect((await popup).url()).toContain('openable.pdf');
+    // The file route needs the access token, so the app fetches the file with it and opens the local copy.
+    expect((await popup).url()).toMatch(/^blob:/);
   });
 });

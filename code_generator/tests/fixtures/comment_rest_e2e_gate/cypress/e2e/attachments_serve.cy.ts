@@ -40,15 +40,19 @@ const read = (id: string, headers: Record<string, string> = asKey()) =>
 
 /** An attachment of a cr_asset record of the caller's organization. */
 function attached(asset: Asset, name = 'contract.pdf'): Cypress.Chainable<string> {
-  return upload(name).then((id) => {
-    cy.request({
-      method: 'PUT',
-      url: `/api/cr_asset/${asset.id}/attachments`,
-      headers: asKey(),
-      body: { type: 'file', items: [{ id }] },
-    }).its('status').should('eq', 200);
-    return id;
-  });
+  return upload(name).then((id) =>
+    cy
+      .request({
+        method: 'PUT',
+        url: `/api/cr_asset/${asset.id}/attachments`,
+        headers: asKey(),
+        body: { type: 'file', items: [{ id }] },
+      })
+      .then((res) => {
+        expect(res.status).to.eq(200);
+        return id;
+      }),
+  );
 }
 
 describe('API: attachments of a bridge owner are delivered through the authorized route', () => {

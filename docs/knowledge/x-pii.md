@@ -59,8 +59,8 @@ otherwise the file is not generated. The function takes a user id and, in one da
    and, when `image_id` is an `x-pii` column, the avatar `attachment` row is deleted;
 4. checks that no `Account` row is left, and rolls the whole transaction back if one is.
 
-After the commit the function removes the stored avatar file (local `public/uploads`, Vercel Blob, or the Google Cloud
-Storage bucket when `x-cloud` is `gcp`). A failure there does not undo the erasure: the result has `success: true` and
+After the commit the function removes the stored avatar object through `lib/attachment/storage.ts` (local `.uploads/`,
+Vercel Blob, or the Google Cloud Storage bucket). A failure there does not undo the erasure: the result has `success: true` and
 the message in `errors`.
 
 A repeated call is allowed. It keeps the first `anonymized_at` and `invalidated_at` (and returns the first time as
