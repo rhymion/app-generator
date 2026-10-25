@@ -156,13 +156,11 @@ def _get_actual_type(defn: dict) -> str | None:
 def get_uri_kind(prop: dict) -> str | None:
     """Return the uri kind for a format:uri property. Default is 'image'.
 
-    'file' (cmd_776(3)/subtask_780a) is a URL-string field like 'image' —
-    still uploaded via /api/upload and stored as a plain string, not an
-    attachment FK — but for a non-image file (e.g. proj_h's file_uri): the
-    upload widget must not render it as an <img>. Rendered via the same
-    SingleAttachmentUpload component (mode='url', kind='file') that the
-    x-relationship: {target: attachment, type: direct} FK path (mode='fk')
-    also uses, per the殿-approved common-component design in subtask_780a.
+    'file' is a URL-string field like 'image' (a plain string, not an
+    attachment FK) for a non-image file (e.g. a document link): it is
+    rendered as an editable URL field and a link, never as an <img>. Files
+    are uploaded only through the attachment fields (bridge or direct FK),
+    which store an attachment record and serve it from /api/attachments/<id>.
     """
     if prop.get('format') != 'uri':
         return None
@@ -4179,7 +4177,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     # (TS2322/TS2551). Branch on the *consuming* schema's own `user` entity
     # rather than assuming the shape unconditionally.
     _creator_avatar_select = (
-        "image: { select: { path: true } }"
+        "image: { select: { id: true } }"
         if any(r['relation_name'] == 'image' for r in get_direct_attachment_fk_props(_raw_def('user', schema)))
         else "image: true"
     )

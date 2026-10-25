@@ -16,6 +16,7 @@
       "@/lib/direct_attachment_gate_item/*": ["./lib/direct_attachment_gate_item/*"],
       "@/components/direct_attachment_gate_item/*": ["./components/direct_attachment_gate_item/*"],
       "@/lib/attachment/direct_actions": ["./lib/attachment/direct_actions.ts"],
+      "@/lib/attachment/access": ["./lib/attachment/access.ts"],
       "@/lib/prisma": ["./lib/prisma.ts"],
       "@/lib/authz": ["./lib/authz.ts"],
       "@/lib/idempotency": ["./lib/idempotency.ts"],

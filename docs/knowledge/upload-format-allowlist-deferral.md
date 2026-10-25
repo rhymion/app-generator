@@ -2,9 +2,8 @@
 
 ## Behavior
 
-`POST /api/upload` (generated from `code_generator/templates/upload_route_vercel.ts.jinja2`
-for Vercel Blob and `upload_route_gcs.ts.jinja2` for GCS; the local-disk fallback of the
-Vercel route shares the same check) validates every file through
+`POST /api/upload` (generated from `code_generator/templates/upload_route.ts.jinja2`; one route
+serves every storage backend) validates every file through
 `lib/_upload_validation.ts` before any I/O:
 
 - the declared multipart `Content-Type` must be on the MIME allow-list, AND

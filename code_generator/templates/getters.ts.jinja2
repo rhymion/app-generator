@@ -22,6 +22,7 @@ import { resolveVirtualColumns } from '@/lib/{{ parent }}/virtual_resolvers';
 {% endif %}
 {% if has_attachable or direct_attachment_rels %}
 import { decryptFileName } from '@/lib/compliance/attachment_name_crypto';
+import { attachmentUrl } from '@/lib/attachment/url';
 {% endif %}
 {% if comment_has_mention %}
 import { extractMentionedUserIds, type UserContext } from '@/lib/mention/parser';
@@ -225,7 +226,7 @@ export async function get{{ parent_pascal }}Detail(id: string{% if should_filter
           console.warn('attachment name decrypt failed:', e instanceof Error ? e.message : e);
         }
       }
-      return { ...rest, name: displayName };
+      return { ...rest, name: displayName, path: attachmentUrl(rest.id) };
     }),
   } : {{ parent_camel }}.{{ attachable_rel_name }};
 {% endif %}
@@ -256,7 +257,7 @@ export async function get{{ parent_pascal }}Detail(id: string{% if should_filter
         console.warn('attachment name decrypt failed:', e instanceof Error ? e.message : e);
       }
     }
-    return { ...rest, name: displayName };
+    return { ...rest, name: displayName, path: attachmentUrl(rest.id) };
   })({{ parent_camel }}.{{ dar.relation_name }});
 {% endfor %}
   return {

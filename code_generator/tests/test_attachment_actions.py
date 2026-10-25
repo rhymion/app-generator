@@ -266,9 +266,10 @@ def test_rendered_bridge_action_rejects_foreign_attachment_ids():
     """Runs the rendered action under vitest against an in-memory Prisma fake.
 
     Covers an attachment id of a same-organization record, of another
-    organization, of the same record but another type (all rejected with
-    nothing written), the unchanged replace/order semantics, and the permission
-    check that precedes it. The test names live in bridge_actions.test.ts.
+    organization, of the same record but another type, and an upload another
+    user made (all rejected with nothing written), linking the caller's own
+    upload, the replace/order semantics, and the permission check that
+    precedes it. The test names live in bridge_actions.test.ts.
     """
     shutil.rmtree(BRIDGE_STAGE, ignore_errors=True)
     (BRIDGE_STAGE / 'lib').mkdir(parents=True)

@@ -304,6 +304,8 @@ model attachment {
   user_image    user?       @relation("UserImage")
   mobile_document_file     mobile_document? @relation("MobileDocumentFile")
   mobile_document_contract mobile_document? @relation("MobileDocumentContract")
+  uploader_id   String?
+  uploader_organization_id String?
   @@index([attachable_id])
 }
 

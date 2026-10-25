@@ -2,6 +2,10 @@ import prisma from '@/lib/prisma';
 import { validateCustomRules } from '@/lib/{{ model }}/service_validation_custom';
 import { AppError } from '@/lib/_errors';
 import { isValidDateValue, type DateValueFormat } from '@/lib/_date_value';
+{% if direct_attachment_rels %}
+import { assertDirectAttachmentValue } from '@/lib/attachment/link';
+import { UNLINKED_ATTACHMENT_WHERE } from '@/lib/attachment/access';
+{% endif %}
 {% if exclusive_parent_columns %}
 import { EXCLUSIVE_PARENT_COLUMNS, validateExclusiveParents } from '@/lib/{{ model }}/exclusive_parents';
 {% endif %}
@@ -9,7 +13,7 @@ import { EXCLUSIVE_PARENT_COLUMNS, validateExclusiveParents } from '@/lib/{{ mod
 import { assertTransitionAllowed, assertInitialStateAllowed } from '@/lib/state_transitions';
 {% endif %}
 
-type TransactionClient = Pick<typeof prisma, '{{ model }}'{% for check in one_to_one_checks %} | '{{ check.target }}'{% endfor %}>;
+type TransactionClient = Pick<typeof prisma, '{{ model }}'{% for check in one_to_one_checks %} | '{{ check.target }}'{% endfor %}{% if direct_attachment_rels %} | 'attachment'{% endif %}>;
 type RequiredField = { key: string; label: string };
 type OneToOneRelation = { key: string; label: string; target: string; required: boolean };
 
@@ -43,6 +47,11 @@ const DATE_FIELDS: (RequiredField & { format: DateValueFormat })[] = [
 {% endfor %}
 ] ;
 
+{% if direct_attachment_rels %}
+// Direct-attachment foreign keys: a new value must be an unlinked attachment the caller uploaded.
+const DIRECT_ATTACHMENT_FIELDS: string[] = [{% for r in direct_attachment_rels %}'{{ r.prop_name }}'{% if not loop.last %}, {% endif %}{% endfor %}];
+
+{% endif %}
 const ONE_TO_ONE_RELATIONS: OneToOneRelation[] = [
 {% for check in one_to_one_checks %}
   { key: '{{ check.key }}', label: '{{ check.label }}', target: '{{ check.target }}', required: {{ 'true' if check.required else 'false' }} },
@@ -159,6 +168,14 @@ async function validateSchemaRules(tx: TransactionClient, data: Record<string, u
       throw new AppError('CONFLICT', `${relation.label} is already linked`, relation.key);
     }
   }
+{% if direct_attachment_rels %}
+
+  // A caller can only attach the file they uploaded themselves, and only once. An unchanged value is
+  // not checked again, so a record keeps working after its file has been attached.
+  for (const key of DIRECT_ATTACHMENT_FIELDS) {
+    await assertDirectAttachmentValue(tx, data[key], prevRow?.[key], actorId, key, UNLINKED_ATTACHMENT_WHERE);
+  }
+{% endif %}
 {% if exclusive_parent_columns %}
 
   // x-exclusive-parents: judge the row as it will be after the save. A column

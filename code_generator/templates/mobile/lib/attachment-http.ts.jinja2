@@ -1,9 +1,11 @@
-// Direct attachment fields: the file is stored through POST /api/upload, then an `attachment` row is
-// created for it through POST /api/attachment/direct. The form submits the row's id with the entity, as
-// the Web form does (components/_standard/SingleAttachmentUpload.tsx, mode 'fk').
+// Direct attachment fields: the file is stored through POST /api/upload, which answers with the id of the
+// attachment it created; POST /api/attachment/direct then prepares that id for the field. The form
+// submits the id with the entity, as the Web form does (components/_standard/SingleAttachmentUpload.tsx,
+// mode 'fk').
 // Bridge attachments (an entity that owns attachments through `attachable`): the file is stored through
-// POST /api/upload and the record's whole set is saved through PUT /api/<entity>/<id>/attachments.
-import { ApiError, apiFetch } from './api-base';
+// POST /api/upload and the record's whole set of ids is saved through PUT /api/<entity>/<id>/attachments.
+// A stored file is read from GET /api/attachments/<id> with the access token (see fetchAttachmentBlob).
+import { ApiError, apiFetch, authorizedImageSource, resolveApiUrl } from './api-base';
 import { toActionFailure } from './entity-http';
 import type { ActionFailure } from './_errors';
 
@@ -45,8 +47,11 @@ export function uploadErrorMessage(err: unknown): string | null {
   }
 }
 
-/** Stores the file through POST /api/upload and answers the URL it is served from. Rejects with an ApiError when the server refuses it. */
-export async function uploadFile(picked: PickedFile): Promise<string> {
+/** What POST /api/upload answers: the id of the attachment it created, and the file name for display. */
+export type UploadedFile = { id: string; name: string };
+
+/** Stores the file through POST /api/upload and answers the attachment it created. Rejects with an ApiError when the server refuses it. */
+export async function uploadFile(picked: PickedFile): Promise<UploadedFile> {
   const form = new FormData();
   if (picked.file) {
     form.append('file', picked.file, picked.name);
@@ -54,22 +59,41 @@ export async function uploadFile(picked: PickedFile): Promise<string> {
     // React Native reads a file part from its local URI.
     form.append('file', { uri: picked.uri, name: picked.name, type: picked.mimeType ?? 'application/octet-stream' } as unknown as Blob);
   }
-  const { url } = await apiFetch<{ url: string }>('/api/upload', { method: 'POST', body: form });
-  return url;
+  return apiFetch<UploadedFile>('/api/upload', { method: 'POST', body: form });
 }
 
-/** Uploads the file and creates its attachment row. Rejects with an ApiError when the server refuses either step. */
+/** Uploads the file and prepares its attachment for a direct field. Rejects with an ApiError when the server refuses either step. */
 export async function uploadAttachment(picked: PickedFile): Promise<AttachmentRow> {
-  const path = await uploadFile(picked);
+  const { id } = await uploadFile(picked);
   return apiFetch<AttachmentRow>('/api/attachment/direct', {
     method: 'POST',
-    body: JSON.stringify({ name: picked.name, path, type: attachmentKind(picked.mimeType) }),
+    body: JSON.stringify({ id, type: attachmentKind(picked.mimeType) }),
   });
+}
+
+/** The image source for an attachment's URL, carrying the access token the file route requires. */
+export function attachmentImageSource(path: string) {
+  return authorizedImageSource(path);
+}
+
+/**
+ * Opens a stored file. The file route needs the access token, which a link handed to the system browser
+ * cannot carry, so the file is fetched with the token and opened from a local object URL (Web build).
+ */
+export async function openAttachment(path: string): Promise<void> {
+  if (typeof window === 'undefined' || typeof URL.createObjectURL !== 'function') {
+    throw new ApiError(0, 'Opening a file is supported on the Web build only');
+  }
+  const source = authorizedImageSource(path);
+  const res = await fetch(resolveApiUrl(path), { headers: source.headers });
+  if (!res.ok) throw new ApiError(res.status, res.statusText);
+  const blob = await res.blob();
+  window.open(URL.createObjectURL(blob), '_blank', 'noopener');
 }
 
 /**
  * One attachment of a record that owns attachments through the `attachable` bridge, as the REST detail embeds it
- * (`id`, `name`, `path`, `type`, `order`). An entry the user just added has no `id` yet.
+ * (`id`, `name`, `path`, `type`, `order`). An entry the user just added carries the id its upload answered with.
  */
 export type BridgeAttachment = { id?: string; name: string; path: string; type?: string; order?: number };
 
@@ -88,7 +112,7 @@ export async function setBridgeAttachments(
   try {
     await apiFetch(`/api/${encodeURIComponent(entity)}/${encodeURIComponent(recordId)}/attachments`, {
       method: 'PUT',
-      body: JSON.stringify({ type, items: items.map(({ id, name, path }) => ({ id, name, path })) }),
+      body: JSON.stringify({ type, items: items.map(({ id }) => ({ id })) }),
     });
     return { ok: true };
   } catch (err) {

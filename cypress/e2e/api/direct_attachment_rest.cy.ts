@@ -1,11 +1,11 @@
 // Hand-written -- not part of the generated entity test set.
 // The REST side of a direct attachment field (x-relationship type: direct), exercised on user.image:
-//   POST /api/upload             stores the file
-//   POST /api/attachment/direct  creates the standalone attachment row for it
-//   PUT  /api/user/:id           links the row by id
-// The first two accept a mobile access token as well as the browser session. Authorization is unchanged:
-// any authenticated caller may store a file and create the (still unlinked) row, and the entity's own
-// update permission decides whether the link is saved.
+//   POST /api/upload             stores the file and answers with the id of the attachment it created
+//   POST /api/attachment/direct  prepares that attachment (by id) for the field
+//   PUT  /api/user/:id           links the attachment by id
+// The first two accept a mobile access token as well as the browser session. Any authenticated caller may
+// store a file; only its uploader can prepare or link it, and the entity's own update permission decides
+// whether the link is saved.
 import { TEST_API_KEY, TEST_CREDENTIALS } from '../../support/test-credentials';
 
 const UPLOAD_URL = '/api/upload';
@@ -68,7 +68,10 @@ describe('API: direct attachment upload and row creation accept a mobile access 
     mobileToken(TEST_CREDENTIALS.email, TEST_CREDENTIALS.password).then((token) => {
       upload({ Authorization: `Bearer ${token}` }).then((res) => {
         expect(res.status).to.eq(200);
-        expect(res.body.url).to.be.a('string').and.not.be.empty;
+        // The response names the attachment, never a location.
+        expect(res.body).to.have.keys(['id', 'name']);
+        expect(res.body.id).to.be.a('string').and.not.be.empty;
+        expect(res.body.name).to.eq('medical-note.txt');
       });
     });
   });
@@ -83,15 +86,16 @@ describe('API: direct attachment upload and row creation accept a mobile access 
     });
   });
 
-  it('creates the attachment row for an uploaded file and shows it, decrypted, on the linked record', () => {
+  it('prepares an uploaded file for the field and shows it, decrypted, on the linked record', () => {
     mobileToken(TEST_CREDENTIALS.email, TEST_CREDENTIALS.password).then((token) => {
       const headers = { Authorization: `Bearer ${token}` };
       upload(headers).then((uploaded) => {
-        createRow(headers, { name: 'medical-note.txt', path: uploaded.body.url, type: 'file' }).then((res) => {
+        createRow(headers, { id: uploaded.body.id, type: 'file' }).then((res) => {
           expect(res.status).to.eq(201);
           expect(res.body).to.have.keys(['id', 'name', 'path', 'type']);
           expect(res.body.name).to.eq('medical-note.txt');
-          expect(res.body.path).to.eq(uploaded.body.url);
+          // The file is delivered from its authorized route, keyed by the attachment id.
+          expect(res.body.path).to.eq(`/api/attachments/${uploaded.body.id}`);
           const attachmentId = res.body.id as string;
 
           sessionUserId().then((userId) => {
@@ -103,7 +107,7 @@ describe('API: direct attachment upload and row creation accept a mobile access 
               failOnStatusCode: false,
             }).its('status').should('eq', 200);
             cy.request({ url: `/api/user/${userId}`, headers }).then((detail) => {
-              expect(detail.body.image).to.include({ id: attachmentId, name: 'medical-note.txt' });
+              expect(detail.body.image).to.include({ id: attachmentId, name: 'medical-note.txt', path: `/api/attachments/${attachmentId}` });
               // The stored name is encrypted; the REST detail never carries the ciphertext or its IV.
               expect(detail.body.image).not.to.have.any.keys('encrypted_original_name', 'name_iv');
             });
@@ -114,29 +118,67 @@ describe('API: direct attachment upload and row creation accept a mobile access 
   });
 
   it('refuses row creation with no credential or a tampered token', () => {
-    const body = { name: 'a.txt', path: '/uploads/x/a.txt', type: 'file' };
+    const body = { id: 'some-attachment', type: 'file' };
     createRow({}, body).its('status').should('eq', 401);
     createRow({ Authorization: 'Bearer aaa.bbb.ccc' }, body).its('status').should('eq', 401);
   });
 
-  it('refuses a malformed row before it reaches the database', () => {
+  it('refuses a malformed request before it reaches the database', () => {
     mobileToken(TEST_CREDENTIALS.email, TEST_CREDENTIALS.password).then((token) => {
       const headers = { Authorization: `Bearer ${token}` };
-      const ok = { name: 'a.txt', path: '/uploads/x/a.txt', type: 'file' };
-      for (const bad of [
-        { ...ok, type: 'executable' },
-        { ...ok, type: 7 },
-        { ...ok, name: '' },
-        { ...ok, name: 'x'.repeat(256) },
-        { ...ok, path: 'javascript:alert(1)' },
-        { ...ok, path: '//evil.example/a.txt' },
-        { ...ok, path: undefined },
-      ]) {
-        createRow(headers, bad).its('status').should('eq', 400);
-      }
-      cy.request({ method: 'POST', url: DIRECT_URL, headers: { ...headers, 'Content-Type': 'text/plain' }, body: 'not json', failOnStatusCode: false })
-        .its('status')
-        .should('eq', 400);
+      upload(headers).then((uploaded) => {
+        const ok = { id: uploaded.body.id, type: 'file' };
+        for (const bad of [
+          { ...ok, type: 'executable' },
+          { ...ok, type: 7 },
+          { ...ok, id: '' },
+          { ...ok, id: 'x'.repeat(65) },
+          { ...ok, id: 42 },
+          // A path or URL is not accepted in place of an id.
+          { type: 'file', path: '/uploads/x/a.txt' },
+          { type: 'file', name: 'a.txt', path: 'javascript:alert(1)' },
+        ]) {
+          createRow(headers, bad).its('status').should('eq', 400);
+        }
+        cy.request({ method: 'POST', url: DIRECT_URL, headers: { ...headers, 'Content-Type': 'text/plain' }, body: 'not json', failOnStatusCode: false })
+          .its('status')
+          .should('eq', 400);
+      });
+    });
+  });
+
+  it('answers 404 for an attachment that does not exist', () => {
+    mobileToken(TEST_CREDENTIALS.email, TEST_CREDENTIALS.password).then((token) => {
+      createRow({ Authorization: `Bearer ${token}` }, { id: 'no-such-attachment', type: 'file' }).its('status').should('eq', 404);
+    });
+  });
+
+  it('lets only the uploader prepare or link a file: another user gets 404 and the file stays unlinked', () => {
+    mobileToken(TEST_CREDENTIALS.email, TEST_CREDENTIALS.password).then((ownerToken) => {
+      upload({ Authorization: `Bearer ${ownerToken}` }).then((uploaded) => {
+        cy.task<string>('db:createSessionUserWithPermission', {
+          entityName: 'user',
+          flags: { read: true, update: true },
+          label: 'directattachmentother',
+        }).then((email) => {
+          mobileToken(email, TEST_CREDENTIALS.password).then((otherToken) => {
+            const other = { Authorization: `Bearer ${otherToken}` };
+            createRow(other, { id: uploaded.body.id, type: 'file' }).its('status').should('eq', 404);
+            // Naming the id directly in the entity update is refused as well.
+            cy.request({ url: '/api/user', headers: { 'X-API-Key': TEST_API_KEY } }).then((list) => {
+              const row = (list.body.rows as { id: string; email?: string; name: string }[]).find((u) => u.name !== TEST_CREDENTIALS.name);
+              expect(row, 'other user').to.exist;
+              cy.request({
+                method: 'PUT',
+                url: `/api/user/${row!.id}`,
+                headers: other,
+                body: { image_id: uploaded.body.id },
+                failOnStatusCode: false,
+              }).its('status').should('be.oneOf', [400, 422, 404]);
+            });
+          });
+        });
+      });
     });
   });
 
@@ -149,7 +191,7 @@ describe('API: direct attachment upload and row creation accept a mobile access 
       mobileToken(email, TEST_CREDENTIALS.password).then((token) => {
         const headers = { Authorization: `Bearer ${token}` };
         upload(headers).then((uploaded) => {
-          createRow(headers, { name: 'medical-note.txt', path: uploaded.body.url, type: 'file' }).then((res) => {
+          createRow(headers, { id: uploaded.body.id, type: 'file' }).then((res) => {
             expect(res.status).to.eq(201);
             sessionUserId().then((userId) => {
               cy.request({

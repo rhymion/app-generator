@@ -5500,10 +5500,9 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         # field's real label.
         jsx_by_field[p] = f"      <ImageUpload\n        value={{{sn}}}\n        onChange={{set{setter}}}\n        label={{'{fk}'}}\n      />"
 
-    # x-uri-kind: file fields (cmd_776(3)) — SingleAttachmentUpload in
-    # mode='url', kind='file': same upload flow as ImageUpload (still a
-    # plain URL-string field, uploaded via /api/upload) but displays a
-    # download link/icon instead of an <img> once uploaded.
+    # x-uri-kind: file fields: SingleAttachmentUpload in mode='url', kind='file'
+    # is an editable URL field that shows a link once a URL is entered. It does
+    # not upload; stored files go through the attachment fields.
     for p in file_uri_props:
         fk     = _tf(p)
         sn     = safe_var_name(p)
@@ -5518,13 +5517,12 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             f"      />"
         )
 
-    # Direct-attachment FK fields (cmd_788): x-relationship type:direct.
-    # SingleAttachmentUpload in mode='fk': uploads via /api/upload, then
-    # createDirectAttachment() (lib/attachment/direct_actions.ts) creates
-    # the attachment row and returns its {id, name, path, type} -- onChange
-    # replaces the whole descriptor. The submitted form field carries only
-    # the id (see direct_attachment_ds below), the same convention every
-    # other FK field already uses.
+    # Direct-attachment FK fields: x-relationship type:direct.
+    # SingleAttachmentUpload in mode='fk': uploads via /api/upload (which
+    # answers the new attachment id), then createDirectAttachment()
+    # (lib/attachment/direct_actions.ts) records the attachment type and
+    # returns {id, name, path, type}; onChange replaces the whole descriptor.
+    # The submitted form field carries only the id, like every other FK field.
     for r in direct_attachment_rels:
         prop_name = r['prop_name']
         fk = _tf(r['relation_name'])

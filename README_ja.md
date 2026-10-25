@@ -95,7 +95,7 @@ YAML スキーマ定義から本番対応の Web アプリケーションを生�
 ### 監査・コンプライアンス
 
 - **監査ログ** — `x-audit: true` を宣言したエンティティについて記録された作成・更新・削除操作を表示する、スキーマ非依存の read-only ビューア（`app/[locale]/audit_log/page.tsx`）。テーブルは追記専用で、改ざん検知用に日次ダイジェストを連鎖させる（[`docs/knowledge/audit-log-append-only.md`](docs/knowledge/audit-log-append-only.md) を参照）
-- **GDPR / データ保護** — `x-pii` フィールド分類（`direct`/`sensitive`/`indirect`）、`anonymizeUser()` 消去関数、`x-gdpr-mode` によるデータ主体区分の分類（`internal`/`consumer`/`both`。スキーマ検証のみで生成コードへの影響なし）、添付ファイル名の AES-256-GCM at-rest 暗号化、コメント内の `x-mention` ユーザーメンション解析
+- **GDPR / データ保護** — `x-pii` フィールド分類（`direct`/`sensitive`/`indirect`）、`anonymizeUser()` 消去関数、`x-gdpr-mode` によるデータ主体区分の分類（`internal`/`consumer`/`both`。スキーマ検証のみで生成コードへの影響なし）、添付ファイル名の AES-256-GCM 暗号化（データベース内）、コメント内の `x-mention` ユーザーメンション解析
 - **利用規約 / プライバシーポリシー**（`/[locale]/legal/terms`、`/[locale]/legal/privacy`）— 登録画面から導線を張ったMarkdown雛形文書。文書の言語追加は `content/legal/<doc>.<locale>.md` ファイルを追加するのみで、サイトUIの言語一覧とは独立（詳細は `docs/knowledge/legal-documents.md`）
 
 ### その他
@@ -271,6 +271,8 @@ npm run docker:down:dev  # 作業終了時にデータベースを停止
 
 デフォルトでは Vercel Blob をバックエンドとした、ポリモーフィックブリッジ経由のファイル・画像アップロードです（`x-cloud` による GCP デプロイ有効時は GCS バックエンド — [デプロイメント](#デプロイメント)を参照）。オプトインしたエンティティの詳細ページにはファイル添付パネルが表示されます。画像・ファイルのプレビューはエンティティごとに個別に非表示にできます（`AttachmentSection` の `showImages`/`showFiles` props、両方デフォルト `true`）。
 
+`format: uri` の列（`x-uri-kind: image`・`link`・`file`）は URL を貼り付ける項目です。利用者が URL を入力または貼り付け、その列にファイルはアップロードされません。アップロードが必要なファイルは、添付レコードを参照する直接添付フィールド（`x-relationship: { target: attachment, type: direct }`）で保存します。
+
 ### インベントリ予約・分割・入荷
 
 任意のエンティティがオプトインできる汎用プリミティブ — `x-reservation`、`x-splittable`、`x-ledger-source` — であり、在庫専用の機構ではありません。`x-reservation` は2つの役割に限定されます: インベントリ割当（`count` モード、数値プールから数量を予約）と特定リソースの予約（`item` モード、例：ホテルの部屋の予約）。`x-splittable` はライン明細を複数パートに分割し、各パートは明示指定または自動割当されたプール行から引き当てます。`x-ledger-source` は入荷伝票・請求明細エンティティ向けに `inventory_transaction` 台帳エンティティと write/adjust/move のスタブテンプレートを生成します。予約元エンティティの承認・却下は、独自の予約ライフサイクルではなく上記の承認フローシステムを経由します。
@@ -306,7 +308,7 @@ npm run docker:down:dev  # 作業終了時にデータベースを停止
 **GDPR / データ保護**:
 - `x-pii` フィールド分類（`direct`/`sensitive`/`indirect`）が、消去（GDPR第17条・忘れられる権利）時に `anonymizeUser()` がスクラブするフィールドを決定します（対象は `user` エンティティのフィールドのみ）。このスクラブはトランザクション内で不可逆的に実行され、参照整合性を保つためユーザー行自体は削除せず、`user` モデルに `anonymized_at` を記録します。実行契機は可逆な無効化ではなく `user` の `invalidate` アクションです。詳細は [docs/knowledge/x-pii.md](docs/knowledge/x-pii.md) を参照。
 - `x-gdpr-mode`（`internal`/`consumer`/`both`）はモデル/フィールド単位のデータ主体区分（対象が従業員データか一般消費者データか）を分類するラベルです。`code_generator/validate.py` でスキーマ検証はされますが、コード生成テンプレートは参照しないため、生成コードへの影響はありません。`x-retention` も参照されません。 詳細は [docs/knowledge/x-gdpr-mode.md](docs/knowledge/x-gdpr-mode.md) を参照。
-- 添付ファイル名は AES-256-GCM で at-rest 暗号化されます（`lib/compliance/attachment_name_crypto.ts`）。
+- 添付ファイル名はデータベース内で AES-256-GCM により暗号化されます（`lib/compliance/attachment_name_crypto.ts`）。ファイルの内容そのものはアプリケーションでは暗号化しません。ファイルはプライベートなストレージにランダムなキーで保存され、所有レコードの読み取り権限と組織の範囲を適用する認可付きルートからのみ配信されます。詳細は [docs/knowledge/attachment-storage.md](docs/knowledge/attachment-storage.md) を参照してください。
 - `x-mention` によりコメント内で `@[user_id:uuid]` メンション構文が有効になり、メンションパーサーが生成されます。
 
 ---
@@ -455,7 +457,7 @@ preview デプロイと異なり自動的なクローラー保護を受けませ
 有効化すると、`generate-code` は追加で以下を生成します:
 - `HEALTHCHECK` 付きのマルチステージ・non-root `Dockerfile` および `.dockerignore`
 - `output: 'standalone'` を設定した `next.config.ts`
-- GCS Signed URL アップロードルート（デフォルトの Vercel Blob アップロードルートを上書き）と V4 Signed URL プロキシルート（`app/api/gcs/[...path]/route.ts`）
+- プライベートな GCS バケットに保存する添付ファイル。認可付きの添付ルートが短時間有効な V4 署名付き URL で配信します（アップロードルートはどのストレージでも共通です）
 - Cloud Run 内部ポート `:8080` がリダイレクトの `Location` ヘッダーに漏出しないようにする `proxy.ts` のヘッダー書き換え
 
 `scripts/` 配下の冪等な自動化スクリプトが GCP 側を駆動します。実行順は

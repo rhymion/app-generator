@@ -1,25 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { Storage } from '@google-cloud/storage';
 import { requireCaller, ApiError } from '@/lib/api-auth';
 import { checkUpload, loadUploadPolicy } from '@/lib/_upload_validation';
+import { storeUploadedFile } from '@/lib/attachment/upload_core';
 
-const storage = new Storage();
-const bucketName = process.env.GCS_BUCKET_NAME!;
-
-// The multipart filename is client-controlled: keep only its last path
-// segment (either separator style) and drop control characters, so it can be
-// shown in the URL but can never act as a path.
-function toStoredFilename(raw: string): string {
-  const base = (raw.split(/[\\/]/).pop() ?? '').replace(/[\u0000-\u001f\u007f]/g, '').trim();
-  return base === '' || base === '.' || base === '..' ? 'file' : base;
-}
-
+// POST /api/upload
+// Body: multipart form data with a `file` part.  ->  200 { id, name }
+//
+// The file is stored under a random key and an attachment record is created for it. The response is the
+// record's id (and the file name for display), never a path or URL: the id is what the attach actions
+// take, and the file is delivered only by GET /api/attachments/<id>. Only the uploader can attach it.
 export async function POST(request: NextRequest) {
   try {
     // Any authenticated caller: the browser session, or a mobile access token / API key.
     // Authorization is unchanged (a signed-in user, no finer-grained permission).
+    let userId: string;
     try {
-      await requireCaller(request);
+      ({ userId } = await requireCaller(request));
     } catch (authError) {
       if (authError instanceof ApiError) {
         return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -36,7 +32,7 @@ export async function POST(request: NextRequest) {
 
     // The declared Content-Type and the file name's extension must both be on
     // the allow-lists (UPLOAD_ALLOWED_MIME_TYPES / UPLOAD_ALLOWED_EXTENSIONS);
-    // the stored Content-Type is derived from the extension, not the request.
+    // the Content-Type stored with the object is derived from the extension, not the request.
     const uploadCheck = checkUpload(file, loadUploadPolicy());
     if (!uploadCheck.ok) {
       return NextResponse.json({ error: 'Invalid file type.' }, { status: 400 });
@@ -47,26 +43,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: `File size exceeds ${maxSize} byte limit` }, { status: 400 });
     }
 
-    const timestamp = Date.now();
-    const randomString = Math.random().toString(36).substring(2, 15);
-    const uniqueDir = `${timestamp}-${randomString}`;
-    const originalFilename = toStoredFilename(file.name);
-    const gcsPath = `${uniqueDir}/${originalFilename}`;
-
-    const bytes = await file.arrayBuffer();
-    const buffer = Buffer.from(bytes);
-
-    const bucket = storage.bucket(bucketName);
-    const gcsFile = bucket.file(gcsPath);
-    // UBLA: save without ACL; object remains private
-    await gcsFile.save(buffer, {
-      metadata: { contentType: uploadCheck.contentType },
-    });
-
-    // Return internal proxy URL; /api/gcs route generates a fresh V4 signed URL per request
-    const url = `/api/gcs/${gcsPath}`;
-
-    return NextResponse.json({ url }, { status: 200 });
+    const stored = await storeUploadedFile(file, uploadCheck.contentType, userId);
+    return NextResponse.json(stored, { status: 200 });
   } catch (error) {
     console.error('Upload error:', error);
     return NextResponse.json({ error: 'Upload failed' }, { status: 500 });

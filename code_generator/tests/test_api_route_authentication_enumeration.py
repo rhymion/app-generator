@@ -45,8 +45,6 @@ _ALTERNATE_CREDENTIAL = {
         r'refresh_token_hash', 'the refresh token is the credential'),
     'app/api/test-utils/reset-caches/route.ts': (
         r'TEST_RESET_TOKEN', 'disabled unless a test token is configured'),
-    'app/api/uploads/[...path]/route.ts': (
-        None, 'serves files under public/uploads like the static asset handler'),
 }
 
 

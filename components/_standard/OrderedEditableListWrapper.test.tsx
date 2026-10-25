@@ -474,7 +474,7 @@ describe('OrderedEditableListWrapper', () => {
       const user = userEvent.setup();
       vi.spyOn(global, 'fetch').mockResolvedValue({
         ok: true,
-        json: () => Promise.resolve({ url: '/uploads/test-file.pdf' }),
+        json: () => Promise.resolve({ id: 'att-1', name: 'test-file.pdf' }),
       } as Response);
 
       render(
@@ -500,7 +500,8 @@ describe('OrderedEditableListWrapper', () => {
 
       expect(global.fetch).toHaveBeenCalledOnce();
       const link = screen.getByRole('link', { name: 'test-file.pdf' });
-      expect(link).toHaveAttribute('href', '/uploads/test-file.pdf');
+      // The list shows the file from its authorized route, keyed by the attachment id the upload answered with.
+      expect(link).toHaveAttribute('href', '/api/attachments/att-1');
     });
 
     it('shows error when upload fails', async () => {
