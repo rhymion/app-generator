@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import { vi, describe, it, expect, beforeEach } from 'vitest';
 import ImageUpload from './ImageUpload';
 
@@ -13,14 +13,15 @@ describe('ImageUpload', () => {
     vi.restoreAllMocks();
   });
 
-  it('renders upload button', () => {
+  it('offers no file upload: the value is a URL', () => {
     render(<ImageUpload value="" onChange={vi.fn()} />);
-    expect(screen.getByText('Upload')).toBeInTheDocument();
+    expect(screen.queryByText('Upload')).not.toBeInTheDocument();
+    expect(document.querySelector('input[type="file"]')).toBeNull();
   });
 
   it('renders default helper text', () => {
     render(<ImageUpload value="" onChange={vi.fn()} />);
-    expect(screen.getByText('You can paste a URL or upload a file')).toBeInTheDocument();
+    expect(screen.getByText('You can paste a URL')).toBeInTheDocument();
   });
 
   it('calls onChange when URL is typed directly', async () => {
@@ -41,54 +42,5 @@ describe('ImageUpload', () => {
   it('does not render image preview when value is empty', () => {
     render(<ImageUpload value="" onChange={vi.fn()} />);
     expect(screen.queryByRole('img')).not.toBeInTheDocument();
-  });
-
-  it('shows error and calls onChange with URL on successful upload', async () => {
-    const onChange = vi.fn();
-    global.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ url: 'https://cdn.example.com/uploaded.png' }),
-    } as Response);
-
-    render(<ImageUpload value="" onChange={onChange} />);
-
-    const fileInput = document.getElementById('image-upload-button') as HTMLInputElement;
-    const file = new File(['content'], 'photo.png', { type: 'image/png' });
-    fireEvent.change(fileInput, { target: { files: [file] } });
-
-    await waitFor(() => {
-      expect(onChange).toHaveBeenCalledWith('https://cdn.example.com/uploaded.png');
-    });
-  });
-
-  it('shows error message when upload API returns error', async () => {
-    global.fetch = vi.fn().mockResolvedValue({
-      ok: false,
-      json: async () => ({ error: 'File too large' }),
-    } as Response);
-
-    render(<ImageUpload value="" onChange={vi.fn()} />);
-
-    const fileInput = document.getElementById('image-upload-button') as HTMLInputElement;
-    const file = new File(['content'], 'photo.png', { type: 'image/png' });
-    fireEvent.change(fileInput, { target: { files: [file] } });
-
-    await waitFor(() => {
-      expect(screen.getByText('File too large')).toBeInTheDocument();
-    });
-  });
-
-  it('shows "Upload failed" when fetch throws', async () => {
-    global.fetch = vi.fn().mockRejectedValue(new Error('Network error'));
-
-    render(<ImageUpload value="" onChange={vi.fn()} />);
-
-    const fileInput = document.getElementById('image-upload-button') as HTMLInputElement;
-    const file = new File(['content'], 'photo.png', { type: 'image/png' });
-    fireEvent.change(fileInput, { target: { files: [file] } });
-
-    await waitFor(() => {
-      expect(screen.getByText('Network error')).toBeInTheDocument();
-    });
   });
 });

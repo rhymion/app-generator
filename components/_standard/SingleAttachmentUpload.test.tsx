@@ -13,27 +13,18 @@ describe('SingleAttachmentUpload — mode="url" (cmd_776(3))', () => {
     vi.restoreAllMocks();
   });
 
-  it('renders upload button and default helper text', () => {
+  it('is a URL field: no upload button, default helper text asks for a URL', () => {
     render(<SingleAttachmentUpload mode="url" kind="file" value="" onChange={vi.fn()} />);
-    expect(screen.getByText('Upload')).toBeInTheDocument();
-    expect(screen.getByText('You can upload a file')).toBeInTheDocument();
+    expect(screen.queryByText('Upload')).not.toBeInTheDocument();
+    expect(document.querySelector('input[type="file"]')).toBeNull();
+    expect(screen.getByText('You can paste a URL')).toBeInTheDocument();
   });
 
-  it('calls onChange with the uploaded URL on successful upload', async () => {
+  it('calls onChange with the URL typed into the field', () => {
     const onChange = vi.fn();
-    global.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ url: 'https://cdn.example.com/uploaded.pdf' }),
-    } as Response);
-
     render(<SingleAttachmentUpload mode="url" kind="file" value="" onChange={onChange} />);
-    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
-    const file = new File(['content'], 'contract.pdf', { type: 'application/pdf' });
-    fireEvent.change(fileInput, { target: { files: [file] } });
-
-    await waitFor(() => {
-      expect(onChange).toHaveBeenCalledWith('https://cdn.example.com/uploaded.pdf');
-    });
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'https://example.com/contract.pdf' } });
+    expect(onChange).toHaveBeenCalledWith('https://example.com/contract.pdf');
   });
 
   it('renders a download link (not an <img>) once a file kind value is set', () => {

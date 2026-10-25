@@ -15,7 +15,8 @@ export type SingleAttachmentFk = {
 type SingleAttachmentUploadProps =
   | {
       /** A plain URL-string field (x-uri-kind: image | file, cmd_776(3)):
-       * value/onChange carry the URL directly, same contract as ImageUpload. */
+       * value/onChange carry the URL directly, same contract as ImageUpload. The value is a URL typed or
+       * pasted by the user; a file is uploaded through a direct-attachment field (mode 'fk') instead. */
       mode: 'url';
       kind: 'image' | 'file';
       value: string;
@@ -51,11 +52,7 @@ type SingleAttachmentUploadProps =
       helperText?: string;
     };
 
-const ACCEPT_URL: Record<'image' | 'file', string> = {
-  image: 'image/jpeg,image/png,image/gif,image/webp',
-  file: '.pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.zip,image/jpeg,image/png,image/gif,image/webp',
-};
-const ACCEPT_FK = ACCEPT_URL.file;
+const ACCEPT_FK = '.pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.zip,image/jpeg,image/png,image/gif,image/webp';
 
 function detectKind(file: File): SingleAttachmentDisplayKind {
   if (file.type.startsWith('image/')) return 'image';
@@ -65,7 +62,7 @@ function detectKind(file: File): SingleAttachmentDisplayKind {
 }
 
 export default function SingleAttachmentUpload(props: SingleAttachmentUploadProps) {
-  const { label = 'attachment', helperText = 'You can upload a file' } = props;
+  const { label = 'attachment', helperText = props.mode === 'url' ? 'You can paste a URL' : 'You can upload a file' } = props;
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const tf = useTranslations('Fields');
@@ -97,9 +94,7 @@ export default function SingleAttachmentUpload(props: SingleAttachmentUploadProp
 
       const data = await response.json();
 
-      if (props.mode === 'url') {
-        props.onChange(data.url);
-      } else {
+      if (props.mode === 'fk') {
         const attachment = await props.createAttachment(data.id, detectKind(file));
         props.onChange(attachment);
       }
@@ -122,20 +117,21 @@ export default function SingleAttachmentUpload(props: SingleAttachmentUploadProp
     }
   };
 
-  const accept = props.mode === 'url' ? ACCEPT_URL[props.kind] : ACCEPT_FK;
   const inputId = `single-attachment-upload-${label}`;
 
   return (
     <div style={{ margin: '16px 0' }}>
-      <input
-        accept={accept}
-        style={{ display: 'none' }}
-        id={inputId}
-        data-testid={`${inputId}-file`}
-        type="file"
-        onChange={handleFileUpload}
-        disabled={uploading}
-      />
+      {props.mode === 'fk' && (
+        <input
+          accept={ACCEPT_FK}
+          style={{ display: 'none' }}
+          id={inputId}
+          data-testid={`${inputId}-file`}
+          type="file"
+          onChange={handleFileUpload}
+          disabled={uploading}
+        />
+      )}
       {/* The Remove button is a SIBLING of this <label>, never a descendant --
           a clickable nested inside a <label for=...> forwards its click to
           the hidden file input (the same defect class cmd_776(4)'s
@@ -145,7 +141,8 @@ export default function SingleAttachmentUpload(props: SingleAttachmentUploadProp
         <label htmlFor={inputId} style={{ flex: 1 }}>
           <TextField
             label={tf(label)}
-            value={displayUrl ? displayName || displayUrl.split('/').slice(-1)[0] : ''}
+            value={props.mode === 'url' ? props.value : displayUrl ? displayName || displayUrl.split('/').slice(-1)[0] : ''}
+            onChange={props.mode === 'url' ? (e) => props.onChange(e.target.value) : undefined}
             fullWidth
             margin="normal"
             helperText={error || helperText}
@@ -153,8 +150,8 @@ export default function SingleAttachmentUpload(props: SingleAttachmentUploadProp
             slotProps={{
               htmlInput: { 'data-testid': `${inputId}-value` },
               input: {
-                readOnly: true,
-                endAdornment: (
+                readOnly: props.mode === 'fk',
+                endAdornment: props.mode === 'url' ? undefined : (
                   <span style={{ marginLeft: '8px', whiteSpace: 'nowrap' }}>
                     <button
                       type="button"
