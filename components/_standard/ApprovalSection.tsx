@@ -307,7 +307,16 @@ export default function ApprovalSection({ src, currentUserRoleIds, currentUserId
     <div style={{ marginTop: '1.5rem' }}>
       <h2>{t('approvalRequests')}</h2>
       {compareHref && (
-        <Button size="small" href={compareHref} data-testid="compare-with-current">
+        // A filled neutral button: reads as a control, but stays quieter than Submit.
+        <Button
+          size="small"
+          variant="contained"
+          color="inherit"
+          disableElevation
+          href={compareHref}
+          data-testid="compare-with-current"
+          sx={{ mb: 1, mr: 1 }}
+        >
           {tVersion('compareWithCurrent')}
         </Button>
       )}
