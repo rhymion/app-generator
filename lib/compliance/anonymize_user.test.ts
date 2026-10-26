@@ -57,6 +57,17 @@ describe('anonymizeUser related records', () => {
     expect(mocks.deleteStoredObject).toHaveBeenCalledWith(STORED_KEY);
   });
 
+  it('revokes the mobile sessions that are not yet revoked', async () => {
+    const first = new Date('2026-01-02T03:04:05Z');
+    mocks.userFindUnique.mockResolvedValue({ anonymized_at: first, invalidated_at: first, image_id: null });
+    const res = await anonymizeUser('u1');
+    expect(res.success).toBe(true);
+    expect(mocks.mobileSessionUpdateMany).toHaveBeenCalledWith({
+      where: { user_id: 'u1', revoked_at: null },
+      data: { revoked_at: first },
+    });
+  });
+
   it('keeps the first erasure time on a repeated call', async () => {
     const first = new Date('2026-01-02T03:04:05Z');
     mocks.userFindUnique.mockResolvedValue({ anonymized_at: first, invalidated_at: first, image_id: null });

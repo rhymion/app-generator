@@ -1,14 +1,15 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
-const { findUnique, updateMany, update, signMobileAccessToken } = vi.hoisted(() => ({
+const { findUnique, userFindUnique, updateMany, update, signMobileAccessToken } = vi.hoisted(() => ({
   findUnique: vi.fn(),
+  userFindUnique: vi.fn(),
   updateMany: vi.fn(),
   update: vi.fn(),
   signMobileAccessToken: vi.fn(),
 }));
 
 vi.mock('@/lib/prisma', () => ({
-  default: { mobile_session: { findUnique, updateMany, update } },
+  default: { mobile_session: { findUnique, updateMany, update }, user: { findUnique: userFindUnique } },
 }));
 // The real module pulls in next-auth; only the error shape matters here.
 vi.mock('@/lib/api-auth', () => {
@@ -56,6 +57,7 @@ const liveSession = {
 beforeEach(() => {
   vi.clearAllMocks();
   signMobileAccessToken.mockResolvedValue('access-token');
+  userFindUnique.mockResolvedValue({ anonymized_at: null });
 });
 
 // The Cypress example for a concurrent double refresh depends on request
@@ -94,5 +96,18 @@ describe('POST /api/mobile/auth/refresh reuse handling', () => {
     expect(res.status).toBe(200);
     expect((await res.json()).refresh_token).toBe('new-refresh-token');
     expect(update).not.toHaveBeenCalled();
+  });
+});
+
+describe('POST /api/mobile/auth/refresh erased users', () => {
+  it('answers 401 and issues nothing when the session owner is anonymized', async () => {
+    findUnique.mockResolvedValue(liveSession);
+    userFindUnique.mockResolvedValue({ anonymized_at: new Date() });
+
+    const res = await POST(refreshRequest('old-token'));
+
+    expect(res.status).toBe(401);
+    expect(updateMany).not.toHaveBeenCalled();
+    expect(signMobileAccessToken).not.toHaveBeenCalled();
   });
 });

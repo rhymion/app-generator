@@ -2152,6 +2152,45 @@ describe('API: {{ title }}', () => {
 {% endif %}
 {% if import_can_update %}
 
+    it('N10a CSV import refuses a declared Content-Type other than JSON or text/plain with 415', () => {
+      cy.request({
+        method: 'POST',
+        url: `{{ api_path }}/import`,
+        headers: { 'X-API-Key': TEST_API_KEY, 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'csv=&dryRun=true',
+        failOnStatusCode: false,
+      }).then((res) => {
+        expect(res.status).to.eq(415);
+        expect(res.body.errors[0].code).to.eq('UNSUPPORTED_MEDIA_TYPE');
+      });
+    });
+
+    it('N10b CSV import accepts the JSON body sent as text/plain (not refused on type)', () => {
+      cy.request({
+        method: 'POST',
+        url: `{{ api_path }}/import`,
+        headers: { 'X-API-Key': TEST_API_KEY, 'Content-Type': 'text/plain' },
+        body: JSON.stringify({ csv: '', dryRun: true }),
+        failOnStatusCode: false,
+      }).then((res) => {
+        expect(res.status).to.not.eq(415);
+        expect(res.body.errors?.[0]?.code).to.not.eq('UNSUPPORTED_MEDIA_TYPE');
+      });
+    });
+
+    it('N10c CSV import rejects CSV text containing a null byte with INVALID_CSV', () => {
+      cy.request({
+        method: 'POST',
+        url: `{{ api_path }}/import`,
+        headers: { 'X-API-Key': TEST_API_KEY },
+        body: { csv: 'a,b\n1,2\u00003\n', dryRun: true },
+        failOnStatusCode: false,
+      }).then((res) => {
+        expect(res.status).to.eq(400);
+        expect(res.body.errors[0].code).to.eq('INVALID_CSV');
+      });
+    });
+
     it('N11 CSV import round-trip: re-importing an exported row matches it via the natural key with zero errors (dry run)', () => {
       cy.task('db:populate{{ pascal }}', 1).then(() => {
         cy.request({ url: `{{ api_path }}/export`, headers: { 'X-API-Key': TEST_API_KEY } }).then((exportRes) => {

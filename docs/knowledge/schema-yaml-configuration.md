@@ -252,6 +252,12 @@ column or an unknown name in it is a build error. A column is required when Pris
 default, or when its entry under `properties:` sets `_required: true` (the way to require a column that has a default or
 is nullable).
 
+A to-one relation (many-to-one or one-to-one) named in `required:` is checked against its foreign key column in Prisma,
+because the column's nullability already decides whether the relation is required. If the foreign key is nullable, or the
+relation has no foreign key on this model (the inverse side of a one-to-one), the entry is a build error: Prisma does not
+require it, so the entry would disagree with the database. If the foreign key is NOT NULL the entry is redundant and the
+build prints a warning. Array relations are not checked this way.
+
 The set of scalar entries is also the **source of truth for which scalar columns are exposed at
 all** — Prisma having a column does not mean it appears in the generated form/API unless it is
 named under `properties:`. This is an allowlist: a column that is not named is absent from the
@@ -2037,6 +2043,12 @@ is not `false` and it either has no `x-display` or declares an `x-display.table`
 `x-generate.list: false`, an `x-display` without `table` (chart only), `x-internal` entities and
 child-only entities are not asked for a primary column. There is no exception by entity name or
 role: `role`, `organization` and `permission` declare theirs like any other entity.
+
+The shared list components (`DataGridClient`, `CardListClient`, `ResponsiveListClient`) have no
+default for `primaryField`: a generated list page passes the declared primary column explicitly.
+A caller that omits it gets no link column in the table and the record id as the card title. A
+parent-embedded bridge grid passes the child's own primary column, and none when the child
+declares none.
 
 The primary column is the list's link column and the card title, and the generated UI and API
 specs assert it. Every `x-display.table` column is also exposed for filtering and sorting, so the

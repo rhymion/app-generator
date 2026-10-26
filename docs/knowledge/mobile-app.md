@@ -655,8 +655,10 @@ The mobile app signs in with email and password and holds an access/refresh toke
 The access token is a 15-minute HS256 JWT signed with `AUTH_SECRET` and carrying `type: "mobile_access"`;
 that claim is the only thing separating it from a web session JWT, so every verification path checks it.
 Refresh tokens last 30 days and are stored as a keyed HMAC, never in plaintext (`mobile_session` table).
-Access-token verification is stateless: a token issued just before sign-out or revocation stays valid for
-the rest of its 15 minutes.
+Access-token verification does not read the `mobile_session` row: a token issued just before sign-out or revocation stays valid for
+the rest of its 15 minutes. It does read the user row (one primary-key lookup), so a token of an anonymized user is
+rejected at once. `anonymizeUser()` also sets `revoked_at` on the user's sessions, and the refresh route answers 401
+for an anonymized user.
 
 The app keeps the refresh token in `expo-secure-store` (`lib/token-storage.ts`). On a device with biometrics or a
 PIN enrolled, a standalone or development build locks it behind that check (`requireAuthentication`), and the

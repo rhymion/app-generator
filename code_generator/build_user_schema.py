@@ -602,6 +602,42 @@ def _annotate_parent_fks(entry: dict, entity_key: str, prisma_models: dict) -> d
     return {**entry, "properties": new_props} if changed else entry
 
 
+def _check_required_to_one_relation(entity_key: str, name: str, model: "PrismaModel") -> None:
+    """Check a to-one relation (many-to-one or one-to-one) named in `required:`.
+
+    Whether such a relation is required is decided by the nullability of its
+    foreign key column in Prisma, so a `required:` entry can only agree with
+    it or contradict it. A relation whose foreign key is nullable (or that has
+    no foreign key on this side, as the inverse side of a one-to-one) cannot be
+    guaranteed present, so the entry is an error. A relation whose foreign key
+    is already NOT NULL makes the entry redundant, which is only a warning.
+    Array relations are not checked here.
+    """
+    pf = model.fields.get(name)
+    if pf is None or pf.is_list or not pf.is_relation_object:
+        return
+    fk_cols = [model.fields[c] for c in pf.relation_fk_fields if c in model.fields]
+    if not fk_cols or any(c.nullable for c in fk_cols):
+        why = (
+            "has no foreign key column on this model"
+            if not fk_cols
+            else "has a nullable foreign key column "
+            f"({', '.join(c.name for c in fk_cols if c.nullable)})"
+        )
+        raise UserSchemaError(
+            f"ERROR: '{entity_key}.required' names '{name}', a to-one relation "
+            f"that {why}, so Prisma does not require it. Remove '{name}' from "
+            "'required:', or make the foreign key column non-nullable in "
+            "prisma/schema.prisma."
+        )
+    warnings.warn(
+        f"'{entity_key}.required' names '{name}', which is already required "
+        f"because its foreign key column ({', '.join(c.name for c in fk_cols)}) "
+        "is NOT NULL in Prisma. Remove the redundant entry.",
+        stacklevel=2,
+    )
+
+
 def _check_required_names(
     entity_key: str,
     entry: dict,
@@ -622,6 +658,7 @@ def _check_required_names(
     embeds = entry.get("properties") or {}
     for name in names:
         if name in embeds:
+            _check_required_to_one_relation(entity_key, name, model)
             continue
         pf = model.fields.get(name)
         if pf is not None and not _is_relation_field(pf, prisma_models):
