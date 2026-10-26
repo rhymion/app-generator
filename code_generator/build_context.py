@@ -2437,6 +2437,17 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     else:
         bridge_pre_delete_select = None
         bridge_post_delete_cleanups = ''
+    # Deleting an owner deletes its `attachable` bridge row; the database then only unlinks the
+    # attachments (onDelete: SetNull). The delete service removes them first (rows in the same
+    # transaction, stored files after commit) -- see lib/attachment/owner_cleanup.ts.
+    bridge_attachment_cleanup_props = [r['prop_name'] for r in bridge_cleanup_rels if r['target'] == 'attachable']
+    bridge_attachment_cleanup = bool(bridge_attachment_cleanup_props)
+    if bridge_attachment_cleanup:
+        bridge_post_delete_cleanups = '\n'.join(
+            f'    _removedAttachmentKeys.push(...(await deleteBridgeAttachments(tx, _bridgeRows'
+            f'.map((r) => r.{prop}))));'
+            for prop in bridge_attachment_cleanup_props
+        ) + '\n' + bridge_post_delete_cleanups
 
     parent_rels_raw = [r for r in _all_parent_rels_raw if r['prop_name'] not in oto_prop_names]
     # relationship_targets: deduplicated by target for import / type purposes
@@ -4889,6 +4900,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         bridge_cleanup_rels=bridge_cleanup_rels,
         bridge_pre_delete_select=bridge_pre_delete_select,
         bridge_post_delete_cleanups=bridge_post_delete_cleanups,
+        bridge_attachment_cleanup=bridge_attachment_cleanup,
         has_commentable=bool(commentable_rel),
         comment_has_mention=comment_has_mention,
         commentable_rel_name=commentable_rel['relation_name'] if commentable_rel else None,

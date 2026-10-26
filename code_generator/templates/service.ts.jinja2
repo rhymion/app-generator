@@ -484,6 +484,9 @@ export async function delete{{ parent_pascal }}(actorId: string | null, ids: str
 {% if reservation_mutation_guard_delete %}
 {{ reservation_mutation_guard_delete }}
 {% endif %}
+{% if bridge_attachment_cleanup %}
+  const _removedAttachmentKeys: string[] = [];
+{% endif %}
   await prisma.$transaction(async (tx) => {
     // cmd_923b: fetched once, before any write -- reused for both the
     // (optional) post-approval delete guard and the (always emitted)
@@ -528,11 +531,18 @@ export async function delete{{ parent_pascal }}(actorId: string | null, ids: str
       await afterDelete(tx, id);
     }
   });
+{% if bridge_attachment_cleanup %}
+  // The rows are gone and the delete committed; remove the stored files too.
+  await removeStoredObjects(_removedAttachmentKeys);
+{% endif %}
 }
 {% else %}
 export async function delete{{ parent_pascal }}(ids: string[]): Promise<void> {
 {% if reservation_mutation_guard_delete %}
 {{ reservation_mutation_guard_delete }}
+{% endif %}
+{% if bridge_attachment_cleanup %}
+  const _removedAttachmentKeys: string[] = [];
 {% endif %}
   // cmd_923b: wrapped in a transaction (previously several independent
   // prisma.* calls with no rollback relationship between them) so
@@ -572,6 +582,10 @@ export async function delete{{ parent_pascal }}(ids: string[]): Promise<void> {
       await afterDelete(tx, id);
     }
   });
+{% if bridge_attachment_cleanup %}
+  // The rows are gone and the delete committed; remove the stored files too.
+  await removeStoredObjects(_removedAttachmentKeys);
+{% endif %}
 }
 {% endif %}
 {% endif %}

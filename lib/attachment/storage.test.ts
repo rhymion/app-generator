@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtemp, readFile, rm, readdir } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { Readable } from 'node:stream';
 
 const blob = vi.hoisted(() => ({
   put: vi.fn(),
@@ -16,6 +17,7 @@ const gcs = vi.hoisted(() => ({
   del: vi.fn(),
   exists: vi.fn(),
   getSignedUrl: vi.fn(),
+  createReadStream: vi.fn(),
   files: [] as string[],
 }));
 vi.mock('@google-cloud/storage', () => ({
@@ -24,7 +26,7 @@ vi.mock('@google-cloud/storage', () => ({
       return {
         file: (key: string) => {
           gcs.files.push(key);
-          return { save: gcs.save, delete: gcs.del, exists: gcs.exists, getSignedUrl: gcs.getSignedUrl };
+          return { save: gcs.save, delete: gcs.del, exists: gcs.exists, getSignedUrl: gcs.getSignedUrl, createReadStream: gcs.createReadStream };
         },
       };
     }
@@ -164,27 +166,26 @@ describe('GCS backend', () => {
     process.env.GCS_BUCKET_NAME = 'bucket';
   });
 
-  it('saves without an ACL and signs a short-lived URL that carries the decrypted file name', async () => {
+  it('saves without an ACL and streams the object with the decrypted file name only in a header', async () => {
     const key = newStorageKey();
     await putStoredObject(key, Buffer.from('x'), 'application/pdf');
     expect(gcs.save).toHaveBeenCalledWith(expect.any(Buffer), { metadata: { contentType: 'application/pdf' } });
 
     gcs.exists.mockResolvedValue([true]);
-    gcs.getSignedUrl.mockResolvedValue(['https://storage.googleapis.com/bucket/' + key + '?X-Goog-Signature=sig']);
+    gcs.createReadStream.mockReturnValue(Readable.from([Buffer.from('gcs-bytes')]));
     const res = await serveStoredObject(key, SERVE);
-    expect(res?.status).toBe(302);
-    expect(res?.headers.get('location')).toContain('X-Goog-Signature');
-    const config = gcs.getSignedUrl.mock.calls[0][0];
-    expect(config).toMatchObject({
-      version: 'v4',
-      action: 'read',
-      responseType: 'application/pdf',
-      responseDisposition: SERVE.disposition,
-    });
-    expect(config.expires - Date.now()).toBeLessThanOrEqual(5 * 60 * 1000);
+    expect(res?.status).toBe(200);
+    expect(res?.headers.get('location')).toBeNull();
+    expect(res?.headers.get('content-disposition')).toBe(SERVE.disposition);
+    expect(res?.headers.get('content-type')).toBe('application/pdf');
+    expect(res?.headers.get('x-content-type-options')).toBe('nosniff');
+    expect(res?.headers.get('cache-control')).toBe('private, no-store');
+    expect(Buffer.from(await res!.arrayBuffer()).toString()).toBe('gcs-bytes');
+    // No signed URL (and so no file name in a query string) is ever built.
+    expect(gcs.getSignedUrl).not.toHaveBeenCalled();
   });
 
-  it('does not sign a URL for an object that does not exist', async () => {
+  it('answers null for an object that does not exist', async () => {
     gcs.exists.mockResolvedValue([false]);
     expect(await serveStoredObject(newStorageKey(), SERVE)).toBeNull();
     expect(gcs.getSignedUrl).not.toHaveBeenCalled();
