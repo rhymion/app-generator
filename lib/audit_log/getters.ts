@@ -14,6 +14,9 @@ import {
 const SORTABLE_FIELDS = new Set<string>(['id', 'target_table', 'target_id', 'action', 'actor_user_id', 'created_at']);
 const FILTERABLE_FIELDS = new Set<string>(['id', 'target_table', 'target_id', 'action', 'actor_user_id', 'created_at']);
 
+// The actor relation exposes only what the UI renders (the display name).
+const ACTOR_USER_SELECT = { id: true, name: true } as const;
+
 /** Build the where clauses that enforce read scope. */
 function buildAuditLogAccessWhere(
   perms: RichPermissions,
@@ -32,7 +35,7 @@ export async function getAuditLogDetail(id: string): Promise<AuditLogDetail | nu
   const auditLog = await prisma.audit_log.findFirst({
     where: { id },
     include: {
-      actor_user: true,
+      actor_user: { select: ACTOR_USER_SELECT },
     },
   });
 
@@ -83,7 +86,7 @@ export async function getAuditLogPage(
 
   const [rowsRaw, total] = await prisma.$transaction([
     prisma.audit_log.findMany({ where, orderBy, skip, take,
-      include: { actor_user: true },
+      include: { actor_user: { select: ACTOR_USER_SELECT } },
     }),
     prisma.audit_log.count({ where }),
   ]);

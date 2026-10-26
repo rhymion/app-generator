@@ -1,5 +1,6 @@
 import type { ModelPermissions } from '@/lib/authz';
-import type { User } from '@/lib/user/types';
+
+export type AuditLogActor = { id: string; name: string };
 
 export type AuditLog = {
   id: string;
@@ -7,7 +8,7 @@ export type AuditLog = {
   target_id: string | null;
   action: string;
   actor_user_id: string | null;
-  actor_user?: User | null;
+  actor_user?: AuditLogActor | null;
   metadata?: Record<string, unknown> | null;
   created_at: Date | string;
 };
@@ -32,7 +33,7 @@ export type FormViewProps = Readonly<{
     target_id: string | null;
     action: string;
     actor_user_id: string | null;
-    actor_user?: User | null;
+    actor_user?: AuditLogActor | null;
     created_at: Date | string;
     metadata?: Record<string, unknown> | null;
   };
