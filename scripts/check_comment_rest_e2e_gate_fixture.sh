@@ -31,6 +31,9 @@
 # `npm run test:e2e:build` (docker up, generate-code, db:push, seed, next build)
 # and scripts/run-e2e.js (start-server-and-test + cypress).
 #
+# The generated entity spec of cr_note (cypress/e2e/api/cr_note.cy.ts) runs too: its cross-organization
+# cases include the foreign-key write checks (G3.8-G3.11), which the default schema cannot produce.
+#
 # Usage: bash scripts/check_comment_rest_e2e_gate_fixture.sh
 # Environment: GATE_KEEP_BUILD_DIR=1 keeps the copy for inspection;
 #              GATE_SPEC='<cypress spec glob>' narrows the specs (default: all of them).
@@ -141,7 +144,7 @@ NODE_ENV=test npm run test:e2e:build
 echo "-- cypress: fixture specs --"
 set +e
 NODE_ENV=test PAYMENT_FAKE_STRIPE=1 node scripts/run-e2e.js test:e2e:start \
-  "cypress run --browser chromium --spec \"${GATE_SPEC:-cypress/e2e/comment_rest_e2e_gate/**/*.cy.ts}\""
+  "cypress run --browser chromium --spec \"${GATE_SPEC:-cypress/e2e/comment_rest_e2e_gate/**/*.cy.ts,cypress/e2e/api/cr_note.cy.ts}\""
 status=$?
 set -e
 

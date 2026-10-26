@@ -9,6 +9,13 @@ export async function add{{ parent_pascal }}(actorId: string{% if parent_params_
     }
   }
 {% endif %}
+{% if fk_write_checks %}
+  await assertFkReferencesUsable(actorId, [
+{% for c in fk_write_checks %}
+    { model: '{{ c.target }}', id: {{ c.var }}, load: (_id) => prisma.{{ c.target }}.findUnique({ where: { id: _id } }) as Promise<Record<string, unknown> | null> },
+{% endfor %}
+  ]);
+{% endif %}
   let result;
   let _idempotentReplay = false;
   try {
@@ -250,6 +257,14 @@ export async function update{{ parent_pascal }}(actorId: string, id: string{% if
       throw new AppError('NOT_FOUND', 'Not found');
     }
   }
+{% endif %}
+{% if fk_write_checks %}
+  const _fkPrevious = await prisma.{{ model }}.findUnique({ where: { id }, select: { {% for c in fk_write_checks %}{{ c.prop }}: true, {% endfor %}} });
+  await assertFkReferencesUsable(actorId, [
+{% for c in fk_write_checks %}
+    { model: '{{ c.target }}', id: {{ c.var }}, previousId: _fkPrevious?.{{ c.prop }}, load: (_id) => prisma.{{ c.target }}.findUnique({ where: { id: _id } }) as Promise<Record<string, unknown> | null> },
+{% endfor %}
+  ]);
 {% endif %}
 {% if is_self_only %}
   // x-self-only: verify ownership at the actual write, not just at the

@@ -3264,6 +3264,27 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     org_id_client_writable = bool(
         should_filter_by_org and _org_fk_prop and _org_fk_prop not in _ro_client_exclude
     )
+    # fk_write_checks: every client-writable FK whose target is an
+    # organization-scoped entity. service.ts verifies, before the value is
+    # written, that the referenced row sits in an organization the actor
+    # belongs to and that the actor may read it (lib/_fk_reference.ts).
+    # Targets without an organization_id column (and organization/user
+    # themselves) are system-global and are not checked here.
+    fk_write_checks = []
+    _client_var_by_prop = {p['prop']: p['var_name'] for p in client_prop_infos}
+    for _r in _all_parent_rels_raw:
+        _t = _r['target']
+        if _r['prop_name'] not in _client_var_by_prop or _t in ('organization', 'user'):
+            continue
+        _t_def = schema['definitions'].get(f'__{_t}', {}) or schema['definitions'].get(_t, {})
+        _t_org = _t_def.get('properties', {}).get('organization_id')
+        if _t_org is None:
+            continue
+        fk_write_checks.append({
+            'prop': _r['prop_name'],
+            'var': _client_var_by_prop[_r['prop_name']],
+            'target': _t,
+        })
     # x-server-value fields never go through the generic "just write the client
     # value" line below — server_value_data_lines (built further down) supplies
     # a dedicated, server-resolved line for each of them instead.
@@ -4729,6 +4750,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         relationship_targets=relationship_targets,
         should_filter_by_org=should_filter_by_org,
         org_id_client_writable=org_id_client_writable,
+        fk_write_checks=fk_write_checks,
         org_relationship_optional=org_relationship_optional,
         is_self_only=is_self_only,
         self_only_admin_bypass=self_only_admin_bypass,
