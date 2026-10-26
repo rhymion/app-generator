@@ -1,0 +1,42 @@
+# check_handwritten_routes_allowlist.yaml -- exemptions for
+# code_generator/check_handwritten_routes.py
+#
+# Each entry names a hand-written route `path` (POSIX, relative to the project
+# root), the guards it is excused from (`skip`: `permission` and/or
+# `rate-limit`) and a required `reason`. An entry that no longer matches a
+# flagged route is reported as stale. Consumer apps keep their own copy and
+# pass it with `--allowlist`.
+#
+# These entries cover the routes this repository ships by hand. Several rely
+# on a per-user ownership check or a credential in the request instead of a
+# role permission; the ones marked "no route-level rate limit" are accepted
+# gaps, not endorsements -- remove the entry when the route gains a limiter.
+
+exemptions:
+  - path: app/api/approval_request/[id]/approve/route.ts
+    skip: [permission, rate-limit]
+    reason: The caller must be a listed approver of the request (role and organization check in the route); no route-level rate limit.
+  - path: app/api/approval_request/[id]/reject/route.ts
+    skip: [permission, rate-limit]
+    reason: Same approver check as approve; no route-level rate limit.
+  - path: app/api/approval_request/[id]/withdraw/route.ts
+    skip: [permission, rate-limit]
+    reason: Only the requester may withdraw their own request; no route-level rate limit.
+  - path: app/api/auth/register/route.ts
+    skip: [permission]
+    reason: Public sign-up; rate limited per IP (auth:register).
+  - path: app/api/mobile/auth/refresh/route.ts
+    skip: [permission, rate-limit]
+    reason: The refresh token is the credential and is rotated on use; no route-level rate limit.
+  - path: app/api/mobile/auth/sessions/[id]/route.ts
+    skip: [permission, rate-limit]
+    reason: Revokes only the calling user's own mobile session; no route-level rate limit.
+  - path: app/api/mobile/auth/token/route.ts
+    skip: [permission]
+    reason: Sign-in endpoint; credentials in the body are the check, and it is rate limited (mobile:auth:token).
+  - path: app/api/notifications/mark-read/route.ts
+    skip: [permission, rate-limit]
+    reason: Updates only the signed-in user's own notifications; no route-level rate limit.
+  - path: app/api/test-utils/reset-caches/route.ts
+    skip: [permission, rate-limit]
+    reason: Disabled unless a test token is configured; clears in-process caches only.
