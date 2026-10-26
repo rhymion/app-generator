@@ -4078,6 +4078,16 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         f"{p['var_name']} ?? null" if _is_nullable(p['def']) else p['var_name']
         for p in client_prop_infos
     )
+    # Update-side counterpart for write-only fields (password, api_key, ...):
+    # an omitted field must leave the stored value unchanged, as it does on the
+    # Server Action path. `?? null` would reach the service as an explicit
+    # clear; '' is the service's "no new value" sentinel (see
+    # _normalized_value_expr), so an omitted field is passed as ''.
+    parent_service_args_update = ', '.join(
+        f"{p['var_name']} ?? ''" if is_write_only_prop(p['def'])
+        else (f"{p['var_name']} ?? null" if _is_nullable(p['def']) else p['var_name'])
+        for p in client_prop_infos
+    )
     child_service_args = ', '.join(
         f"{c['child_var']}_ids ?? []" if c['use_connect'] else f"{c['property_name']} ?? []"
         for c in write_ch
@@ -4687,7 +4697,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     service_args_for_create = f"actorId, {parent_service_args}" + (
         f", {child_service_args}" if child_service_args else ""
     ) + (f", {_flatten_null_args}" if _flatten_null_args else "")
-    service_args_for_update = f"actorId, id, {parent_service_args}" + (
+    service_args_for_update = f"actorId, id, {parent_service_args_update}" + (
         f", {child_service_args_update}" if child_service_args_update else ""
     ) + (f", {_flatten_null_args}" if _flatten_null_args else "")
 
