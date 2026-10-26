@@ -3,9 +3,8 @@ All notable changes to this project will be documented in this file.
 The format is based on Keep a Changelog (https://keepachangelog.com/),
 and this project adheres to Semantic Versioning (https://semver.org/).
 
-## [Unreleased]
-
-### Fixed
+## [6.0.1] - 2026-10-26
+### Security
 - **Audit log actor relation.** Audit log entries no longer carry unrelated user fields in their actor relation.
 - **Foreign-key writes.** A foreign-key write now requires the referenced row to be in the caller's organization and readable by the caller.
 
