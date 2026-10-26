@@ -9,14 +9,25 @@
     "created_cr_split_creates cr_split_create[] @relation(\"CrSplitCreateCreator\")",
     "updated_cr_split_creates cr_split_create[] @relation(\"CrSplitCreateUpdater\")",
     "created_cr_split_reads cr_split_read[] @relation(\"CrSplitReadCreator\")",
-    "updated_cr_split_reads cr_split_read[] @relation(\"CrSplitReadUpdater\")"
+    "updated_cr_split_reads cr_split_read[] @relation(\"CrSplitReadUpdater\")",
+    "created_cr_notes cr_note[] @relation(\"CrNoteCreator\")",
+    "updated_cr_notes cr_note[] @relation(\"CrNoteUpdater\")",
+    "created_cr_refs cr_ref[] @relation(\"CrRefCreator\")",
+    "updated_cr_refs cr_ref[] @relation(\"CrRefUpdater\")",
+    "created_cr_groups cr_group[] @relation(\"CrGroupCreator\")",
+    "updated_cr_groups cr_group[] @relation(\"CrGroupUpdater\")",
+    "created_cr_group_items cr_group_item[] @relation(\"CrGroupItemCreator\")",
+    "updated_cr_group_items cr_group_item[] @relation(\"CrGroupItemUpdater\")"
   ],
   "organization": [
     "cr_tickets cr_ticket[]",
     "cr_assets cr_asset[]",
     "cr_splits cr_split[]",
     "cr_split_creates cr_split_create[]",
-    "cr_split_reads cr_split_read[]"
+    "cr_split_reads cr_split_read[]",
+    "cr_notes cr_note[]",
+    "cr_refs cr_ref[]",
+    "cr_groups cr_group[]"
   ],
   "commentable": [
     "cr_ticket cr_ticket?"

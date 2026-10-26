@@ -81,6 +81,30 @@ describe('API: Audit Log', () => {
     });
   });
 
+  describe('Actor relation exposes only the display fields', () => {
+    const ACTOR_KEYS = ['id', 'name'];
+
+    it('8.1 list and detail return only id and name for the actor to an audit_log.read-only user', () => {
+      cy.task<any[]>('db:populateAuditLogFull', 1).then((records) => {
+        cy.task<string>('db:createApiUserWithPermission', {
+          entityName: 'audit_log',
+          flags: { read: true },
+          label: 'auditor',
+        }).then((readerKey) => {
+          cy.request({ url: API_BASE, headers: { 'X-API-Key': readerKey } }).then((res) => {
+            expect(res.status).to.eq(200);
+            expect(res.body.rows).to.have.length(1);
+            expect(Object.keys(res.body.rows[0].actor_user).sort()).to.deep.eq(ACTOR_KEYS);
+          });
+          cy.request({ url: `${API_BASE}/${records[0].id}`, headers: { 'X-API-Key': readerKey } }).then((res) => {
+            expect(res.status).to.eq(200);
+            expect(Object.keys(res.body.actor_user).sort()).to.deep.eq(ACTOR_KEYS);
+          });
+        });
+      });
+    });
+  });
+
   describe('Permission errors', () => {
     it('7.1 returns 4xx for GET list when permission denied', () => {
       cy.task<string>('db:createLimitedApiUser', 'audit_log').then((limitedKey) => {
