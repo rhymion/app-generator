@@ -4,6 +4,16 @@ The format is based on Keep a Changelog (https://keepachangelog.com/),
 and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
+### Security
+- **Sessions and tokens issued before an erasure stop working** (Issue #1061). `anonymizeUser()` now revokes the user's mobile sessions. The web session (`jwt()` callback), the mobile access token verification and `POST /api/mobile/auth/refresh` reject a user whose `anonymized_at` is set. Mobile access-token verification now makes one primary-key lookup of the user per request.
+- **CSV import route checks the request Content-Type and rejects null bytes** (Issue #1107). `POST /api/<entity>/import` answers HTTP 415 (`UNSUPPORTED_MEDIA_TYPE`) unless the request is `application/json` or `text/plain`, and HTTP 400 (`INVALID_CSV`) when the CSV text contains a null byte. CSV files picked in the import modal are unaffected, whatever their file type. See `docs/knowledge/csv-import-request-checks.md`.
+
+### Added
+- **Static check for hand-written API routes** (Issue #1122). `npm run check:handwritten-routes` (`code_generator/check_handwritten_routes.py`) scans `app/api/**/route.ts` files the generator did not write and flags one that writes without a permission-check call or without a rate-limiter call. Exemptions live in `code_generator/check_handwritten_routes_allowlist.yaml` with a required reason. See `docs/knowledge/multi-tenancy-and-permissions.md`.
+
+### Changed
+- **Entity-level `required:` is validated for to-one relations** (Issue #1083). Naming a many-to-one or one-to-one relation whose foreign key is nullable (or has no foreign key on the model) is now a build error, since Prisma does not require it. Naming one whose foreign key is NOT NULL prints a warning that the entry is redundant. Array relations are unchanged.
+- **Shared list components no longer default `primaryField` to `'name'`** (Issue #837). `DataGridClient`, `CardListClient` and `ResponsiveListClient` take the primary column only from the caller; when omitted, the table has no link column and the card title is the record id. Generated list pages already pass the declared primary column, and the parent-embedded bridge grid now passes the child's own primary column (none when the child declares none). A hand-written caller that relied on the default must pass `primaryField`.
 
 ## [6.0.0] - 2026-10-25
 ### Breaking changes
