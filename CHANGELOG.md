@@ -5,6 +5,10 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- **Audit log actor relation.** Audit log entries no longer carry unrelated user fields in their actor relation.
+- **Foreign-key writes.** A foreign-key write now requires the referenced row to be in the caller's organization and readable by the caller.
+
 ## [6.0.0] - 2026-10-25
 ### Breaking changes
 - **Existing applications migrate stored files once.** An application that already holds attachments runs a one-time migration of its stored files and adds the two attachment columns `uploader_id` and `uploader_organization_id`. The steps are in `docs/knowledge/attachment-storage.md`.
