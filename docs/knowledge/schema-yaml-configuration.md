@@ -252,6 +252,12 @@ column or an unknown name in it is a build error. A column is required when Pris
 default, or when its entry under `properties:` sets `_required: true` (the way to require a column that has a default or
 is nullable).
 
+A to-one relation (many-to-one or one-to-one) named in `required:` is checked against its foreign key column in Prisma,
+because the column's nullability already decides whether the relation is required. If the foreign key is nullable, or the
+relation has no foreign key on this model (the inverse side of a one-to-one), the entry is a build error: Prisma does not
+require it, so the entry would disagree with the database. If the foreign key is NOT NULL the entry is redundant and the
+build prints a warning. Array relations are not checked this way.
+
 The set of scalar entries is also the **source of truth for which scalar columns are exposed at
 all** — Prisma having a column does not mean it appears in the generated form/API unless it is
 named under `properties:`. This is an allowlist: a column that is not named is absent from the

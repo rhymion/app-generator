@@ -107,6 +107,21 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
+    // The CSV travels as the `csv` string of a JSON body (the import modal and
+    // API clients send `application/json`; `text/plain` is accepted for clients
+    // that post the same JSON without a JSON header). Any other declared type
+    // is refused before the body is read.
+    const contentType = (request.headers.get('content-type') ?? '').split(';')[0].trim().toLowerCase();
+    if (contentType !== 'application/json' && contentType !== 'text/plain') {
+      return NextResponse.json(
+        {
+          summary: { total: 0, succeeded: 0, failed: 0, dryRun: true },
+          errors: [{ row: 0, code: 'UNSUPPORTED_MEDIA_TYPE', message: 'Content-Type must be application/json.' }],
+        } satisfies ImportResult,
+        { status: 415 },
+      );
+    }
+
     const body = await request.json();
     const csvRaw = typeof body?.csv === 'string' ? body.csv : '';
     const dryRun = body?.dryRun !== false;
@@ -117,6 +132,16 @@ export async function POST(request: NextRequest) {
         {
           summary: { total: 0, succeeded: 0, failed: 0, dryRun },
           errors: [{ row: 0, code: 'FILE_TOO_LARGE', message: `CSV exceeds ${MAX_IMPORT_BYTES} bytes` }],
+        } satisfies ImportResult,
+        { status: 400 },
+      );
+    }
+    // A NUL byte never appears in CSV text; it marks binary content sent as CSV.
+    if (csvRaw.includes('\u0000')) {
+      return NextResponse.json(
+        {
+          summary: { total: 0, succeeded: 0, failed: 0, dryRun },
+          errors: [{ row: 0, code: 'INVALID_CSV', message: 'CSV contains a null byte; send CSV text only.' }],
         } satisfies ImportResult,
         { status: 400 },
       );
