@@ -7,8 +7,8 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 ### Security
 - **Sessions and tokens issued before an erasure stop working** (Issue #1061). `anonymizeUser()` now revokes the user's mobile sessions. The web session (`jwt()` callback), the mobile access token verification and `POST /api/mobile/auth/refresh` reject a user whose `anonymized_at` is set. Mobile access-token verification now makes one primary-key lookup of the user per request.
 - **CSV import route checks the request Content-Type and rejects null bytes** (Issue #1107). `POST /api/<entity>/import` answers HTTP 415 (`UNSUPPORTED_MEDIA_TYPE`) unless the request is `application/json` or `text/plain`, and HTTP 400 (`INVALID_CSV`) when the CSV text contains a null byte. CSV files picked in the import modal are unaffected, whatever their file type. See `docs/knowledge/csv-import-request-checks.md`.
-
 - **Slow-query warning log no longer prints bound parameter values** (Issue #1172). It reports only the number of parameters.
+
 ### Added
 - **`VersionHistory` can drop its New version button.** `props: {showNewVersionLink: false}` on the identity's `VersionHistory` entry in `x-custom-components` hides the button, for an identity whose own component starts new versions. On by default. See `docs/knowledge/schema-yaml-configuration.md`.
 - **Static check for hand-written API routes** (Issue #1122). `npm run check:handwritten-routes` (`code_generator/check_handwritten_routes.py`) scans `app/api/**/route.ts` files the generator did not write and flags one that writes without a permission-check call or without a rate-limiter call. Exemptions live in `code_generator/check_handwritten_routes_allowlist.yaml` with a required reason. See `docs/knowledge/multi-tenancy-and-permissions.md`.
