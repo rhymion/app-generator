@@ -393,7 +393,9 @@ def test_version_history_component_links_to_the_new_version_screen():
         'parent': 'product_version', 'parent_pascal': 'ProductVersion', 'identity': 'product',
         'number': 'version_no', 'children': [],
     })
-    assert 'newVersionHref={`/product_version/new?new_version_of=${encodeURIComponent(src.id)}`}' in comp
+    assert 'newVersionHref={showNewVersionLink ? `/product_version/new?new_version_of=${encodeURIComponent(src.id)}` : undefined}' in comp
+    # On by default; `props: {showNewVersionLink: false}` in x-custom-components turns the button off.
+    assert 'showNewVersionLink = true' in comp
 
 
 def test_version_history_read_reports_whether_the_caller_may_create_a_version():

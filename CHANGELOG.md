@@ -4,6 +4,11 @@ The format is based on Keep a Changelog (https://keepachangelog.com/),
 and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
+### Added
+- **`VersionHistory` can drop its New version button.** `props: {showNewVersionLink: false}` on the identity's `VersionHistory` entry in `x-custom-components` hides the button, for an identity whose own component starts new versions. On by default. See `docs/knowledge/schema-yaml-configuration.md`.
+
+### Changed
+- **"Compare with current version" looks like a button.** On a draft version's approval section the link is now a filled neutral button (theme grey), quieter than Submit, instead of plain text.
 
 ## [6.0.0] - 2026-10-25
 ### Breaking changes
