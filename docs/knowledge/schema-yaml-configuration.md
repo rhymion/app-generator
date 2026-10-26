@@ -2042,6 +2042,12 @@ is not `false` and it either has no `x-display` or declares an `x-display.table`
 child-only entities are not asked for a primary column. There is no exception by entity name or
 role: `role`, `organization` and `permission` declare theirs like any other entity.
 
+The shared list components (`DataGridClient`, `CardListClient`, `ResponsiveListClient`) have no
+default for `primaryField`: a generated list page passes the declared primary column explicitly.
+A caller that omits it gets no link column in the table and the record id as the card title. A
+parent-embedded bridge grid passes the child's own primary column, and none when the child
+declares none.
+
 The primary column is the list's link column and the card title, and the generated UI and API
 specs assert it. Every `x-display.table` column is also exposed for filtering and sorting, so the
 Prisma model needs an `@@index` on it (`python3 scripts/add_required_indexes.py` adds them).

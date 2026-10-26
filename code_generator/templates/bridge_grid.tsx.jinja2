@@ -72,6 +72,9 @@ export default function {{ child_pascal }}BridgeGrid({ bridgeId, parentType, par
           removeAction={remove{{ child_pascal }}}
           entityLabel={title}
           displayFields={[{{ display_fields }}]}
+{% if primary_field %}
+          primaryField="{{ primary_field }}"
+{% endif %}
           permissions={{ '{{' }} create: false, read: true, update: !readOnly, delete: !readOnly {{ '}}' }}
           openLinksInNewTab={!readOnly}
         />

@@ -2203,6 +2203,13 @@ def generate(schema_path: str, output_dir: str) -> None:
                         )
             if not _df_entries:
                 _df_entries = ["{ field: 'id', headerName: 'id' }"]
+            # The child's own declared primary column (if any) is the link column;
+            # a child that declares none gets no link column (no implicit 'name').
+            _bg_primary = next(
+                (_fname for _col in _bg_cols for _fname, _fcfg in _col.items()
+                 if (_fcfg or {}).get('primary')),
+                '',
+            )
             _write(
                 components_dir / f'{parent_pascal}BridgeGrid.tsx',
                 _render(env, 'bridge_grid.tsx.jinja2', {
@@ -2210,6 +2217,7 @@ def generate(schema_path: str, output_dir: str) -> None:
                     'child_pascal': parent_pascal,
                     'bridge_fk': f"{_self_bridge['name']}_id",
                     'display_fields': ', '.join(_df_entries),
+                    'primary_field': _bg_primary,
                 }),
             )
 
