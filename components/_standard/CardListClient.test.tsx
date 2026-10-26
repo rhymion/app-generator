@@ -48,7 +48,7 @@ describe('CardListClient', () => {
     });
 
     it('uses item id as title when name is absent', () => {
-      const noName = { id: 'xyz' };
+      const noName: { id: string; name?: string } = { id: 'xyz' };
       render(<CardListClient primaryField="name" src={[noName]} basePath={basePath} />);
       expect(screen.getByText('xyz')).toBeInTheDocument();
     });
