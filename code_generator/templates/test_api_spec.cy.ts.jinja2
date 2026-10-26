@@ -896,6 +896,104 @@ describe('API: {{ title }}', () => {
     });
 {% endif %}
 
+{% if fk_write_probe %}
+    // Foreign keys are references, not just values: writing one must be refused
+    // when the referenced row sits in an organization the actor does not belong
+    // to, with the same 404 a missing row gets.
+{% if can_new %}
+    it('G3.8 POST with a {{ fk_write_probe.prop }} in a foreign org returns 404 (existence hidden)', () => {
+      cy.task<any>('db:populate{{ pascal }}Dependencies').then((deps) => {
+        cy.task<any>('db:createCrossOrgScenario', { entityName: '{{ fk_write_probe.target }}', entityId: deps.{{ fk_write_probe.dep_var }}2.id }).then((scenario) => {
+          cy.request({
+            method: 'POST',
+            url: API_BASE,
+            headers: { 'X-API-Key': TEST_API_KEY },
+            body: {
+{% for ln in fk_write_post_body %}
+{{ ln }}
+{% endfor %}
+              {{ fk_write_probe.prop }}: scenario.entityInOrgB.id,
+            },
+            failOnStatusCode: false,
+          }).then((res) => {
+            expect(res.status).to.eq(404);
+          });
+        });
+      });
+    });
+
+    it('G3.9 bulk POST with a {{ fk_write_probe.prop }} in a foreign org reports Not found and does not create', () => {
+      cy.task<any>('db:populate{{ pascal }}Dependencies').then((deps) => {
+        cy.task<any>('db:createCrossOrgScenario', { entityName: '{{ fk_write_probe.target }}', entityId: deps.{{ fk_write_probe.dep_var }}2.id }).then((scenario) => {
+          cy.request({
+            method: 'POST',
+            url: `${API_BASE}/bulk`,
+            headers: { 'X-API-Key': TEST_API_KEY },
+            body: [{
+{% for ln in fk_write_post_body_bulk %}
+{{ ln }}
+{% endfor %}
+              {{ fk_write_probe.prop }}: scenario.entityInOrgB.id,
+            }],
+            failOnStatusCode: false,
+          }).then((res) => {
+            expect(res.status).to.eq(207);
+            expect(res.body.summary.succeeded).to.eq(0);
+            expect(res.body.results[0].success).to.eq(false);
+            expect(res.body.results[0].error).to.match(/^Not found/);
+          });
+        });
+      });
+    });
+{% endif %}
+{% if can_edit %}
+
+    it('G3.10 PUT with a {{ fk_write_probe.prop }} in a foreign org returns 404 (existence hidden)', () => {
+      cy.task<any>('db:populate{{ pascal }}Dependencies').then((deps) => {
+        cy.task<any[]>('db:populate{{ pascal }}', 1).then((records) => {
+          cy.task<any>('db:createCrossOrgScenario', { entityName: '{{ fk_write_probe.target }}', entityId: deps.{{ fk_write_probe.dep_var }}2.id }).then((scenario) => {
+            cy.request({
+              method: 'PUT',
+              url: `${API_BASE}/${records[0].id}`,
+              headers: { 'X-API-Key': TEST_API_KEY },
+              body: {
+{% for ln in fk_write_put_body %}
+{{ ln }}
+{% endfor %}
+                {{ fk_write_probe.prop }}: scenario.entityInOrgB.id,
+              },
+              failOnStatusCode: false,
+            }).then((res) => {
+              expect(res.status).to.eq(404);
+            });
+          });
+        });
+      });
+    });
+
+    it('G3.11 bulk PUT with a {{ fk_write_probe.prop }} in a foreign org reports Not found and does not write', () => {
+      cy.task<any>('db:populate{{ pascal }}Dependencies').then((deps) => {
+        cy.task<any[]>('db:populate{{ pascal }}', 1).then((records) => {
+          cy.task<any>('db:createCrossOrgScenario', { entityName: '{{ fk_write_probe.target }}', entityId: deps.{{ fk_write_probe.dep_var }}2.id }).then((scenario) => {
+            cy.request({
+              method: 'PUT',
+              url: `${API_BASE}/bulk`,
+              headers: { 'X-API-Key': TEST_API_KEY },
+              body: [{ id: records[0].id, {{ fk_write_probe.prop }}: scenario.entityInOrgB.id }],
+              failOnStatusCode: false,
+            }).then((res) => {
+              expect(res.status).to.eq(207);
+              expect(res.body.summary.succeeded).to.eq(0);
+              expect(res.body.results[0].success).to.eq(false);
+              expect(res.body.results[0].error).to.match(/^Not found/);
+            });
+          });
+        });
+      });
+    });
+{% endif %}
+
+{% endif %}
     // The relation picker route runs the same org-scoped search the web
     // picker does: a record of a foreign organization is never offered, a
     // record the caller may see still is.

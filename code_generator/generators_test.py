@@ -6002,6 +6002,25 @@ def api_spec_context(
                 override={_api_date_range['end']: api_value(_drb_start_meta, title)},
             )
 
+    # fk_write_probe: the primary display FK, when it points at an
+    # organization-scoped entity. The G3.8-G3.11 specs point it at a row of
+    # another organization and expect the write to be refused. Restricted to
+    # the primary FK because the Dependencies helper provides a second row
+    # (deps.<var>2) for it only; every client-writable FK goes through the
+    # same generated service check.
+    fk_write_probe = None
+    if (should_filter_by_org and primary_is_fk and not primary_fk_is_ua and primary_fk_rel
+            and primary_fk_rel['target'] not in ('organization', 'user')):
+        _probe_target_def = _raw_def(primary_fk_rel['target'], schema) or {}
+        if 'organization_id' in (_probe_target_def.get('properties') or {}):
+            _probe_prop = f'{primary_field_name}_id'
+            if _probe_prop in put_body_props and primary_dep_var:
+                fk_write_probe = {
+                    'prop': _probe_prop,
+                    'dep_var': primary_dep_var,
+                    'target': primary_fk_rel['target'],
+                }
+
     return {
         'parent': parent,
         'pascal': parent_pascal,
@@ -6054,6 +6073,10 @@ def api_spec_context(
         # populate steps 4.1 uses).
         'org_cross_put_body': _put_body_impl('              ', skip_field='organization_id'),
         'org_cross_put_body_fk': _put_body_impl('                ', skip_field='organization_id'),
+        'fk_write_probe': fk_write_probe,
+        'fk_write_post_body': _post_body_impl(fk_write_probe['prop'], f'{I}      ') if fk_write_probe else [],
+        'fk_write_post_body_bulk': _post_body_impl(fk_write_probe['prop'], f'{I}          ') if fk_write_probe else [],
+        'fk_write_put_body': _put_body_impl('                ', skip_field=fk_write_probe['prop']) if fk_write_probe else [],
         # Bulk test bodies — two extra spaces of indent (inside array item `{`)
         'bulk_post_body_valid':   _post_body_impl(None,               f'{I}      '),
         'bulk_post_body_invalid': _post_body_impl(field_to_skip_5_1, f'{I}      '),
