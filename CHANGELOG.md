@@ -17,6 +17,11 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 - **Entity-level `required:` is validated for to-one relations** (Issue #1083). Naming a many-to-one or one-to-one relation whose foreign key is nullable (or has no foreign key on the model) is now a build error, since Prisma does not require it. Naming one whose foreign key is NOT NULL prints a warning that the entry is redundant. Array relations are unchanged.
 - **Shared list components no longer default `primaryField` to `'name'`** (Issue #837). `DataGridClient`, `CardListClient` and `ResponsiveListClient` take the primary column only from the caller; when omitted, the table has no link column and the card title is the record id. Generated list pages already pass the declared primary column, and the parent-embedded bridge grid now passes the child's own primary column (none when the child declares none). A hand-written caller that relied on the default must pass `primaryField`.
 
+## [6.0.1] - 2026-10-26
+### Security
+- **Audit log actor relation.** Audit log entries no longer carry unrelated user fields in their actor relation.
+- **Foreign-key writes.** A foreign-key write now requires the referenced row to be in the caller's organization and readable by the caller.
+
 ## [6.0.0] - 2026-10-25
 ### Breaking changes
 - **Existing applications migrate stored files once.** An application that already holds attachments runs a one-time migration of its stored files and adds the two attachment columns `uploader_id` and `uploader_organization_id`. The steps are in `docs/knowledge/attachment-storage.md`.

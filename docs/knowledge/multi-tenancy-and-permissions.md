@@ -396,6 +396,10 @@ Read paths (list/search/detail-GET/export) scope by `organization_id` via `build
 
 A cross-organization id resolves to a null/empty lookup result instead of succeeding: this returns a 404 on API routes and is a silent no-op on session actions. This guard applies only to entities where `should_filter_by_org` is true (see "Which models are org-scoped" above) — non-org-scoped entities are unaffected.
 
+### Foreign-key writes are checked too
+
+A foreign key is a reference, so writing one is checked as well. In the generated `add{Entity}` / `update{Entity}` functions in `service.ts` (shared by the REST routes, the Server Actions and both bulk routes), every client-writable many-to-one or selector one-to-one foreign key whose target entity has an `organization_id` column (`fk_write_checks` in `build_context.py`) goes through `assertFkReferencesUsable` (`lib/_fk_reference.ts`) before the write. The referenced row must belong to an organization the actor is a member of (or have no organization) and the actor must be allowed to read it, with creator/assignee item rules applied. A row that fails either condition, or does not exist, is answered with the same 404 `Not found`. On update, a value equal to the one already stored is not re-checked, so editing other fields of a record whose reference the actor can no longer read keeps working. Read-only foreign keys, `organization` and `user` targets, and targets without an `organization_id` column are not checked. The foreign keys of nested child rows written through the parent (`child_fk_check_create` / `child_fk_check_update`) follow the same rule, with the stored value looked up per existing child row on update. CSV import resolves foreign keys through its own organization-scoped lookups.
+
 ---
 
 ## 5. Current limitations
