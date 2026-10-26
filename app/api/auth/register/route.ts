@@ -46,9 +46,14 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ ok: true }, { status: 201 });
   } catch (err) {
-    console.error("[register]", err);
+    // Log only the error class and Prisma code: a database validation error's
+    // message embeds the call arguments, including the submitted password hash.
+    console.error("[register] failed", {
+      name: err instanceof Error ? err.name : typeof err,
+      code: (err as { code?: unknown } | null)?.code,
+    });
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Registration failed" },
+      { error: "Registration failed", code: "REGISTRATION_FAILED" },
       { status: 500 }
     );
   }

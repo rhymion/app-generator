@@ -60,3 +60,21 @@ describe('POST /api/auth/register rate limit', () => {
     expect(res.status).toBe(409);
   });
 });
+
+describe('POST /api/auth/register unexpected failure', () => {
+  it('returns a generic body and logs no error message text', async () => {
+    const leaked = 'Invalid `prisma.user.create()` invocation: password: "$2a$10$abcdefghijklmnopqrstuv"';
+    userCreate.mockRejectedValueOnce(Object.assign(new Error(leaked), { code: 'P2000' }));
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    const res = await POST(registerRequest('203.0.113.7'));
+    const body = await res.json();
+
+    expect(res.status).toBe(500);
+    expect(body).toEqual({ error: 'Registration failed', code: 'REGISTRATION_FAILED' });
+    expect(JSON.stringify(body)).not.toContain('$2a$');
+    expect(JSON.stringify(errorSpy.mock.calls)).not.toContain('$2a$');
+    expect(JSON.stringify(errorSpy.mock.calls)).toContain('P2000');
+    errorSpy.mockRestore();
+  });
+});
