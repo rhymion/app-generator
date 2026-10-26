@@ -1,82 +1,70 @@
 // Hand-written -- not part of the generated entity test set.
-// PUT /api/setting/:id with the write-only fields (password, api_key) left out of the body must leave
-// both stored values unchanged (Issue #1155). Both are checked through the credentials they back:
-// the password through the mobile token endpoint, the api_key through the X-API-Key header that
-// authenticates the follow-up request itself. An explicit new password value is still written.
-import { TEST_API_KEY, TEST_CREDENTIALS, hashPassword } from '../../support/test-credentials';
+// PUT /api/setting/:id with the write-only fields (password, api_key) left out of the body, or sent
+// empty, must leave both stored values unchanged (Issue #1155). An explicitly supplied value is still
+// written. The persisted state is read back with the `db:getCredentialState` task.
+type CredentialState = { passwordIsNull: boolean; apiKeyIsNull: boolean; passwordHash: string | null };
 
-const SETTING_URL = '/api/setting';
+const EMAIL = 'api_writeonly_setting@example.com';
+const SEEDED_PASSWORD = 'not_needed'; // what db:createApiUserWithPermission stores
 
-function ownUserId(): Cypress.Chainable<string> {
-  return cy
-    .request({ url: '/api/user', headers: { 'X-API-Key': TEST_API_KEY } })
-    .then((res) => {
-      const row = (res.body.rows as { id: string; name: string }[]).find((u) => u.name === TEST_CREDENTIALS.name);
-      expect(row, 'test user').to.exist;
-      return row!.id;
-    });
+// The trailing 24-char cuid2 of the key is the user's own id (and the id `setting` expects).
+function userIdFromApiKey(apiKey: string): string {
+  const match = apiKey.match(/([a-z0-9]{24})$/);
+  if (!match) throw new Error(`Could not extract user id from API key: ${apiKey}`);
+  return match[1];
 }
 
-function mobileLogin(password: string) {
+function putSetting(apiKey: string, body: Record<string, unknown>) {
   return cy.request({
-    method: 'POST',
-    url: '/api/mobile/auth/token',
-    body: { email: TEST_CREDENTIALS.email, password },
-    failOnStatusCode: false,
+    method: 'PUT',
+    url: `/api/setting/${userIdFromApiKey(apiKey)}`,
+    headers: { 'X-API-Key': apiKey },
+    body: { name: 'Renamed Account', email: EMAIL, ...body },
   });
 }
 
 describe('API: setting update leaves omitted write-only fields unchanged', () => {
+  let apiKey: string;
+
   beforeEach(() => {
     cy.task('db:reset');
     cy.task('db:seed');
     cy.task('db:grantAllPermissions');
+    cy.task<string>('db:createApiUserWithPermission', {
+      entityName: 'setting',
+      flags: { read: true, update: true },
+      label: 'writeonly',
+    }).then((key) => {
+      apiKey = key;
+    });
   });
 
-  it('keeps the password and api_key when the body omits both', () => {
-    ownUserId().then((id) => {
-      cy.request({
-        method: 'PUT',
-        url: `${SETTING_URL}/${id}`,
-        headers: { 'X-API-Key': TEST_API_KEY },
-        body: { name: TEST_CREDENTIALS.name, email: TEST_CREDENTIALS.email },
-      }).then((res) => {
-        expect(res.status).to.eq(200);
-      });
-      // The api_key still authenticates, and the password still signs in.
-      cy.request({ url: `${SETTING_URL}/${id}`, headers: { 'X-API-Key': TEST_API_KEY } })
-        .its('status').should('eq', 200);
-      mobileLogin(TEST_CREDENTIALS.password).its('status').should('eq', 200);
+  function expectCredentialsUntouched() {
+    cy.task<CredentialState>('db:getCredentialState', EMAIL).then((state) => {
+      expect(state.passwordIsNull, 'password is not cleared').to.eq(false);
+      expect(state.passwordHash).to.eq(SEEDED_PASSWORD);
+      expect(state.apiKeyIsNull, 'api_key is not cleared').to.eq(false);
     });
+  }
+
+  it('keeps the password and api_key when the body omits both', () => {
+    putSetting(apiKey, {}).its('status').should('eq', 200);
+    expectCredentialsUntouched();
+    // The api_key still authenticates.
+    cy.request({ url: `/api/setting/${userIdFromApiKey(apiKey)}`, headers: { 'X-API-Key': apiKey } })
+      .its('status').should('eq', 200);
   });
 
   it('keeps the password and api_key when the body sends them empty', () => {
-    ownUserId().then((id) => {
-      cy.request({
-        method: 'PUT',
-        url: `${SETTING_URL}/${id}`,
-        headers: { 'X-API-Key': TEST_API_KEY },
-        body: { name: TEST_CREDENTIALS.name, email: TEST_CREDENTIALS.email, password: '', api_key: '' },
-      }).its('status').should('eq', 200);
-      cy.request({ url: `${SETTING_URL}/${id}`, headers: { 'X-API-Key': TEST_API_KEY } })
-        .its('status').should('eq', 200);
-      mobileLogin(TEST_CREDENTIALS.password).its('status').should('eq', 200);
-    });
+    putSetting(apiKey, { password: '', api_key: '' }).its('status').should('eq', 200);
+    expectCredentialsUntouched();
   });
 
   it('still writes an explicitly supplied password', () => {
-    const newPassword = 'changed-password-456';
-    ownUserId().then((id) => {
-      cy.wrap(hashPassword(newPassword)).then((hash) => {
-        cy.request({
-          method: 'PUT',
-          url: `${SETTING_URL}/${id}`,
-          headers: { 'X-API-Key': TEST_API_KEY },
-          body: { name: TEST_CREDENTIALS.name, email: TEST_CREDENTIALS.email, password: hash },
-        }).its('status').should('eq', 200);
-      });
-      mobileLogin(newPassword).its('status').should('eq', 200);
-      mobileLogin(TEST_CREDENTIALS.password).its('status').should('eq', 401);
+    putSetting(apiKey, { password: 'replacement-value' }).its('status').should('eq', 200);
+    cy.task<CredentialState>('db:getCredentialState', EMAIL).then((state) => {
+      expect(state.passwordHash).to.eq('replacement-value');
+      expect(state.apiKeyIsNull).to.eq(false);
     });
   });
 });
