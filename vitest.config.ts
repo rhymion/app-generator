@@ -23,6 +23,16 @@ const dashboardGeneratedFallback = {
   },
 };
 
+// The resolveId decision above depends on whether the generated files exist, but Vitest's
+// on-disk transform cache is not keyed on it. A cache written while the files were absent
+// (e.g. an earlier run before generate-code) keeps the stub-resolved import of ./catalog, so
+// after generate-code vi.mock('./catalog') no longer matches and the dashboard tests fail with
+// a TypeError (Issue #1185). Give each generated/stub state its own cache directory so a cache
+// never outlives the state it was written under.
+const dashboardGeneratedState = Object.keys(DASHBOARD_GENERATED_STUBS)
+  .map((source) => (fs.existsSync(path.resolve(dashboardDir, `${source}.ts`)) ? "1" : "0"))
+  .join("");
+
 // prj:sync lists generator tests whose script the consumer replaces (Issue #1070); a
 // checkout that never ran prj:sync has no list, so every generator test runs.
 function prjSyncExcludedTests(): string[] {
@@ -40,6 +50,12 @@ export default defineConfig({
   plugins: [react(), dashboardGeneratedFallback],
   test: {
     typecheck: { tsconfig: "./tsconfig.test.json" },
+    fsModuleCachePath: path.resolve(
+      __dirname,
+      "node_modules",
+      ".vitest-cache",
+      `dashboard-generated-${dashboardGeneratedState}`,
+    ),
     environment: "jsdom",
     globals: true,
     setupFiles: ["./vitest.setup.ts"],
