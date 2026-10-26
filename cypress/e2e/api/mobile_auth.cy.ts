@@ -234,15 +234,21 @@ describe('API: Mobile Auth (mobile token auth)', () => {
       cy.task<{ id: string; email: string; password: string }>('db:createSecondMobileUser').then((u) => {
         login(u.email, u.password).then((loginRes) => {
           const pair = loginRes.body as TokenPair;
-          cy.request({ url: '/api/user', headers: bearer(pair.access_token) }).its('status').should('eq', 200);
+          cy.request({ url: SESSIONS_URL, headers: bearer(pair.access_token) }).its('status').should('eq', 200);
 
+          // Invalidating a user takes the user entity's delete right, which the seeded Administrator lacks.
+          cy.task('db:setEntityPermission', {
+            email: TEST_CREDENTIALS.email,
+            entityName: 'user',
+            flags: { delete: true },
+          });
           cy.request({
             method: 'POST',
             url: `/api/user/${u.id}/actions/invalidate`,
             headers: { 'X-API-Key': TEST_API_KEY },
           }).its('status').should('be.within', 200, 299);
 
-          cy.request({ url: '/api/user', headers: bearer(pair.access_token), failOnStatusCode: false })
+          cy.request({ url: SESSIONS_URL, headers: bearer(pair.access_token), failOnStatusCode: false })
             .its('status').should('eq', 401);
           cy.request({
             method: 'POST',
