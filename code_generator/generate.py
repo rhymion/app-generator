@@ -2760,6 +2760,11 @@ def generate(schema_path: str, output_dir: str) -> None:
         )
         print('  Mention candidate search → lib/mention/search.ts')
         _write(
+            out / 'lib' / 'mention' / 'recipients.ts',
+            _render(env, 'mention_recipients.ts.jinja2', {}),
+        )
+        print('  Mention recipient scoping → lib/mention/recipients.ts')
+        _write(
             out / 'app' / 'api' / 'mention' / 'users' / 'route.ts',
             _render(env, 'mention_users_api_route.ts.jinja2', {}),
         )

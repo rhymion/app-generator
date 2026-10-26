@@ -134,3 +134,52 @@ def test_child_mention_false_omits_all_mention_code():
                   'mentioned_in_comment', 'encodeMentions', 'userLookup', 'storedMessage'):
         assert token not in out
     assert 'select: { creator_id: true, ticket_id: true }' in out
+
+
+# ---------------------------------------------------------------------------
+# Organization scope of mention recipients: a hand-written marker for a user
+# outside the actor's organizations must not deliver a notification, the same
+# boundary the mention picker applies to its candidates.
+# ---------------------------------------------------------------------------
+
+def _builders():
+    return {
+        'bridge': lambda flag: _build_comment_actions_bridge(
+            parent='ticket', model='ticket', has_assignee_id=False, comment_has_mention=flag,
+        ),
+        'child': lambda flag: _build_comment_actions(
+            _CHILD, parent='ticket', model='ticket', has_assignee_id=False, comment_has_mention=flag,
+        ),
+    }
+
+
+def test_mention_recipients_are_scoped_to_actor_organizations_on_create_and_update():
+    for variant, build in _builders().items():
+        out = build(True)
+        create_filter = (
+            'const mentionedIds = await filterMentionRecipientsToActorOrgs('
+            'userId, extractMentionedUserIds(message).filter((mid) => mid !== userId));'
+        )
+        update_filter = (
+            'const freshMentions = await filterMentionRecipientsToActorOrgs('
+            'userId, newIds.filter((mid) => !oldIds.has(mid) && mid !== userId));'
+        )
+        assert create_filter in out, variant
+        assert update_filter in out, variant
+        # the filter runs before the notification loop that consumes it
+        assert out.index(create_filter) < out.index('for (const mentionedId of new Set(mentionedIds))'), variant
+        assert out.index(update_filter) < out.index('for (const mentionedId of freshMentions)'), variant
+
+
+def test_mention_recipient_filter_absent_without_mention_field():
+    for variant, build in _builders().items():
+        assert 'filterMentionRecipientsToActorOrgs' not in build(False), variant
+
+
+def test_mention_recipients_template_filters_by_shared_organization():
+    from pathlib import Path
+    template = (Path(__file__).resolve().parent.parent / 'templates' / 'mention_recipients.ts.jinja2').read_text()
+    assert 'export async function filterMentionRecipientsToActorOrgs' in template
+    assert "organizations: { some: { users: { some: { id: actorId } } } }" in template
+    # not a Server Action module: the actor id must stay a trusted server-side argument
+    assert "'use server'" not in template.replace('(no \'use server\')', '')

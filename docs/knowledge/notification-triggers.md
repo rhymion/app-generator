@@ -32,9 +32,15 @@ enables the same behavior for that entity.
 ## Approval request creation notification
 
 `notifyApprovalRequestCreated()` (`lib/_notifyApprovalRequest.ts`) is
-built to notify every user holding the approving role for a newly
-created `approval_request`, excluding the requester and optionally
-scoped to an organization.
+built to notify the users holding the approving role for a newly
+created `approval_request`, excluding the requester. Recipients are
+limited to approvers who share an organization with the record
+(`orgId`, when the caller passes it) or, otherwise, with the acting
+user. When neither is known, or the acting user belongs to no
+organization, nobody is notified: the notification carries a record id
+and link, which must not cross an organization boundary. The
+order-reached notification below applies the same scope, using the
+acting approver.
 
 For a top-level entity, it is wired into the edge-trigger block
 `generators.py` emits directly into `service.ts.jinja2`'s

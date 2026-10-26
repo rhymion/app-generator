@@ -6,6 +6,27 @@ type Tx = Omit<
   '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'
 >;
 
+/**
+ * Organization ids a recipient must belong to (at least one). An explicit
+ * `orgId` (the record's own organization) wins; otherwise the acting user's
+ * organizations apply, matching the mention picker's scope. With neither, the
+ * list is empty and nobody is notified: a notification carries a record link
+ * and id, so it must never cross an organization boundary by default.
+ */
+async function resolveScopeOrgIds(
+  db: Tx,
+  orgId: string | null,
+  actorId: string | null,
+): Promise<string[]> {
+  if (orgId) return [orgId];
+  if (!actorId) return [];
+  const actor = await db.user.findUnique({
+    where: { id: actorId },
+    select: { organizations: { select: { id: true } } },
+  });
+  return actor?.organizations.map((o) => o.id) ?? [];
+}
+
 interface NotifyOptions {
   /**
    * Approvable-id this approval_request was created for. Used to look up the
@@ -41,8 +62,9 @@ interface NotifyOptions {
 
 /**
  * Trigger #2 (notification design 2026-05-11): after an approval_request is
- * created, notify every user holding the approver role for its flow. Optional
- * org-scope filter applied when `orgId` is provided.
+ * created, notify the users holding the approver role for its flow who share an
+ * organization with the record (`orgId`) or, when that is not given, with the
+ * acting user (`excludeUserId`).
  *
  * Fire-and-forget — does not share a transaction with the caller. Safe to
  * call from inside an entity's afterCreate hook (it receives a `tx` so the
@@ -74,6 +96,7 @@ export async function notifyApprovalRequestCreated(
 
   const orgId = options.orgId ?? null;
   const excludeUserId = options.excludeUserId ?? null;
+  const scopeOrgIds = await resolveScopeOrgIds(db, orgId, excludeUserId);
 
   const entityLabel = options.entityLabel ?? req.approval_flow.entity_name ?? 'request';
 
@@ -89,7 +112,7 @@ export async function notifyApprovalRequestCreated(
 
   for (const u of role.users) {
     if (u.id === excludeUserId) continue;
-    if (orgId && !u.organizations.some((o) => o.id === orgId)) continue;
+    if (!u.organizations.some((o) => scopeOrgIds.includes(o.id))) continue;
     notify(u.id, 'approval_requested', {
       title: `New approval request: ${entityLabel}`,
       href,
@@ -143,6 +166,7 @@ export async function notifyApprovalOrderReached(
   });
 
   const excludeUserId = options.excludeUserId ?? null;
+  const scopeOrgIds = await resolveScopeOrgIds(db, null, excludeUserId);
   const href =
     options.targetEntityName && options.targetId
       ? `/${options.targetEntityName}/view/${options.targetId}`
@@ -152,7 +176,7 @@ export async function notifyApprovalOrderReached(
     if (!req.approval_flow?.approver_role_id) continue;
     const role = await db.role.findUnique({
       where: { id: req.approval_flow.approver_role_id },
-      select: { users: { select: { id: true } } },
+      select: { users: { select: { id: true, organizations: { select: { id: true } } } } },
     });
     if (!role) continue;
 
@@ -160,6 +184,7 @@ export async function notifyApprovalOrderReached(
 
     for (const u of role.users) {
       if (u.id === excludeUserId) continue;
+      if (!u.organizations.some((o) => scopeOrgIds.includes(o.id))) continue;
       notify(u.id, 'approval_order_reached', {
         title: `Your approval is now needed: ${entityLabel}`,
         href,

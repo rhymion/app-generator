@@ -1409,7 +1409,7 @@ def _build_comment_actions(comment_children: list[dict], parent: str, model: str
         # excluded; on update, only newly-added mentions (vs. the prior message)
         # are notified.
         mention_notify_add = (
-            f"\n  const mentionedIds = extractMentionedUserIds(message).filter((mid) => mid !== userId);"
+            f"\n  const mentionedIds = await filterMentionRecipientsToActorOrgs(userId, extractMentionedUserIds(message).filter((mid) => mid !== userId));"
             f"\n  for (const mentionedId of new Set(mentionedIds)) {{"
             f"\n    notify(mentionedId, 'mentioned_in_comment', {{"
             f"\n      title: 'You were mentioned in a {parent_pascal} comment',"
@@ -1425,7 +1425,7 @@ def _build_comment_actions(comment_children: list[dict], parent: str, model: str
         mention_notify_update = (
             f"\n  const oldIds = new Set(extractMentionedUserIds(comment.message));"
             f"\n  const newIds = extractMentionedUserIds(message);"
-            f"\n  const freshMentions = newIds.filter((mid) => !oldIds.has(mid) && mid !== userId);"
+            f"\n  const freshMentions = await filterMentionRecipientsToActorOrgs(userId, newIds.filter((mid) => !oldIds.has(mid) && mid !== userId));"
             f"\n  for (const mentionedId of freshMentions) {{"
             f"\n    notify(mentionedId, 'mentioned_in_comment', {{"
             f"\n      title: 'You were mentioned in a {parent_pascal} comment',"
@@ -1495,7 +1495,7 @@ def _build_comment_actions_bridge(parent: str, model: str, has_assignee_id: bool
     # has no direct parent FK on the comment row (only commentable_id), so the
     # update path resolves the parent row (through the access check) for the href.
     mention_notify_add = (
-        f"\n  const mentionedIds = extractMentionedUserIds(message).filter((mid) => mid !== userId);"
+        f"\n  const mentionedIds = await filterMentionRecipientsToActorOrgs(userId, extractMentionedUserIds(message).filter((mid) => mid !== userId));"
         f"\n  for (const mentionedId of new Set(mentionedIds)) {{"
         f"\n    notify(mentionedId, 'mentioned_in_comment', {{"
         f"\n      title: 'You were mentioned in a {parent_pascal} comment',"
@@ -1511,7 +1511,7 @@ def _build_comment_actions_bridge(parent: str, model: str, has_assignee_id: bool
     mention_notify_update = (
         f"\n  const oldIds = new Set(extractMentionedUserIds(comment.message));"
         f"\n  const newIds = extractMentionedUserIds(message);"
-        f"\n  const freshMentions = newIds.filter((mid) => !oldIds.has(mid) && mid !== userId);"
+        f"\n  const freshMentions = await filterMentionRecipientsToActorOrgs(userId, newIds.filter((mid) => !oldIds.has(mid) && mid !== userId));"
         f"\n  for (const mentionedId of freshMentions) {{"
         f"\n    notify(mentionedId, 'mentioned_in_comment', {{"
         f"\n      title: 'You were mentioned in a {parent_pascal} comment',"
