@@ -90,6 +90,7 @@ from validate import (
     validate_schema, validate_prisma_indexes,
     validate_self_only_creator_id_columns, validate_defaults_cross_schema,
     validate_submit_on_default_matches_prisma, validate_version_of_prisma,
+    validate_attachment_provenance_columns,
     validate_direct_attachment_prerequisite,
     validate_direct_attachment_reverse_fields,
     validate_write_once_stub_asymmetry,
@@ -1520,6 +1521,7 @@ def generate(schema_path: str, output_dir: str) -> None:
         validate_defaults_cross_schema(schema, Path(output_dir) / 'prisma' / 'schema.prisma')
         validate_submit_on_default_matches_prisma(schema, Path(output_dir) / 'prisma' / 'schema.prisma')
         validate_version_of_prisma(schema, Path(output_dir) / 'prisma' / 'schema.prisma')
+        validate_attachment_provenance_columns(Path(output_dir) / 'prisma' / 'schema.prisma')
         validate_direct_attachment_prerequisite(schema, Path(output_dir) / 'prisma' / 'schema.prisma')
         validate_direct_attachment_reverse_fields(schema, Path(output_dir) / 'prisma' / 'schema.prisma')
     except SchemaValidationError as exc:
@@ -1630,6 +1632,11 @@ def generate(schema_path: str, output_dir: str) -> None:
     api_entities = {e['parent'] for e in entities if (e.get('generate_config') or {}).get('api')}
     # Entities whose get<Entity>Detail() takes a userId (organization scope or x-self-only).
     detail_takes_user_id: dict[str, bool] = {}
+    # Entities that can own an attachment, for the authorized attachment route
+    # (lib/attachment/access.ts): PascalCase name per entity, and one record per
+    # direct-attachment foreign key.
+    parent_pascal_by_parent: dict[str, str] = {}
+    direct_attachment_owners: list[dict] = []
 
     for entity in entities:
         parent     = entity['parent']
@@ -1748,6 +1755,18 @@ def generate(schema_path: str, output_dir: str) -> None:
         # --- getters.ts ---
         getters_ctx = {**ctx, 'named_constants': named_constants}
         detail_takes_user_id[parent] = bool(ctx.get('should_filter_by_org') or ctx.get('is_self_only'))
+        parent_pascal_by_parent[parent] = ctx['parent_pascal']
+        # A proxy view over another model (model != parent) shares that model's rows and relations:
+        # the base entity is the owner.
+        for _dar in (ctx.get('direct_attachment_rels') or []) if parent == model else []:
+            direct_attachment_owners.append({
+                'name': parent,
+                'model': model,
+                'pascal': ctx['parent_pascal'],
+                'fk_prop': _dar['prop_name'],
+                'back_relation': f"{parent}_{_dar['relation_name']}",
+                'user_arg': detail_takes_user_id[parent],
+            })
         _write(lib_dir / 'getters.ts', _render(env, 'getters.ts.jinja2', getters_ctx))
 
         # --- autocomplete/list custom filter stubs (cmd_377/379 DP-1) ---
@@ -2571,6 +2590,31 @@ def generate(schema_path: str, output_dir: str) -> None:
     # `lib/attachment/actions.ts`, and whichever ran later silently clobbered
     # the other's exports (see subtask_769d report for the reproduction).
     attachable_owners = build_attachable_owners(schema)
+    _bridge_read_owners = [
+        {'name': o['name'], 'pascal': parent_pascal_by_parent[o['name']], 'user_arg': detail_takes_user_id[o['name']]}
+        for o in attachable_owners if o['name'] in parent_pascal_by_parent
+    ]
+    # Read authorization and the "unlinked" definition for attachments, and the one route that
+    # delivers stored files (the only way to read an object).
+    _write(
+        out / 'lib' / 'attachment' / 'access.ts',
+        _render(env, 'attachment_access.ts.jinja2', {
+            'bridge_owners': _bridge_read_owners,
+            'direct_owners': direct_attachment_owners,
+            # Each owner entity's detail getter is imported once, however many of its fields point at attachments.
+            'getter_owners': sorted(
+                {o['name']: o for o in [*_bridge_read_owners, *direct_attachment_owners]}.values(),
+                key=lambda o: o['name'],
+            ),
+        }),
+    )
+    print(f'  Attachment access → lib/attachment/access.ts ({len(_bridge_read_owners)} bridge owners, '
+          f'{len(direct_attachment_owners)} direct-FK fields)')
+    _write(
+        out / 'app' / 'api' / 'attachments' / '[id]' / 'route.ts',
+        _render(env, 'attachment_serve_route.ts.jinja2', {}),
+    )
+    print('  Attachment serve route → app/api/attachments/[id]/route.ts')
     _write(
         out / 'lib' / 'attachment' / 'bridge_actions.ts',
         _render(env, 'attachment_actions.ts.jinja2', {
@@ -3818,15 +3862,13 @@ def generate(schema_path: str, output_dir: str) -> None:
     else:
         print('\nSkipping mobile app (x-generator.mobile.enabled is not true)')
 
-    # --- upload/route.ts (Vercel Blob, base default) ---
-    # Always emitted so app/api/upload/route.ts is a full generated artifact
-    # (manifest-tracked, cleanup-eligible) in both modes. x-cloud:gcp below
-    # overwrites this with the GCS version when enabled (cmd_269/cmd_272).
+    # --- upload/route.ts ---
+    # One route for every storage backend (lib/attachment/storage.ts picks it from the environment).
     _write(
         out / 'app' / 'api' / 'upload' / 'route.ts',
-        _render(env, 'upload_route_vercel.ts.jinja2', {}),
+        _render(env, 'upload_route.ts.jinja2', {}),
     )
-    print('  Upload route (Vercel Blob) → app/api/upload/route.ts')
+    print('  Upload route → app/api/upload/route.ts')
 
     # --- Dockerfile + .dockerignore ---
     # Emitted for x-cloud:gcp and for any schema that declares scheduled tasks,
@@ -3844,22 +3886,6 @@ def generate(schema_path: str, output_dir: str) -> None:
     # --- x-cloud opt-in: GCP Cloud Run artifacts ---
     if is_gcp:
         print('\nGenerating GCP Cloud Run artifacts (x-cloud:gcp opt-in)...')
-
-        # upload/route.ts — replace Vercel Blob with GCS
-        _write(
-            out / 'app' / 'api' / 'upload' / 'route.ts',
-            _render(env, 'upload_route_gcs.ts.jinja2', {}),
-        )
-        print('  Cloud: GCS upload route → app/api/upload/route.ts')
-
-        # GCS object serving route (V4 Signed URL proxy)
-        gcs_serve_dir = out / 'app' / 'api' / 'gcs' / '[...path]'
-        gcs_serve_dir.mkdir(parents=True, exist_ok=True)
-        _write(
-            gcs_serve_dir / 'route.ts',
-            _render(env, 'gcs_serve_route.ts.jinja2', {}),
-        )
-        print('  Cloud: GCS serve route → app/api/gcs/[...path]/route.ts')
 
         # next.config.ts — add output: 'standalone'
         next_config_path = out / 'next.config.ts'

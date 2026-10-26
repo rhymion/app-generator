@@ -641,7 +641,7 @@ ever referenced by id for `creator_id`/`updater_id` attribution.
 
 `vercel.json` is not read at all under GCP Cloud Run — `generate.py` skips
 writing the `crons` key entirely when `x-cloud.provider: gcp` (mirroring how
-the same flag switches `app/api/upload/route.ts` from Vercel Blob to GCS).
+the same flag selects the container artifacts).
 Per-task Cloud Scheduler jobs that call the HTTP route are not provisioned
 by `gcp-setup.sh` or `gcp-deploy.sh`. To create one by hand:
 

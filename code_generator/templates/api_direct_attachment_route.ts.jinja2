@@ -1,11 +1,11 @@
 // AUTO-GENERATED - DO NOT EDIT
-// REST side of the direct-attachment FK path (x-relationship type:direct): creates the standalone
-// `attachment` row for a file already stored through POST /api/upload. The Web form reaches the same
+// REST side of the direct-attachment FK path (x-relationship type:direct): prepares a file already
+// stored through POST /api/upload (by its attachment id) for a direct-attachment field. The Web form reaches the same
 // function as a Server Action (lib/attachment/direct_actions.ts); this route serves callers that carry
 // a mobile access token or API key instead of a browser session.
 //
-// Authorization is the Server Action's own: any authenticated user may create the row (it is not yet
-// linked to any entity). The entity's create/update permission and organization checks run when the
+// Authorization is the Server Action's own: only the user who uploaded the file, and only while no
+// record references it. The entity's create/update permission and organization checks run when the
 // returned id is submitted with the entity form, exactly as for the Web form.
 import { NextRequest, NextResponse } from 'next/server';
 import { requireCaller, withActor, handleApiError, ApiError } from '@/lib/api-auth';
@@ -25,13 +25,9 @@ export async function POST(request: NextRequest) {
     } catch {
       throw new ApiError(400, 'Request body must be JSON.');
     }
-    const { name, path, type } = (body ?? {}) as Record<string, unknown>;
-    if (typeof name !== 'string' || name.trim() === '' || name.length > 255) {
-      throw new ApiError(400, 'name must be a non-empty string of at most 255 characters.');
-    }
-    // /api/upload answers with a site-relative path (local disk, GCS proxy) or an absolute http(s) blob URL.
-    if (typeof path !== 'string' || !/^(\/(?!\/)|https?:\/\/)/.test(path)) {
-      throw new ApiError(400, 'path must be the URL returned by /api/upload.');
+    const { id, type } = (body ?? {}) as Record<string, unknown>;
+    if (typeof id !== 'string' || id.trim() === '' || id.length > 64) {
+      throw new ApiError(400, 'id must be the attachment id returned by /api/upload.');
     }
 {% if type_values %}
     if (typeof type !== 'string' || !ATTACHMENT_TYPES.includes(type)) {
@@ -44,7 +40,7 @@ export async function POST(request: NextRequest) {
 {% endif %}
 
     const attachment = await withActor(userId, () =>
-      createDirectAttachment(name, path, type as {{ type_ts }}),
+      createDirectAttachment(id, type as {{ type_ts }}),
     );
     return NextResponse.json(attachment, { status: 201 });
   } catch (error) {

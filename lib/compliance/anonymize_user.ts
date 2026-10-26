@@ -5,9 +5,7 @@
 // Does NOT physically delete the user row to preserve referential integrity.
 
 import prisma from '@/lib/prisma';
-import { unlink, rmdir } from 'fs/promises';
-import path from 'path';
-import { del } from '@vercel/blob';
+import { deleteStoredObject, isStorageKey } from '@/lib/attachment/storage';
 
 export interface AnonymizeUserResult {
   success: boolean;
@@ -16,23 +14,11 @@ export interface AnonymizeUserResult {
   errors?: string[];
 }
 
-// Removes the stored bytes behind an attachment path after the database
-// transaction has committed. The path forms are the ones the upload route of
-// this application writes.
-async function removeStoredFile(storedPath: string): Promise<void> {
-  if (/^https?:\/\//.test(storedPath)) {
-    await del(storedPath);
-    return;
-  }
-  const uploadRoot = path.resolve(process.cwd(), 'public', 'uploads');
-  const target = path.resolve(uploadRoot, storedPath.replace(/^\/uploads\//, ''));
-  if (!target.startsWith(uploadRoot + path.sep)) return;
-  try {
-    await unlink(target);
-    await rmdir(path.dirname(target));
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException)?.code !== 'ENOENT') throw err;
-  }
+// Removes the stored object behind an attachment after the database transaction has committed.
+// `storedKey` is the attachment's opaque storage key.
+async function removeStoredFile(storedKey: string): Promise<void> {
+  if (!isStorageKey(storedKey)) return;
+  await deleteStoredObject(storedKey);
 }
 
 export async function anonymizeUser(userId: string): Promise<AnonymizeUserResult> {

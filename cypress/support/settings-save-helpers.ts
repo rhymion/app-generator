@@ -8,6 +8,7 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient } from '@/app/generated/prisma/client';
 import { createId } from '@paralleldrive/cuid2';
 import bcrypt from 'bcryptjs';
+import { randomUUID } from 'node:crypto';
 
 const connectionString = `${process.env.DATABASE_URL}`;
 const adapter = new PrismaPg({ connectionString });
@@ -52,7 +53,7 @@ async function seedStartingAvatar(userId: string): Promise<string> {
     data: {
       id: createId(),
       name: 'starting-avatar.png',
-      path: 'https://example.com/starting-avatar.png',
+      path: randomUUID(),
       type: 'image',
     },
   });

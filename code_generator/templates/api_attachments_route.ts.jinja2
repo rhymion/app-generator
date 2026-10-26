@@ -6,19 +6,21 @@ import { get{{ parent_pascal }}Detail } from '@/lib/{{ parent }}/getters';
 import { setAttachmentsForBridge, type AttachmentItemInput } from '@/lib/attachment/bridge_actions';
 
 // PUT /api/{{ parent }}/[id]/attachments
-// Body: { type: {{ type_values | join(' | ') if type_values else 'an integer' }}, items: [{ id?, name, path }] }  ->  200 { ok: true }
+// Body: { type: {{ type_values | join(' | ') if type_values else 'an integer' }}, items: [{ id }] }  ->  200 { ok: true }
 //
 // The REST side of the attachment panel on the {{ parent }} edit form. It runs the same
 // setAttachmentsForBridge Server Action the panel calls, as the authenticated caller (mobile access
 // token or API key), so the replace semantics (rows of this type that are not listed are deleted, listed
-// rows keep their order), the file name encryption and the revalidation are the web's own, not a copy.
-// The listed order is the stored order. `path` is the URL POST /api/upload answered with.
+// rows keep their order) and the revalidation are the web's own, not a copy. The listed order is the
+// stored order. Each `id` is an attachment of this record, or the id POST /api/upload answered with
+// (only the user who uploaded it can attach it, and only once).
 //
 // Access: the caller must be able to update the {{ parent }} record, which is what the web form
 // requires before it offers the panel. The record is read through get{{ parent_pascal }}Detail, so a
 // record outside the caller's organizations (or, for a self-only entity, not the caller's own) is
-// "Not found". A listed `id` must be an attachment this record already holds, so another record's
-// (or organization's) attachment cannot be taken over by naming its id.
+// "Not found". A listed `id` must be an attachment this record already holds or one the caller uploaded
+// and has not attached yet, so another record's (or organization's) attachment cannot be taken over by
+// naming its id.
 
 const MAX_ITEMS = 100;
 {% if type_values %}
@@ -74,23 +76,13 @@ export async function PUT(request: NextRequest, { params }: Params) {
     if (!attachableId) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
-    const held = new Set<string>(
-      ((item.{{ attachable_rel_name }}?.{{ attachable_attachments_prop }} ?? []) as Array<{ id: string }>).map((a) => a.id),
-    );
     const parsed: AttachmentItemInput[] = [];
     for (const [index, raw] of items.entries()) {
       const entry = (raw ?? {}) as Record<string, unknown>;
-      if (typeof entry.name !== 'string' || entry.name.trim() === '' || entry.name.length > 255) {
-        return NextResponse.json({ error: `items[${index}].name must be a non-empty string of at most 255 characters` }, { status: 400 });
+      if (typeof entry.id !== 'string' || entry.id.trim() === '' || entry.id.length > 64) {
+        return NextResponse.json({ error: `items[${index}].id must be an attachment id` }, { status: 400 });
       }
-      // /api/upload answers with a site-relative path (local disk, GCS proxy) or an absolute http(s) blob URL.
-      if (typeof entry.path !== 'string' || !/^(\/(?!\/)|https?:\/\/)/.test(entry.path)) {
-        return NextResponse.json({ error: `items[${index}].path must be the URL returned by /api/upload` }, { status: 400 });
-      }
-      if (entry.id != null && (typeof entry.id !== 'string' || !held.has(entry.id))) {
-        return NextResponse.json({ error: `items[${index}].id is not an attachment of this record` }, { status: 400 });
-      }
-      parsed.push({ id: (entry.id as string | undefined) ?? null, order: index, name: entry.name, path: entry.path });
+      parsed.push({ id: entry.id, order: index });
     }
 
     await withActor(actorId, () => setAttachmentsForBridge(attachableId, type as {{ type_ts }}, parsed));

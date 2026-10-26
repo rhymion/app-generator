@@ -111,15 +111,15 @@ def test_invalidate_record_lookup_precedes_the_handler_call():
     assert out['action'].index('resolvePermissions(') < out['action'].index('await doIt(id)')
 
 
-def test_upload_local_fallback_does_not_use_client_filename_as_a_path():
-    for tpl in ('upload_route_vercel.ts.jinja2', 'upload_route_gcs.ts.jinja2'):
-        out = _render(tpl)
-        assert 'toStoredFilename(file.name)' in out
-        assert 'const originalFilename = file.name;' not in out
+def test_upload_route_never_uses_the_client_filename_as_a_storage_location():
+    out = _render('upload_route.ts.jinja2')
+    # The route hands the file to the shared upload core, which stores it under a random key.
+    assert 'storeUploadedFile(file, uploadCheck.contentType, userId)' in out
+    assert 'file.name' not in out
+    assert 'writeFile' not in out and "'public'" not in out
 
 
-def test_upload_local_fallback_confines_final_path_inside_upload_directory():
-    out = _render('upload_route_vercel.ts.jinja2')
-    assert 'path.join(uploadsDir, originalFilename)' not in out
-    assert 'path.resolve(uploadsDir, originalFilename)' in out
-    assert 'filepath.startsWith(uploadsDir + path.sep)' in out
+def test_upload_route_answers_with_the_attachment_id_never_a_path_or_url():
+    out = _render('upload_route.ts.jinja2')
+    assert 'return NextResponse.json(stored, { status: 200 });' in out
+    assert 'url' not in out.replace('request.url', '')

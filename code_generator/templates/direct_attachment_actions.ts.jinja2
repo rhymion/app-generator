@@ -8,7 +8,10 @@
 
 import { getSessionUserIdOrThrow } from '@/lib/authz';
 import prisma from '@/lib/prisma';
-import { encryptFileName } from '@/lib/compliance/attachment_name_crypto';
+import { AppError } from '@/lib/_errors';
+import { UNLINKED_ATTACHMENT_WHERE } from '@/lib/attachment/access';
+import { attachmentUrl } from '@/lib/attachment/url';
+import { decryptFileName } from '@/lib/compliance/attachment_name_crypto';
 
 export type DirectAttachment = {
   id: string;
@@ -18,35 +21,37 @@ export type DirectAttachment = {
 };
 
 /**
- * Creates a standalone attachment row (attachable_id: null) for the
- * direct-FK path. Any authenticated user may call this -- it mirrors
- * /api/upload's own auth bar (a session, no finer-grained permission),
- * since the row is not yet linked to any entity; the entity's own
- * create/update permission check is what actually gates persisting the
- * link (the returned id is only submitted as a plain FormData value, the
- * same as every other FK field).
+ * Prepares a file uploaded through POST /api/upload for a direct-attachment FK field: records the
+ * attachment kind and returns the descriptor the form displays. Only the user who uploaded the file
+ * can do this, and only while no record references it yet; any other id answers "not found".
  *
- * The original file name is encrypted at rest the same way the polymorphic
- * attachable bridge does (lib/attachment/bridge_actions.ts) -- `name`
- * returned here is the plaintext original name handed back to the caller
- * for immediate display, never the stored UUID/ciphertext.
+ * The id is submitted with the entity form like any other FK value. The entity's own create/update
+ * permission check gates persisting the link, and its write validation checks the id again (an
+ * unlinked attachment uploaded by the caller), so this action grants nothing by itself.
+ *
+ * `name` is the plaintext original file name for immediate display; `path` is the URL the file is
+ * delivered from (GET /api/attachments/<id>), never a storage location.
  */
 export async function createDirectAttachment(
-  name: string,
-  path: string,
+  id: string,
   type: {{ type_ts }},
 ): Promise<DirectAttachment> {
-  await getSessionUserIdOrThrow();
-  const encrypted = encryptFileName(name);
-  const attachment = await prisma.attachment.create({
-    data: {
-      attachable_id: null,
-      type,
-      name: encrypted.uuid,
-      encrypted_original_name: encrypted.encryptedName,
-      name_iv: encrypted.iv,
-      path,
-    },
+  const actorId = await getSessionUserIdOrThrow();
+  const updated = await prisma.attachment.updateMany({
+    where: { id, uploader_id: actorId, ...UNLINKED_ATTACHMENT_WHERE },
+    data: { type },
   });
-  return { id: attachment.id, name, path: attachment.path, type };
+  if (updated.count !== 1) throw new AppError('NOT_FOUND', 'Attachment not found');
+  const row = await prisma.attachment.findUnique({
+    where: { id },
+    select: { id: true, name: true, encrypted_original_name: true },
+  });
+  if (!row) throw new AppError('NOT_FOUND', 'Attachment not found');
+  let name = row.name;
+  try {
+    if (row.encrypted_original_name) name = decryptFileName(row.encrypted_original_name);
+  } catch {
+    // Keep the stored name when the original cannot be decrypted.
+  }
+  return { id: row.id, name, path: attachmentUrl(row.id), type };
 }

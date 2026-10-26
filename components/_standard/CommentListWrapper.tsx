@@ -17,6 +17,7 @@ import SaveIcon from '@mui/icons-material/Save';
 import CloseIcon from '@mui/icons-material/Close';
 import SendIcon from '@mui/icons-material/Send';
 import type { ModelPermissions } from '@/lib/authz';
+import { attachmentUrl } from '@/lib/attachment/url';
 import CommentReactionBar from '@/components/_standard/CommentReactionBar';
 import type { CommentReactionSummary, ReactionType } from '@/components/_standard/CommentReactionBar';
 import MentionInput, { type MentionSearchFn } from '@/components/_standard/MentionInput';
@@ -30,10 +31,10 @@ export type CommentItem = {
     id: string;
     name: string;
     // The creator's avatar is a direct-attachment FK (`user.image_id` ->
-    // attachment, only `path` selected) on schemas that have adopted it,
+    // attachment, only `id` selected) on schemas that have adopted it,
     // but still a plain URL string column on schemas that haven't -- this
     // static component is shared by both, so it accepts either shape.
-    image?: { path: string } | string | null;
+    image?: { id: string } | string | null;
   } | null;
   reactionCounts?: Array<{ type: string | number; count: number }>;
   myReactionTypes?: (string | number)[];
@@ -130,7 +131,7 @@ function CommentItemComponent({ comment, canDelete, onUpdate, onDelete, reaction
 
   const creatorName = comment.creator?.name ?? 'Unknown';
   const creatorImage = comment.creator?.image;
-  const avatarSrc = (typeof creatorImage === 'string' ? creatorImage : creatorImage?.path) ?? undefined;
+  const avatarSrc = (typeof creatorImage === 'string' ? creatorImage : creatorImage ? attachmentUrl(creatorImage.id) : undefined) ?? undefined;
   const wasEdited =
     comment.created_at &&
     comment.updated_at &&

@@ -3,8 +3,9 @@ import { login } from './helpers';
 
 // Runs only against the app built by scripts/run_mobile_entity_playwright.sh, whose schema adds
 // mobile_document: a required direct attachment field (contract) and an optional one (file). The
-// form picks a file, uploads it (POST /api/upload), creates the attachment row (POST
-// /api/attachment/direct) and submits the row's id with the entity, as the Web form does.
+// form picks a file, uploads it (POST /api/upload, which answers the attachment id), prepares that
+// attachment for the field (POST /api/attachment/direct) and submits its id with the entity, as the Web
+// form does.
 
 async function openNew(page: Page) {
   await login(page);
@@ -37,11 +38,15 @@ function captureWrite(page: Page, method: 'POST' | 'PUT') {
 test.describe('Direct attachment fields', () => {
   test('a picked file is uploaded with the access token and its row id is saved with the record', async ({ page }) => {
     const bodies = captureWrite(page, 'POST');
-    const calls: { url: string; authorization: string | undefined }[] = [];
+    const calls: { url: string; authorization: string | undefined; body: unknown }[] = [];
     page.on('request', (request) => {
       const { pathname } = new URL(request.url());
       if (request.method() === 'POST' && (pathname === '/api/upload' || pathname === '/api/attachment/direct')) {
-        calls.push({ url: pathname, authorization: request.headers()['authorization'] });
+        calls.push({
+          url: pathname,
+          authorization: request.headers()['authorization'],
+          body: pathname === '/api/attachment/direct' ? request.postDataJSON() : null,
+        });
       }
     });
     await openNew(page);
@@ -51,6 +56,8 @@ test.describe('Direct attachment fields', () => {
     await expect(page.getByTestId('attachment-name-contract_id')).toHaveText('contract.pdf');
     expect(calls.map((c) => c.url)).toEqual(['/api/upload', '/api/attachment/direct']);
     for (const call of calls) expect(call.authorization).toMatch(/^Bearer .+\..+\..+$/);
+    // The attachment is named by the id the upload answered with; no path is sent.
+    expect(calls[1].body).toEqual({ id: expect.any(String), type: 'file' });
 
     await page.getByTestId('form-save').click();
     await expect(page.getByTestId('view-mobile_document')).toBeVisible();
@@ -126,16 +133,24 @@ test.describe('Direct attachment fields', () => {
     await expect(page.getByTestId('attachment-name-file_id')).toHaveText('-');
   });
 
-  test('the detail screen opens the attached file from its name', async ({ page, context }) => {
+  test('the detail screen opens the attached file from its name', async ({ page }) => {
     await openNew(page);
     await page.getByTestId('field-title').fill('Openable');
     await attach(page, 'contract_id', 'openable.pdf', 'application/pdf');
     await expect(page.getByTestId('attachment-name-contract_id')).toHaveText('openable.pdf');
     await page.getByTestId('form-save').click();
     await expect(page.getByTestId('view-field-contract_id')).toHaveText('openable.pdf');
-    const popup = context.waitForEvent('page');
+    await page.evaluate(() => {
+      const w = window as unknown as { __opened?: string };
+      window.open = (url) => {
+        w.__opened = String(url);
+        return null;
+      };
+    });
     await page.getByTestId('view-field-contract_id').click();
-    expect((await popup).url()).toContain('/uploads/');
-    expect((await popup).url()).toContain('openable.pdf');
+    // The file route needs the access token, so the app fetches the file with it and opens the local copy.
+    await expect
+      .poll(() => page.evaluate(() => (window as unknown as { __opened?: string }).__opened ?? ''))
+      .toMatch(/^blob:/);
   });
 });

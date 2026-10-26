@@ -248,21 +248,23 @@ Choosing a file takes two requests, the same two the Web form makes (`SingleAtta
 
 | Step | Request | Result |
 |---|---|---|
-| Store the file | `POST /api/upload` (multipart, field `file`) | `{ url }`; a type the route does not accept or a file over `UPLOAD_MAX_BYTES` is refused with its own text, which the field shows |
-| Create the row | `POST /api/attachment/direct` with `{ name, path, type }` | `201 { id, name, path, type }` |
+| Store the file | `POST /api/upload` (multipart, field `file`) | `{ id, name }`, the attachment that was created; a type the route does not accept or a file over `UPLOAD_MAX_BYTES` is refused with its own text, which the field shows |
+| Prepare it for the field | `POST /api/attachment/direct` with `{ id, type }` | `201 { id, name, path, type }`, `path` being `/api/attachments/<id>` |
 
 The entity form then submits the id under the column name (`<column>: <id>`, `null` when cleared), and the
 detail and edit screens read the row the REST detail embeds under the column name without `_id`. The file name
 is stored encrypted and returned decrypted, as on the Web screens.
 
 Both routes accept a mobile access token, an API key or the browser session (`requireCaller()`), and nothing
-else changes about who may do what: any authenticated user may store a file and create the (still unlinked)
-row; the entity's own `create` / `update` permission and organization rules decide whether the link is saved,
-exactly as for the Web form. `/api/attachment/direct` runs the Web action (`createDirectAttachment`) as the
-authenticated caller, so there is one implementation of the row. The route rejects a `type` outside the
-`attachment.type` enum, an empty or over-long name and a `path` that is not a site-relative path or an
-`http(s)` URL. A file stored through the Google Cloud Storage upload route is served by `/api/gcs/...`, which
-requires a browser session, so the link on the detail screen opens only where that session is shared.
+else changes about who may do what: any authenticated user may store a file; only the user who uploaded it can
+prepare it for a field or link it, and the entity's own `create` / `update` permission and organization rules decide
+whether the link is saved, exactly as for the Web form. `/api/attachment/direct` runs the Web action
+(`createDirectAttachment`) as the authenticated caller, so there is one implementation. The route rejects a `type`
+outside the `attachment.type` enum and an `id` that is empty or over-long; a path or URL is not accepted in place of an
+id, and an id that is not an unlinked upload of the caller answers `404`. Files are read from
+`GET /api/attachments/<id>`, which needs the access token (see
+[attachment-storage.md](attachment-storage.md)): the screens fetch images with an `Authorization` header and open a file
+by fetching it with the token (Web build).
 
 ### Hand-written components
 
@@ -338,21 +340,22 @@ create form has no attachment section (attachments can only be added once the re
 
 | Step | Request | Result |
 |---|---|---|
-| Store a file | `POST /api/upload` (multipart, field `file`) | `{ url }`; a refused type or size is shown on the section |
-| Save a type's list | `PUT /api/<entity>/<id>/attachments` with `{ type, items: [{ id?, name, path }] }` | `200 { ok: true }` |
+| Store a file | `POST /api/upload` (multipart, field `file`) | `{ id, name }`; a refused type or size is shown on the section |
+| Save a type's list | `PUT /api/<entity>/<id>/attachments` with `{ type, items: [{ id }] }` | `200 { ok: true }` |
 
 `PUT /api/<entity>/<id>/attachments` is generated for an owner with the bridge, the component, a detail screen and an edit
 screen. It runs the Web panel's own Server Action (`setAttachmentsForBridge`, `lib/attachment/bridge_actions.ts`) as the
 authenticated caller (mobile access token or API key), so the replace semantics are the Web's: the listed order is the stored order,
-an item with an `id` keeps its row, an item without one is created, and a row of that type that is not listed is deleted.
-The other types are untouched. File names are stored encrypted, as on the Web.
+an item whose `id` is one of the record's own attachments keeps its row, an item whose `id` is an upload the caller made
+(and has not attached yet) is linked to the record, and a row of that type that is not listed is deleted with its stored
+file. The other types are untouched. File names are stored encrypted, as on the Web.
 
 Access is the owner's: the caller needs `update` on the entity (and, for a record-level grant, on that record), and the
 record is read through the entity's detail getter, so a record of another organization (or, for an `x-self-only` entity,
-not the caller's own) answers `404` and writes nothing. A listed `id` must already be an attachment of this record, so the
-id of another record's (or another organization's) attachment cannot be used to take it over (`400`). The route also
-rejects a `type` outside the `attachment.type` enum, an empty or over-long name, a `path` that is not a site-relative path
-or an `http(s)` URL, and more than 100 items.
+not the caller's own) answers `404` and writes nothing. A listed `id` must be an attachment this record already holds or an
+upload the caller made and has not attached, so the id of another record's (or another organization's) attachment, or of
+another user's upload, cannot be used to take it over (`404`, nothing written). The route also rejects a `type` outside the
+`attachment.type` enum, an `id` that is empty or over-long (a `path` is not accepted), and more than 100 items.
 
 If the second request is refused, the record itself is already saved; the form stays open and shows the server's text on the
 section, with the edits kept.
@@ -811,11 +814,14 @@ does for the other end-to-end fixtures, and signs in as the seeded administrator
 - `code_generator/tests/fixtures/comment_rest_e2e_gate/cypress/e2e/attachments_rest.cy.ts` covers
   `PUT /api/cr_asset/{id}/attachments` (see `npm run test:comment-rest-e2e-gate`): a mobile access token (accepted), no
   credential or a bad key (401), replace semantics (listed order, reorder, removal, images and files separate), malformed
-  bodies (400), a caller without `update` (403), a record of a foreign organization (404, nothing written) and an id that
-  belongs to another record (400, nothing taken over).
+  bodies (400), a caller without `update` (403), a record of a foreign organization (404, nothing written), an id that
+  belongs to another record and an upload made by another user (404, nothing taken over).
+  `attachments_serve.cy.ts` covers `GET /api/attachments/{id}`: read permission (200), a member without it (403), a user
+  of another organization (404) and an upload that is not attached yet (uploader only).
 - `cypress/e2e/api/direct_attachment_rest.cy.ts` covers `POST /api/upload` and `POST /api/attachment/direct` with a
   mobile access token (accepted), no credential or a tampered token (401), malformed input (400), the decrypted
-  name on the linked record, and a holder without `update` on the entity who can store a file but not link it (403).
+  name on the linked record, a holder without `update` on the entity who can store a file but not link it (403) and an
+  upload made by another user (404).
 - `mobile/e2e/*.spec.ts` are curated, hand-written specs, one per flow, not generated. A mobile change
   ships a spec for the flow it changes.
 - `mobile/scripts/real-browser-verify.js` is the reusable real-browser check. It selects a preset with
