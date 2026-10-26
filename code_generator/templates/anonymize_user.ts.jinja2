@@ -70,6 +70,9 @@ export async function anonymizeUser(userId: string): Promise<AnonymizeUserResult
       // (the rows stay so token revocation keeps working), the person's
       // notifications and the cached responses of their idempotent requests.
       await tx.mobile_session.updateMany({ where: { user_id: userId }, data: { device_name: null } });
+      // Revoke the person's mobile sessions so their refresh tokens stop working.
+      // Sessions revoked earlier keep their original revocation time.
+      await tx.mobile_session.updateMany({ where: { user_id: userId, revoked_at: null }, data: { revoked_at: anonymizedAt } });
       await tx.notification.deleteMany({ where: { user_id: userId } });
       await tx.idempotency_key.deleteMany({ where: { actor_user_id: userId } });
 {% if scrubs_avatar %}

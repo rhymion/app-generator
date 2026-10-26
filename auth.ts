@@ -440,8 +440,11 @@ export const authConfig: NextAuthConfig = {
       if (token.id) {
         const dbUser = await prisma.user.findUnique({
           where: { id: token.id },
-          select: { mfa_enabled: true, mfa_token_version: true },
+          select: { mfa_enabled: true, mfa_token_version: true, anonymized_at: true },
         });
+        // An erased user's session ends here: returning null makes Auth.js
+        // treat the cookie as no session and clear it.
+        if (dbUser?.anonymized_at) return null;
         const dbVersion = dbUser?.mfa_token_version ?? 0;
         const tokenVersion = token.mfa_token_version ?? 0;
         if (dbUser?.mfa_enabled && dbVersion > tokenVersion) {

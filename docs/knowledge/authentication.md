@@ -432,6 +432,11 @@ end up in hosting runtime logs). A user is identified by id only:
 touch `audit_log`: the table is append-only (see
 [audit-log-append-only.md](audit-log-append-only.md)) and `actor_user_id` stays
 as the pseudonymous key. The person is erased on the `user` row.
+
+Erasure also ends the person's sessions. The web `jwt()` callback in `auth.ts` returns `null` for a user whose
+`anonymized_at` is set, so Auth.js treats the cookie as no session and clears it (the callback already reads the user
+row on every session read). Mobile access tokens are rejected by `verifyMobileAccessToken()` for the same reason, and
+`anonymizeUser()` revokes the user's `mobile_session` rows so their refresh tokens stop working.
 Failed credential and MFA sign-ins are not recorded in `audit_log`; they
 are throttled by the Redis rate limits described above. Rows written by
 earlier versions may still hold `metadata.email` in a deployed database;
