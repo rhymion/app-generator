@@ -3,17 +3,12 @@ import { createId } from "@paralleldrive/cuid2";
 import bcrypt from "bcryptjs";
 import prisma from "@/lib/prisma";
 import { getRateLimiter } from "@/lib/rate-limit";
-
-function clientIp(request: Request): string {
-  const fwd = request.headers.get("x-forwarded-for");
-  if (fwd) return fwd.split(",")[0]!.trim();
-  return request.headers.get("x-real-ip") ?? "unknown";
-}
+import { clientIp } from "@/lib/rate-limit/client-ip";
 
 export async function POST(request: Request) {
   try {
     // Per-IP ceiling, checked before any body parsing or database read.
-    const decision = await getRateLimiter().check("auth:register", clientIp(request));
+    const decision = await getRateLimiter().check("auth:register", clientIp(request.headers));
     if (!decision.allowed) {
       return NextResponse.json(
         { error: "rate_limited", retryAfter: decision.retryAfterSeconds },

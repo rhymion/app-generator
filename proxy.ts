@@ -3,6 +3,7 @@ import { NextResponse, NextRequest } from 'next/server';
 import { auth } from '@/auth';
 import { routing } from './i18n/routing';
 import { getRateLimiter } from '@/lib/rate-limit';
+import { clientIp } from '@/lib/rate-limit/client-ip';
 import { safeRedirectPath } from '@/lib/auth/safe-redirect';
 
 const intlMiddleware = createIntlMiddleware(routing);
@@ -27,12 +28,6 @@ function bucketForAuthRequest(pathname: string, method: string): string | null {
   // Anything else under /api/auth — session reads, csrf, providers list — is
   // not abuse-prone, so it's not rate-limited.
   return null;
-}
-
-function clientIp(req: Request): string {
-  const fwd = req.headers.get('x-forwarded-for');
-  if (fwd) return fwd.split(',')[0]!.trim();
-  return req.headers.get('x-real-ip') ?? 'unknown';
 }
 
 /**
@@ -105,7 +100,7 @@ export const proxy = auth(async (req) => {
   // list) — those fall through with no overhead.
   const bucket = bucketForAuthRequest(pathname, req.method);
   if (bucket) {
-    const decision = await getRateLimiter().check(bucket, clientIp(req));
+    const decision = await getRateLimiter().check(bucket, clientIp(req.headers));
     if (!decision.allowed) {
       return new NextResponse(
         JSON.stringify({ error: 'rate_limited', retryAfter: decision.retryAfterSeconds }),
