@@ -17,6 +17,10 @@
 #               organization scoping of the split route.
 #   cr_note     an entity scoped by organization with a required foreign key to cr_ref (also scoped by
 #               organization), for fk_write_rest.cy.ts: a foreign key may only point at a row the caller can reach.
+#   cr_group / cr_group_item
+#               an organization-scoped parent with an inline child (read-only own pages) whose rows carry a foreign
+#               key to cr_ref: the child rows are written only through the parent's own create / update, which
+#               must apply the same foreign-key rule as cr_note (fk_write_nested.cy.ts).
 #   cr_split_create / cr_split_read
 #               the same shape with editing disabled (`edit: false`): the update permission can never
 #               be assigned there, so the split route asks for `create` (cr_split_create, `new: true`)
@@ -202,3 +206,53 @@ definitions:
       organization_id:
         x-relationship:
           labelField: name
+
+  cr_group:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: true
+    x-display:
+      table:
+        - title:
+            primary: true
+    properties:
+      title: {}
+      organization_id:
+        x-relationship:
+          labelField: name
+      cr_group_items:
+        type: array
+        items:
+          $ref: "#/definitions/cr_group_item"
+
+  cr_group_item:
+    x-generate:
+      list: true
+      view: true
+      new: false
+      edit: false
+      delete: false
+      invalidate: false
+      api: false
+      test: false
+    x-display:
+      table:
+        - name:
+            primary: true
+    properties:
+      name:
+        minLength: 1
+      cr_group_id:
+        pattern: "^c[a-z0-9]{24,}$"
+      cr_ref_id:
+        pattern: "^c[a-z0-9]{24,}$"
+        x-relationship:
+          type: many-to-one
+          target: cr_ref
+          labelField: title

@@ -16,6 +16,9 @@ export async function add{{ parent_pascal }}(actorId: string{% if parent_params_
 {% endfor %}
   ]);
 {% endif %}
+{% if child_fk_check_create %}
+{{ child_fk_check_create }}
+{% endif %}
   let result;
   let _idempotentReplay = false;
   try {
@@ -265,6 +268,9 @@ export async function update{{ parent_pascal }}(actorId: string, id: string{% if
     { model: '{{ c.target }}', id: {{ c.var }}, previousId: _fkPrevious?.{{ c.prop }}, load: (_id) => prisma.{{ c.target }}.findUnique({ where: { id: _id } }) as Promise<Record<string, unknown> | null> },
 {% endfor %}
   ]);
+{% endif %}
+{% if child_fk_check_update %}
+{{ child_fk_check_update }}
 {% endif %}
 {% if is_self_only %}
   // x-self-only: verify ownership at the actual write, not just at the

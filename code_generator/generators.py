@@ -3415,6 +3415,8 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
     should_filter_by_org    = bool(ctx.get('should_filter_by_org'))
     org_id_client_writable  = bool(ctx.get('org_id_client_writable'))
     fk_write_checks         = ctx.get('fk_write_checks') or []
+    child_fk_check_create   = ctx.get('child_fk_check_create') or ''
+    child_fk_check_update   = ctx.get('child_fk_check_update') or ''
     is_self_only            = bool(ctx.get('is_self_only'))
     reservation_config      = ctx.get('reservation_config')
     has_reservation         = bool(reservation_config and reservation_config.get('mode') == 'count')
@@ -4050,7 +4052,7 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
                or approval_edge_trigger_update_code) else '')
         + (f"\nimport {{ recordAuditEvent }} from '@/lib/audit-log';" if is_audited else '')
         + (f"\nimport {{ getAssociatedOrganizations }} from '@/lib/organization/getters_associated';" if org_id_client_writable and (can_create or can_update) else '')
-        + ("\nimport { assertFkReferencesUsable } from '@/lib/_fk_reference';" if fk_write_checks and (can_create or can_update) else '')
+        + ("\nimport { assertFkReferencesUsable } from '@/lib/_fk_reference';" if (fk_write_checks or child_fk_check_create or child_fk_check_update) and (can_create or can_update) else '')
         + (f"\nimport {{ AppError, p2002Field }} from '@/lib/_errors';" if can_create or can_update else '')
         + (ctx.get('child_exclusive_imports', '') if can_create or can_update else '')
         + (f"\nimport {{ getModelPermissions }} from '@/lib/authz';" if server_value_override_fields and can_create else '')
@@ -4111,6 +4113,8 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
         'should_filter_by_org':               should_filter_by_org,
         'org_id_client_writable':             org_id_client_writable,
         'fk_write_checks':                   fk_write_checks,
+        'child_fk_check_create':             child_fk_check_create,
+        'child_fk_check_update':             child_fk_check_update,
         'approval_edge_trigger_create_code':  approval_edge_trigger_create_code,
         'version_of_create_code':             version_of_create_code,
         'version_of_pre_create_code':         version_of_pre_create_code,

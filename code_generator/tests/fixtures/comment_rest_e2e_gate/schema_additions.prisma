@@ -144,8 +144,47 @@ model cr_ref {
   updater_id      String
   updater         user         @relation("CrRefUpdater", fields: [updater_id], references: [id])
   cr_notes        cr_note[]
+  cr_group_items  cr_group_item[]
   @@index([title])
   @@index([organization_id])
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
+model cr_group {
+  id              String          @id @default(cuid())
+  title           String
+  organization_id String
+  organization    organization    @relation(fields: [organization_id], references: [id])
+  cr_group_items  cr_group_item[]
+  created_at      DateTime        @default(now()) @db.Timestamptz(0)
+  updated_at      DateTime        @updatedAt @db.Timestamptz(0)
+  creator_id      String
+  creator         user            @relation("CrGroupCreator", fields: [creator_id], references: [id])
+  updater_id      String
+  updater         user            @relation("CrGroupUpdater", fields: [updater_id], references: [id])
+  @@index([title])
+  @@index([organization_id])
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
+model cr_group_item {
+  id          String   @id @default(cuid())
+  name        String
+  cr_group_id String
+  cr_group    cr_group @relation(fields: [cr_group_id], references: [id], onDelete: Cascade)
+  cr_ref_id   String?
+  cr_ref      cr_ref?  @relation(fields: [cr_ref_id], references: [id])
+  created_at  DateTime @default(now()) @db.Timestamptz(0)
+  updated_at  DateTime @updatedAt @db.Timestamptz(0)
+  creator_id  String
+  creator     user     @relation("CrGroupItemCreator", fields: [creator_id], references: [id])
+  updater_id  String
+  updater     user     @relation("CrGroupItemUpdater", fields: [updater_id], references: [id])
+  @@index([name])
+  @@index([cr_group_id])
+  @@index([cr_ref_id])
   @@index([creator_id])
   @@index([updater_id])
 }

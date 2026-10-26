@@ -910,6 +910,23 @@ def _build_child_data(children_raw: list[dict], model: str, schema: dict,
             if p not in readonly_field_names and p not in _exclusive_fks
         )
 
+        # Foreign keys of the child's own rows that point at an
+        # organization-scoped entity: written straight from the client's row,
+        # so service.ts checks them like the parent's own foreign keys
+        # (lib/_fk_reference.ts). Only columns the nested write really takes
+        # from the client are listed.
+        child_fk_write_checks = []
+        if not use_connect:
+            _written_cols = set(props_no_id) - set(readonly_field_names)
+            for _r in get_parent_relationships(child_def, schema):
+                _t = _r['target']
+                if _r['prop_name'] not in _written_cols or _t in ('organization', 'user'):
+                    continue
+                _t_def = schema['definitions'].get(f'__{_t}', {}) or schema['definitions'].get(_t, {})
+                if _t_def.get('properties', {}).get('organization_id') is None:
+                    continue
+                child_fk_write_checks.append({'prop': _r['prop_name'], 'target': _t})
+
         child_var    = safe_var_name(prop_name)
         child_pascal = to_pascal_case(prop_name)
         form_key     = singularize(prop_name)
@@ -994,6 +1011,7 @@ def _build_child_data(children_raw: list[dict], model: str, schema: dict,
             'field_type_with_id': field_type_with_id,
             'field_map_create': field_map_create,
             'field_map_update': field_map_update,
+            **({'fk_write_checks': child_fk_write_checks} if child_fk_write_checks else {}),
             'readonly_field_names': readonly_field_names,
             'approval_indexed':   approval_indexed,
             'approval_array_var': approval_array_var,
@@ -1124,6 +1142,38 @@ def _build_child_nested_update(children_data: list[dict]) -> str:
                 f"      }},"
             )
     return '\n'.join(lines)
+
+
+def _build_child_fk_check(children_data: list[dict], for_update: bool) -> str:
+    """Service-layer check for the foreign keys carried by nested child rows:
+    each one that points at an organization-scoped entity must reference a row
+    the actor may use, exactly like the parent's own foreign keys. On update an
+    existing row's unchanged value is not checked again."""
+    blocks = []
+    for c in children_data:
+        checks = c.get('fk_write_checks') or []
+        if c['use_connect'] or not checks:
+            continue
+        cv, cm = c['child_var'], c['name']
+        prev = f"_{cv}FkPrev"
+        if for_update:
+            sel = ', '.join(f"{k['prop']}: true" for k in checks)
+            blocks.append(
+                f"  const {prev} = new Map((await prisma.{cm}.findMany({{\n"
+                f"    where: {{ id: {{ in: {cv}Items.map((f) => f.id).filter((x): x is string => Boolean(x)) }} }},\n"
+                f"    select: {{ id: true, {sel} }},\n"
+                f"  }})).map((r) => [r.id, r] as const));\n"
+            )
+        entries = []
+        for k in checks:
+            p, t = k['prop'], k['target']
+            prev_expr = f", previousId: f.id ? {prev}.get(f.id)?.{p} : undefined" if for_update else ''
+            entries.append(
+                f"    ...{cv}Items.map((f) => ({{ model: '{t}', id: f.{p}{prev_expr}, "
+                f"load: (_id: string) => prisma.{t}.findUnique({{ where: {{ id: _id }} }}) as Promise<Record<string, unknown> | null> }})),"
+            )
+        blocks.append("  await assertFkReferencesUsable(actorId, [\n" + '\n'.join(entries) + "\n  ]);")
+    return '\n'.join(blocks)
 
 
 def _exclusive_check_children(children_data: list[dict]) -> list[dict]:
@@ -3556,6 +3606,8 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     # search below narrows its options to records that are not attached yet.
     list_child_attach_callers = _list_child_attach_callers(schema, parent)
     child_attach_guard_create = _build_child_attach_guard(write_ch, model, for_update=False)
+    child_fk_check_create = _build_child_fk_check(write_ch, for_update=False)
+    child_fk_check_update = _build_child_fk_check(write_ch, for_update=True)
     child_attach_guard_update = _build_child_attach_guard(write_ch, model, for_update=True)
     child_exclusive_create_check = _build_child_exclusive_create_check(write_ch)
     child_exclusive_update_check = _build_child_exclusive_update_check(write_ch)
@@ -4751,6 +4803,8 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         should_filter_by_org=should_filter_by_org,
         org_id_client_writable=org_id_client_writable,
         fk_write_checks=fk_write_checks,
+        child_fk_check_create=child_fk_check_create,
+        child_fk_check_update=child_fk_check_update,
         org_relationship_optional=org_relationship_optional,
         is_self_only=is_self_only,
         self_only_admin_bypass=self_only_admin_bypass,
