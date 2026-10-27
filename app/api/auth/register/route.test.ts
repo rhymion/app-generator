@@ -78,3 +78,16 @@ describe('POST /api/auth/register unexpected failure', () => {
     errorSpy.mockRestore();
   });
 });
+
+describe('POST /api/auth/register client address', () => {
+  it('cannot be reset by rotating a client-supplied X-Forwarded-For prefix', async () => {
+    for (let i = 0; i < 5; i++) {
+      const res = await POST(registerRequest(`10.0.0.${i}, 203.0.113.7`, `u${i}@example.com`));
+      expect(res.status).toBe(201);
+    }
+
+    const blocked = await POST(registerRequest('10.9.9.9, 203.0.113.7', 'u6@example.com'));
+
+    expect(blocked.status).toBe(429);
+  });
+});

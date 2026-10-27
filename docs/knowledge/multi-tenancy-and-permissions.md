@@ -266,6 +266,12 @@ Machine clients use the `X-API-Key` header (or `Authorization: Bearer <key>`):
 export async function authenticateApiKey(request: NextRequest): Promise<{ userId: string }>
 ```
 
+When a request carries more than one credential, one order applies in every
+helper (`authenticate`, `resolveActorId`, `requireCaller`, `requireDualAuth`)
+and in routes that accept both a token and a session (`/api/notifications`):
+`X-API-Key` first, then `Authorization: Bearer` (a mobile access token if it
+has three dot-separated segments, otherwise an API key), then the session cookie.
+
 The API key is looked up against `user.api_key` in the DB. A TTL LRU cache (5 min, 1000 entries) reduces DB load. The cache is gated to production (`process.env.NODE_ENV === 'production'`) so Cypress test resets do not encounter stale entries.
 
 ### Dual authentication (session OR API key)
