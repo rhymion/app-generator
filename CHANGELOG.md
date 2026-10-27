@@ -12,6 +12,14 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 - **CSV import route checks the request Content-Type and rejects null bytes** (Issue #1107). `POST /api/<entity>/import` answers HTTP 415 (`UNSUPPORTED_MEDIA_TYPE`) unless the request is `application/json` or `text/plain`, and HTTP 400 (`INVALID_CSV`) when the CSV text contains a null byte. CSV files picked in the import modal are unaffected, whatever their file type. See `docs/knowledge/csv-import-request-checks.md`.
 - **Slow-query warning log no longer prints bound parameter values** (Issue #1172). It reports only the number of parameters.
 
+### Fixed
+- **GCP deploy reads the attachment bucket under the name the storage code uses** (Issue #1160). `scripts/gcp-deploy.sh` now maps the `app-gcs-bucket-name` secret to `GCS_BUCKET_NAME` (it set `GCS_BUCKET`, which nothing read, so uploads silently went to local disk). Re-run the deploy script to update an existing service. Attachment storage also throws on Cloud Run or Vercel when no backend is configured, instead of falling back to local disk; set `ATTACHMENT_LOCAL_DIR` to opt in to a persistent local path. See `docs/knowledge/attachment-storage.md`.
+- **Vercel Blob is selected by `BLOB_STORE_ID` as well as the read-write token** (Issue #1168), so a project using OIDC only no longer falls through to local disk.
+
+### Security
+- **Narrower bucket role and Public Access Prevention for the GCP attachment bucket** (Issues #1162, #1164). `scripts/gcp-setup.sh` grants `roles/storage.objectUser` instead of `roles/storage.objectAdmin`, creates the bucket with Public Access Prevention, and warns when an existing bucket lacks uniform bucket-level access or Public Access Prevention. A bucket set up earlier keeps its existing role until revoked by hand.
+- **Audit-log OIDC docs recommend a subject-scoped Workload Identity binding** (Issue #1167). See `docs/knowledge/audit-log-append-only.md`.
+
 ### Added
 - **`VersionHistory` can drop its New version button.** `props: {showNewVersionLink: false}` on the identity's `VersionHistory` entry in `x-custom-components` hides the button, for an identity whose own component starts new versions. On by default. See `docs/knowledge/schema-yaml-configuration.md`.
 - **Static check for hand-written API routes** (Issue #1122). `npm run check:handwritten-routes` (`code_generator/check_handwritten_routes.py`) scans `app/api/**/route.ts` files the generator did not write and flags one that writes without a permission-check call or without a rate-limiter call. Exemptions live in `code_generator/check_handwritten_routes_allowlist.yaml` with a required reason. See `docs/knowledge/multi-tenancy-and-permissions.md`.

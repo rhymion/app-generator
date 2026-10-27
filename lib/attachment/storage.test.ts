@@ -85,6 +85,20 @@ describe('backend selection', () => {
     expect(storageBackend({ BLOB_READ_WRITE_TOKEN: 't' })).toBe('vercel');
     expect(storageBackend({ BLOB_READ_WRITE_TOKEN: 't', GCS_BUCKET_NAME: 'b' })).toBe('gcs');
   });
+
+  it('uses Vercel Blob when only BLOB_STORE_ID (OIDC) is set', () => {
+    expect(storageBackend({ BLOB_STORE_ID: 'store_abc' })).toBe('vercel');
+  });
+
+  it('throws instead of using local disk on Cloud Run or Vercel when nothing is configured', () => {
+    expect(() => storageBackend({ K_SERVICE: 'svc', NODE_ENV: 'production' })).toThrow(/No attachment storage backend/);
+    expect(() => storageBackend({ VERCEL: '1', NODE_ENV: 'production' })).toThrow(/BLOB_STORE_ID/);
+  });
+
+  it('allows local disk on those platforms only with an explicit ATTACHMENT_LOCAL_DIR or in development', () => {
+    expect(storageBackend({ K_SERVICE: 'svc', NODE_ENV: 'production', ATTACHMENT_LOCAL_DIR: '/data' })).toBe('local');
+    expect(storageBackend({ VERCEL: '1', NODE_ENV: 'development' })).toBe('local');
+  });
 });
 
 describe('local backend', () => {
