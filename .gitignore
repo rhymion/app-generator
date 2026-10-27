@@ -377,6 +377,7 @@ cypress/e2e/api/*.cy.ts
 !cypress/e2e/api/upload_path_safety.cy.ts
 !cypress/e2e/api/user_invalidate_record_scope.cy.ts
 !cypress/e2e/api/setting_write_only_omitted.cy.ts
+!cypress/e2e/api/setting_credential_confirmation.cy.ts
 
 # ── cypress/support/ ──
 cypress/support/*/
