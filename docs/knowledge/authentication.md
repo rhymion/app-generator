@@ -339,16 +339,27 @@ account code (materially lower severity than a stolen-session attacker
 against someone else's second factor) and were out of the fix's stated
 scope.
 
-**Fail-open on a Redis outage (Issue #587):** the rate limiter is a
-defensive gate in front of auth, not auth itself. `lib/rate-limit/
-redis.ts`'s `check()` now catches any error from the underlying
-`ioredis` `eval` call (connection refused, timeout, …) and returns an
-`allowed: true` decision instead of throwing — an unreachable Redis must
-never take the entire `/api/auth/*` surface down with a 500. Every
-fail-open is logged (`console.error`, tagged `[rate-limit:fail_open]`,
-same "log and continue" contract as `lib/audit-log.ts`'s DB-write
-fail-open) so the degraded window is visible in server logs rather than
-silently inferred from an absence of 429s.
+**Redis outage: the limiter never rejects because of the fault (Issues #587,
+#1176, #1178):** the rate limiter is a defensive gate in front of auth, not
+auth itself. `lib/rate-limit/redis.ts`'s `check()` catches any error from the
+underlying `ioredis` `eval` call (connection refused, timeout, a provider
+that answers every command with a quota error, ...) and never throws — an
+unreachable Redis must not take the `/api/auth/*` surface down with a 500.
+Instead of allowing everything, a failed check is answered by a per-process
+in-memory limiter built from the same buckets, so exhausting the provider's
+command quota does not switch limiting off; the counters are per instance,
+so the effective ceiling is weaker than the shared one. Every failure is
+logged (`console.error`, tagged `[rate-limit:fail_open]`, same "log and
+continue" contract as `lib/audit-log.ts`) so the degraded window is visible
+in server logs.
+
+The failure is reached within seconds: the client is built with
+`connectTimeout` and `commandTimeout` of 2000 ms, `maxRetriesPerRequest: 1`
+and a backoff capped at 1 s, and each check is also bounded by the same
+timeout (`RATE_LIMIT_REDIS_TIMEOUT_MS`, default 2000). After a failure Redis
+is bypassed for 5 s (`RATE_LIMIT_REDIS_COOLDOWN_MS`) and the in-memory
+limiter answers directly, so a sustained outage costs one timeout per
+cooldown window rather than one per request.
 
 **API keys are unaffected by any of this.** `authenticateApiKey()`
 (`lib/api-auth.ts`) has no MFA check by design — API keys are

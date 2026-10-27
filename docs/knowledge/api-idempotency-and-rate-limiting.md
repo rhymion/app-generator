@@ -122,6 +122,12 @@ New buckets, added to `PRODUCTION_BUCKETS`:
 - Both overridable via `RATE_LIMIT_API_READ_LIMIT` /
   `RATE_LIMIT_API_WRITE_LIMIT` env vars, following the exact
   `RATE_LIMIT_AUTH_CREDENTIALS_LIMIT` precedent already in the file.
+
+The upload route (`POST /api/upload`) spends a separate `upload:file` bucket
+— 30 uploads per user per 10 minutes, keyed by the authenticated user id,
+checked before the multipart body is read, overridable with
+`RATE_LIMIT_UPLOAD_LIMIT`. A caller over the ceiling gets HTTP 429 with
+`Retry-After` and `X-RateLimit-Bucket: upload:file`.
 - A limited request returns HTTP 429 with `{ error: 'rate_limited',
   retryAfter: <seconds> }`, a `Retry-After` header, and an
   `X-RateLimit-Bucket` header — the same response shape `proxy.ts` already
