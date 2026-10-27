@@ -12,7 +12,10 @@ vi.mock('@/lib/prisma', () => ({
     mfa_recovery_code: { findMany: recoveryFindMany, update: vi.fn() },
   },
 }));
-vi.mock('bcryptjs', () => ({ default: { compare: vi.fn().mockResolvedValue(true) } }));
+const { bcryptCompare } = vi.hoisted(() => ({ bcryptCompare: vi.fn() }));
+vi.mock('bcryptjs', () => ({
+  default: { compare: bcryptCompare, hash: vi.fn().mockResolvedValue('dummy-hash') },
+}));
 vi.mock('@/lib/mfa/crypto', () => ({ decryptSecret: (s: string) => s }));
 vi.mock('@/lib/mfa/totp', () => ({ verifyTotp }));
 vi.mock('@/lib/mfa/recovery', () => ({ verifyRecoveryCode: vi.fn().mockResolvedValue(false) }));
@@ -45,6 +48,8 @@ function tokenRequest(n: number) {
 
 beforeEach(() => {
   _resetForTests();
+  bcryptCompare.mockReset();
+  bcryptCompare.mockResolvedValue(true);
   verifyTotp.mockResolvedValue(false);
   recoveryFindMany.mockResolvedValue([]);
   userFindUnique.mockResolvedValue({
@@ -67,5 +72,29 @@ describe('POST /api/mobile/auth/token MFA throttling', () => {
 
     expect(blocked.status).toBe(429);
     expect(Number(blocked.headers.get('Retry-After'))).toBeGreaterThan(0);
+  });
+});
+
+describe('POST /api/mobile/auth/token password timing', () => {
+  it.each([
+    ['an unknown email', null],
+    ['an SSO-only account', { id: 'user-2', password: null, mfa_enabled: false, anonymized_at: null }],
+  ])('runs a password comparison even for %s, so it takes as long as a wrong password', async (_label, user) => {
+    userFindUnique.mockResolvedValue(user);
+
+    const res = await POST(tokenRequest(50));
+
+    expect(res.status).toBe(401);
+    expect(bcryptCompare).toHaveBeenCalledTimes(1);
+  });
+
+  it('answers a wrong password and an unknown email with the same status', async () => {
+    bcryptCompare.mockResolvedValue(false);
+    const wrong = await POST(tokenRequest(51));
+    userFindUnique.mockResolvedValue(null);
+    const unknown = await POST(tokenRequest(52));
+
+    expect(wrong.status).toBe(unknown.status);
+    expect(await wrong.json()).toEqual(await unknown.json());
   });
 });

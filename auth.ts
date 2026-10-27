@@ -6,7 +6,7 @@ import CredentialsProvider from "next-auth/providers/credentials";
 import GoogleProvider from "next-auth/providers/google";
 import { PrismaAdapter } from "@auth/prisma-adapter";
 import prisma from "@/lib/prisma";
-import bcrypt from "bcryptjs";
+import { verifyPassword } from "@/lib/auth/password-check";
 import { siteConfig } from "@/lib/site-config";
 import { recordAuditEvent } from "@/lib/audit-log";
 import { verifyMfaCode } from "@/lib/mfa/verify";
@@ -70,17 +70,15 @@ function buildProviders(): Provider[] {
 
         // SSO-provisioned users have password === null and must not be allowed
         // to sign in via the credentials form. Treat them the same as a missing
-        // account so we don't leak that the email is registered.
-        if (!user || !user.password) {
-          throw new Error("Invalid credentials");
-        }
-
-        const isCorrectPassword = await bcrypt.compare(
+        // account so we don't leak that the email is registered. verifyPassword()
+        // runs a comparison against a throwaway hash when there is none, so the
+        // response time does not reveal which case applied either.
+        const isCorrectPassword = await verifyPassword(
           credentials.password as string,
-          user.password,
+          user?.password,
         );
 
-        if (!isCorrectPassword) {
+        if (!user || !user.password || !isCorrectPassword) {
           throw new Error("Invalid credentials");
         }
 

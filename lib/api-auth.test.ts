@@ -24,7 +24,7 @@ vi.mock('@/lib/authz', () => ({
 
 vi.mock('@/lib/rate-limit', async () => (await import('@/test/helpers/real-rate-limiter')).realRateLimiterModule());
 import { _resetForTests as resetRateLimiter } from './rate-limit';
-import { ApiError, authenticateApiKey, handleApiError, requireCaller, requireDualAuth, requireScheduledTaskRole, resolveActorId } from './api-auth';
+import { ApiError, authenticate, authenticateApiKey, handleApiError, requireCaller, requireDualAuth, requireScheduledTaskRole, resolveActorId } from './api-auth';
 import { SCHEDULED_TASK_ROLE_NAME } from './scheduled-tasks/system-actor';
 
 function makeRequest(headers: Record<string, string> = {}) {
@@ -189,6 +189,33 @@ describe('requireCaller', () => {
 });
 
 const MOBILE_JWT = 'header.payload.signature';
+
+describe('authenticate', () => {
+  it('resolves X-API-Key first when a mobile access token is also sent', async () => {
+    userFindFirst.mockResolvedValue({ id: 'key-user', api_key_expires_at: null });
+    await expect(
+      authenticate(makeRequest({ 'X-API-Key': 'mk_test', Authorization: `Bearer ${MOBILE_JWT}` })),
+    ).resolves.toEqual({ userId: 'key-user' });
+    expect(verifyMobileAccessToken).not.toHaveBeenCalled();
+  });
+
+  it('resolves identically to resolveActorId and requireCaller when both credentials are sent', async () => {
+    userFindFirst.mockResolvedValue({ id: 'key-user', api_key_expires_at: null });
+    const headers = { 'X-API-Key': 'mk_test', Authorization: `Bearer ${MOBILE_JWT}` };
+    const viaAuthenticate = await authenticate(makeRequest(headers));
+    const viaActor = await resolveActorId(makeRequest(headers));
+    const viaCaller = await requireCaller(makeRequest(headers));
+    expect(viaActor).toBe(viaAuthenticate.userId);
+    expect(viaCaller).toEqual(viaAuthenticate);
+  });
+
+  it('still resolves a mobile access token when no X-API-Key is sent', async () => {
+    verifyMobileAccessToken.mockResolvedValue({ userId: 'mobile-user', sessionId: 's1' });
+    await expect(authenticate(makeRequest({ Authorization: `Bearer ${MOBILE_JWT}` }))).resolves.toEqual({
+      userId: 'mobile-user',
+    });
+  });
+});
 
 describe('resolveActorId', () => {
   it('resolves a mobile access token sent as a bearer credential', async () => {

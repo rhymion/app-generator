@@ -310,6 +310,18 @@ blocked. The challenge action maps it to `{ ok: false, error: 'RATE_LIMITED',
 retryAfterSeconds }`, the mobile token route to `429` with `Retry-After`, and
 credentials sign-in reports it as an invalid code.
 
+**Client address for rate-limit keys.** The per-IP buckets (`auth:*` in
+`proxy.ts`, `auth:register`, `mobile:auth:token`) key on `clientIp()`
+(`lib/rate-limit/client-ip.ts`). `X-Forwarded-For` is a list that each proxy
+appends to, so its left-most entries are whatever the client sent. `clientIp()`
+therefore takes the entry `TRUSTED_PROXY_HOPS` positions from the right
+(default `1`: the platform edge, which appends the peer address it saw).
+Set `TRUSTED_PROXY_HOPS=2` when a further trusted proxy (for example an
+external load balancer) sits in front of the platform edge. A platform that
+overwrites the header yields a single entry, which is returned as is. When
+the list is shorter than the hop count the left-most entry is used.
+`X-Real-IP` is consulted only when `X-Forwarded-For` is absent.
+
 **Self-registration and API keys.** `POST /api/auth/register` is limited per
 client IP by the `auth:register` bucket (5 requests / 10 min) and answers
 `429` with `Retry-After` when it is spent. `authenticateApiKey`
@@ -492,7 +504,11 @@ in `code_generator/json_schema.yaml` omits `password`.
 The credentials `authorize()` in `auth.ts` rejects accounts where
 `password === null`, returning the same "Invalid credentials" message
 as a missing account. This avoids leaking that an email is registered
-as an SSO account when a credentials sign-in is attempted.
+as an SSO account when a credentials sign-in is attempted. The password
+check goes through `verifyPassword()` (`lib/auth/password-check.ts`), which
+runs a bcrypt comparison against a throwaway hash of the same cost when there
+is no stored hash, so an unknown or SSO-only account does not answer faster
+than a wrong password. `POST /api/mobile/auth/token` uses the same helper.
 
 If an SSO user later wants to *also* sign in with a password, an admin
 (or a future self-serve flow) sets `password` to a bcrypt hash. No

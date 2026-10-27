@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import bcrypt from 'bcryptjs';
+import { verifyPassword } from '@/lib/auth/password-check';
 import prisma from '@/lib/prisma';
 import { ApiError, handleApiError, requireMobileAuth } from '@/lib/api-auth';
 import { verifyMfaCode } from '@/lib/mfa/verify';
 import { MfaRateLimitedError } from '@/lib/mfa/errors';
 import { getRateLimiter } from '@/lib/rate-limit';
+import { clientIp } from '@/lib/rate-limit/client-ip';
 import {
   ACCESS_TOKEN_TTL_SECONDS,
   REFRESH_TOKEN_TTL_MS,
@@ -21,12 +22,6 @@ import {
  * pasted API key. `lib/api-auth.ts`'s `authenticateApiKey()` / X-API-Key
  * support is untouched and keeps serving service-to-service access.
  */
-
-function clientIp(request: NextRequest): string {
-  const fwd = request.headers.get('x-forwarded-for');
-  if (fwd) return fwd.split(',')[0]!.trim();
-  return request.headers.get('x-real-ip') ?? 'unknown';
-}
 
 export async function POST(request: NextRequest) {
   return handlePost(request);
@@ -50,7 +45,7 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
     // any DB read.
     const decision = await getRateLimiter().check(
       'mobile:auth:token',
-      `${clientIp(request)}:${email.toLowerCase()}`,
+      `${clientIp(request.headers)}:${email.toLowerCase()}`,
     );
     if (!decision.allowed) {
       return NextResponse.json(
@@ -63,12 +58,10 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
     // SSO-only users (password === null) and unknown emails must be
     // indistinguishable from the caller's point of view — same as the
     // NextAuth credentials guard in auth.ts.
-    if (!user || !user.password) {
-      throw new ApiError(401, 'Invalid credentials');
-    }
-
-    const passwordOk = await bcrypt.compare(password, user.password);
-    if (!passwordOk) {
+    // verifyPassword() compares against a throwaway hash when there is none, so
+    // the response time does not reveal which case applied.
+    const passwordOk = await verifyPassword(password, user?.password);
+    if (!user || !user.password || !passwordOk) {
       throw new ApiError(401, 'Invalid credentials');
     }
 
