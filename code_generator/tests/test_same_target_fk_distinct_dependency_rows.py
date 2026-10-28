@@ -220,3 +220,70 @@ class TestVarySiblingKey:
     def test_fk_column_keys_are_left_alone(self):
         fields = [{'prop_name': 'step_no', 'prisma_val': '1', 'prisma_val_second': '1'}]
         assert _vary_sibling_key(fields, [{'prop_name': 'parent_id', 'dep_var_name': 'parent'}], 1, 2) == (fields, False)
+
+
+STRING_KEY_PRISMA = """
+model agent {
+  id String @id @default(cuid())
+  agent_code String @unique
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+  links agent_link[] @relation("MainAgent")
+  parent_links agent_link[] @relation("ParentAgent")
+}
+
+model agent_link {
+  id String @id @default(cuid())
+  agent_id String
+  agent agent @relation("MainAgent", fields: [agent_id], references: [id])
+  parent_agent_id String?
+  parent_agent agent? @relation("ParentAgent", fields: [parent_agent_id], references: [id])
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+  @@index([agent_id])
+  @@index([parent_agent_id])
+}
+"""
+
+STRING_KEY_USER_SCHEMA = {
+    'definitions': {
+        'agent': {
+            'x-display': {'table': [{'agent_code': {'primary': True}}]},
+            'properties': {'agent_code': {}},
+        },
+        'agent_link': {
+            'x-display': {'table': [{'agent': {'primary': True}}, {'parent_agent': {}}]},
+            'properties': {
+                'agent_id': {'x-relationship': {'labelField': 'agent_code'}},
+                'parent_agent_id': {'x-relationship': {'labelField': 'agent_code'}},
+            },
+        },
+    },
+}
+
+
+@pytest.fixture
+def string_key_schema(tmp_path):
+    path = tmp_path / 'schema.prisma'
+    path.write_text(STRING_KEY_PRISMA)
+    parsed = parse_prisma_schema(path)
+    set_prisma_uniques(collect_unique_columns(parsed))
+    yield build_intermediate_schema(STRING_KEY_USER_SCHEMA, parsed)
+    set_prisma_uniques({})
+
+
+def test_string_key_sibling_fk_expects_the_suffixed_label_of_its_row(string_key_schema):
+    """The helper seeds 'Test Agent Code A 2' for the second FK to the same target; the spec's
+    expected label has to say the same (it used to expect 'Test Agent Code A' for both)."""
+    ctx = spec_context(*_args_for(string_key_schema, 'agent_link'))
+    spec = _env().get_template('test_spec.cy.ts.jinja2').render(**ctx)
+    helper_args = _args_for(string_key_schema, 'agent_link')
+    helper = _env().get_template('test_helper.ts.jinja2').render(**helper_context(*helper_args))
+    assert "agent_code: 'Test Agent Code A 2'" in helper
+    assert "cy.checkField('Parent Agent', 'Test Agent Code A 2');" in spec
+    assert "cy.checkField('Agent', 'Test Agent Code A');" in spec
+
+
+def _args_for(schema: dict, entity: str):
+    children = _extract_children(schema['definitions'][entity], schema)
+    return entity, children, schema, entity, entity, CONFIG

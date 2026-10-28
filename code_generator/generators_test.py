@@ -485,6 +485,10 @@ def _seed_path_part(
         # matches whichever of those two the row actually holds.
         return label_prop.get('default') or label_prop['enum'][0]
     if prop_type == 'string':
+        if unique_index is None and cursor_entity == target and final_field in (scalar_overrides or {}):
+            # The helper gave this sibling FK's row its own key (see _vary_sibling_key);
+            # the override is the quoted TS literal, the UI shows its value.
+            return scalar_overrides[final_field].strip("'")
         title = to_title_case(final_field)
         return f'Test {title} 0_{unique_index}' if unique_index is not None else f'Test {title} A'
     if prop_type in ('integer', 'number'):
