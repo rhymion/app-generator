@@ -664,8 +664,10 @@ The app keeps the refresh token in `expo-secure-store` (`lib/token-storage.ts`).
 PIN enrolled, a standalone or development build locks it behind that check (`requireAuthentication`), and the
 build's `Info.plist` carries `NSFaceIDUsageDescription` from the `expo-secure-store` config plugin. Expo Go has no
 such text in its own `Info.plist`, so the app stores and reads the token there without the lock
-(`Constants.executionEnvironment` is `storeClient`). The check runs in one function for both save and read, so the
-two always agree, and a locked save that fails outside Expo Go is not retried unlocked. Face ID therefore cannot
+(`Constants.executionEnvironment` is `storeClient`). The check runs only when the token is saved; the result is
+stored beside it (`app_refresh_token_locked`, unlocked) and every read reuses it, so enrolling or removing a device
+lock later does not log the user out. A failure of the device authentication API stores the token unlocked and logs a
+warning. A locked save that fails outside Expo Go is not retried unlocked. Face ID therefore cannot
 be verified in Expo Go; only a standalone or development build locks the token. Web uses `localStorage`.
 
 Generated REST routes call `authenticate()` (`lib/api-auth.ts`), which accepts either a mobile access JWT
