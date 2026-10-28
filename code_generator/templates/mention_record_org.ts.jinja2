@@ -11,10 +11,10 @@
 // empty, resolves to `{ organizationId: null }`: its mentions are not scoped
 // by organization.
 
-import prisma from '@/lib/prisma';
+{% if resolvers %}import prisma from '@/lib/prisma';
 import { requirePermission } from '@/lib/authz';
 import { AppError } from '@/lib/_errors';
-{% if needs_associated_orgs %}import { getAssociatedOrganizations } from '@/lib/organization/getters_associated';
+{% endif %}{% if needs_associated_orgs %}import { getAssociatedOrganizations } from '@/lib/organization/getters_associated';
 {% endif %}
 export interface MentionRecordOrganization {
   organizationId: string | null;

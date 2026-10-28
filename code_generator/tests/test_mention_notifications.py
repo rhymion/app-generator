@@ -252,3 +252,39 @@ def test_record_org_template_resolves_only_known_entities_from_its_own_table():
     # `constructor` / `__proto__` style entity names from the client must not reach a resolver
     assert 'Object.prototype.hasOwnProperty.call(RESOLVERS, entity)' in t
     assert "'use server'" not in t.replace("(no 'use server')", '')
+
+
+_RECORD_ORG_IMPORTS = (
+    "import prisma from '@/lib/prisma';",
+    "import { requirePermission } from '@/lib/authz';",
+    "import { AppError } from '@/lib/_errors';",
+)
+
+
+def _render_record_org(resolvers: str) -> str:
+    from generate import _make_env, _render
+    return _render(_make_env(), 'mention_record_org.ts.jinja2', {
+        'resolvers': resolvers,
+        'needs_associated_orgs': 'getAssociatedOrganizations' in resolvers,
+    })
+
+
+def test_record_org_omits_resolver_imports_when_there_are_no_resolvers():
+    out = _render_record_org('')
+    for line in _RECORD_ORG_IMPORTS:
+        assert line not in out
+    assert 'getAssociatedOrganizations' not in out
+    # the lookup still exists and answers null for every entity
+    assert 'export async function resolveMentionRecordOrganization(' in out
+    assert 'const RESOLVERS: Record<string, MentionRecordResolver> = {\n};' in out
+
+
+def test_record_org_emits_resolver_imports_when_there_are_resolvers():
+    resolver = _build_mention_record_resolver(
+        'ticket', 'ticket', '{ id: true, creator_id: true }',
+        {'should_filter_by_org': True, 'is_self_only': False, 'filter_values': {}},
+    )
+    out = _render_record_org(resolver)
+    for line in _RECORD_ORG_IMPORTS:
+        assert line in out
+    assert "import { getAssociatedOrganizations } from '@/lib/organization/getters_associated';" in out
