@@ -1,0 +1,37 @@
+// Auto-generated — do not edit manually.
+// Organization of the record a mention is written for. Not a Server Action
+// module (no 'use server'): `record` comes from the client, so every lookup
+// re-reads the record on the server through the same read gates the
+// entity's own detail page applies (organization scope, x-self-only,
+// x-filter-values, read permission) and derives the organization itself.
+//
+// A record the caller cannot read, an unknown entity, or a missing id
+// resolves to `null` -- the mention search then answers with no candidates.
+// An entity without an organization column, or a record whose organization is
+// empty, resolves to `{ organizationId: null }`: its mentions are not scoped
+// by organization.
+
+import prisma from '@/lib/prisma';
+import { requirePermission } from '@/lib/authz';
+import { AppError } from '@/lib/_errors';
+export interface MentionRecordOrganization {
+  organizationId: string | null;
+}
+
+type MentionRecordResolver = (
+  recordId: string,
+  userId: string,
+) => Promise<MentionRecordOrganization | null>;
+
+const RESOLVERS: Record<string, MentionRecordResolver> = {
+};
+
+export async function resolveMentionRecordOrganization(
+  entity: string,
+  recordId: string,
+  userId: string,
+): Promise<MentionRecordOrganization | null> {
+  if (!Object.prototype.hasOwnProperty.call(RESOLVERS, entity)) return null;
+  if (typeof recordId !== 'string' || recordId.length === 0) return null;
+  return RESOLVERS[entity](recordId, userId);
+}
