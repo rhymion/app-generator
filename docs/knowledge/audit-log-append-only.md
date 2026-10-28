@@ -184,10 +184,13 @@ password or connection string is ever passed on a command line or recorded in a 
 5. **Verify as the restricted role, with its own credentials.** When switching `PGUSER` in a shell, switch `PGPASSWORD` as
    well; a leftover owner password makes a wrong-password failure indistinguishable from a missing grant. `SELECT
    current_user` returns `app_runtime`, and `TRUNCATE audit_log` fails with `permission denied`.
-6. **`scripts/vercel-setup.sh` injects the owner's pooled URL as `DATABASE_URL`.** Re-running it (or
-   `scripts/vercel-env.sh inject`) overwrites a `DATABASE_URL` that was set to the restricted role. After any re-run, set
-   `DATABASE_URL` for each Vercel environment back to the restricted role's connection string by hand. The script
-   prints a reminder when it injects.
+6. **Record the restricted role's URL so a re-run keeps it.** `scripts/vercel-setup.sh` and
+   `scripts/vercel-env.sh inject` inject the owner's pooled URL as `DATABASE_URL`, which would overwrite a
+   `DATABASE_URL` set to the restricted role. Put the role's pooled connection string in `.env.production.local` as
+   `DATABASE_URL_APP_PROD` (Production) and `DATABASE_URL_APP_STAGING` (Preview). When one is set, the script injects it
+   as `DATABASE_URL` for that target and says so; `DIRECT_URL` stays the owner's unpooled URL, because migrations need
+   the owner. When it is not set, every run prints a warning that `DATABASE_URL` is being set to the owner's URL. The
+   script never creates the role or handles its password beyond reading that file.
 
 The scheduled task `audit_log_ensure_partitions` writes a completion record to `scheduled_task_run`. If that table is
 missing from the database, the run fails with `The table public.scheduled_task_run does not exist in the current

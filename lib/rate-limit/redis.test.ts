@@ -32,6 +32,21 @@ describe('createRedisRateLimiter', () => {
     vi.restoreAllMocks();
   });
 
+  it('namespaces keys with keyPrefix, and with RATE_LIMIT_KEY_PREFIX when no option is given', async () => {
+    const fake = makeFakeClient();
+    const limiter = createRedisRateLimiter(BUCKETS, { client: fake as never, keyPrefix: 'preview:' });
+    fake.enqueue([1, 2, 0, 9_999]);
+    await limiter.check('tight', '1.1.1.1');
+    expect(fake.calls[0].args[0]).toBe('rl:preview:tight:1.1.1.1');
+
+    vi.stubEnv('RATE_LIMIT_KEY_PREFIX', 'production:');
+    const envLimiter = createRedisRateLimiter(BUCKETS, { client: fake as never });
+    fake.enqueue([1, 2, 0, 9_999]);
+    await envLimiter.check('tight', '1.1.1.1');
+    expect(fake.calls[1].args[0]).toBe('rl:production:tight:1.1.1.1');
+    vi.unstubAllEnvs();
+  });
+
   it('passes bucket window/limit and the cache key to the Lua script', async () => {
     const fake = makeFakeClient();
     const limiter = createRedisRateLimiter(BUCKETS, { client: fake as never });
