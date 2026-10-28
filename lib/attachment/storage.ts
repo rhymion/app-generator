@@ -8,7 +8,7 @@
 // serveStoredObject() after its permission checks.
 //
 // Backend, chosen from the environment:
-//   GCS_BUCKET_NAME set            -> Google Cloud Storage (private bucket, V4 signed URL)
+//   GCS_BUCKET_NAME set            -> Google Cloud Storage (private bucket, streamed through the route)
 //   BLOB_READ_WRITE_TOKEN set      -> Vercel Blob with `access: 'private'`
 //   neither                        -> local disk under ATTACHMENT_LOCAL_DIR (default `.uploads/`
 //                                     at the project root, never under `public/`)
@@ -102,9 +102,9 @@ export type ServeOptions = {
 /**
  * The response that delivers one stored object, or null when the object does not exist.
  *
- * GCS: a short-lived V4 signed URL carrying the response type and disposition, answered as a redirect.
- * Vercel Blob and local disk: the bytes are streamed through the route (a Blob presigned URL cannot
- * set the response Content-Disposition, so the decrypted file name could not be delivered by redirect).
+ * All three backends stream the bytes through the route, so the decrypted file name travels only in the
+ * response header. A signed URL (GCS) or presigned URL (Blob) would carry it in a query string that
+ * can reach browser history and URL-logging proxies.
  */
 export async function serveStoredObject(key: string, options: ServeOptions): Promise<Response | null> {
   assertKey(key);
@@ -120,14 +120,8 @@ export async function serveStoredObject(key: string, options: ServeOptions): Pro
       const file = bucket.file(key);
       const [exists] = await file.exists();
       if (!exists) return null;
-      const [signedUrl] = await file.getSignedUrl({
-        version: 'v4',
-        action: 'read',
-        expires: Date.now() + 5 * 60 * 1000,
-        responseType: options.contentType,
-        responseDisposition: options.disposition,
-      });
-      return new Response(null, { status: 302, headers: { Location: signedUrl, 'Cache-Control': 'private, no-store' } });
+      const body = Readable.toWeb(file.createReadStream()) as unknown as ReadableStream;
+      return new Response(body, { status: 200, headers });
     }
     case 'vercel': {
       const { get } = await import('@vercel/blob');
