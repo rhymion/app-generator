@@ -81,7 +81,7 @@ x-generator:
 | `AUDIT_LOG_GCS_RETENTION_MODE` | `unlocked` (default) or `locked`. Always set it explicitly; it is never inferred from `NODE_ENV`. |
 | `AUDIT_LOG_GCS_AUTH` | `adc` (default; Application Default Credentials) or `vercel-oidc` (Vercel OIDC with Workload Identity Federation, needs `GCP_PROJECT_ID`, `GCP_PROJECT_NUMBER`, `GCP_SERVICE_ACCOUNT_EMAIL`, `GCP_WORKLOAD_IDENTITY_POOL_ID`, `GCP_WORKLOAD_IDENTITY_POOL_PROVIDER_ID`). |
 | `AUDIT_LOG_GCS_ENDPOINT` | Optional API endpoint override, for a local emulator. |
-| `AUDIT_LOG_S3_BUCKET` | Select S3. Required with it: `AUDIT_LOG_S3_REGION`, `AUDIT_LOG_S3_RETENTION_DAYS`. |
+| `AUDIT_LOG_S3_BUCKET` | Select S3. Required with it: `AUDIT_LOG_S3_REGION`, `AUDIT_LOG_S3_RETENTION_DAYS` (whole days, 1 to 3650). The objects use Object Lock COMPLIANCE mode, which nobody, including the account root, can shorten or remove, so a larger value is rejected at start-up instead of being accepted silently. |
 | `AUDIT_LOG_S3_EXPECTED_BUCKET_OWNER` | Optional 12-digit AWS account id. When set it is sent as `ExpectedBucketOwner` on every S3 put and get, so a request cannot land in a same-named bucket owned by another account. Recommended whenever the account is known. |
 | `AUDIT_LOG_STORAGE_DIR` | A local directory, for tests and local runs only. |
 
