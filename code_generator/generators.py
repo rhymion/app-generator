@@ -2658,10 +2658,11 @@ def _build_approval_create_block_for_entity(
     exists (has been created/committed in `tx_var`) by the time this block
     runs, since target_id_expr is evaluated at that point.
     """
-    notify_opts = f"{{ excludeUserId: {actor_id_expr} }}"
+    notify_opts = f"{{ resolveOrganization: resolveApprovableOrganization, excludeUserId: {actor_id_expr} }}"
     if target_entity_name and target_id_expr:
         notify_opts = (
             f"{{\n"
+            f"{indent}    resolveOrganization: resolveApprovableOrganization,\n"
             f"{indent}    excludeUserId: {actor_id_expr},\n"
             f"{indent}    targetEntityName: '{target_entity_name}',\n"
             f"{indent}    targetId: {target_id_expr},\n"
@@ -2721,10 +2722,11 @@ def _build_split_approval_inherit_block(
     runs, since the old ordering (notify before the child row existed) can
     never resolve a target.
     """
-    notify_opts = '{ excludeUserId: userId }'
+    notify_opts = '{ resolveOrganization: resolveApprovableOrganization, excludeUserId: userId }'
     if target_entity_name and target_id_expr:
         notify_opts = (
             f"{{\n"
+            f"{indent}    resolveOrganization: resolveApprovableOrganization,\n"
             f"{indent}    excludeUserId: userId,\n"
             f"{indent}    targetEntityName: '{target_entity_name}',\n"
             f"{indent}    targetId: {target_id_expr},\n"
@@ -4039,6 +4041,7 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
         + (f"\nimport {{ notify }} from '@/lib/_notifier';"
            if has_assignee_id or child_assignee_notify_create_code or child_assignee_notify_update_code else '')
         + (f"\nimport {{ notifyApprovalRequestCreated }} from '@/lib/_notifyApprovalRequest';"
+           f"\nimport {{ resolveApprovableOrganization }} from '@/lib/approval_request/resolve_target';"
            if (approval_lines_post_create_code or approval_lines_post_update_code
                or reservation_self_case_notifies or approval_edge_trigger_create_code
                or approval_edge_trigger_update_code) else '')

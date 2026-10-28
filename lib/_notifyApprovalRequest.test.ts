@@ -6,9 +6,8 @@ const { notify, resolveApprovableOrganization } = vi.hoisted(() => ({
 }));
 
 vi.mock('@/lib/_notifier', () => ({ notify }));
-// Generated per schema (gitignored), so it is replaced here: what matters is the organization the
-// record behind the approvable carries.
-vi.mock('@/lib/approval_request/resolve_target', () => ({ resolveApprovableOrganization }));
+// The generated resolveApprovableOrganization (git-ignored) is injected by the callers, so it is
+// never imported here: what matters is the organization the record behind the approvable carries.
 
 import { notifyApprovalRequestCreated, notifyApprovalOrderReached } from './_notifyApprovalRequest';
 
@@ -76,7 +75,7 @@ describe('notifyApprovalRequestCreated', () => {
       ],
     });
 
-    await notifyApprovalRequestCreated(tx, 'req-1', { excludeUserId: 'actor' });
+    await notifyApprovalRequestCreated(tx, 'req-1', { resolveOrganization: resolveApprovableOrganization, excludeUserId: 'actor' });
 
     expect(notify).toHaveBeenCalledTimes(2);
     expect(notify.mock.calls.map((c) => c[0])).toEqual(['u1', 'u2']);
@@ -92,7 +91,7 @@ describe('notifyApprovalRequestCreated', () => {
       ],
     });
 
-    await notifyApprovalRequestCreated(tx, 'req-1', { excludeUserId: 'u1' });
+    await notifyApprovalRequestCreated(tx, 'req-1', { resolveOrganization: resolveApprovableOrganization, excludeUserId: 'u1' });
 
     expect(notify).toHaveBeenCalledTimes(1);
     expect(notify.mock.calls[0][0]).toBe('u2');
@@ -107,7 +106,7 @@ describe('notifyApprovalRequestCreated', () => {
       ],
     });
 
-    await notifyApprovalRequestCreated(tx, 'req-1', { orgId: 'org-a' });
+    await notifyApprovalRequestCreated(tx, 'req-1', { resolveOrganization: resolveApprovableOrganization, orgId: 'org-a' });
 
     expect(notify).toHaveBeenCalledTimes(1);
     expect(notify.mock.calls[0][0]).toBe('u1');
@@ -128,7 +127,7 @@ describe('notifyApprovalRequestCreated', () => {
       resolveApprovableOrganization.mockResolvedValue({ scoped: false });
       const tx = makeTx({ approvalFlow: flow, roleUsers: approvers });
 
-      await notifyApprovalRequestCreated(tx, 'req-1', { excludeUserId: 'actor' });
+      await notifyApprovalRequestCreated(tx, 'req-1', { resolveOrganization: resolveApprovableOrganization, excludeUserId: 'actor' });
 
       expect(notify.mock.calls.map((c) => c[0])).toEqual(approvers.map((u) => u.id));
       expect(resolveApprovableOrganization).toHaveBeenCalledWith(tx, 'leave_request', 'appr-1');
@@ -138,7 +137,7 @@ describe('notifyApprovalRequestCreated', () => {
       resolveApprovableOrganization.mockResolvedValue({ scoped: true, organizationId: null });
       const tx = makeTx({ approvalFlow: flow, roleUsers: approvers });
 
-      await notifyApprovalRequestCreated(tx, 'req-1', { excludeUserId: 'actor' });
+      await notifyApprovalRequestCreated(tx, 'req-1', { resolveOrganization: resolveApprovableOrganization, excludeUserId: 'actor' });
 
       expect(notify.mock.calls.map((c) => c[0])).toEqual(approvers.map((u) => u.id));
     });
@@ -147,7 +146,7 @@ describe('notifyApprovalRequestCreated', () => {
       resolveApprovableOrganization.mockResolvedValue({ scoped: true, organizationId: 'org-a' });
       const tx = makeTx({ approvalFlow: flow, roleUsers: approvers });
 
-      await notifyApprovalRequestCreated(tx, 'req-1', { excludeUserId: 'actor' });
+      await notifyApprovalRequestCreated(tx, 'req-1', { resolveOrganization: resolveApprovableOrganization, excludeUserId: 'actor' });
 
       expect(notify.mock.calls.map((c) => c[0])).toEqual(['in-record-org']);
     });
@@ -156,7 +155,7 @@ describe('notifyApprovalRequestCreated', () => {
       resolveApprovableOrganization.mockResolvedValue({ scoped: true, organizationId: 'org-a' });
       const tx = makeTx({ approvalFlow: flow, roleUsers: approvers });
 
-      await notifyApprovalRequestCreated(tx, 'req-1');
+      await notifyApprovalRequestCreated(tx, 'req-1', { resolveOrganization: resolveApprovableOrganization });
 
       expect(notify.mock.calls.map((c) => c[0])).toEqual(['in-record-org']);
     });
@@ -165,7 +164,7 @@ describe('notifyApprovalRequestCreated', () => {
       resolveApprovableOrganization.mockResolvedValue({ scoped: true, organizationId: 'org-a' });
       const tx = makeTx({ approvalFlow: flow, roleUsers: approvers });
 
-      await notifyApprovalRequestCreated(tx, 'req-1', { excludeUserId: 'actor', orgId: 'org-b' });
+      await notifyApprovalRequestCreated(tx, 'req-1', { resolveOrganization: resolveApprovableOrganization, excludeUserId: 'actor', orgId: 'org-b' });
 
       expect(notify.mock.calls.map((c) => c[0])).toEqual(['other-org']);
     });
@@ -174,7 +173,7 @@ describe('notifyApprovalRequestCreated', () => {
       resolveApprovableOrganization.mockResolvedValue(null);
       const tx = makeTx({ approvalFlow: flow, roleUsers: approvers });
 
-      await notifyApprovalRequestCreated(tx, 'req-1', { excludeUserId: 'actor' });
+      await notifyApprovalRequestCreated(tx, 'req-1', { resolveOrganization: resolveApprovableOrganization, excludeUserId: 'actor' });
 
       expect(notify).toHaveBeenCalledTimes(approvers.length);
     });
@@ -183,7 +182,7 @@ describe('notifyApprovalRequestCreated', () => {
   it('is a no-op when the approval_flow has no approver_role_id (or is absent)', async () => {
     const tx = makeTx({ approvalFlow: { approver_role_id: null, entity_name: 'leave_request' } });
 
-    await notifyApprovalRequestCreated(tx, 'req-1', { excludeUserId: 'actor' });
+    await notifyApprovalRequestCreated(tx, 'req-1', { resolveOrganization: resolveApprovableOrganization, excludeUserId: 'actor' });
 
     expect(notify).not.toHaveBeenCalled();
   });
@@ -199,6 +198,7 @@ describe('notifyApprovalRequestCreated', () => {
       });
 
       await notifyApprovalRequestCreated(tx, 'req-1', {
+        resolveOrganization: resolveApprovableOrganization,
         excludeUserId: 'actor',
         targetEntityName: 'leave_request',
         targetId: 'lr-42',
@@ -214,6 +214,7 @@ describe('notifyApprovalRequestCreated', () => {
       });
 
       await notifyApprovalRequestCreated(tx, 'req-1', {
+        resolveOrganization: resolveApprovableOrganization,
         excludeUserId: 'actor',
         targetEntityName: 'leave_request',
         targetId: 'lr-42',
@@ -229,7 +230,7 @@ describe('notifyApprovalRequestCreated', () => {
         roleUsers: [{ id: 'u1', organizations: [{ id: 'org-a' }] }],
       });
 
-      await notifyApprovalRequestCreated(tx, 'req-1', { excludeUserId: 'actor' });
+      await notifyApprovalRequestCreated(tx, 'req-1', { resolveOrganization: resolveApprovableOrganization, excludeUserId: 'actor' });
 
       expect(notify.mock.calls[0][2].href).toBeUndefined();
     });
@@ -250,7 +251,7 @@ describe('notifyApprovalOrderReached', () => {
       roleUsersByRoleId: { 'role-2': [{ id: 'u1' }, { id: 'u2' }] },
     });
 
-    await notifyApprovalOrderReached(db, 'appr-1', ['flow-2'], { excludeUserId: 'actor' });
+    await notifyApprovalOrderReached(db, 'appr-1', ['flow-2'], { resolveOrganization: resolveApprovableOrganization, excludeUserId: 'actor' });
 
     expect(notify).toHaveBeenCalledTimes(2);
     expect(notify.mock.calls.map((c) => c[0])).toEqual(['u1', 'u2']);
@@ -261,7 +262,7 @@ describe('notifyApprovalOrderReached', () => {
   it('is a no-op when flowIds is empty (no DB call at all)', async () => {
     const db = makeOrderReachedDb({ requests: [], roleUsersByRoleId: {} });
 
-    await notifyApprovalOrderReached(db, 'appr-1', []);
+    await notifyApprovalOrderReached(db, 'appr-1', [], { resolveOrganization: resolveApprovableOrganization });
 
     expect(db.approval_request.findMany).not.toHaveBeenCalled();
     expect(notify).not.toHaveBeenCalled();
@@ -275,7 +276,7 @@ describe('notifyApprovalOrderReached', () => {
       roleUsersByRoleId: { 'role-2': [{ id: 'u1' }, { id: 'u2' }] },
     });
 
-    await notifyApprovalOrderReached(db, 'appr-1', ['flow-2'], { excludeUserId: 'u1' });
+    await notifyApprovalOrderReached(db, 'appr-1', ['flow-2'], { resolveOrganization: resolveApprovableOrganization, excludeUserId: 'u1' });
 
     expect(notify).toHaveBeenCalledTimes(1);
     expect(notify.mock.calls[0][0]).toBe('u2');
@@ -290,7 +291,7 @@ describe('notifyApprovalOrderReached', () => {
       roleUsersByRoleId: { 'role-2': [{ id: 'u2' }], 'role-3': [{ id: 'u3' }] },
     });
 
-    await notifyApprovalOrderReached(db, 'appr-1', ['flow-2', 'flow-3'], { excludeUserId: 'actor' });
+    await notifyApprovalOrderReached(db, 'appr-1', ['flow-2', 'flow-3'], { resolveOrganization: resolveApprovableOrganization, excludeUserId: 'actor' });
 
     expect(notify.mock.calls.map((c) => c[0])).toEqual(['u2', 'u3']);
   });
@@ -304,6 +305,7 @@ describe('notifyApprovalOrderReached', () => {
     });
 
     await notifyApprovalOrderReached(db, 'appr-1', ['flow-2'], {
+      resolveOrganization: resolveApprovableOrganization,
       excludeUserId: 'actor',
       targetEntityName: 'leave_request',
       targetId: 'lr-42',
@@ -328,7 +330,7 @@ describe('notifyApprovalOrderReached', () => {
       resolveApprovableOrganization.mockResolvedValue({ scoped: false });
       const db = makeOrderReachedDb({ requests, roleUsersByRoleId });
 
-      await notifyApprovalOrderReached(db, 'appr-1', ['flow-2'], { excludeUserId: 'actor' });
+      await notifyApprovalOrderReached(db, 'appr-1', ['flow-2'], { resolveOrganization: resolveApprovableOrganization, excludeUserId: 'actor' });
 
       expect(notify.mock.calls.map((c) => c[0])).toEqual(['in-record-org', 'shares-actor-org-only', 'no-org']);
       expect(resolveApprovableOrganization).toHaveBeenCalledWith(db, 'leave_request', 'appr-1');
@@ -338,7 +340,7 @@ describe('notifyApprovalOrderReached', () => {
       resolveApprovableOrganization.mockResolvedValue({ scoped: true, organizationId: null });
       const db = makeOrderReachedDb({ requests, roleUsersByRoleId });
 
-      await notifyApprovalOrderReached(db, 'appr-1', ['flow-2'], { excludeUserId: 'actor' });
+      await notifyApprovalOrderReached(db, 'appr-1', ['flow-2'], { resolveOrganization: resolveApprovableOrganization, excludeUserId: 'actor' });
 
       expect(notify).toHaveBeenCalledTimes(3);
     });
@@ -347,7 +349,7 @@ describe('notifyApprovalOrderReached', () => {
       resolveApprovableOrganization.mockResolvedValue({ scoped: true, organizationId: 'org-a' });
       const db = makeOrderReachedDb({ requests, roleUsersByRoleId });
 
-      await notifyApprovalOrderReached(db, 'appr-1', ['flow-2'], { excludeUserId: 'actor' });
+      await notifyApprovalOrderReached(db, 'appr-1', ['flow-2'], { resolveOrganization: resolveApprovableOrganization, excludeUserId: 'actor' });
 
       expect(notify.mock.calls.map((c) => c[0])).toEqual(['in-record-org']);
     });
@@ -359,7 +361,7 @@ describe('notifyApprovalOrderReached', () => {
       roleUsersByRoleId: {},
     });
 
-    await notifyApprovalOrderReached(db, 'appr-1', ['flow-2'], { excludeUserId: 'actor' });
+    await notifyApprovalOrderReached(db, 'appr-1', ['flow-2'], { resolveOrganization: resolveApprovableOrganization, excludeUserId: 'actor' });
 
     expect(notify).not.toHaveBeenCalled();
   });

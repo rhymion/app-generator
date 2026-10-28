@@ -1,11 +1,25 @@
 import type { PrismaClient } from '@/app/generated/prisma/client';
 import { notify } from '@/lib/_notifier';
-import { resolveApprovableOrganization } from '@/lib/approval_request/resolve_target';
 
 type Tx = Omit<
   PrismaClient,
   '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'
 >;
+
+/**
+ * Reads the organization of the record behind an approvable. The real
+ * implementation (resolveApprovableOrganization in
+ * lib/approval_request/resolve_target.ts) is generator-emitted and git-ignored,
+ * so this hand-maintained module takes it as an argument from the generated
+ * call sites instead of importing it: a static import cannot resolve on a
+ * checkout that has not run generate-code (CI Unit Tests). See
+ * docs/knowledge/troubleshooting.md §2.4.
+ */
+export type ResolveRecordOrganization = (
+  tx: PrismaClient,
+  entityType: string,
+  approvableId: string,
+) => Promise<{ scoped: false } | { scoped: true; organizationId: string | null } | null>;
 
 /**
  * Organization a recipient must belong to: the organization of the record the
@@ -20,14 +34,17 @@ async function resolveRecordOrgId(
   explicitOrgId: string | null,
   entityName: string | null | undefined,
   approvableId: string | null | undefined,
+  resolveOrganization: ResolveRecordOrganization,
 ): Promise<string | null> {
   if (explicitOrgId) return explicitOrgId;
   if (!entityName || !approvableId) return null;
-  const resolved = await resolveApprovableOrganization(db, entityName, approvableId);
+  const resolved = await resolveOrganization(db as PrismaClient, entityName, approvableId);
   return resolved?.scoped ? resolved.organizationId : null;
 }
 
 interface NotifyOptions {
+  /** Generated resolveApprovableOrganization, injected by the caller (see ResolveRecordOrganization). */
+  resolveOrganization: ResolveRecordOrganization;
   /**
    * Approvable-id this approval_request was created for. Used to look up the
    * owning entity row when org-scoping is requested.
@@ -75,7 +92,7 @@ interface NotifyOptions {
 export async function notifyApprovalRequestCreated(
   tx: unknown,
   approvalRequestId: string,
-  options: NotifyOptions = {},
+  options: NotifyOptions,
 ): Promise<void> {
   const db = tx as Tx;
   const req = await db.approval_request.findUnique({
@@ -103,6 +120,7 @@ export async function notifyApprovalRequestCreated(
     orgId,
     req.approval_flow.entity_name,
     options.approvableId ?? req.approvable_id,
+    options.resolveOrganization,
   );
 
   const entityLabel = options.entityLabel ?? req.approval_flow.entity_name ?? 'request';
@@ -130,6 +148,8 @@ export async function notifyApprovalRequestCreated(
 }
 
 interface OrderReachedOptions {
+  /** Generated resolveApprovableOrganization, injected by the caller (see ResolveRecordOrganization). */
+  resolveOrganization: ResolveRecordOrganization;
   /** Entity-name shown in the notification title. Falls back to the flow's entity_name. */
   entityLabel?: string | null;
   /** Acting approver of the just-approved flow — skipped in case they also hold a follow-on flow's approver role. */
@@ -159,7 +179,7 @@ export async function notifyApprovalOrderReached(
   tx: unknown,
   approvableId: string,
   flowIds: string[],
-  options: OrderReachedOptions = {},
+  options: OrderReachedOptions,
 ): Promise<void> {
   if (flowIds.length === 0) return;
 
@@ -187,7 +207,13 @@ export async function notifyApprovalOrderReached(
     if (!role) continue;
 
     const entityLabel = options.entityLabel ?? req.approval_flow.entity_name ?? 'request';
-    const recordOrgId = await resolveRecordOrgId(db, null, req.approval_flow.entity_name, approvableId);
+    const recordOrgId = await resolveRecordOrgId(
+      db,
+      null,
+      req.approval_flow.entity_name,
+      approvableId,
+      options.resolveOrganization,
+    );
 
     for (const u of role.users) {
       if (u.id === excludeUserId) continue;
