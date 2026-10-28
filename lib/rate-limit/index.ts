@@ -86,6 +86,10 @@ const PRODUCTION_BUCKETS: Record<string, RateLimitBucketConfig> = {
   // spraying candidates against the 10^6 TOTP space or the recovery-code
   // list is not.
   'auth:mfa:challenge':      { limit: 10, windowMs: 5 * 60_000 },
+  // 10 current-password confirmations per user per 5 minutes, spent by the
+  // REST write path that changes a password. Keyed by user id like the MFA
+  // bucket above, so an API key cannot be used to guess the current password.
+  'auth:password:confirm':   { limit: 10, windowMs: 5 * 60_000 },
   // Per-API-key REST ceilings (ai-agent-integration-design.md "Idempotency
   // keys and rate limiting — resolved design"). Keyed by the caller's
   // resolved user id, not IP: an API caller (agent or otherwise) can share

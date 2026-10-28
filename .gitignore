@@ -222,6 +222,7 @@ lib/dashboard/use_entity_approval_actions.ts
 !lib/attachment/upload_core.ts
 !lib/attachment/link.ts
 !lib/attachment/orphan_cleanup.ts
+!lib/attachment/owner_cleanup.ts
 !lib/attachment/url.ts
 !lib/attachment/*.test.ts
 !lib/approval_flow/autocomplete_filter.ts
@@ -377,6 +378,7 @@ cypress/e2e/api/*.cy.ts
 !cypress/e2e/api/upload_path_safety.cy.ts
 !cypress/e2e/api/user_invalidate_record_scope.cy.ts
 !cypress/e2e/api/setting_write_only_omitted.cy.ts
+!cypress/e2e/api/setting_credential_confirmation.cy.ts
 
 # ── cypress/support/ ──
 cypress/support/*/

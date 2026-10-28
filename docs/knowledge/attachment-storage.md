@@ -19,10 +19,21 @@ orphan cleanup.
   display. `attachment.path` holds the storage key; REST responses carry `path: "/api/attachments/<id>"`
   instead, so a storage key never leaves the server.
 - **Private storage.** Google Cloud Storage objects are saved without an ACL (uniform bucket-level access).
-  Vercel Blob objects use `access: 'private'`. The local-disk backend (no bucket and no Blob token) writes under
+  Vercel Blob objects use `access: 'private'`. The local-disk backend (no bucket and no Blob credential) writes under
   `.uploads/` at the project root, or under `ATTACHMENT_LOCAL_DIR`; it is never under `public/`, so no file is a
   static asset. The backend is chosen from the environment by `lib/attachment/storage.ts`: `GCS_BUCKET_NAME`, then
-  `BLOB_READ_WRITE_TOKEN`, then local disk.
+  `BLOB_STORE_ID` or `BLOB_READ_WRITE_TOKEN` (Vercel Blob; the SDK uses the short-lived Vercel OIDC token when
+  `BLOB_STORE_ID` is set and the read-write token otherwise), then local disk.
+- **No silent local-disk fallback on ephemeral platforms.** Local disk is not shared between instances and is lost on
+  restart or scale-down. When `K_SERVICE` (Cloud Run) or `VERCEL` is set, `NODE_ENV` is not `development`, and neither a
+  bucket, a Blob credential nor `ATTACHMENT_LOCAL_DIR` is configured, `storageBackend()` throws with a message naming the
+  variables to set. `ATTACHMENT_LOCAL_DIR` set explicitly (for example to a mounted persistent volume) opts in to local disk.
+- **The GCP scripts match the storage code.** `scripts/gcp-deploy.sh` maps the `app-gcs-bucket-name` secret to
+  `GCS_BUCKET_NAME`, the variable the storage code reads. `scripts/gcp-setup.sh` creates the bucket with uniform
+  bucket-level access and Public Access Prevention, grants the Cloud Run service account `roles/storage.objectUser` on it
+  (save, exists, signed URL and delete are all the application does), and, for a bucket that already exists, warns when
+  uniform bucket-level access or Public Access Prevention is off. It does not change an existing bucket or remove a
+  broader role granted earlier; revoke `roles/storage.objectAdmin` on an existing bucket by hand.
 - **Uploads are provenance-tracked.** `POST /api/upload` creates the `attachment` record immediately, not yet
   referenced by any record, and records `uploader_id` and `uploader_organization_id`.
 - **The upload is attached by id, never by path.** `setAttachmentsForBridge` and the direct-attachment write path
@@ -49,8 +60,8 @@ read permission on the `user` model to see another user's avatar.
 
 | Backend | Delivery |
 |---------|----------|
-| Google Cloud Storage | The route authorizes first, then redirects (`302`) to a V4 signed URL valid for five minutes. The signed URL carries `response-content-type` and `response-content-disposition` (`responseDisposition` in `getSignedUrl`), so the browser receives the decrypted original name. |
-| Vercel Blob | The route authorizes first, then streams the object through the function (`get(key, { access: 'private' })`). A presigned Blob URL honors only `validUntil` and `useCache`; it cannot set the response `Content-Disposition`, so the decrypted name could not be delivered by redirect. |
+| Google Cloud Storage | The route authorizes first, then streams the object through the function (`createReadStream()`). No signed URL is built, so the decrypted original name travels only in the `Content-Disposition` response header and never in a URL (browser history, URL-logging proxies). |
+| Vercel Blob | The route authorizes first, then streams the object through the function (`get(key, { access: 'private' })`). A presigned Blob URL honors only `validUntil` and `useCache`; it cannot set the response `Content-Disposition`, and a redirect would put the decrypted name in a URL. |
 | Local disk | The route streams the file. |
 
 Responses carry `X-Content-Type-Options: nosniff` and `Cache-Control: private, no-store`. Images are served
@@ -83,6 +94,15 @@ application is deployed.
 ## URL columns versus file fields
 
 A `format: uri` column, whatever its `x-uri-kind` (`image`, the default; `link`; or `file`), is a paste-a-URL field: the form shows a URL text input and the stored value is the URL the user typed or pasted. A column that still declares `x-uri-kind: file` renders the same way, with a download link on the view page. A file that needs uploading is stored through a direct-attachment field (`x-relationship: { target: attachment, type: direct }`), which references an attachment row.
+
+## Deleting an owner record deletes its attachments
+
+Deleting a record that owns attachments through the `attachable` bridge deletes the attachment rows linked to its
+bridge row in the same transaction as the delete (`deleteBridgeAttachments()` in `lib/attachment/owner_cleanup.ts`),
+before the bridge row itself is deleted. The stored objects are removed after the transaction commits
+(`removeStoredObjects()`), the same split `setAttachmentsForBridge` uses when a file is detached. A rolled-back delete
+keeps both rows and files; a failure to remove an object leaves at most an unreachable object, never a row that
+points at nothing. Files referenced through a direct-attachment foreign key are not affected.
 
 ## Scheduled cleanup of uploads that were never attached
 

@@ -565,7 +565,9 @@ export async function POST(request: NextRequest) {
             message: `Row ${action.row}${err.field ? `, column '${err.field}'` : ''}: ${err.message}`,
           });
         } else {
-          commitErrors.push({ row: action.row, code: 'WRITE_FAILED', message: err instanceof Error ? err.message : String(err) });
+          // Not one of the app's own typed errors: keep the detail in the server log only.
+          console.error('[import] row write failed', action.row, err instanceof Error ? err.name : typeof err);
+          commitErrors.push({ row: action.row, code: 'WRITE_FAILED', message: 'The row could not be written' });
         }
       }
     }

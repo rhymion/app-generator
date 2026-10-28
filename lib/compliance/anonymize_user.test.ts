@@ -87,6 +87,15 @@ describe('anonymizeUser related records', () => {
     expect(res.errors?.[0]).toContain('Stored avatar file was not removed');
   });
 
+  it('keeps storage SDK error text out of the reported errors', async () => {
+    mocks.deleteStoredObject.mockRejectedValue(new Error('AccessDenied: bucket=secret-bucket key=avatars/u1.png'));
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const res = await anonymizeUser('u1');
+    expect(JSON.stringify(res.errors)).not.toContain('secret-bucket');
+    expect(JSON.stringify(errorSpy.mock.calls)).not.toContain('secret-bucket');
+    errorSpy.mockRestore();
+  });
+
   it('rolls back and reports when the user does not exist', async () => {
     mocks.userFindUnique.mockResolvedValue(null);
     const res = await anonymizeUser('nope');
