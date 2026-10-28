@@ -46,6 +46,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 - **GCP deploy reads the attachment bucket under the name the storage code uses** (Issue #1160). `scripts/gcp-deploy.sh` now maps the `app-gcs-bucket-name` secret to `GCS_BUCKET_NAME` (it set `GCS_BUCKET`, which nothing read, so uploads silently went to local disk). Re-run the deploy script to update an existing service. Attachment storage also throws on Cloud Run or Vercel when no backend is configured, instead of falling back to local disk; set `ATTACHMENT_LOCAL_DIR` to opt in to a persistent local path. See `docs/knowledge/attachment-storage.md`.
 - **Vercel Blob is selected by `BLOB_STORE_ID` as well as the read-write token** (Issue #1168), so a project using OIDC only no longer falls through to local disk.
 - **A revoked permission or role change takes effect immediately in every instance** (Issue #731, permission side). The per-process 30-second permission cache in `lib/authz.ts` is removed, along with `invalidatePermissionCache()`; every request reads the current permissions, deduplicated only within the request. The API key cache is unchanged. See `docs/knowledge/multi-tenancy-and-permissions.md`.
+- **The dashboard widget editor spec no longer fails intermittently on a detached element** (Issue #1056). It looked up the group-by input by the label's generated `for` id, which can change between the server render and hydration; it now reaches the input through the DOM. Test-only change.
 
 ## [6.0.1] - 2026-10-26
 ### Security
