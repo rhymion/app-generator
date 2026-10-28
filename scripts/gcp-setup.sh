@@ -157,7 +157,7 @@ run_iam_binding gcloud projects add-iam-policy-binding "$PROJECT_ID" \
   --role="roles/secretmanager.secretAccessor" \
   --condition=None
 
-# GCS objectAdmin at bucket level (avoids UBLA + condition mismatch issues)
+# GCS objectUser at bucket level (avoids UBLA + condition mismatch issues)
 # Bucket may not exist yet; this binding is re-applied after Step 6 as well.
 # Self-impersonation required for V4 Signed URL (signBlob via IAM Credentials API)
 run_iam_binding gcloud iam service-accounts add-iam-policy-binding "$SA_EMAIL" \
@@ -298,14 +298,26 @@ echo ""
 echo "=== Step 6: GCS Bucket ==="
 if gcloud storage buckets describe "gs://${GCS_BUCKET}" --quiet 2>/dev/null; then
   echo "[SKIP] GCS bucket gs://${GCS_BUCKET} already exists"
+  # An existing bucket is not modified, but its access settings are checked:
+  # attachment bytes must not be publicly reachable.
+  _bucket_ubla=$(gcloud storage buckets describe "gs://${GCS_BUCKET}" --format='value(uniform_bucket_level_access)' --quiet 2>/dev/null || true)
+  _bucket_pap=$(gcloud storage buckets describe "gs://${GCS_BUCKET}" --format='value(public_access_prevention)' --quiet 2>/dev/null || true)
+  if [[ "$_bucket_ubla" != "True" && "$_bucket_ubla" != "true" ]]; then
+    echo "  WARN: gs://${GCS_BUCKET} does not have uniform bucket-level access enabled." >&2
+  fi
+  if [[ "$_bucket_pap" != "enforced" ]]; then
+    echo "  WARN: gs://${GCS_BUCKET} does not enforce Public Access Prevention (found: ${_bucket_pap:-unknown})." >&2
+    echo "        Enable it with: gcloud storage buckets update gs://${GCS_BUCKET} --public-access-prevention" >&2
+  fi
 else
   # UBLA is enforced by org policy (constraints/storage.uniformBucketLevelAccess)
   # and required for production. Access is granted via bucket-level IAM below
-  # (roles/storage.objectAdmin); uploads are served with V4 signed URLs, so no
+  # (roles/storage.objectUser); uploads are served with V4 signed URLs, so no
   # object ACLs / public access are needed. Do NOT use --no-uniform-bucket-level-access.
   run gcloud storage buckets create "gs://${GCS_BUCKET}" \
     --location="$REGION" \
-    --uniform-bucket-level-access
+    --uniform-bucket-level-access \
+    --public-access-prevention
 fi
 # Always (re-)apply the IAM binding — idempotent. Also protected against IAM
 # propagation lag: on a fast idempotent re-run (Steps 4.5/5 all hit their [SKIP]
@@ -313,7 +325,7 @@ fi
 # still be inside the eventual-consistency window for the Storage API.
 run_iam_binding gcloud storage buckets add-iam-policy-binding "gs://${GCS_BUCKET}" \
   --member="serviceAccount:${SA_EMAIL}" \
-  --role=roles/storage.objectAdmin
+  --role=roles/storage.objectUser
 
 # ── Done ──────────────────────────────────────────────────────────────────────
 echo ""

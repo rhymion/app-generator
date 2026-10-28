@@ -4029,6 +4029,8 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
         + (f"\nimport {{ afterUpdate }} from '@/lib/{model}/service_after_update';" if can_update else '')
         + (f"\nimport {{ afterDelete }} from '@/lib/{model}/service_after_delete';" if can_delete else '')
         + (f"\nimport {{ validateOnDelete }} from '@/lib/{model}/service_validation_delete';" if can_delete else '')
+        + ("\nimport { deleteBridgeAttachments, removeStoredObjects } from '@/lib/attachment/owner_cleanup';"
+           if can_delete and ctx.get('bridge_attachment_cleanup') else '')
         # cmd_923b: post-submit side effect hook -- fires once per submit
         # transition (create edge trigger / update edge trigger / the
         # standalone submit_for_approval action all funnel through

@@ -289,6 +289,29 @@ to close) if it shows up in profiling for a specific deployment.
 `crypto.randomInt`, which rejection-samples internally, so every character is
 equally likely. Codes are shown as `abcd-efgh` and stored bcrypt-hashed.
 
+**Confirming a password change or an MFA disable over REST (Issue #1188):**
+the account settings page asks for the current password before it accepts a new
+one and for a TOTP or recovery code before it turns MFA off. The REST update
+routes of the self-only account view (`PUT /api/setting/:id` and
+`PUT /api/setting/bulk`, generated for a self-only view of the `user` model that
+has both `password` and `mfa_enabled`) ask for the same proof through
+`confirmCredentialChange()` (`lib/auth/credential-confirmation.ts`), so an API
+key or a mobile token alone cannot change either:
+
+- A non-empty `password` needs `current_password` (HTTP 400 when missing, 403
+  when wrong or when the account has no password). The new password is sent in
+  plain text and stored as a bcrypt hash. Wrong attempts spend the
+  `auth:password:confirm` bucket (10 per user per 5 minutes, keyed by user id
+  like `auth:mfa:challenge`); a spent budget answers `429` with `Retry-After`.
+- `mfa_enabled: false` on an account that has MFA on needs `mfa_code`, a current
+  TOTP or recovery code (HTTP 400 when missing, 403 when invalid). It runs
+  `disableMfa()`, so the secret and the recovery codes are cleared exactly as on
+  the settings page, and shares the `auth:mfa:challenge` budget.
+- `mfa_enabled: true` on an account that has MFA off answers 400: MFA is turned
+  on only through the enrollment flow on the settings page.
+- Omitting `password`, sending it empty, omitting `mfa_enabled` or repeating the
+  stored value needs no confirmation.
+
 **Rate limiting the challenge itself (Issue #588):** `proxy.ts`'s
 rate-limit matcher only covers `/api/auth/*` — `/mfa-challenge` is a
 normal page route whose Server Action (`completeMfaChallenge`,
