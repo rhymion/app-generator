@@ -19,6 +19,11 @@ type FakeSession = {
 
 type FakeStripeState = {
   created: Row[];
+  // The request options of each create() call, parallel to `created`.
+  createOptions: Row[];
+  // Session returned for each idempotency key, as Stripe replays the first
+  // result of a repeated key.
+  idempotent: Map<string, Row>;
   sessions: Map<string, FakeSession>;
   expired: string[];
   // Simulates Stripe answering expire() without closing the session.
@@ -33,6 +38,8 @@ type FakeStripeState = {
 function freshState(): FakeStripeState {
   return {
     created: [],
+    createOptions: [],
+    idempotent: new Map(),
     sessions: new Map(),
     expired: [],
     expireLeavesOpen: false,
@@ -52,8 +59,12 @@ export function resetFakeStripe() {
 export const fakeStripe = {
   checkout: {
     sessions: {
-      async create(params: Row) {
+      async create(params: Row, options: Row = {}) {
+        const key = typeof options.idempotencyKey === 'string' ? options.idempotencyKey : undefined;
+        const replay = key ? fakeStripeState.idempotent.get(key) : undefined;
+        if (replay) return replay;
         fakeStripeState.created.push(params);
+        fakeStripeState.createOptions.push(options);
         const id = `${fakeStripeState.idPrefix}${fakeStripeState.created.length}`;
         // The buyer is sent to the success URL itself (Stripe's hosted page is
         // not reachable without the network); the placeholder is expanded the
@@ -63,7 +74,9 @@ export const fakeStripe = {
           id,
         );
         fakeStripeState.sessions.set(id, { status: 'open', url, payment_status: 'unpaid' });
-        return { id, url, currency: 'usd', amount_total: 9900 };
+        const result = { id, url, currency: 'usd', amount_total: 9900 };
+        if (key) fakeStripeState.idempotent.set(key, result);
+        return result;
       },
       async retrieve(id: string) {
         const s = fakeStripeState.sessions.get(id);
