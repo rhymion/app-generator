@@ -178,7 +178,7 @@ run gcloud run deploy "${SERVICE_NAME}" \
   --image="${SERVICE_IMAGE_TAG}" \
   --region="${REGION}" \
   --service-account="${SA_EMAIL}" \
-  --set-secrets=DATABASE_URL=app-database-url:latest,AUTH_SECRET=app-nextauth-secret:latest,GCS_BUCKET=app-gcs-bucket-name:latest,REDIS_URL=app-redis-url:latest \
+  --set-secrets=DATABASE_URL=app-database-url:latest,AUTH_SECRET=app-nextauth-secret:latest,GCS_BUCKET_NAME=app-gcs-bucket-name:latest,REDIS_URL=app-redis-url:latest \
   --set-env-vars="${_DEPLOY_ENV_VARS}" \
   --no-invoker-iam-check \
   --min-instances=0 \

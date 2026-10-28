@@ -19,10 +19,21 @@ orphan cleanup.
   display. `attachment.path` holds the storage key; REST responses carry `path: "/api/attachments/<id>"`
   instead, so a storage key never leaves the server.
 - **Private storage.** Google Cloud Storage objects are saved without an ACL (uniform bucket-level access).
-  Vercel Blob objects use `access: 'private'`. The local-disk backend (no bucket and no Blob token) writes under
+  Vercel Blob objects use `access: 'private'`. The local-disk backend (no bucket and no Blob credential) writes under
   `.uploads/` at the project root, or under `ATTACHMENT_LOCAL_DIR`; it is never under `public/`, so no file is a
   static asset. The backend is chosen from the environment by `lib/attachment/storage.ts`: `GCS_BUCKET_NAME`, then
-  `BLOB_READ_WRITE_TOKEN`, then local disk.
+  `BLOB_STORE_ID` or `BLOB_READ_WRITE_TOKEN` (Vercel Blob; the SDK uses the short-lived Vercel OIDC token when
+  `BLOB_STORE_ID` is set and the read-write token otherwise), then local disk.
+- **No silent local-disk fallback on ephemeral platforms.** Local disk is not shared between instances and is lost on
+  restart or scale-down. When `K_SERVICE` (Cloud Run) or `VERCEL` is set, `NODE_ENV` is not `development`, and neither a
+  bucket, a Blob credential nor `ATTACHMENT_LOCAL_DIR` is configured, `storageBackend()` throws with a message naming the
+  variables to set. `ATTACHMENT_LOCAL_DIR` set explicitly (for example to a mounted persistent volume) opts in to local disk.
+- **The GCP scripts match the storage code.** `scripts/gcp-deploy.sh` maps the `app-gcs-bucket-name` secret to
+  `GCS_BUCKET_NAME`, the variable the storage code reads. `scripts/gcp-setup.sh` creates the bucket with uniform
+  bucket-level access and Public Access Prevention, grants the Cloud Run service account `roles/storage.objectUser` on it
+  (save, exists, signed URL and delete are all the application does), and, for a bucket that already exists, warns when
+  uniform bucket-level access or Public Access Prevention is off. It does not change an existing bucket or remove a
+  broader role granted earlier; revoke `roles/storage.objectAdmin` on an existing bucket by hand.
 - **Uploads are provenance-tracked.** `POST /api/upload` creates the `attachment` record immediately, not yet
   referenced by any record, and records `uploader_id` and `uploader_organization_id`.
 - **The upload is attached by id, never by path.** `setAttachmentsForBridge` and the direct-attachment write path
