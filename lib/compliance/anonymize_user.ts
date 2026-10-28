@@ -97,8 +97,9 @@ export async function anonymizeUser(userId: string): Promise<AnonymizeUserResult
       }
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    errors.push(message);
+    // The detail stays in the server log; callers get a generic message.
+    console.error('[anonymizeUser] transaction failed', userId, err instanceof Error ? err.name : typeof err);
+    errors.push('Anonymization failed');
     return { success: false, userId, anonymizedAt, errors };
   }
 
@@ -108,7 +109,8 @@ export async function anonymizeUser(userId: string): Promise<AnonymizeUserResult
     try {
       await removeStoredFile(avatar.path);
     } catch (err) {
-      errors.push(`Stored avatar file was not removed: ${err instanceof Error ? err.message : String(err)}`);
+      console.error('[anonymizeUser] avatar file removal failed', userId, err instanceof Error ? err.name : typeof err);
+      errors.push('Stored avatar file was not removed');
     }
   }
 

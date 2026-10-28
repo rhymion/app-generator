@@ -60,8 +60,8 @@ read permission on the `user` model to see another user's avatar.
 
 | Backend | Delivery |
 |---------|----------|
-| Google Cloud Storage | The route authorizes first, then redirects (`302`) to a V4 signed URL valid for five minutes. The signed URL carries `response-content-type` and `response-content-disposition` (`responseDisposition` in `getSignedUrl`), so the browser receives the decrypted original name. |
-| Vercel Blob | The route authorizes first, then streams the object through the function (`get(key, { access: 'private' })`). A presigned Blob URL honors only `validUntil` and `useCache`; it cannot set the response `Content-Disposition`, so the decrypted name could not be delivered by redirect. |
+| Google Cloud Storage | The route authorizes first, then streams the object through the function (`createReadStream()`). No signed URL is built, so the decrypted original name travels only in the `Content-Disposition` response header and never in a URL (browser history, URL-logging proxies). |
+| Vercel Blob | The route authorizes first, then streams the object through the function (`get(key, { access: 'private' })`). A presigned Blob URL honors only `validUntil` and `useCache`; it cannot set the response `Content-Disposition`, and a redirect would put the decrypted name in a URL. |
 | Local disk | The route streams the file. |
 
 Responses carry `X-Content-Type-Options: nosniff` and `Cache-Control: private, no-store`. Images are served
@@ -94,6 +94,15 @@ application is deployed.
 ## URL columns versus file fields
 
 A `format: uri` column, whatever its `x-uri-kind` (`image`, the default; `link`; or `file`), is a paste-a-URL field: the form shows a URL text input and the stored value is the URL the user typed or pasted. A column that still declares `x-uri-kind: file` renders the same way, with a download link on the view page. A file that needs uploading is stored through a direct-attachment field (`x-relationship: { target: attachment, type: direct }`), which references an attachment row.
+
+## Deleting an owner record deletes its attachments
+
+Deleting a record that owns attachments through the `attachable` bridge deletes the attachment rows linked to its
+bridge row in the same transaction as the delete (`deleteBridgeAttachments()` in `lib/attachment/owner_cleanup.ts`),
+before the bridge row itself is deleted. The stored objects are removed after the transaction commits
+(`removeStoredObjects()`), the same split `setAttachmentsForBridge` uses when a file is detached. A rolled-back delete
+keeps both rows and files; a failure to remove an object leaves at most an unreachable object, never a row that
+points at nothing. Files referenced through a direct-attachment foreign key are not affected.
 
 ## Scheduled cleanup of uploads that were never attached
 

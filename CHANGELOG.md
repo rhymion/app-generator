@@ -11,14 +11,12 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 - **Sessions and tokens issued before an erasure stop working** (Issue #1061). `anonymizeUser()` now revokes the user's mobile sessions. The web session (`jwt()` callback), the mobile access token verification and `POST /api/mobile/auth/refresh` reject a user whose `anonymized_at` is set. Mobile access-token verification now makes one primary-key lookup of the user per request.
 - **CSV import route checks the request Content-Type and rejects null bytes** (Issue #1107). `POST /api/<entity>/import` answers HTTP 415 (`UNSUPPORTED_MEDIA_TYPE`) unless the request is `application/json` or `text/plain`, and HTTP 400 (`INVALID_CSV`) when the CSV text contains a null byte. CSV files picked in the import modal are unaffected, whatever their file type. See `docs/knowledge/csv-import-request-checks.md`.
 - **Slow-query warning log no longer prints bound parameter values** (Issue #1172). It reports only the number of parameters.
-
-### Fixed
-- **GCP deploy reads the attachment bucket under the name the storage code uses** (Issue #1160). `scripts/gcp-deploy.sh` now maps the `app-gcs-bucket-name` secret to `GCS_BUCKET_NAME` (it set `GCS_BUCKET`, which nothing read, so uploads silently went to local disk). Re-run the deploy script to update an existing service. Attachment storage also throws on Cloud Run or Vercel when no backend is configured, instead of falling back to local disk; set `ATTACHMENT_LOCAL_DIR` to opt in to a persistent local path. See `docs/knowledge/attachment-storage.md`.
-- **Vercel Blob is selected by `BLOB_STORE_ID` as well as the read-write token** (Issue #1168), so a project using OIDC only no longer falls through to local disk.
-
-### Security
 - **Narrower bucket role and Public Access Prevention for the GCP attachment bucket** (Issues #1162, #1164). `scripts/gcp-setup.sh` grants `roles/storage.objectUser` instead of `roles/storage.objectAdmin`, creates the bucket with Public Access Prevention, and warns when an existing bucket lacks uniform bucket-level access or Public Access Prevention. A bucket set up earlier keeps its existing role until revoked by hand.
 - **Audit-log OIDC docs recommend a subject-scoped Workload Identity binding** (Issue #1167). See `docs/knowledge/audit-log-append-only.md`.
+- **Routes no longer forward raw exception text** (Issues #1154, #1166). `POST /api/auth/register` answers `{ error, code: "REGISTRATION_FAILED" }` on an unexpected failure and logs only the error class and code. The bulk routes, the CSV-import commit path, the Stripe webhook route and `anonymizeUser()` answer with a generic message for any error that is not the app's own typed error; the detail stays in the server log.
+
+- **GCS attachments are streamed through the route** (Issue #1156). The Google Cloud Storage backend no longer redirects to a V4 signed URL that carried the decrypted original file name in its query string; the route streams the object and sets the name only in the `Content-Disposition` header, as the Vercel Blob and local backends do. Downloads of large files now pass through the application.
+- **Deleting an owner record deletes its attachments** (Issue #1191). The delete service of a record that owns attachments through the `attachable` bridge now deletes the linked attachment rows in the delete transaction and removes their stored files after commit, instead of leaving unlinked attachments the uploader could still read. See `docs/knowledge/attachment-storage.md`.
 
 ### Added
 - **`VersionHistory` can drop its New version button.** `props: {showNewVersionLink: false}` on the identity's `VersionHistory` entry in `x-custom-components` hides the button, for an identity whose own component starts new versions. On by default. See `docs/knowledge/schema-yaml-configuration.md`.
@@ -30,6 +28,10 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 - **"Compare with current version" looks like a button.** On a draft version's approval section the link is now a filled neutral button (theme grey), quieter than Submit, instead of plain text.
 - **Entity-level `required:` is validated for to-one relations** (Issue #1083). Naming a many-to-one or one-to-one relation whose foreign key is nullable (or has no foreign key on the model) is now a build error, since Prisma does not require it. Naming one whose foreign key is NOT NULL prints a warning that the entry is redundant. Array relations are unchanged.
 - **Shared list components no longer default `primaryField` to `'name'`** (Issue #837). `DataGridClient`, `CardListClient` and `ResponsiveListClient` take the primary column only from the caller; when omitted, the table has no link column and the card title is the record id. Generated list pages already pass the declared primary column, and the parent-embedded bridge grid now passes the child's own primary column (none when the child declares none). A hand-written caller that relied on the default must pass `primaryField`.
+
+### Fixed
+- **GCP deploy reads the attachment bucket under the name the storage code uses** (Issue #1160). `scripts/gcp-deploy.sh` now maps the `app-gcs-bucket-name` secret to `GCS_BUCKET_NAME` (it set `GCS_BUCKET`, which nothing read, so uploads silently went to local disk). Re-run the deploy script to update an existing service. Attachment storage also throws on Cloud Run or Vercel when no backend is configured, instead of falling back to local disk; set `ATTACHMENT_LOCAL_DIR` to opt in to a persistent local path. See `docs/knowledge/attachment-storage.md`.
+- **Vercel Blob is selected by `BLOB_STORE_ID` as well as the read-write token** (Issue #1168), so a project using OIDC only no longer falls through to local disk.
 
 ## [6.0.1] - 2026-10-26
 ### Security
