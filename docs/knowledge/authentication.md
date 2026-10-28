@@ -595,5 +595,4 @@ The following are explicitly out of scope for the current implementation:
 - **MFA / TOTP**: Shipped in v1 (S5 phase 5a) for the credentials provider, opt-in per user. Shipped for the OAuth path too as of S8 — see "MFA on the OAuth path" below. Admin-mandated MFA is still deferred.
 - **Account linking UI**: Shipped in v1 (S7). `/setting/accounts` lists and connects/detaches OAuth providers; cross-email linking deferred. See `lib/account-link/`, `auth.ts`.
 - **Audit-log table**: Not implemented. Auth events log to `console.info` only. Prisma model with role/permission hooks deferred.
-- **Rate limiting on `/api/auth/*`**: Not implemented. Planned: Next.js proxy + Upstash Redis.
 - **Per-tenant SSO (SAML)**: Not implemented. Would use SAML Jackson / WorkOS with per-tenant domain binding.
