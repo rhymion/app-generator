@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getRateLimiter } from '@/lib/rate-limit';
 import { requireCaller, ApiError } from '@/lib/api-auth';
 import { checkUpload, loadUploadPolicy } from '@/lib/_upload_validation';
 import { storeUploadedFile } from '@/lib/attachment/upload_core';
@@ -21,6 +22,15 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
       }
       throw authError;
+    }
+
+    // Per-user ceiling on file posts, checked before the body is parsed.
+    const _rl = await getRateLimiter().check('upload:file', userId);
+    if (!_rl.allowed) {
+      return NextResponse.json(
+        { error: 'rate_limited', retryAfter: _rl.retryAfterSeconds },
+        { status: 429, headers: { 'Retry-After': String(_rl.retryAfterSeconds), 'X-RateLimit-Bucket': 'upload:file' } },
+      );
     }
 
     const formData = await request.formData();
