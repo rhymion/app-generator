@@ -111,6 +111,14 @@ cross-referencing the separate create-request schema) still gets the
 signal. Never leaked into a query-parameter schema (`readOnly` is a
 response-body concept; stripped there it would be meaningless).
 
+A write-only field (`password`, `api_key`, ...; `ctx['write_only_field_names']`) is
+marked `writeOnly: true` on both the record schema and the create-request
+schema: it is accepted on write and never returned on a read. A client
+generated from the document therefore does not expect these values in a
+response. The request schema of the self-only account view (`setting`) also
+lists `current_password` and `mfa_code` as write-only strings (see
+`authentication.md`, "Confirming a password change or an MFA disable over REST").
+
 The record schema also lists the base fields an entity does not declare
 itself — `id`, `created_at`/`updated_at` (`date-time`) and `creator_id`
 (nullable string) — each `readOnly: true`, because every response row

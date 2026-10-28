@@ -66,6 +66,8 @@ export type MfaUserSeed = {
   secret: string;
   /** One plaintext recovery code — single-use. */
   recoveryCode: string;
+  /** API key of the same account; its trailing 24 characters are the user id. */
+  apiKey: string;
 };
 
 export const SSO_MFA_TEST_CREDENTIALS = {
@@ -91,6 +93,7 @@ export async function seedMfaTestUser(): Promise<MfaUserSeed> {
   const codes = await generateRecoveryCodes();
   const hashedPassword = await bcrypt.hash(MFA_TEST_CREDENTIALS.password, 10);
   const userId = createId();
+  const apiKey = `test_mk_mfa_${userId}`;
 
   await prisma.user.create({
     data: {
@@ -102,6 +105,7 @@ export async function seedMfaTestUser(): Promise<MfaUserSeed> {
       password: hashedPassword,
       mfa_secret: encryptedSecret,
       mfa_enabled: true,
+      api_key: apiKey,
     },
   });
 
@@ -119,6 +123,7 @@ export async function seedMfaTestUser(): Promise<MfaUserSeed> {
     password: MFA_TEST_CREDENTIALS.password,
     secret,
     recoveryCode: codes[0].plaintext,
+    apiKey,
   };
 }
 

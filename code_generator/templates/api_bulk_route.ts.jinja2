@@ -3,7 +3,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { authenticate, requireApiPermission, handleApiError, ApiError } from '@/lib/api-auth';
 import { AppError } from '@/lib/_errors';
 import { getRateLimiter } from '@/lib/rate-limit';
-{% if can_update or can_delete %}import prisma from '@/lib/prisma';
+{% if credential_confirmation and can_update %}import { confirmCredentialChange } from '@/lib/auth/credential-confirmation';
+{% endif %}{% if can_update or can_delete %}import prisma from '@/lib/prisma';
 {% endif %}{% if should_filter_by_org and (can_update or can_delete) %}import { getAssociatedOrganizations } from '@/lib/organization/getters_associated';
 {% endif %}{% if can_create %}
 import { add{{ parent_pascal }} } from '@/lib/{{ parent }}/service';
@@ -188,6 +189,18 @@ export async function PUT(request: NextRequest) {
 {% endfor %}
 {% endif %}
       try {
+{% if credential_confirmation %}
+        // Issue #1188: as on the single PUT, a password change needs the current
+        // password and turning MFA off needs a TOTP/recovery code.
+        const _credential = await confirmCredentialChange(id, {
+          password: {{ credential_password_var }},
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          currentPassword: (bulkItems[i] as any).current_password,
+          mfaEnabled: {{ credential_mfa_var }},
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          mfaCode: (bulkItems[i] as any).mfa_code,
+        });
+{% endif %}
         await update{{ parent_pascal }}({{ service_args_for_update }}, null);
         bulkResults.push({ index: i, success: true, data: { success: true } });
       } catch (err) {

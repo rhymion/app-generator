@@ -1,7 +1,7 @@
 // Hand-written -- not part of the generated entity test set.
 // PUT /api/setting/:id with the write-only fields (password, api_key) left out of the body, or sent
-// empty, must leave both stored values unchanged (Issue #1155). An explicitly supplied value is still
-// written. The persisted state is read back with the `db:getCredentialState` task.
+// empty, must leave both stored values unchanged (Issue #1155). An explicitly supplied api_key is still
+// written (changing the password needs the current password: setting_credential_confirmation.cy.ts). The persisted state is read back with the `db:getCredentialState` task.
 type CredentialState = { passwordIsNull: boolean; apiKeyIsNull: boolean; passwordHash: string | null };
 
 const EMAIL = 'api_writeonly_setting@example.com';
@@ -60,11 +60,8 @@ describe('API: setting update leaves omitted write-only fields unchanged', () =>
     expectCredentialsUntouched();
   });
 
-  it('still writes an explicitly supplied password', () => {
-    putSetting(apiKey, { password: 'replacement-value' }).its('status').should('eq', 200);
-    cy.task<CredentialState>('db:getCredentialState', EMAIL).then((state) => {
-      expect(state.passwordHash).to.eq('replacement-value');
-      expect(state.apiKeyIsNull).to.eq(false);
-    });
+  it('still writes an explicitly supplied api_key and leaves the password alone', () => {
+    putSetting(apiKey, { api_key: apiKey }).its('status').should('eq', 200);
+    expectCredentialsUntouched();
   });
 });

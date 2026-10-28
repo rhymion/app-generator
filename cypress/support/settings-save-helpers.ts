@@ -130,7 +130,12 @@ export async function seedSsoSettingsSaveTestUser(): Promise<SsoSettingsSaveUser
   return { email: SSO_SETTINGS_SAVE_TEST.email, userId, startingImageId };
 }
 
-export type CredentialState = { passwordIsNull: boolean; apiKeyIsNull: boolean; passwordHash: string | null };
+export type CredentialState = {
+  passwordIsNull: boolean;
+  apiKeyIsNull: boolean;
+  passwordHash: string | null;
+  mfaEnabled: boolean;
+};
 
 /** Reads the raw persisted password/api_key state for a user, for
  * asserting a save that didn't touch these fields left them untouched
@@ -139,11 +144,12 @@ export type CredentialState = { passwordIsNull: boolean; apiKeyIsNull: boolean; 
 export async function getCredentialState(email: string): Promise<CredentialState> {
   const user = await prisma.user.findUniqueOrThrow({
     where: { email },
-    select: { password: true, api_key: true },
+    select: { password: true, api_key: true, mfa_enabled: true },
   });
   return {
     passwordIsNull: user.password === null,
     apiKeyIsNull: user.api_key === null,
     passwordHash: user.password,
+    mfaEnabled: user.mfa_enabled,
   };
 }
