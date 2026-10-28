@@ -1,6 +1,7 @@
 // AUTO-GENERATED - DO NOT EDIT
 import { NextRequest, NextResponse } from 'next/server';
-import { authenticate, requireApiPermission, handleApiError } from '@/lib/api-auth';
+import { authenticate, requireApiPermission, handleApiError, ApiError } from '@/lib/api-auth';
+import { AppError } from '@/lib/_errors';
 import { getRateLimiter } from '@/lib/rate-limit';
 {% if can_update or can_delete %}import prisma from '@/lib/prisma';
 {% endif %}{% if should_filter_by_org and (can_update or can_delete) %}import { getAssociatedOrganizations } from '@/lib/organization/getters_associated';
@@ -22,6 +23,15 @@ type BulkResult<T> = BulkSuccess<T> | BulkFailure;
 interface BulkResponse<T> {
   results: BulkResult<T>[];
   summary: { total: number; succeeded: number; failed: number };
+}
+
+// Per-item failure text. The app's own typed errors carry caller-facing text;
+// anything else (a driver, SDK or database error) is logged here and answered
+// with a generic message so internal wording never reaches the client.
+function bulkErrorText(err: unknown): string {
+  if (err instanceof AppError || err instanceof ApiError) return err.message;
+  console.error('[bulk] item failed', err instanceof Error ? err.name : typeof err);
+  return 'Internal error';
 }
 
 function makeBulkResponse<T>(results: BulkResult<T>[]): BulkResponse<T> {
@@ -73,7 +83,7 @@ export async function POST(request: NextRequest) {
         const result = await add{{ parent_pascal }}({{ service_args_for_create }});
         bulkResults.push({ index: i, success: true, data: result });
       } catch (err) {
-        bulkResults.push({ index: i, success: false, error: err instanceof Error ? err.message : String(err) });
+        bulkResults.push({ index: i, success: false, error: bulkErrorText(err) });
       }
     }
 
@@ -181,7 +191,7 @@ export async function PUT(request: NextRequest) {
         await update{{ parent_pascal }}({{ service_args_for_update }}, null);
         bulkResults.push({ index: i, success: true, data: { success: true } });
       } catch (err) {
-        bulkResults.push({ index: i, success: false, error: err instanceof Error ? err.message : String(err) });
+        bulkResults.push({ index: i, success: false, error: bulkErrorText(err) });
       }
     }
 
