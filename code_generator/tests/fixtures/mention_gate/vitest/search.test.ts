@@ -11,7 +11,7 @@ vi.mock('@/lib/authz', () => ({
   getSessionUserIdOrThrow: vi.fn().mockResolvedValue('actor'),
   getModelPermissions,
 }));
-// Generated per schema (gitignored): what matters is the organization it resolves for the record.
+// Generated per schema (not tracked): what matters is the organization it resolves for the record.
 vi.mock('@/lib/mention/record_org', () => ({ resolveMentionRecordOrganization }));
 
 import { searchMentionUserOptions } from './search';

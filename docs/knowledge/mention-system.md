@@ -469,6 +469,15 @@ comment/mention creator avatar" for the fix.
   that is fixed, but is a different, heavier mechanism than this per-PR
   fixture.
 
+**Generated `lib/mention` files are not tracked.** Only `lib/mention/parser.ts` and
+`lib/mention/parser.test.ts` are tracked (see `.gitignore`); `search.ts`, `recipients.ts` and
+`record_org.ts` are generated and ignored like the rest of `lib/*/*`. Their unit tests
+(`search.test.ts`, `recipients.test.ts`) import the generated files, so they live in
+`code_generator/tests/fixtures/mention_gate/vitest/` and run inside `npm run test:mention-gate`,
+after the fixture app is generated, against the fixture shims. The repository's own Unit Tests
+job (no generate-code) does not run them. `record_org.ts` emits its `prisma`, `requirePermission`
+and `AppError` imports only when the schema has at least one mention record resolver.
+
 **Fixture gate: how to grow it.** When a new branch is found dark (via a
 downstream consumer break, a code review, or deliberate audit), the
 procedure is:
