@@ -1390,9 +1390,53 @@ def _comment_parent_access_block(parent: str, model: str, key_where: str, op: st
     )
 
 
+def _mention_record_org(comment_has_mention: bool, item_select: str, scope: dict) -> tuple[str, str]:
+    """Return (item_select, org_expr) for mention recipient scoping.
+
+    The mention scope axis is the organization of the record the comment belongs to
+    (``parentRow``). An entity without an organization column has no scope (``null``);
+    otherwise the parent row read selects ``organization_id`` so the recipient filter can
+    use it (an empty value means no scope, decided at run time by the filter).
+    """
+    if not (comment_has_mention and scope.get('should_filter_by_org')):
+        return item_select, 'null'
+    if 'organization_id' not in item_select:
+        item_select = item_select.rstrip()[:-1].rstrip() + ', organization_id: true }'
+    return item_select, 'parentRow.organization_id'
+
+
+def _build_mention_record_resolver(parent: str, model: str, item_select: str, scope: dict) -> str:
+    """One entity's entry of the mention candidate search's record lookup.
+
+    Runs the same read gates the entity's own detail page runs (organization scope,
+    x-self-only, x-filter-values, then requirePermission) on the record id the client sent, and
+    returns the record's organization. A missing or unreadable record resolves to ``null``
+    so the search can answer with no candidates instead of leaking any. An entity without an
+    organization column resolves to ``{ organizationId: null }``: its mentions are not scoped.
+    """
+    has_org_column = bool(scope.get('should_filter_by_org'))
+    if has_org_column and 'organization_id' not in item_select:
+        item_select = item_select.rstrip()[:-1].rstrip() + ', organization_id: true }'
+    access = _comment_parent_access_block(parent, model, "id: recordId", 'read', item_select, scope)
+    org_expr = 'parentRow.organization_id ?? null' if has_org_column else 'null'
+    body = ''.join(('    ' + line if line.strip() else line) for line in access.splitlines(keepends=True))
+    return (
+        f"  {parent}: async (recordId, userId) => {{\n"
+        f"    try {{\n"
+        f"{body}"
+        f"      return {{ organizationId: {org_expr} }};\n"
+        f"    }} catch (error) {{\n"
+        f"      if (error instanceof AppError) return null;\n"
+        f"      throw error;\n"
+        f"    }}\n"
+        f"  }},\n"
+    )
+
+
 def _build_comment_actions(comment_children: list[dict], parent: str, model: str, has_assignee_id: bool, comment_has_mention: bool = False,
                            item_select: str = '{ id: true, creator_id: true }', scope: dict | None = None) -> str:
     scope = scope or {}
+    item_select, org_expr = _mention_record_org(comment_has_mention, item_select, scope)
     parent_pascal = to_pascal_case(parent)
     recipient_list = (
         "[parentRow.creator_id, parentRow.assignee_id]"
@@ -1410,7 +1454,7 @@ def _build_comment_actions(comment_children: list[dict], parent: str, model: str
         # excluded; on update, only newly-added mentions (vs. the prior message)
         # are notified.
         mention_notify_add = (
-            f"\n  const mentionedIds = extractMentionedUserIds(message).filter((mid) => mid !== userId);"
+            f"\n  const mentionedIds = await filterMentionRecipientsToRecordOrg({org_expr}, extractMentionedUserIds(message).filter((mid) => mid !== userId));"
             f"\n  for (const mentionedId of new Set(mentionedIds)) {{"
             f"\n    notify(mentionedId, 'mentioned_in_comment', {{"
             f"\n      title: 'You were mentioned in a {parent_pascal} comment',"
@@ -1426,7 +1470,7 @@ def _build_comment_actions(comment_children: list[dict], parent: str, model: str
         mention_notify_update = (
             f"\n  const oldIds = new Set(extractMentionedUserIds(comment.message));"
             f"\n  const newIds = extractMentionedUserIds(message);"
-            f"\n  const freshMentions = newIds.filter((mid) => !oldIds.has(mid) && mid !== userId);"
+            f"\n  const freshMentions = await filterMentionRecipientsToRecordOrg({org_expr}, newIds.filter((mid) => !oldIds.has(mid) && mid !== userId));"
             f"\n  for (const mentionedId of freshMentions) {{"
             f"\n    notify(mentionedId, 'mentioned_in_comment', {{"
             f"\n      title: 'You were mentioned in a {parent_pascal} comment',"
@@ -1486,6 +1530,7 @@ def _build_comment_actions_bridge(parent: str, model: str, has_assignee_id: bool
                                   item_select: str = '{ id: true, creator_id: true }', scope: dict | None = None) -> str:
     """Generate comment actions using the shared commentable bridge (single comment table)."""
     scope = scope or {}
+    item_select, org_expr = _mention_record_org(comment_has_mention, item_select, scope)
     parent_pascal = to_pascal_case(parent)
     recipient_list = (
         "[parentRow.creator_id, parentRow.assignee_id]"
@@ -1496,7 +1541,7 @@ def _build_comment_actions_bridge(parent: str, model: str, has_assignee_id: bool
     # has no direct parent FK on the comment row (only commentable_id), so the
     # update path resolves the parent row (through the access check) for the href.
     mention_notify_add = (
-        f"\n  const mentionedIds = extractMentionedUserIds(message).filter((mid) => mid !== userId);"
+        f"\n  const mentionedIds = await filterMentionRecipientsToRecordOrg({org_expr}, extractMentionedUserIds(message).filter((mid) => mid !== userId));"
         f"\n  for (const mentionedId of new Set(mentionedIds)) {{"
         f"\n    notify(mentionedId, 'mentioned_in_comment', {{"
         f"\n      title: 'You were mentioned in a {parent_pascal} comment',"
@@ -1512,7 +1557,7 @@ def _build_comment_actions_bridge(parent: str, model: str, has_assignee_id: bool
     mention_notify_update = (
         f"\n  const oldIds = new Set(extractMentionedUserIds(comment.message));"
         f"\n  const newIds = extractMentionedUserIds(message);"
-        f"\n  const freshMentions = newIds.filter((mid) => !oldIds.has(mid) && mid !== userId);"
+        f"\n  const freshMentions = await filterMentionRecipientsToRecordOrg({org_expr}, newIds.filter((mid) => !oldIds.has(mid) && mid !== userId));"
         f"\n  for (const mentionedId of freshMentions) {{"
         f"\n    notify(mentionedId, 'mentioned_in_comment', {{"
         f"\n      title: 'You were mentioned in a {parent_pascal} comment',"
@@ -3651,6 +3696,14 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         'is_self_only': is_self_only,
         'filter_values': filter_values,
     }
+    # Mention candidate search: the picker is told which record the mention is for and the
+    # server derives that record's organization (lib/mention/record_org.ts). An entity hosts a
+    # mention picker through its comment thread or its own x-mention text fields.
+    mention_record_resolver = ''
+    if comment_has_mention or mention_fields:
+        mention_record_resolver = _build_mention_record_resolver(
+            parent, model, item_context_select, _comment_scope)
+
     if commentable_rel:
         comment_actions_code = _build_comment_actions_bridge(
             parent, model, has_assignee_id, comment_has_mention, item_context_select, _comment_scope)
@@ -4969,6 +5022,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         child_assignee_notify_create_code=child_assignee_notify_create_code,
         child_assignee_notify_update_code=child_assignee_notify_update_code,
         comment_actions_code=comment_actions_code,
+        mention_record_resolver=mention_record_resolver,
         # FormData
         form_data_gets=form_data_gets,
         # Service / snapshots

@@ -177,7 +177,8 @@ def test_mention_field_true_wires_mention_input():
     ups = _upsert_ctx(_mention_field_entity_schema())
     assert ups['has_mention_fields'] is True
     assert '<MentionInput' in ups['all_parent_fields_jsx']
-    assert 'searchUsers={searchMentionUserOptions}' in ups['all_parent_fields_jsx']
+    assert 'searchMentionUserOptions(q, isEdit ?' in ups['all_parent_fields_jsx']
+    assert 'searchUsers={(q) => searchMentionUserOptions(q,' in ups['all_parent_fields_jsx']
     assert 'value={notes}' in ups['all_parent_fields_jsx']
     # Controlled state (not the uncontrolled ref pattern used for plain text fields).
     assert 'useState<string>(src.notes ?? \'\')' in ups['all_states']

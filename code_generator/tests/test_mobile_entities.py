@@ -872,8 +872,10 @@ def test_mention_lookup_is_wired_when_the_schema_has_a_mention_field():
     env = _make_env()
     http = _render(env, 'mobile/lib/comment-http.ts.jinja2', {'has_mention': True})
     thread = _render(env, 'mobile/components/native/CommentThread.tsx.jinja2', {'has_mention': True})
-    assert '/api/mention/users?q=${encodeURIComponent(q)}' in http
-    assert 'search: searchMentionUsers' in thread
+    assert '/api/mention/users?q=${encodeURIComponent(q)}&entity=${encodeURIComponent(record.entity)}' in http
+    assert '&id=${encodeURIComponent(record.id)}' in http
+    # The composer names the record the comment belongs to, so the server scopes the candidates by it.
+    assert 'search: (q) => searchMentionUsers(q, { entity, id: recordId })' in thread
     plain = _render(env, 'mobile/components/native/CommentThread.tsx.jinja2', {'has_mention': False})
     assert 'searchMentionUsers' not in plain
 

@@ -80,6 +80,11 @@ export default defineConfig({
       // under .generated-payment-gate/).
       "code_generator/tests/fixtures/payment_gate/**",
       ".generated-payment-gate/**",
+      // Mention gate fixture: its tests import the generated lib/mention/*.ts, so
+      // scripts/check_mention_gate_fixture.sh runs them against generated code, with
+      // its own config (and the copy it stages under .generated-mention-gate/).
+      "code_generator/tests/fixtures/mention_gate/**",
+      ".generated-mention-gate/**",
       // Attachment bridge ownership fixture: run by
       // code_generator/tests/test_attachment_actions.py against the rendered
       // template, with its own config (and the copy it stages under

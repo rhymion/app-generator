@@ -84,6 +84,19 @@ npx tsc -p "$OUT_DIR/tsconfig.json"
 tsc_status=$?
 set -e
 
+echo "-- vitest search.test.ts + recipients.test.ts (generated lib/mention/*.ts) --"
+cp "$FIXTURE_DIR/vitest/search.test.ts" "$FIXTURE_DIR/vitest/recipients.test.ts" "$OUT_DIR/lib/mention/"
+cp "$FIXTURE_DIR/vitest.config.mts" "$OUT_DIR/vitest.config.mts"
+set +e
+npx vitest run --config "$OUT_DIR/vitest.config.mts"
+vitest_status=$?
+set -e
+if [ "$vitest_status" -ne 0 ]; then
+  echo "mention-gate fixture check FAILED -- the generated lib/mention/search.ts or" >&2
+  echo "recipients.ts no longer behaves as the fixture's vitest tests expect." >&2
+  exit "$vitest_status"
+fi
+
 t1=$(date +%s.%N)
 elapsed=$(echo "$t1 - $t0" | bc)
 echo "== mention-gate fixture check: $(printf '%.1f' "$elapsed")s, tsc exit=$tsc_status =="

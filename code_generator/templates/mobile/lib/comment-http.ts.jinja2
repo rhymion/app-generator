@@ -88,9 +88,18 @@ export type MentionUserOption = { id: string; name: string; email: string };
 /** The candidates for `q`, or `permissionDenied` when the caller may not read users. */
 export type MentionSearchResult = { options: MentionUserOption[]; permissionDenied: boolean };
 
-/** `GET /api/mention/users?q=`: the same search the Web picker runs (`searchMentionUserOptions`). */
-export async function searchMentionUsers(q: string): Promise<MentionSearchResult> {
-  const body = await apiFetch<Partial<MentionSearchResult>>(`/api/mention/users?q=${encodeURIComponent(q)}`);
+/**
+ * `GET /api/mention/users?q=&entity=&id=`: the same search the Web picker runs
+ * (`searchMentionUserOptions`). `record` names the record the comment belongs to; the server reads it
+ * again and offers only the users that record's organization allows.
+ */
+export async function searchMentionUsers(
+  q: string,
+  record: { entity: string; id: string },
+): Promise<MentionSearchResult> {
+  const body = await apiFetch<Partial<MentionSearchResult>>(
+    `/api/mention/users?q=${encodeURIComponent(q)}&entity=${encodeURIComponent(record.entity)}&id=${encodeURIComponent(record.id)}`,
+  );
   return { options: body.options ?? [], permissionDenied: body.permissionDenied === true };
 }
 {% endraw %}{% endif %}{% raw %}

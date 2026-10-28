@@ -23,6 +23,7 @@ import { assertInvalidateAllowed } from './invalidate_guard';
 {% if uses_prisma %}import prisma from '@/lib/prisma';
 {% endif %}{% if comment_actions_code %}import { notify } from '@/lib/_notifier';
 {% endif %}{% if comment_has_mention %}import { extractMentionedUserIds } from '@/lib/mention/parser';
+import { filterMentionRecipientsToRecordOrg } from '@/lib/mention/recipients';
 {% endif %}{% if has_commentable %}import { COMMENT_REACTION_TYPES } from '@/lib/reaction_constants';
 import type { CommentReactionSummary } from './types';
 import { createComment, updateComment, deleteComment } from '@/lib/comment/service';
