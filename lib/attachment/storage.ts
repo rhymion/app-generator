@@ -9,9 +9,15 @@
 //
 // Backend, chosen from the environment:
 //   GCS_BUCKET_NAME set            -> Google Cloud Storage (private bucket, V4 signed URL)
-//   BLOB_READ_WRITE_TOKEN set      -> Vercel Blob with `access: 'private'`
+//   BLOB_STORE_ID or
+//   BLOB_READ_WRITE_TOKEN set      -> Vercel Blob with `access: 'private'` (the SDK authenticates with
+//                                     the short-lived Vercel OIDC token when BLOB_STORE_ID is set, and
+//                                     falls back to the read-write token otherwise)
 //   neither                        -> local disk under ATTACHMENT_LOCAL_DIR (default `.uploads/`
 //                                     at the project root, never under `public/`)
+//
+// Local disk is not durable on Cloud Run or Vercel (instances are ephemeral and do not share a disk), so
+// on those platforms an unresolved backend is a configuration error and throws instead of falling back.
 
 import { randomUUID } from 'node:crypto';
 import { createReadStream } from 'node:fs';
@@ -35,7 +41,15 @@ export function isStorageKey(key: string): boolean {
 
 export function storageBackend(env: Record<string, string | undefined> = process.env): StorageBackend {
   if (env.GCS_BUCKET_NAME) return 'gcs';
-  if (env.BLOB_READ_WRITE_TOKEN) return 'vercel';
+  if (env.BLOB_STORE_ID || env.BLOB_READ_WRITE_TOKEN) return 'vercel';
+  // K_SERVICE is set by Cloud Run, VERCEL by Vercel. A non-development deployment there with no
+  // backend configured would otherwise write to an ephemeral disk and lose the files.
+  if ((env.K_SERVICE || env.VERCEL) && env.NODE_ENV !== 'development' && !env.ATTACHMENT_LOCAL_DIR) {
+    throw new Error(
+      'No attachment storage backend is configured. Set GCS_BUCKET_NAME (Google Cloud Storage), ' +
+        'BLOB_STORE_ID or BLOB_READ_WRITE_TOKEN (Vercel Blob), or ATTACHMENT_LOCAL_DIR (a persistent local path).',
+    );
+  }
   return 'local';
 }
 
@@ -102,9 +116,9 @@ export type ServeOptions = {
 /**
  * The response that delivers one stored object, or null when the object does not exist.
  *
- * GCS: a short-lived V4 signed URL carrying the response type and disposition, answered as a redirect.
- * Vercel Blob and local disk: the bytes are streamed through the route (a Blob presigned URL cannot
- * set the response Content-Disposition, so the decrypted file name could not be delivered by redirect).
+ * All three backends stream the bytes through the route, so the decrypted file name travels only in the
+ * response header. A signed URL (GCS) or presigned URL (Blob) would carry it in a query string that
+ * can reach browser history and URL-logging proxies.
  */
 export async function serveStoredObject(key: string, options: ServeOptions): Promise<Response | null> {
   assertKey(key);
@@ -120,14 +134,8 @@ export async function serveStoredObject(key: string, options: ServeOptions): Pro
       const file = bucket.file(key);
       const [exists] = await file.exists();
       if (!exists) return null;
-      const [signedUrl] = await file.getSignedUrl({
-        version: 'v4',
-        action: 'read',
-        expires: Date.now() + 5 * 60 * 1000,
-        responseType: options.contentType,
-        responseDisposition: options.disposition,
-      });
-      return new Response(null, { status: 302, headers: { Location: signedUrl, 'Cache-Control': 'private, no-store' } });
+      const body = Readable.toWeb(file.createReadStream()) as unknown as ReadableStream;
+      return new Response(body, { status: 200, headers });
     }
     case 'vercel': {
       const { get } = await import('@vercel/blob');

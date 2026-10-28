@@ -40,6 +40,7 @@ from helpers.state_machine_parser import parse_state_machine_diagram, ParseError
 from pathlib import Path
 import copy
 import json
+import re
 import warnings
 
 # ---------------------------------------------------------------------------
@@ -2437,6 +2438,17 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     else:
         bridge_pre_delete_select = None
         bridge_post_delete_cleanups = ''
+    # Deleting an owner deletes its `attachable` bridge row; the database then only unlinks the
+    # attachments (onDelete: SetNull). The delete service removes them first (rows in the same
+    # transaction, stored files after commit) -- see lib/attachment/owner_cleanup.ts.
+    bridge_attachment_cleanup_props = [r['prop_name'] for r in bridge_cleanup_rels if r['target'] == 'attachable']
+    bridge_attachment_cleanup = bool(bridge_attachment_cleanup_props)
+    if bridge_attachment_cleanup:
+        bridge_post_delete_cleanups = '\n'.join(
+            f'    _removedAttachmentKeys.push(...(await deleteBridgeAttachments(tx, _bridgeRows'
+            f'.map((r) => r.{prop}))));'
+            for prop in bridge_attachment_cleanup_props
+        ) + '\n' + bridge_post_delete_cleanups
 
     parent_rels_raw = [r for r in _all_parent_rels_raw if r['prop_name'] not in oto_prop_names]
     # relationship_targets: deduplicated by target for import / type purposes
@@ -4701,6 +4713,35 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         f", {child_service_args_update}" if child_service_args_update else ""
     ) + (f", {_flatten_null_args}" if _flatten_null_args else "")
 
+    # Credential confirmation (Issue #1188): a self-only view of the `user`
+    # model that exposes both `password` and `mfa_enabled` (the `setting`
+    # view) must not let a REST write change either field on an API key or
+    # mobile token alone. The account settings page asks for the current
+    # password (to change the password) and a TOTP/recovery code (to turn
+    # MFA off); the REST update routes ask for the same proof through
+    # confirmCredentialChange() (lib/auth/credential-confirmation.ts), and the
+    # service receives the confirmed values instead of the raw request ones.
+    _cred_vars = {p['prop']: p['var_name'] for p in client_prop_infos}
+    credential_confirmation = (
+        is_self_only
+        and model == 'user'
+        and 'password' in _cred_vars
+        and 'mfa_enabled' in _cred_vars
+    )
+    credential_password_var = _cred_vars.get('password', 'password')
+    credential_mfa_var = _cred_vars.get('mfa_enabled', 'mfaEnabled')
+    if credential_confirmation:
+        service_args_for_update = re.sub(
+            rf"\b{re.escape(credential_password_var)} \?\? ''",
+            '_credential.password',
+            service_args_for_update,
+        )
+        service_args_for_update = re.sub(
+            rf"(?<![\w.]){re.escape(credential_mfa_var)}(?!\w)",
+            '_credential.mfaEnabled',
+            service_args_for_update,
+        )
+
     # CSV import -> service.ts convergence (cmd_996, Issue #93; widened by
     # cmd_1124 to also cover embedded DataGrid children -- a JSON Schema
     # `required` relation array does not mean the child list must be
@@ -4899,6 +4940,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         bridge_cleanup_rels=bridge_cleanup_rels,
         bridge_pre_delete_select=bridge_pre_delete_select,
         bridge_post_delete_cleanups=bridge_post_delete_cleanups,
+        bridge_attachment_cleanup=bridge_attachment_cleanup,
         has_commentable=bool(commentable_rel),
         comment_has_mention=comment_has_mention,
         commentable_rel_name=commentable_rel['relation_name'] if commentable_rel else None,
@@ -4948,6 +4990,9 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         all_body_fields_create=all_body_fields_create,
         service_args_for_create=service_args_for_create,
         service_args_for_update=service_args_for_update,
+        credential_confirmation=credential_confirmation,
+        credential_password_var=credential_password_var,
+        credential_mfa_var=credential_mfa_var,
         # CSV import -> service.ts convergence (cmd_996, Issue #93; cmd_1124)
         import_service_parent_args=import_service_parent_args,
         import_service_child_args=import_service_child_args,

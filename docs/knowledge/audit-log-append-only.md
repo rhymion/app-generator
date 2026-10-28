@@ -82,6 +82,7 @@ x-generator:
 | `AUDIT_LOG_GCS_AUTH` | `adc` (default; Application Default Credentials) or `vercel-oidc` (Vercel OIDC with Workload Identity Federation, needs `GCP_PROJECT_ID`, `GCP_PROJECT_NUMBER`, `GCP_SERVICE_ACCOUNT_EMAIL`, `GCP_WORKLOAD_IDENTITY_POOL_ID`, `GCP_WORKLOAD_IDENTITY_POOL_PROVIDER_ID`). |
 | `AUDIT_LOG_GCS_ENDPOINT` | Optional API endpoint override, for a local emulator. |
 | `AUDIT_LOG_S3_BUCKET` | Select S3. Required with it: `AUDIT_LOG_S3_REGION`, `AUDIT_LOG_S3_RETENTION_DAYS`. |
+| `AUDIT_LOG_S3_EXPECTED_BUCKET_OWNER` | Optional 12-digit AWS account id. When set it is sent as `ExpectedBucketOwner` on every S3 put and get, so a request cannot land in a same-named bucket owned by another account. Recommended whenever the account is known. |
 | `AUDIT_LOG_STORAGE_DIR` | A local directory, for tests and local runs only. |
 
 The factory checks them in that order. When none is set it throws `Audit log storage is not configured: ...`; a digest job
@@ -105,7 +106,8 @@ declared without storage fails with that message and is recorded as a failed run
 - **Credentials.** The client uses Application Default Credentials. On Cloud Run that is the service account attached to the
   service or Job, with no key file. On Vercel set `AUDIT_LOG_GCS_AUTH=vercel-oidc`: the Vercel OIDC token is exchanged for short-lived Google credentials (the
   setup follows Vercel's guide "Connect to Google Cloud Platform (GCP)"; the five `GCP_*` values are identifiers, not secrets), so
-  no service account key is stored. `@vercel/oidc` and `google-auth-library` are loaded only in that mode.
+  no service account key is stored. When creating the provider binding, grant `roles/iam.workloadIdentityUser` to a principal scoped to the specific
+  identity (a `principal://` member with the Vercel subject), not to the whole pool (`principalSet://`), per Google's Workload Identity Federation guidance. `@vercel/oidc` and `google-auth-library` are loaded only in that mode.
 - **The local emulator** (`AUDIT_LOG_GCS_ENDPOINT`) tracks retention settings but does not enforce them, so a green emulator run is
   not evidence that overwrite and delete are blocked; check that once against a real bucket.
 

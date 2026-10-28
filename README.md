@@ -476,7 +476,7 @@ automatic crawler protection (unlike a preview deployment). `lib/site-config.ts`
 When enabled, `generate-code` additionally emits:
 - A multi-stage, non-root `Dockerfile` with a `HEALTHCHECK`, plus `.dockerignore`
 - `next.config.ts` with `output: 'standalone'`
-- Attachments in a private GCS bucket, delivered by the authorized attachments route through a short-lived V4 signed URL (the upload route is the same for every storage backend)
+- Attachments in a private GCS bucket, streamed by the authorized attachments route (the upload route is the same for every storage backend)
 - `proxy.ts` header rewriting so Cloud Run's internal `:8080` port never leaks into a redirect `Location` header
 
 Idempotent automation scripts in `scripts/` drive the GCP side, run in this

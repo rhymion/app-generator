@@ -93,9 +93,9 @@ Operations performed (idempotent — safe to re-run):
   - app-direct-database-url (Neon `DIRECT_URL`, unpooled — used only by the
     `app-migrate` Job, see Step 3 below)
   - app-nextauth-secret (AUTH_SECRET)
-  - app-gcs-bucket-name (GCS_BUCKET)
+  - app-gcs-bucket-name (read by the app as `GCS_BUCKET_NAME`)
   - app-redis-url (REDIS_URL)
-- Create GCS bucket + IAM bindings
+- Create GCS bucket (uniform bucket-level access, Public Access Prevention) + IAM binding (`roles/storage.objectUser`)
 
 There is no longer a Cloud SQL instance/DB/user to create, no public IP to
 obtain, and no "register in Prisma Console" prompt at the end — the DB is
@@ -140,7 +140,7 @@ Operations performed (default = Neon pooled/direct connection):
   migrations must not run through the pooled endpoint
 - Run seed
 - Cloud Run Service deploy:
-  - `--set-secrets`: DATABASE_URL / AUTH_SECRET / GCS_BUCKET / REDIS_URL
+  - `--set-secrets`: DATABASE_URL / AUTH_SECRET / GCS_BUCKET_NAME / REDIS_URL
   - `--set-env-vars`: AUTH_TRUST_HOST=true / NODE_ENV=production, plus
     PRISMA_POOL_MAX=<value> when that var is set in `.env.production.local`
     (blank by default — see below)
