@@ -24,7 +24,7 @@ When `comment_has_mention=False`, none of the above should appear at all —
 the generated code must be identical to the pre-cmd_522 shape for entities
 with no x-mention-annotated comment field.
 """
-from build_context import _build_comment_actions, _build_comment_actions_bridge
+from build_context import _build_mention_record_resolver, _build_comment_actions, _build_comment_actions_bridge
 
 
 # ---------------------------------------------------------------------------
@@ -137,49 +137,118 @@ def test_child_mention_false_omits_all_mention_code():
 
 
 # ---------------------------------------------------------------------------
-# Organization scope of mention recipients: a hand-written marker for a user
-# outside the actor's organizations must not deliver a notification, the same
-# boundary the mention picker applies to its candidates.
+# Organization scope of mention recipients: the axis is the organization of the
+# record the comment belongs to, never the commenter's. A record without an
+# organization column does not scope; a record with one notifies only that
+# organization's members.
 # ---------------------------------------------------------------------------
 
-def _builders():
+_ORG_SCOPE = {'should_filter_by_org': True}
+
+
+def _builders(scope):
     return {
         'bridge': lambda flag: _build_comment_actions_bridge(
-            parent='ticket', model='ticket', has_assignee_id=False, comment_has_mention=flag,
+            parent='ticket', model='ticket', has_assignee_id=False, comment_has_mention=flag, scope=scope,
         ),
         'child': lambda flag: _build_comment_actions(
-            _CHILD, parent='ticket', model='ticket', has_assignee_id=False, comment_has_mention=flag,
+            _CHILD, parent='ticket', model='ticket', has_assignee_id=False, comment_has_mention=flag, scope=scope,
         ),
     }
 
 
-def test_mention_recipients_are_scoped_to_actor_organizations_on_create_and_update():
-    for variant, build in _builders().items():
+def test_mention_recipients_are_scoped_to_the_record_organization_on_create_and_update():
+    for variant, build in _builders(_ORG_SCOPE).items():
         out = build(True)
         create_filter = (
-            'const mentionedIds = await filterMentionRecipientsToActorOrgs('
-            'userId, extractMentionedUserIds(message).filter((mid) => mid !== userId));'
+            'const mentionedIds = await filterMentionRecipientsToRecordOrg('
+            'parentRow.organization_id, extractMentionedUserIds(message).filter((mid) => mid !== userId));'
         )
         update_filter = (
-            'const freshMentions = await filterMentionRecipientsToActorOrgs('
-            'userId, newIds.filter((mid) => !oldIds.has(mid) && mid !== userId));'
+            'const freshMentions = await filterMentionRecipientsToRecordOrg('
+            'parentRow.organization_id, newIds.filter((mid) => !oldIds.has(mid) && mid !== userId));'
         )
         assert create_filter in out, variant
         assert update_filter in out, variant
         # the filter runs before the notification loop that consumes it
         assert out.index(create_filter) < out.index('for (const mentionedId of new Set(mentionedIds))'), variant
         assert out.index(update_filter) < out.index('for (const mentionedId of freshMentions)'), variant
+        # the parent row read carries the organization the filter uses, on every access check
+        assert out.count('organization_id: true }') >= 3, variant
+        # never the commenter's organizations
+        assert 'ActorOrgs' not in out, variant
+
+
+def test_mention_recipients_are_not_scoped_when_the_record_has_no_organization_column():
+    for variant, build in _builders({}).items():
+        out = build(True)
+        assert 'await filterMentionRecipientsToRecordOrg(null, ' in out, variant
+        assert 'parentRow.organization_id' not in out, variant
+        assert 'organization_id: true' not in out, variant
 
 
 def test_mention_recipient_filter_absent_without_mention_field():
-    for variant, build in _builders().items():
-        assert 'filterMentionRecipientsToActorOrgs' not in build(False), variant
+    for variant, build in _builders(_ORG_SCOPE).items():
+        out = build(False)
+        assert 'filterMentionRecipientsToRecordOrg' not in out, variant
+        assert 'organization_id: true' not in out, variant
 
 
-def test_mention_recipients_template_filters_by_shared_organization():
+def test_mention_recipients_template_scopes_by_record_organization_only():
     from pathlib import Path
     template = (Path(__file__).resolve().parent.parent / 'templates' / 'mention_recipients.ts.jinja2').read_text()
-    assert 'export async function filterMentionRecipientsToActorOrgs' in template
-    assert "organizations: { some: { users: { some: { id: actorId } } } }" in template
-    # not a Server Action module: the actor id must stay a trusted server-side argument
-    assert "'use server'" not in template.replace('(no \'use server\')', '')
+    assert 'export async function filterMentionRecipientsToRecordOrg' in template
+    assert 'organizations: { some: { id: recordOrganizationId } }' in template
+    # no organization -> no scoping at all
+    assert 'if (!recordOrganizationId) return candidateIds;' in template
+    # not the actor's organizations, and not a Server Action module
+    assert 'actorId' not in template
+    assert "'use server'" not in template.replace("(no 'use server')", '')
+
+
+# ---------------------------------------------------------------------------
+# Mention candidate search: the record the mention is for is read again on the
+# server and its organization decides the scope.
+# ---------------------------------------------------------------------------
+
+def test_record_resolver_of_an_org_scoped_entity_reads_the_record_through_its_gates():
+    out = _build_mention_record_resolver(
+        'ticket', 'ticket', '{ id: true, creator_id: true }',
+        {'should_filter_by_org': True, 'is_self_only': True, 'filter_values': {'status': [1]}},
+    )
+    assert 'ticket: async (recordId, userId) => {' in out
+    assert 'where: { id: recordId, organization_id: { in: _assocOrgIds }, creator_id: userId, status: { in: [1] } }' in out
+    assert 'select: { id: true, creator_id: true, organization_id: true }' in out
+    assert "await requirePermission('ticket', 'read', parentRow, userId);" in out
+    assert 'return { organizationId: parentRow.organization_id ?? null };' in out
+    # a missing or unreadable record resolves to null, never to a scope
+    assert 'if (error instanceof AppError) return null;' in out
+
+
+def test_record_resolver_of_an_entity_without_an_organization_column_scopes_nothing():
+    out = _build_mention_record_resolver('memo', 'memo', '{ id: true, creator_id: true }', {})
+    assert 'organization_id' not in out
+    assert 'getAssociatedOrganizations' not in out
+    assert 'return { organizationId: null };' in out
+    assert "await requirePermission('memo', 'read', parentRow, userId);" in out
+
+
+def test_search_template_takes_the_record_and_never_scopes_by_the_actor():
+    from pathlib import Path
+    t = (Path(__file__).resolve().parent.parent / 'templates' / 'mention_search.ts.jinja2').read_text()
+    assert 'record?: MentionRecordRef | null,' in t
+    assert 'resolveMentionRecordOrganization' in t
+    assert 'getAssociatedOrganizations' not in t
+    assert '__no_org_membership__' not in t
+    # unknown / unreadable / missing record: no candidates and no user query
+    assert 'if (!resolved) return { options: [], permissionDenied: false };' in t
+    # only a record that carries an organization narrows the list
+    assert 'if (resolved.organizationId) {' in t
+
+
+def test_record_org_template_resolves_only_known_entities_from_its_own_table():
+    from pathlib import Path
+    t = (Path(__file__).resolve().parent.parent / 'templates' / 'mention_record_org.ts.jinja2').read_text()
+    # `constructor` / `__proto__` style entity names from the client must not reach a resolver
+    assert 'Object.prototype.hasOwnProperty.call(RESOLVERS, entity)' in t
+    assert "'use server'" not in t.replace("(no 'use server')", '')

@@ -39,18 +39,6 @@ export async function setupMultiStageApprovalFixture() {
 
   const hashedPassword = await getTestPasswordHash();
 
-  // Order-reached notifications only go to approvers who share an organization
-  // with the user who approved the previous stage, so both approvers join one
-  // shared organization.
-  const sharedOrg = await prisma.organization.create({
-    data: {
-      name: `Multi-Stage Approval Org ${createId()}`,
-      creator_id: testUser.id,
-      updater_id: testUser.id,
-      users: { connect: [{ id: testUser.id }] },
-    },
-  });
-
   async function createApproverRoleAndUser(label: string) {
     const role = await prisma.role.create({
       data: {
@@ -70,7 +58,6 @@ export async function setupMultiStageApprovalFixture() {
         name: `Multi-Stage Approval ${label}`,
         password: hashedPassword,
         roles: { connect: [{ id: role.id }] },
-        organizations: { connect: [{ id: sharedOrg.id }] },
       },
     });
     return { roleId: role.id, userId, email };

@@ -26,7 +26,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 const {
   findUnique, findFirst, arUpdate, arUpdateMany, historyCreate, historyCreateMany,
   approvableFindUnique, approvableFindUniqueOuter, approvableUpdate, transactionMock, revalidatePathMock,
-  txFlowFindUnique, txArFindMany, prismaArFindMany, prismaRoleFindUnique, prismaUserFindUnique,
+  txFlowFindUnique, txArFindMany, prismaArFindMany, prismaRoleFindUnique,
   notifyMock, notifyApprovalRequestCreatedMock,
 } = vi.hoisted(() => ({
   findUnique: vi.fn(),
@@ -54,7 +54,6 @@ const {
   txArFindMany: vi.fn(),
   prismaArFindMany: vi.fn(),
   prismaRoleFindUnique: vi.fn(),
-  prismaUserFindUnique: vi.fn(),
   notifyMock: vi.fn(),
   notifyApprovalRequestCreatedMock: vi.fn(),
 }));
@@ -64,7 +63,6 @@ vi.mock('@/lib/prisma', () => ({
     approval_request: { findUnique, update: arUpdate, findMany: prismaArFindMany },
     approvable: { findUnique: approvableFindUniqueOuter },
     role: { findUnique: prismaRoleFindUnique },
-    user: { findUnique: prismaUserFindUnique },
     $transaction: transactionMock,
   },
 }));
@@ -444,8 +442,7 @@ describe('approveApprovalRequest order-reached notification (cmd_541)', () => {
     prismaArFindMany.mockResolvedValue([
       { id: 'req-2', approval_flow: { approver_role_id: 'approver-2-role', entity_name: 'user' } },
     ]);
-    prismaRoleFindUnique.mockResolvedValue({ users: [{ id: 'approver-2-user', organizations: [{ id: 'org-1' }] }] });
-    prismaUserFindUnique.mockResolvedValue({ organizations: [{ id: 'org-1' }] });
+    prismaRoleFindUnique.mockResolvedValue({ users: [{ id: 'approver-2-user' }] });
 
     await approveApprovalRequest('req-1');
 

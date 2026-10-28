@@ -101,9 +101,12 @@ optional `q` of at most 200 characters (`400` beyond that).
 
 ## Mention search
 
-`searchMentionUserOptions()` returns at most 20 users ordered by name whose organizations include one of
-the caller's, filtered by `q` (case-insensitive substring of the name; an empty `q` lists the first 20).
-A caller without any organization membership gets an empty list. A caller who may not read `user` gets
+`searchMentionUserOptions()` returns at most 20 users ordered by name, filtered by `q` (case-insensitive
+substring of the name; an empty `q` lists the first 20). `entity` and `id` (both or neither, each at most 200
+characters, `400` otherwise) name the record the mention is for: the server reads that record again and, when it
+has an organization, offers only that organization's members; a record without an organization scopes nothing
+(the caller's own organizations do not matter), and a record that does not exist, that the caller cannot read, or
+an unknown `entity` gives an empty list. Without them nothing is scoped by a record. A caller who may not read `user` gets
 `{ "options": [], "permissionDenied": true }` with status `200`, the same result the web picker receives
 so it can show "suggestions unavailable"; this differs on purpose from `GET /api/{entity}/options`, which
 answers `403` (see `relation-picker-rest-route.md`).
@@ -130,7 +133,7 @@ includes `/api/mention/users` and the `MentionUserOption` schema when the search
   entity with a comment thread. Its Cypress spec covers authentication with an API key and a mobile
   access token, add, edit and delete, the mention notifications, `403` without `update` and for a
   non-author, `404` for a record or comment of another organization or record, message validation, and
-  the search's organization scope, the 20-user limit and the `permissionDenied` result. The fixture also holds an `x-splittable` entity scoped by organization (`cr_split`); `split_rest.cy.ts` covers
+  the search's scope by the record's organization, the 20-user limit and the `permissionDenied` result. A second commentable entity without an organization column (`cr_memo`) and `mention_scope.cy.ts` cover who a mention notifies, with and without an organization on the record. The fixture also holds an `x-splittable` entity scoped by organization (`cr_split`); `split_rest.cy.ts` covers
   `POST /api/cr_split/{id}/actions/split`: `401` without credentials, `403` without `update`, `404` for a record of another
   organization (and for a caller in no organization), and the permitted split. A test-only probe
   route (`probe_routes/action_probe_route.ts`, copied into the disposable app only) calls the Server Actions

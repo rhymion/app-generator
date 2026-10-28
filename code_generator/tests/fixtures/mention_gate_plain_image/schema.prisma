@@ -13,13 +13,6 @@ datasource db {
   provider = "postgresql"
 }
 
-// Minimal stand-in for the real `organization` model: only the membership
-// relation that lib/mention/recipients.ts filters on.
-model organization {
-  id    String @id @default(cuid())
-  users user[] @relation("UserOrganizations")
-}
-
 model user {
   id        String    @id @default(cuid())
   name      String
@@ -27,7 +20,6 @@ model user {
   image     String?
   comments  comment[] @relation("CommentCreator")
   reactions reaction[] @relation("ReactionUser")
-  organizations organization[] @relation("UserOrganizations")
   created_items mention_gate_plain_image_item[] @relation("MentionGatePlainImageItemCreator")
   updated_items mention_gate_plain_image_item[] @relation("MentionGatePlainImageItemUpdater")
 }

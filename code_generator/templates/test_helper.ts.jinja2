@@ -786,29 +786,16 @@ export async function populate{{ pascal }}Data(length: number) {
 // mention marker resolves to that user's name on the detail GET response.
 export async function populate{{ pascal }}WithMentionUser() {
   const testUser = await getTestUser();
-  // Mention notifications only reach users who share an organization with the
-  // commenter, so the mentioned user joins one of the acting user's
-  // organizations (a new one when the acting user has none).
-  const testUserOrgs = await prisma.user.findUnique({
-    where: { id: testUser.id },
-    select: { organizations: { select: { id: true } } },
-  });
-  const sharedOrgIds = testUserOrgs?.organizations.length
-    ? testUserOrgs.organizations
-    : [
-        await prisma.organization.create({
-          data: {
-            name: `Mention Org ${Date.now()}`,
-            creator_id: testUser.id,
-            updater_id: testUser.id,
-            users: { connect: [{ id: testUser.id }] },
-          },
-          select: { id: true },
-        }),
-      ];
+  // populate{{ pascal }}Data already JSON-round-trips its records, so `record`
+  // below is plain JSON (dates as ISO strings), not a live Prisma object.
+  const [record] = await populate{{ pascal }}Data(1);
+  // Mention notifications are scoped by the record's organization: when this
+  // record has one, the mentioned user is a member of it. A record without an
+  // organization does not scope its mentions, so the user joins none.
+  const recordOrganizationId = (record as { organization_id?: string | null }).organization_id;
   const mentionedUser = await prisma.user.create({
     data: {
-      organizations: { connect: sharedOrgIds },
+      ...(recordOrganizationId ? { organizations: { connect: [{ id: recordOrganizationId }] } } : {}),
       name: `Mentioned User ${Date.now()}`,
       email: `mentioned-user-${Date.now()}-${Math.random()}@example.com`,
       password: 'test-password',
@@ -816,9 +803,6 @@ export async function populate{{ pascal }}WithMentionUser() {
       updater_id: testUser.id,
     },
   });
-  // populate{{ pascal }}Data already JSON-round-trips its records, so `record`
-  // below is plain JSON (dates as ISO strings), not a live Prisma object.
-  const [record] = await populate{{ pascal }}Data(1);
   const comment = await prisma.comment.create({
     data: {
       message: `@[user_id:${mentionedUser.id}]`,

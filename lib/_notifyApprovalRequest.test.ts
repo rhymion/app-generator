@@ -1,27 +1,30 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
-const { notify } = vi.hoisted(() => ({ notify: vi.fn() }));
+const { notify, resolveApprovableOrganization } = vi.hoisted(() => ({
+  notify: vi.fn(),
+  resolveApprovableOrganization: vi.fn(),
+}));
 
 vi.mock('@/lib/_notifier', () => ({ notify }));
+// Generated per schema (gitignored), so it is replaced here: what matters is the organization the
+// record behind the approvable carries.
+vi.mock('@/lib/approval_request/resolve_target', () => ({ resolveApprovableOrganization }));
 
 import { notifyApprovalRequestCreated, notifyApprovalOrderReached } from './_notifyApprovalRequest';
 
 function makeTx({
   approvalFlow,
   roleUsers,
-  actorOrgs = [{ id: 'org-a' }],
 }: {
   approvalFlow: { approver_role_id: string | null; entity_name: string } | null;
   roleUsers?: Array<{ id: string; organizations: Array<{ id: string }> }>;
-  actorOrgs?: Array<{ id: string }>;
 }) {
   return {
-    user: { findUnique: vi.fn().mockResolvedValue({ organizations: actorOrgs }) },
     approval_request: {
       findUnique: vi.fn().mockResolvedValue(
         approvalFlow
-          ? { id: 'req-1', approval_flow: approvalFlow }
-          : { id: 'req-1', approval_flow: null },
+          ? { id: 'req-1', approvable_id: 'appr-1', approval_flow: approvalFlow }
+          : { id: 'req-1', approvable_id: 'appr-1', approval_flow: null },
       ),
     },
     role: {
@@ -40,14 +43,11 @@ function makeTx({
 function makeOrderReachedDb({
   requests,
   roleUsersByRoleId,
-  actorOrgs = [{ id: 'org-a' }],
 }: {
   requests: Array<{ id: string; approval_flow: { approver_role_id: string | null; entity_name: string } | null }>;
   roleUsersByRoleId: Record<string, Array<{ id: string; organizations?: Array<{ id: string }> }>>;
-  actorOrgs?: Array<{ id: string }>;
 }) {
   return {
-    user: { findUnique: vi.fn().mockResolvedValue({ organizations: actorOrgs }) },
     approval_request: {
       findMany: vi.fn().mockResolvedValue(requests),
     },
@@ -62,6 +62,8 @@ function makeOrderReachedDb({
 
 beforeEach(() => {
   notify.mockReset();
+  // Default: the record's entity has no organization column, so nothing is scoped.
+  resolveApprovableOrganization.mockReset().mockResolvedValue({ scoped: false });
 });
 
 describe('notifyApprovalRequestCreated', () => {
@@ -111,58 +113,70 @@ describe('notifyApprovalRequestCreated', () => {
     expect(notify.mock.calls[0][0]).toBe('u1');
   });
 
-  // Organization scope: a notification carries a record link and id, so the
-  // approver list is narrowed to the organization boundary by default.
-  describe('organization scope', () => {
+  // Organization scope: the axis is the organization of the record the approval is about, never
+  // the acting user's. A record without an organization does not narrow the approvers.
+  describe('organization scope (the record\'s organization)', () => {
     const approvers = [
-      { id: 'same-org', organizations: [{ id: 'org-a' }] },
+      { id: 'in-record-org', organizations: [{ id: 'org-a' }] },
+      { id: 'shares-actor-org-only', organizations: [{ id: 'org-actor' }] },
       { id: 'other-org', organizations: [{ id: 'org-b' }] },
       { id: 'no-org', organizations: [] },
     ];
+    const flow = { approver_role_id: 'role-1', entity_name: 'leave_request' };
 
-    it('without orgId, notifies only approvers sharing an organization with the acting user', async () => {
-      const tx = makeTx({
-        approvalFlow: { approver_role_id: 'role-1', entity_name: 'leave_request' },
-        roleUsers: approvers,
-      });
+    it('an entity without an organization column notifies every approver, even with an acting user who has no organization', async () => {
+      resolveApprovableOrganization.mockResolvedValue({ scoped: false });
+      const tx = makeTx({ approvalFlow: flow, roleUsers: approvers });
 
       await notifyApprovalRequestCreated(tx, 'req-1', { excludeUserId: 'actor' });
 
-      expect(notify.mock.calls.map((c) => c[0])).toEqual(['same-org']);
+      expect(notify.mock.calls.map((c) => c[0])).toEqual(approvers.map((u) => u.id));
+      expect(resolveApprovableOrganization).toHaveBeenCalledWith(tx, 'leave_request', 'appr-1');
     });
 
-    it('an explicit orgId takes precedence over the acting user\'s organizations', async () => {
-      const tx = makeTx({
-        approvalFlow: { approver_role_id: 'role-1', entity_name: 'leave_request' },
-        roleUsers: approvers,
-      });
+    it('a record whose organization is empty notifies every approver', async () => {
+      resolveApprovableOrganization.mockResolvedValue({ scoped: true, organizationId: null });
+      const tx = makeTx({ approvalFlow: flow, roleUsers: approvers });
+
+      await notifyApprovalRequestCreated(tx, 'req-1', { excludeUserId: 'actor' });
+
+      expect(notify.mock.calls.map((c) => c[0])).toEqual(approvers.map((u) => u.id));
+    });
+
+    it('a record with an organization notifies only that organization\'s approvers, not one who merely shares the actor\'s organization', async () => {
+      resolveApprovableOrganization.mockResolvedValue({ scoped: true, organizationId: 'org-a' });
+      const tx = makeTx({ approvalFlow: flow, roleUsers: approvers });
+
+      await notifyApprovalRequestCreated(tx, 'req-1', { excludeUserId: 'actor' });
+
+      expect(notify.mock.calls.map((c) => c[0])).toEqual(['in-record-org']);
+    });
+
+    it('works without an acting user: the record decides', async () => {
+      resolveApprovableOrganization.mockResolvedValue({ scoped: true, organizationId: 'org-a' });
+      const tx = makeTx({ approvalFlow: flow, roleUsers: approvers });
+
+      await notifyApprovalRequestCreated(tx, 'req-1');
+
+      expect(notify.mock.calls.map((c) => c[0])).toEqual(['in-record-org']);
+    });
+
+    it('an explicit orgId takes precedence over the organization read from the record', async () => {
+      resolveApprovableOrganization.mockResolvedValue({ scoped: true, organizationId: 'org-a' });
+      const tx = makeTx({ approvalFlow: flow, roleUsers: approvers });
 
       await notifyApprovalRequestCreated(tx, 'req-1', { excludeUserId: 'actor', orgId: 'org-b' });
 
       expect(notify.mock.calls.map((c) => c[0])).toEqual(['other-org']);
     });
 
-    it('notifies nobody when the acting user has no organization', async () => {
-      const tx = makeTx({
-        approvalFlow: { approver_role_id: 'role-1', entity_name: 'leave_request' },
-        roleUsers: approvers,
-        actorOrgs: [],
-      });
+    it('a record that cannot be found does not narrow the approvers', async () => {
+      resolveApprovableOrganization.mockResolvedValue(null);
+      const tx = makeTx({ approvalFlow: flow, roleUsers: approvers });
 
       await notifyApprovalRequestCreated(tx, 'req-1', { excludeUserId: 'actor' });
 
-      expect(notify).not.toHaveBeenCalled();
-    });
-
-    it('notifies nobody when neither orgId nor an acting user is known', async () => {
-      const tx = makeTx({
-        approvalFlow: { approver_role_id: 'role-1', entity_name: 'leave_request' },
-        roleUsers: approvers,
-      });
-
-      await notifyApprovalRequestCreated(tx, 'req-1');
-
-      expect(notify).not.toHaveBeenCalled();
+      expect(notify).toHaveBeenCalledTimes(approvers.length);
     });
   });
 
@@ -298,31 +312,45 @@ describe('notifyApprovalOrderReached', () => {
     expect(notify.mock.calls[0][2]).toMatchObject({ href: '/leave_request/view/lr-42' });
   });
 
-  it('skips approvers outside the acting user\'s organizations, and notifies nobody when the actor has none', async () => {
+  describe('organization scope (the record\'s organization)', () => {
     const requests = [
       { id: 'req-2', approval_flow: { approver_role_id: 'role-2', entity_name: 'leave_request' } },
     ];
     const roleUsersByRoleId = {
       'role-2': [
-        { id: 'same-org', organizations: [{ id: 'org-a' }] },
-        { id: 'other-org', organizations: [{ id: 'org-b' }] },
+        { id: 'in-record-org', organizations: [{ id: 'org-a' }] },
+        { id: 'shares-actor-org-only', organizations: [{ id: 'org-actor' }] },
         { id: 'no-org', organizations: [] },
       ],
     };
 
-    await notifyApprovalOrderReached(makeOrderReachedDb({ requests, roleUsersByRoleId }), 'appr-1', ['flow-2'], {
-      excludeUserId: 'actor',
-    });
-    expect(notify.mock.calls.map((c) => c[0])).toEqual(['same-org']);
+    it('an entity without an organization column notifies every approver of the follow-on flow', async () => {
+      resolveApprovableOrganization.mockResolvedValue({ scoped: false });
+      const db = makeOrderReachedDb({ requests, roleUsersByRoleId });
 
-    notify.mockReset();
-    await notifyApprovalOrderReached(
-      makeOrderReachedDb({ requests, roleUsersByRoleId, actorOrgs: [] }),
-      'appr-1',
-      ['flow-2'],
-      { excludeUserId: 'actor' },
-    );
-    expect(notify).not.toHaveBeenCalled();
+      await notifyApprovalOrderReached(db, 'appr-1', ['flow-2'], { excludeUserId: 'actor' });
+
+      expect(notify.mock.calls.map((c) => c[0])).toEqual(['in-record-org', 'shares-actor-org-only', 'no-org']);
+      expect(resolveApprovableOrganization).toHaveBeenCalledWith(db, 'leave_request', 'appr-1');
+    });
+
+    it('a record whose organization is empty notifies every approver', async () => {
+      resolveApprovableOrganization.mockResolvedValue({ scoped: true, organizationId: null });
+      const db = makeOrderReachedDb({ requests, roleUsersByRoleId });
+
+      await notifyApprovalOrderReached(db, 'appr-1', ['flow-2'], { excludeUserId: 'actor' });
+
+      expect(notify).toHaveBeenCalledTimes(3);
+    });
+
+    it('a record with an organization notifies only that organization\'s approvers', async () => {
+      resolveApprovableOrganization.mockResolvedValue({ scoped: true, organizationId: 'org-a' });
+      const db = makeOrderReachedDb({ requests, roleUsersByRoleId });
+
+      await notifyApprovalOrderReached(db, 'appr-1', ['flow-2'], { excludeUserId: 'actor' });
+
+      expect(notify.mock.calls.map((c) => c[0])).toEqual(['in-record-org']);
+    });
   });
 
   it('is a no-op for a flow with no approver_role_id', async () => {

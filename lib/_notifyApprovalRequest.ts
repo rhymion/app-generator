@@ -1,5 +1,6 @@
 import type { PrismaClient } from '@/app/generated/prisma/client';
 import { notify } from '@/lib/_notifier';
+import { resolveApprovableOrganization } from '@/lib/approval_request/resolve_target';
 
 type Tx = Omit<
   PrismaClient,
@@ -7,24 +8,23 @@ type Tx = Omit<
 >;
 
 /**
- * Organization ids a recipient must belong to (at least one). An explicit
- * `orgId` (the record's own organization) wins; otherwise the acting user's
- * organizations apply, matching the mention picker's scope. With neither, the
- * list is empty and nobody is notified: a notification carries a record link
- * and id, so it must never cross an organization boundary by default.
+ * Organization a recipient must belong to: the organization of the record the
+ * approval is about, never the acting user's. An explicit `orgId` wins;
+ * otherwise the record is read through its approvable. A record without an
+ * organization (the entity has no organization_id column, or the value is
+ * empty) returns null, which means "do not scope": an organization-less
+ * customer's approvers are notified exactly as before.
  */
-async function resolveScopeOrgIds(
+async function resolveRecordOrgId(
   db: Tx,
-  orgId: string | null,
-  actorId: string | null,
-): Promise<string[]> {
-  if (orgId) return [orgId];
-  if (!actorId) return [];
-  const actor = await db.user.findUnique({
-    where: { id: actorId },
-    select: { organizations: { select: { id: true } } },
-  });
-  return actor?.organizations.map((o) => o.id) ?? [];
+  explicitOrgId: string | null,
+  entityName: string | null | undefined,
+  approvableId: string | null | undefined,
+): Promise<string | null> {
+  if (explicitOrgId) return explicitOrgId;
+  if (!entityName || !approvableId) return null;
+  const resolved = await resolveApprovableOrganization(db, entityName, approvableId);
+  return resolved?.scoped ? resolved.organizationId : null;
 }
 
 interface NotifyOptions {
@@ -39,9 +39,10 @@ interface NotifyOptions {
    */
   entityLabel?: string | null;
   /**
-   * When the entity has organization-scope, pass `{ orgId }` so the notifier
-   * filters approver-role members to that organization (per the notification
-   * design: "if the item has organization information").
+   * The record's own organization. Optional: when omitted, the notifier reads
+   * the organization of the record behind the approvable itself. Either way,
+   * approver-role members are limited to that organization when the record has
+   * one, and are not limited at all when it has none.
    */
   orgId?: string | null;
   /**
@@ -62,9 +63,9 @@ interface NotifyOptions {
 
 /**
  * Trigger #2 (notification design 2026-05-11): after an approval_request is
- * created, notify the users holding the approver role for its flow who share an
- * organization with the record (`orgId`) or, when that is not given, with the
- * acting user (`excludeUserId`).
+ * created, notify the users holding the approver role for its flow. When the
+ * record has an organization, only members of that organization are notified;
+ * a record without one does not narrow the recipients.
  *
  * Fire-and-forget — does not share a transaction with the caller. Safe to
  * call from inside an entity's afterCreate hook (it receives a `tx` so the
@@ -81,6 +82,7 @@ export async function notifyApprovalRequestCreated(
     where: { id: approvalRequestId },
     select: {
       id: true,
+      approvable_id: true,
       approval_flow: {
         select: { approver_role_id: true, entity_name: true },
       },
@@ -96,7 +98,12 @@ export async function notifyApprovalRequestCreated(
 
   const orgId = options.orgId ?? null;
   const excludeUserId = options.excludeUserId ?? null;
-  const scopeOrgIds = await resolveScopeOrgIds(db, orgId, excludeUserId);
+  const recordOrgId = await resolveRecordOrgId(
+    db,
+    orgId,
+    req.approval_flow.entity_name,
+    options.approvableId ?? req.approvable_id,
+  );
 
   const entityLabel = options.entityLabel ?? req.approval_flow.entity_name ?? 'request';
 
@@ -112,7 +119,7 @@ export async function notifyApprovalRequestCreated(
 
   for (const u of role.users) {
     if (u.id === excludeUserId) continue;
-    if (!u.organizations.some((o) => scopeOrgIds.includes(o.id))) continue;
+    if (recordOrgId && !u.organizations.some((o) => o.id === recordOrgId)) continue;
     notify(u.id, 'approval_requested', {
       title: `New approval request: ${entityLabel}`,
       href,
@@ -166,7 +173,6 @@ export async function notifyApprovalOrderReached(
   });
 
   const excludeUserId = options.excludeUserId ?? null;
-  const scopeOrgIds = await resolveScopeOrgIds(db, null, excludeUserId);
   const href =
     options.targetEntityName && options.targetId
       ? `/${options.targetEntityName}/view/${options.targetId}`
@@ -181,10 +187,11 @@ export async function notifyApprovalOrderReached(
     if (!role) continue;
 
     const entityLabel = options.entityLabel ?? req.approval_flow.entity_name ?? 'request';
+    const recordOrgId = await resolveRecordOrgId(db, null, req.approval_flow.entity_name, approvableId);
 
     for (const u of role.users) {
       if (u.id === excludeUserId) continue;
-      if (!u.organizations.some((o) => scopeOrgIds.includes(o.id))) continue;
+      if (recordOrgId && !u.organizations.some((o) => o.id === recordOrgId)) continue;
       notify(u.id, 'approval_order_reached', {
         title: `Your approval is now needed: ${entityLabel}`,
         href,

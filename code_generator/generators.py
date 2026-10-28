@@ -5372,7 +5372,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             f"        label={{tf('{fk}')}}\n"
             f"        value={{{sn}}}\n"
             f"        onChange={{(v) => set{_setter(sn)}(v)}}\n"
-            f"        searchUsers={{searchMentionUserOptions}}\n"
+            f"        searchUsers={{(q) => searchMentionUserOptions(q, isEdit ? {{ entity: '{parent}', id: src.id }} : null)}}\n"
             f"        {'required' if req else ''}\n"
             f"        rows={{{rows}}}\n"
             f"      />"
@@ -7064,7 +7064,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     # form_view.tsx.jinja2, so a comment's mentions render as links here too
     # instead of showing the raw @[user_id:<id>] marker.
     _mention_props = (
-        f"          searchUsers={{searchMentionUserOptions}}\n"
+        f"          searchUsers={{(q) => searchMentionUserOptions(q, {{ entity: '{parent}', id: src.id }})}}\n"
         f"          renderMessage={{(c) => <MentionText text={{c.message}} userContext={{mentionUserContext ?? {{}}}} canViewUserProfile={{Boolean(canViewUserProfile)}} />}}\n"
         if comment_has_mention_fu else ""
     )

@@ -1594,6 +1594,9 @@ def generate(schema_path: str, output_dir: str) -> None:
     # Pre-compute named_constants so entity templates (getters.ts) can use it
     named_constants = extract_named_constants(schema)
 
+    # Per-entity record lookups for the mention candidate search (lib/mention/record_org.ts).
+    mention_record_resolvers: list[str] = []
+
     doc_dir = out / 'docs' / 'generated'
     entity_doc_summaries: list[dict] = []
     # OpenAPI 3.1 build artifact (cmd_1154, ai-agent-integration-design.md
@@ -1675,6 +1678,8 @@ def generate(schema_path: str, output_dir: str) -> None:
 
         # Base context for all other generators
         ctx = build_context(entity, schema, has_reactions=bool(named_constants))
+        if ctx.get('mention_record_resolver'):
+            mention_record_resolvers.append(ctx['mention_record_resolver'])
         # List panel search box: the entity's search trigram columns (a search target)
         # adjusted by per-column `x-trigram-filter: true/false`; none -> no search box.
         _search_cols = _resolve_search_columns(
@@ -2764,6 +2769,15 @@ def generate(schema_path: str, output_dir: str) -> None:
             _render(env, 'mention_recipients.ts.jinja2', {}),
         )
         print('  Mention recipient scoping → lib/mention/recipients.ts')
+        _resolvers_ts = ''.join(mention_record_resolvers)
+        _write(
+            out / 'lib' / 'mention' / 'record_org.ts',
+            _render(env, 'mention_record_org.ts.jinja2', {
+                'resolvers': _resolvers_ts,
+                'needs_associated_orgs': 'getAssociatedOrganizations' in _resolvers_ts,
+            }),
+        )
+        print(f'  Mention record organization lookup → lib/mention/record_org.ts ({len(mention_record_resolvers)} entity/entities)')
         _write(
             out / 'app' / 'api' / 'mention' / 'users' / 'route.ts',
             _render(env, 'mention_users_api_route.ts.jinja2', {}),

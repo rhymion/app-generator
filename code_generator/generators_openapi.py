@@ -856,11 +856,21 @@ def assemble_openapi_document(entity_specs: list[dict], *, mention_search: bool 
                     {'name': 'q', 'in': 'query', 'required': False,
                      'schema': {'type': 'string', 'maxLength': 200},
                      'description': 'Substring of the user name; empty returns the first users by name.'},
+                    {'name': 'entity', 'in': 'query', 'required': False,
+                     'schema': {'type': 'string', 'maxLength': 200},
+                     'description': 'Entity of the record the mention is for. Give it together with id.'},
+                    {'name': 'id', 'in': 'query', 'required': False,
+                     'schema': {'type': 'string', 'maxLength': 200},
+                     'description': (
+                         'Id of the record the mention is for. When the record has an organization, only '
+                         'that organization\'s users are offered; a record the caller cannot read yields no '
+                         'candidates.'
+                     )},
                 ],
                 'responses': {
                     '200': {
                         'description': (
-                            'At most 20 users in the caller\'s organizations, ordered by name. '
+                            'At most 20 users, ordered by name, limited to the record\'s organization when it has one. '
                             'A caller who may not read users gets an empty list with permissionDenied true.'
                         ),
                         'content': {'application/json': {'schema': {

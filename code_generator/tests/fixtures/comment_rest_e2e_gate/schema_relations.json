@@ -2,6 +2,8 @@
   "user": [
     "created_cr_tickets cr_ticket[] @relation(\"CrTicketCreator\")",
     "updated_cr_tickets cr_ticket[] @relation(\"CrTicketUpdater\")",
+    "created_cr_memos cr_memo[] @relation(\"CrMemoCreator\")",
+    "updated_cr_memos cr_memo[] @relation(\"CrMemoUpdater\")",
     "created_cr_assets cr_asset[] @relation(\"CrAssetCreator\")",
     "updated_cr_assets cr_asset[] @relation(\"CrAssetUpdater\")",
     "created_cr_splits cr_split[] @relation(\"CrSplitCreator\")",
@@ -30,7 +32,8 @@
     "cr_groups cr_group[]"
   ],
   "commentable": [
-    "cr_ticket cr_ticket?"
+    "cr_ticket cr_ticket?",
+    "cr_memo cr_memo?"
   ],
   "attachable": [
     "cr_asset cr_asset?"
