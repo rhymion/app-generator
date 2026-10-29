@@ -34,7 +34,7 @@ def _run(tmp_path: Path, **scenario) -> dict:
 
 
 def _lock_options(out: dict, fn: str):
-    return [c['options'] for c in out['calls'] if c['fn'] == fn]
+    return [c['options'] for c in out['calls'] if c['fn'] == fn and c['key'] == 'app_refresh_token']
 
 
 def test_expo_go_saves_and_reads_the_refresh_token_without_the_lock(tmp_path):
@@ -78,3 +78,22 @@ def test_web_never_touches_secure_store(tmp_path):
 
 def test_the_secure_store_plugin_is_declared_so_standalone_builds_get_the_face_id_text():
     assert 'expo-secure-store' in APP_JSON.read_text()
+
+
+def test_the_lock_decision_is_stored_at_save_time_and_reused_on_read(tmp_path):
+    # The device loses its enrolled lock after sign-in: the read must still ask for the lock the token was saved with.
+    out = _run(tmp_path, isEnrolledAfterSave=False)
+    (options,) = _lock_options(out, 'getItemAsync')[-1:]
+    assert options['requireAuthentication'] is True
+    assert out['read'] == 'refresh-secret'
+
+
+def test_a_lock_enrolled_after_save_does_not_change_how_the_token_is_read(tmp_path):
+    out = _run(tmp_path, isEnrolled=False, isEnrolledAfterSave=True)
+    assert _lock_options(out, 'getItemAsync')[-1:] == [None]
+
+
+def test_a_failing_device_authentication_check_is_logged_and_stores_unlocked(tmp_path):
+    out = _run(tmp_path, authCheckThrows=True)
+    assert _lock_options(out, 'setItemAsync')[0] is None
+    assert 'Device authentication check failed' in out['warnings'][0]
