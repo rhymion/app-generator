@@ -3,7 +3,7 @@
 ## Reporting a vulnerability
 
 Please report suspected vulnerabilities privately through GitHub's private
-vulnerability reporting: open the repository's **Security** tab and choose
+vulnerability reporting: open the repository's **Security and quality** tab and choose
 **Report a vulnerability**. Please do not open a public issue, pull request or
 discussion for a suspected vulnerability.
 
