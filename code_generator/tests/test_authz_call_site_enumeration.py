@@ -49,7 +49,7 @@ def _sources() -> dict:
     for root in ('lib', 'app', 'components', 'cypress'):
         for suffix in ('*.ts', '*.tsx'):
             for path in sorted((REPO_ROOT / root).rglob(suffix)):
-                if path.name.endswith(('.test.ts', '.test.tsx')) or 'node_modules' in path.parts:
+                if not path.is_file() or path.name.endswith(('.test.ts', '.test.tsx')) or 'node_modules' in path.parts:
                     continue
                 found[path.relative_to(REPO_ROOT).as_posix()] = path
     return found
