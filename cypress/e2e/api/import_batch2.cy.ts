@@ -217,6 +217,12 @@ describe('API: CSV Import batch2 (cmd_328) — dotted FK + Tier2/Tier3 authoriza
           flags: { create: true, read: true, update: true, delete: false, import: true },
           label: 'p4',
         }).then((email) => {
+          // The imported row points at a role, so the importer must be able to read that role.
+          cy.task('db:grantAdditionalEntityPermission', {
+            email,
+            entityName: 'role',
+            flags: { read: true },
+          });
           cy.login(email, TEST_CREDENTIALS.password);
           const csv = 'name,role_name,create,read,update,delete,import\n__perm_p4_test__,__test_role_p4__,true,true,false,false,false';
           cy.request({ method: 'POST', url: PERMISSION_IMPORT_PATH, body: { csv, dryRun: true } }).then((dryRes) => {
