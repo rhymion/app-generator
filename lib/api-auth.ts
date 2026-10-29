@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createHash } from 'node:crypto';
 import prisma from '@/lib/prisma';
 import { getRateLimiter } from '@/lib/rate-limit';
-import { requirePermission, getSessionUserId, type RichPermissions, type Operation, type ItemContext } from '@/lib/authz';
+import { requireEntityPermission, requireRecordPermission, getSessionUserId, type RichPermissions, type Operation, type RecordContext } from '@/lib/authz';
 import { TtlLruCache } from '@/lib/_ttl_lru';
 import { AppError, type ErrorCode } from '@/lib/_errors';
 import { SCHEDULED_TASK_ROLE_NAME } from '@/lib/scheduled-tasks/system-actor';
@@ -245,14 +245,34 @@ export function withActor<T>(userId: string, fn: () => Promise<T>): Promise<T> {
   return runAsActor(userId, fn);
 }
 
+/**
+ * Entity-only permission check: may the caller ever perform `operation` on this
+ * entity? It takes no record, so it never resolves Creator/Assignee-scoped
+ * flags -- once a record is loaded, authorize with
+ * {@link requireApiRecordPermission}.
+ */
 export async function requireApiPermission(
   userId: string,
   model: string,
   operation: Operation,
-  item?: ItemContext,
 ): Promise<RichPermissions> {
   try {
-    return await requirePermission(model, operation, item, userId);
+    return await requireEntityPermission(model, operation, userId);
+  } catch (e) {
+    if (e instanceof ApiError) throw e;
+    throw new ApiError(403, (e as Error).message);
+  }
+}
+
+/** Record-scoped permission check: the record is required, see {@link requireRecordPermission}. */
+export async function requireApiRecordPermission(
+  userId: string,
+  model: string,
+  operation: Operation,
+  item: RecordContext,
+): Promise<RichPermissions> {
+  try {
+    return await requireRecordPermission(model, operation, item, userId);
   } catch (e) {
     if (e instanceof ApiError) throw e;
     throw new ApiError(403, (e as Error).message);

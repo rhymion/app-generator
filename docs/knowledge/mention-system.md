@@ -475,7 +475,7 @@ comment/mention creator avatar" for the fix.
 (`search.test.ts`, `recipients.test.ts`) import the generated files, so they live in
 `code_generator/tests/fixtures/mention_gate/vitest/` and run inside `npm run test:mention-gate`,
 after the fixture app is generated, against the fixture shims. The repository's own Unit Tests
-job (no generate-code) does not run them. `record_org.ts` emits its `prisma`, `requirePermission`
+job (no generate-code) does not run them. `record_org.ts` emits its `prisma`, `requireRecordPermission`
 and `AppError` imports only when the schema has at least one mention record resolver.
 
 **Fixture gate: how to grow it.** When a new branch is found dark (via a

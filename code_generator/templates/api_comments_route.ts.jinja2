@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { authenticate, requireApiPermission, withActor, handleApiError, ApiError } from '@/lib/api-auth';
 import { getRateLimiter } from '@/lib/rate-limit';
-import { resolvePermissions } from '@/lib/authz';
+import { resolveRecordPermissions } from '@/lib/authz';
 import { get{{ parent_pascal }}Detail } from '@/lib/{{ parent }}/getters';
 import { add{{ parent_pascal }}Comment } from '@/lib/{{ parent }}/actions';
 
@@ -40,7 +40,7 @@ export async function POST(request: NextRequest, { params }: Params) {
     if (!item) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
-    const resolved = await resolvePermissions(basePerms, item, actorId);
+    const resolved = await resolveRecordPermissions(basePerms, item, actorId);
     if (!resolved.update) {
       throw new ApiError(403, `Access denied: {{ parent }}.update`);
     }

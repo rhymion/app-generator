@@ -111,14 +111,14 @@ def test_create_only_upsert_rejects_id():
 
 
 def test_create_only_upsert_guard_precedes_permission_check():
-    """The id guard must run before requirePermission()/create-only work
+    """The id guard must run before requireRecordPermission()/create-only work
     begins, so an update-intent request is rejected immediately rather than
     partially processed."""
     rendered = _render_actions(can_update=False)
     body = _upsert_function_body(rendered)
 
     guard_idx = body.index("if (id) throw new Error('Update not supported');")
-    perm_idx = body.index("requirePermission('widget', 'create')")
+    perm_idx = body.index("requireEntityPermission('widget', 'create')")
     assert guard_idx < perm_idx, (
         f'Expected the id guard to precede the create permission check. '
         f'Got:\n{body}'

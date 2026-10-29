@@ -1,40 +1,6 @@
 'use server';
 
-import { redirect } from 'next/navigation';
-{% if comment_actions_code or (can_list and can_delete) or can_invalidate %}import { revalidatePath } from 'next/cache';
-{% endif %}{% if can_create or can_update or can_invalidate or has_commentable or can_delete or comment_actions_code %}import { {% if can_create or can_update or can_invalidate or has_commentable or comment_actions_code %}getSessionUserIdOrThrow, requirePermission{% if has_commentable or (can_invalidate and not is_self_only) %}, resolvePermissions{% endif %}{% if can_delete %}, {% endif %}{% endif %}{% if can_delete %}getModelPermissions{% endif %} } from '@/lib/authz';
-{% endif %}
-{% if can_create or can_update or can_delete %}import { AppError, type ActionFailure } from '@/lib/_errors';
-{% elif has_commentable or comment_actions_code or can_invalidate %}import { AppError } from '@/lib/_errors';
-{% endif %}
-{% if can_invalidate %}
-{% if invalidate_module %}
-import { {{ invalidate_handler }} } from '@/{{ invalidate_module }}';
-{% else %}
-{# no handler/module configured: fall back to the write-once stub (cmd_583).
-   Aliased on import -- the stub's export is also named invalidate{{ parent_pascal }},
-   which collides with this file's own wrapper function of the same name below. #}
-import { invalidate{{ parent_pascal }} as _invalidate{{ parent_pascal }}Stub } from '@/lib/{{ parent }}/invalidate_handler';
-{% endif %}
-{% if has_invalidate_guard %}
-import { assertInvalidateAllowed } from './invalidate_guard';
-{% endif %}
-{% endif %}
-{% if uses_prisma %}import prisma from '@/lib/prisma';
-{% endif %}{% if comment_actions_code %}import { notify } from '@/lib/_notifier';
-{% endif %}{% if comment_has_mention %}import { extractMentionedUserIds } from '@/lib/mention/parser';
-import { filterMentionRecipientsToRecordOrg } from '@/lib/mention/recipients';
-{% endif %}{% if has_commentable %}import { COMMENT_REACTION_TYPES } from '@/lib/reaction_constants';
-import type { CommentReactionSummary } from './types';
-import { createComment, updateComment, deleteComment } from '@/lib/comment/service';
-import { createReaction, deleteReaction } from '@/lib/reaction/service';
-{% endif %}
-{% if service_imports %}
-import { {{ service_imports }} } from './service';
-{% endif %}
-{% if should_filter_by_org and (can_update or can_delete or comment_actions_code or can_invalidate) %}
-import { getAssociatedOrganizations } from '@/lib/organization/getters_associated';
-{% endif %}
+{% set _actions_body %}
 {% if can_create or can_update %}
 export async function upsert{{ parent_pascal }}(data: FormData) {
 {{ upsert_body }}
@@ -154,9 +120,9 @@ export async function invalidate{{ parent_pascal }}(id: string): Promise<void> {
   // Creator/Assignee grants only apply to records the caller created / is
   // assigned to, and the record must be inside the caller's organizations.
   {% if is_self_only %}
-  await requirePermission('{{ parent }}', 'delete', undefined, userId);
+  await requireEntityPermission('{{ parent }}', 'delete', userId);
   {% else %}
-  const _invalidateBasePerms = await requirePermission('{{ parent }}', 'delete', undefined, userId);
+  const _invalidateBasePerms = await requireEntityPermission('{{ parent }}', 'delete', userId);
   {% endif %}
   {% if should_filter_by_org %}
   const _assocOrgs = await getAssociatedOrganizations(userId);
@@ -174,7 +140,7 @@ export async function invalidate{{ parent_pascal }}(id: string): Promise<void> {
   // x-self-only: ownership is the sole gate, with no general.delete override.
   if (_invalidateItem.creator_id !== userId) throw new AppError('NOT_FOUND', 'Not found');
   {% else %}
-  const _invalidateResolved = await resolvePermissions(_invalidateBasePerms, _invalidateItem, userId);
+  const _invalidateResolved = await resolveRecordPermissions(_invalidateBasePerms, _invalidateItem, userId);
   if (!_invalidateResolved.delete) {
     throw new AppError('PERMISSION_DENIED', 'Access denied: {{ parent }}.delete');
   }
@@ -216,7 +182,7 @@ export async function toggle{{ parent_pascal }}CommentReaction(
   // same two-stage pattern PR #749 applied to the REST routes, closing the
   // Server-Action-specific leak shape here (which error is thrown, not a
   // 404-vs-403 status code).
-  const basePerms = await requirePermission('{{ parent }}', 'read', undefined, userId);
+  const basePerms = await requireEntityPermission('{{ parent }}', 'read', userId);
   const comment = await prisma.comment.findUnique({
     where: { id: commentId },
     select: { commentable_id: true },
@@ -226,7 +192,7 @@ export async function toggle{{ parent_pascal }}CommentReaction(
     where: { commentable_id: comment.commentable_id },
     select: { id: true, creator_id: true{% if has_assignee_id %}, assignee_id: true{% endif %} },
   });
-  const resolved = parentRow ? await resolvePermissions(basePerms, parentRow, userId) : basePerms;
+  const resolved = parentRow ? await resolveRecordPermissions(basePerms, parentRow, userId) : basePerms;
   if (!resolved.read) {
     throw new AppError('PERMISSION_DENIED', `Access denied: {{ parent }}.read`);
   }
@@ -258,3 +224,44 @@ export async function toggle{{ parent_pascal }}CommentReaction(
   return { commentId, type, active, counts, myTypes };
 }
 {% endif %}
+
+{% endset %}
+{% set _authz_names = [] %}
+{% if can_create or can_update or can_invalidate or has_commentable or comment_actions_code %}{% set _ = _authz_names.append('getSessionUserIdOrThrow') %}{% if 'requireEntityPermission(' in _actions_body %}{% set _ = _authz_names.append('requireEntityPermission') %}{% endif %}{% if 'requireRecordPermission(' in _actions_body %}{% set _ = _authz_names.append('requireRecordPermission') %}{% endif %}{% if has_commentable or (can_invalidate and not is_self_only) %}{% set _ = _authz_names.append('resolveRecordPermissions') %}{% endif %}{% endif %}
+{% if can_delete %}{% set _ = _authz_names.append('getModelPermissions') %}{% endif %}
+import { redirect } from 'next/navigation';
+{% if comment_actions_code or (can_list and can_delete) or can_invalidate %}import { revalidatePath } from 'next/cache';
+{% endif %}{% if can_create or can_update or can_invalidate or has_commentable or can_delete or comment_actions_code %}import { {{ _authz_names | join(', ') }} } from '@/lib/authz';
+{% endif %}
+{% if can_create or can_update or can_delete %}import { AppError, type ActionFailure } from '@/lib/_errors';
+{% elif has_commentable or comment_actions_code or can_invalidate %}import { AppError } from '@/lib/_errors';
+{% endif %}
+{% if can_invalidate %}
+{% if invalidate_module %}
+import { {{ invalidate_handler }} } from '@/{{ invalidate_module }}';
+{% else %}
+{# no handler/module configured: fall back to the write-once stub (cmd_583).
+   Aliased on import -- the stub's export is also named invalidate{{ parent_pascal }},
+   which collides with this file's own wrapper function of the same name below. #}
+import { invalidate{{ parent_pascal }} as _invalidate{{ parent_pascal }}Stub } from '@/lib/{{ parent }}/invalidate_handler';
+{% endif %}
+{% if has_invalidate_guard %}
+import { assertInvalidateAllowed } from './invalidate_guard';
+{% endif %}
+{% endif %}
+{% if uses_prisma %}import prisma from '@/lib/prisma';
+{% endif %}{% if comment_actions_code %}import { notify } from '@/lib/_notifier';
+{% endif %}{% if comment_has_mention %}import { extractMentionedUserIds } from '@/lib/mention/parser';
+import { filterMentionRecipientsToRecordOrg } from '@/lib/mention/recipients';
+{% endif %}{% if has_commentable %}import { COMMENT_REACTION_TYPES } from '@/lib/reaction_constants';
+import type { CommentReactionSummary } from './types';
+import { createComment, updateComment, deleteComment } from '@/lib/comment/service';
+import { createReaction, deleteReaction } from '@/lib/reaction/service';
+{% endif %}
+{% if service_imports %}
+import { {{ service_imports }} } from './service';
+{% endif %}
+{% if should_filter_by_org and (can_update or can_delete or comment_actions_code or can_invalidate) %}
+import { getAssociatedOrganizations } from '@/lib/organization/getters_associated';
+{% endif %}
+{{ _actions_body }}

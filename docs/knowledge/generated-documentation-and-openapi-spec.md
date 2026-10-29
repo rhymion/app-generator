@@ -283,7 +283,7 @@ Every judgment in the response reuses an already-generated function --
 never a second, divergent derivation (the design doc's anti-pattern
 against a parallel agent API recreating a second, divergent code path):
 
-- `operations.update`/`operations.delete` -- `canAccess()`
+- `operations.update`/`operations.delete` -- `canAccessEntity()`
   (`lib/authz.ts`), the same non-throwing permission check every read
   path already uses; an `x-self-only` entity checks
   `creator_id === actorId` instead, matching the write path's own "no

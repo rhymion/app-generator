@@ -113,7 +113,7 @@ The original pattern was sequential:
 const userId = await getSessionUserId();
 const item = await getDetail(id);
 const permissions = await getModelPermissions('entity', userId);
-// then resolvePermissions(permissions, item, userId) to apply creator/assignee context
+// then resolveRecordPermissions(permissions, item, userId) to apply creator/assignee context
 ```
 
 `getSessionUserId()` had to finish before anything else could start.
@@ -128,7 +128,7 @@ const [item, { permissions: basePermissions, userId }] = await Promise.all([
   getDetail(id),
   getModelPermissions(),
 ]);
-const resolved = await resolvePermissions(basePermissions, item, userId);
+const resolved = await resolveRecordPermissions(basePermissions, item, userId);
 ```
 
 For list pages, permissions and data are also fetched in parallel:
@@ -408,7 +408,7 @@ to fail against the pre-fix template (2 assertions, both catch the regression in
 ### Problem
 
 `getModelPermissions(model, userId)` (`lib/authz.ts`) is called once per model — every
-generated entity's own `requirePermission`/`canAccess` calls, plus the cross-entity search
+generated entity's own `requireRecordPermission`/`canAccessRecord` (or their entity-only counterparts) calls, plus the cross-entity search
 path (`search_helpers.ts.jinja2`, one call per entity in `ALL_ENTITIES`). Its underlying
 query filtered by `name: model`:
 

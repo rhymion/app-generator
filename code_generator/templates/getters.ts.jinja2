@@ -5,7 +5,7 @@ import prisma from '@/lib/prisma';
 import { AppError } from '@/lib/_errors';
 {% endif %}
 import type { {{ parent_pascal }}, {{ parent_pascal }}Detail } from '@/lib/{{ parent }}/types';
-import { assertPermission, getModelPermissions, resolvePermissions, toPermissions{% if should_filter_by_org or is_self_only %}, getSessionUserIdOrThrow{% endif %} } from '@/lib/authz';
+import { assertPermission, getModelPermissions, resolveEntityPermissions, resolveRecordPermissions, toPermissions{% if should_filter_by_org or is_self_only %}, getSessionUserIdOrThrow{% endif %} } from '@/lib/authz';
 import type { Operation, RichPermissions } from '@/lib/authz';
 import {
   type PageOpts, type PageResult, type ColumnFilterKind, type RelationFilterMap, type EnumMembersMap, type DecimalScalesMap,
@@ -332,7 +332,9 @@ export async function get{{ parent_pascal }}DetailPageData(id: string, operation
     getModelPermissions('{{ parent }}'),
   ]);
 {% endif %}
-  const resolved = await resolvePermissions(basePermissions, {{ parent_camel }}, userId ?? '');
+  const resolved = {{ parent_camel }}
+    ? await resolveRecordPermissions(basePermissions, {{ parent_camel }}, userId ?? '')
+    : await resolveEntityPermissions(basePermissions);
   await assertPermission(resolved, operation, '{{ parent }}');
 {% if comment_has_mention %}
   // canViewUserProfile (cmd_522): whether the viewer may link mentioned users'

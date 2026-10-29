@@ -15,7 +15,7 @@ the consumer owns it after the first run. A hand-written route *writes* when it 
 or `DELETE` handler, or calls a direct `prisma.<model>.<write>(` method. A
 writing route is flagged when its source (comments stripped) lacks either:
 
-1. a permission check -- a call to `requireApiPermission(`, `requirePermission(`
+1. a permission check -- a call to `requireApiPermission(`, `requireApiRecordPermission(`, `requireEntityPermission(`, `requireRecordPermission(`
    or `requireScheduledTaskRole(`. Authentication alone (`authenticate(`,
    `requireSession(`, ...) answers "who is calling", not "may they do this".
 2. rate limiting -- a call to `getRateLimiter(`, the limiter in
@@ -65,7 +65,7 @@ _DIRECT_WRITE = re.compile(
     r'\bprisma\.[A-Za-z_]\w*\.(create|update|delete|upsert|createMany|updateMany|deleteMany)\s*\('
 )
 _PERMISSION_CALL = re.compile(
-    r'\b(requireApiPermission|requirePermission|requireScheduledTaskRole)\s*\('
+    r'\b(requireApiPermission|requireApiRecordPermission|requireEntityPermission|requireRecordPermission|requireScheduledTaskRole)\s*\('
 )
 _RATE_LIMIT_CALL = re.compile(r'\bgetRateLimiter\s*\(')
 

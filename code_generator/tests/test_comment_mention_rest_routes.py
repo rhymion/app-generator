@@ -75,7 +75,7 @@ def test_add_route_checks_access_to_the_parent_before_writing(mention):
     route = _add_route(mention)
     coarse = route.index("requireApiPermission(actorId, 'mention_gate_item', 'update')")
     read = route.index('getMentionGateItemDetail(id')
-    resolved = route.index('resolvePermissions(basePerms, item, actorId)')
+    resolved = route.index('resolveRecordPermissions(basePerms, item, actorId)')
     write = route.index('withActor(')
     assert coarse < read < resolved < write
     assert "Access denied: mention_gate_item.update" in route

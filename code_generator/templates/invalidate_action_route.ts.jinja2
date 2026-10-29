@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { authenticate, requireApiPermission, handleApiError{% if not is_self_only %}, ApiError{% endif %} } from '@/lib/api-auth';
 {% if not is_self_only %}
-import { resolvePermissions } from '@/lib/authz';
+import { resolveRecordPermissions } from '@/lib/authz';
 {% endif %}
 import prisma from '@/lib/prisma';
 {% if should_filter_by_org %}
@@ -57,7 +57,7 @@ export async function POST(
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
 {% else %}
-    const resolved = await resolvePermissions(basePerms, existing, userId);
+    const resolved = await resolveRecordPermissions(basePerms, existing, userId);
     if (!resolved.delete) {
       throw new ApiError(403, `Access denied: {{ parent }}.delete`);
     }

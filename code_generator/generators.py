@@ -1155,7 +1155,7 @@ def actions_context(ctx: dict) -> dict:
         # GAP-2 fix (cmd_452): org-scoped entities must retrieve actorId before the
         # existence check (needed by getAssociatedOrganizations) and re-fetch the
         # target row through an org-filtered findFirst, not a global findUnique —
-        # otherwise requirePermission() can only see creator_id/assignee_id and a
+        # otherwise requireRecordPermission() can only see creator_id/assignee_id and a
         # user with general.update can edit any org's record by id. Applied to
         # every findUnique-before-update site in this function (not only the
         # audited line) since they share the identical gap. should_filter_by_org
@@ -1164,14 +1164,13 @@ def actions_context(ctx: dict) -> dict:
         # byte-identical to the pre-fix output (see the `else` arm below and its
         # callers) — confirmed via cmd_452's golden-diff forward check.
         #
-        # The explicit `if (!existing) throw` below is NOT optional: requirePermission()
-        # falls back to the top-level (general | creator | assignee) union whenever its
-        # item argument is falsy (lib/authz.ts requirePermission — `item && resolvedUserId
-        # ? resolvePermissions(...) : permissions`), so a general.update=true caller would
-        # still pass the check on a null `existing`, and the subsequent update<Parent>()
-        # call would then write to `id` unconditionally — the org-scoped findFirst above
-        # would filter the *read* but have zero effect on the *write*. Denying immediately
-        # on a null `existing` is what actually stops the cross-org mutation.
+        # The explicit `if (!existing) throw` below is NOT optional: requireRecordPermission()
+        # needs a record, and a null `existing` cannot be passed to it (the type has no
+        # null). Without the throw, the code would have to fall back to an entity-only check,
+        # which passes for any caller holding a general.update grant, and the subsequent
+        # update<Parent>() call would then write to `id` unconditionally — the org-scoped
+        # findFirst above would filter the *read* but have zero effect on the *write*.
+        # Denying immediately on a null `existing` is what actually stops the cross-org mutation.
         # actorId must already be declared in the enclosing function scope (before
         # the if/else this is nested in) — every should_filter_by_org call site
         # below declares it up front, precisely so it's still in scope for the
@@ -1268,9 +1267,9 @@ def actions_context(ctx: dict) -> dict:
     def _wrap_block_with_catch(block: str, indent: str) -> str:
         """Same as _wrap_call_with_catch, but for a multi-line statement
         block (already newline-terminated) instead of a single call —
-        used to wrap the requirePermission()/existence-check section of
+        used to wrap the requireRecordPermission()/existence-check section of
         upsertXxx, which throws AppError('PERMISSION_DENIED' | 'NOT_FOUND',
-        ...) via lib/authz.ts's requirePermission and _actor_and_existing_block
+        ...) via lib/authz.ts's requireRecordPermission and _actor_and_existing_block
         above. Never needs the reservation-specific branches: those errors
         only originate from the create/update service call, not a
         permission check."""
@@ -1316,9 +1315,9 @@ def actions_context(ctx: dict) -> dict:
                     _perm_block = (
                         f"  if (id) {{\n"
                         + _actor_and_existing_block("    ") +
-                        f"    await requirePermission('{parent}', 'update', existing);\n"
+                        f"    await requireRecordPermission('{parent}', 'update', existing);\n"
                         f"  }} else {{\n"
-                        f"    await requirePermission('{parent}', 'create');\n"
+                        f"    await requireEntityPermission('{parent}', 'create');\n"
                         f"  }}\n"
                     )
                     return (
@@ -1339,9 +1338,9 @@ def actions_context(ctx: dict) -> dict:
                 _perm_block = (
                     f"  if (id) {{\n"
                     f"    const existing = await prisma.{model}.findUnique({{ where: {{ id }}, select: {item_context_select} }});\n"
-                    f"    await requirePermission('{parent}', 'update', existing);\n"
+                    f"    await requireRecordPermission('{parent}', 'update', existing);\n"
                     f"  }} else {{\n"
-                    f"    await requirePermission('{parent}', 'create');\n"
+                    f"    await requireEntityPermission('{parent}', 'create');\n"
                     f"  }}\n"
                 )
                 return (
@@ -1363,9 +1362,9 @@ def actions_context(ctx: dict) -> dict:
                 _perm_block = (
                     f"  if (id) {{\n"
                     + _actor_and_existing_block("    ") +
-                    f"    await requirePermission('{parent}', 'update', existing);\n"
+                    f"    await requireRecordPermission('{parent}', 'update', existing);\n"
                     f"  }} else {{\n"
-                    f"    await requirePermission('{parent}', 'create');\n"
+                    f"    await requireEntityPermission('{parent}', 'create');\n"
                     f"  }}\n"
                 )
                 return (
@@ -1386,9 +1385,9 @@ def actions_context(ctx: dict) -> dict:
             _perm_block = (
                 f"  if (id) {{\n"
                 f"    const existing = await prisma.{model}.findUnique({{ where: {{ id }}, select: {item_context_select} }});\n"
-                f"    await requirePermission('{parent}', 'update', existing);\n"
+                f"    await requireRecordPermission('{parent}', 'update', existing);\n"
                 f"  }} else {{\n"
-                f"    await requirePermission('{parent}', 'create');\n"
+                f"    await requireEntityPermission('{parent}', 'create');\n"
                 f"  }}\n"
             )
             return (
@@ -1410,7 +1409,7 @@ def actions_context(ctx: dict) -> dict:
             if should_filter_by_org:
                 _perm_block = (
                     _actor_and_existing_block("  ") +
-                    f"  await requirePermission('{parent}', 'update', existing);\n"
+                    f"  await requireRecordPermission('{parent}', 'update', existing);\n"
                 )
                 return (
                     f"  const id = data.get('id') as string | null;\n"
@@ -1428,7 +1427,7 @@ def actions_context(ctx: dict) -> dict:
                 )
             _perm_block = (
                 f"  const existing = await prisma.{model}.findUnique({{ where: {{ id }}, select: {item_context_select} }});\n"
-                f"  await requirePermission('{parent}', 'update', existing);\n"
+                f"  await requireRecordPermission('{parent}', 'update', existing);\n"
             )
             return (
                 f"  const id = data.get('id') as string | null;\n"
@@ -1457,7 +1456,7 @@ def actions_context(ctx: dict) -> dict:
             # duplicate row instead of surfacing the mismatch. `src.id` is
             # `''` for a genuine new-entity form (page_new.tsx), so this
             # never fires on the normal create path.
-            _perm_block = f"  await requirePermission('{parent}', 'create');\n"
+            _perm_block = f"  await requireEntityPermission('{parent}', 'create');\n"
             return (
                 f"  const id = data.get('id') as string | null;\n"
                 f"  if (id) throw new Error('Update not supported');\n"
@@ -7692,7 +7691,7 @@ def seed_entities_context(schema: dict) -> dict:
     permissions.ts` (a development / verification tool, NOT the production
     seed) grants Administrator CRUD on -- and, per entity, WHICH of
     create/read/update/delete/import that grant may actually include
-    (`seed_entity_grants`, see `_seed_entity_grant_flags`). requirePermission()
+    (`seed_entity_grants`, see `_seed_entity_grant_flags`). requireRecordPermission()
     (lib/authz.ts, called from actions.ts.jinja2) checks permissions keyed to
     each entity's own VIEW/route name (`parent`), not the underlying
     Prisma model — so a proxy view sharing a model with other views (e.g.

@@ -1,8 +1,9 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
-const { userFindFirst, requirePermission, verifyMobileAccessToken, getAuditLogPage, getAuditLogDetail } = vi.hoisted(() => ({
+const { userFindFirst, requireEntityPermission, requireRecordPermission, verifyMobileAccessToken, getAuditLogPage, getAuditLogDetail } = vi.hoisted(() => ({
   userFindFirst: vi.fn(),
-  requirePermission: vi.fn(),
+  requireEntityPermission: vi.fn(),
+  requireRecordPermission: vi.fn(),
   verifyMobileAccessToken: vi.fn(),
   getAuditLogPage: vi.fn(),
   getAuditLogDetail: vi.fn(),
@@ -16,7 +17,7 @@ vi.mock('@/lib/mobile-auth', () => ({
 }));
 vi.mock('@/lib/prisma', () => ({ default: { user: { findFirst: userFindFirst } } }));
 vi.mock('@/lib/rate-limit', async () => (await import('@/test/helpers/real-rate-limiter')).realRateLimiterModule());
-vi.mock('@/lib/authz', () => ({ requirePermission, getSessionUserId: vi.fn() }));
+vi.mock('@/lib/authz', () => ({ requireEntityPermission, requireRecordPermission, getSessionUserId: vi.fn() }));
 vi.mock('@/lib/audit_log/getters', () => ({ getAuditLogPage, getAuditLogDetail }));
 
 import { NextRequest } from 'next/server';
@@ -31,7 +32,8 @@ function request(path: string, headers: Record<string, string>) {
 
 beforeEach(() => {
   userFindFirst.mockReset();
-  requirePermission.mockReset().mockResolvedValue({ general: {} });
+  requireEntityPermission.mockReset().mockResolvedValue({ general: {} });
+  requireRecordPermission.mockReset().mockResolvedValue({ general: {} });
   verifyMobileAccessToken.mockReset();
   getAuditLogPage.mockReset().mockResolvedValue({ rows: [], total: 0, page: 0, pageSize: 20 });
   getAuditLogDetail.mockReset().mockResolvedValue({ id: 'a1' });
@@ -45,14 +47,14 @@ describe('GET /api/audit_log', () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ rows: [], total: 0, page: 0, pageSize: 20 });
     expect(userFindFirst).not.toHaveBeenCalled();
-    expect(requirePermission).toHaveBeenCalledWith('audit_log', 'read', undefined, 'user-1');
+    expect(requireEntityPermission).toHaveBeenCalledWith('audit_log', 'read', 'user-1');
   });
 
   it('still accepts a service API key', async () => {
     userFindFirst.mockResolvedValue({ id: 'user-2', api_key_expires_at: null });
     const res = await listRoute(request('/api/audit_log', { 'X-API-Key': 'plain-key' }));
     expect(res.status).toBe(200);
-    expect(requirePermission).toHaveBeenCalledWith('audit_log', 'read', undefined, 'user-2');
+    expect(requireEntityPermission).toHaveBeenCalledWith('audit_log', 'read', 'user-2');
   });
 
   it('rejects an invalid mobile access token with 401', async () => {
@@ -64,7 +66,7 @@ describe('GET /api/audit_log', () => {
 
   it('answers 403 when the mobile caller lacks read on audit_log', async () => {
     verifyMobileAccessToken.mockResolvedValue({ userId: 'user-1', sessionId: 's1' });
-    requirePermission.mockRejectedValue(new Error('Permission denied'));
+    requireEntityPermission.mockRejectedValue(new Error('Permission denied'));
     const res = await listRoute(request('/api/audit_log', { Authorization: `Bearer ${MOBILE_JWT}` }));
     expect(res.status).toBe(403);
     expect(getAuditLogPage).not.toHaveBeenCalled();

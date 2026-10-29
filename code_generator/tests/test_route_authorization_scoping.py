@@ -146,7 +146,7 @@ def test_split_route_scopes_the_record_to_the_callers_organizations():
 
 def test_split_route_resolves_record_level_permission_like_the_single_record_put():
     out = _render_split()
-    assert 'resolvePermissions(_basePerms, parent as Record<string, unknown>, userId)' in out
+    assert 'resolveRecordPermissions(_basePerms, parent as Record<string, unknown>, userId)' in out
     assert "throw new ApiError(403, 'Access denied: thing.update')" in out
 
 
@@ -159,13 +159,13 @@ def test_split_route_without_an_organization_relation_still_checks_permission():
     out = _render_split(should_filter_by_org=False)
     assert 'getAssociatedOrganizations' not in out
     assert "await requireApiPermission(userId, 'thing', 'update')" in out
-    assert 'resolvePermissions(' in out
+    assert 'resolveRecordPermissions(' in out
 
 
 def test_split_route_for_a_self_only_entity_gates_on_ownership():
     out = _render_split(is_self_only=True)
     assert 'parent.creator_id !== userId' in out
-    assert 'resolvePermissions(' not in out
+    assert 'resolveRecordPermissions(' not in out
 
 
 @pytest.mark.parametrize('op', ['update', 'create', 'read'])
