@@ -135,3 +135,15 @@ update call and no throw, `cog` must contain the throw and no prisma call.
 The original three assertions above only checked file existence and import
 statements, never the body, which is why the regression this addendum fixes
 wasn't caught by them.
+
+## Not a Server Action module
+
+The stub must not start with `'use server'`. Every export of a `'use server'`
+module is registered as a Server Action that a client can call directly, and
+the stub carries none of the permission or organization checks: those run in
+the `invalidate<Entity>` wrapper in `actions.ts` (which keeps the directive)
+and in the invalidate REST route. Both import the stub as ordinary server-side
+code, so removing the directive changes neither call path.
+`test_invalidate_mechanism_fixture.py` fails if a generated stub, or the stub
+template, carries a module-level `'use server'`. An app generated before this
+change keeps its write-once copy and must delete that line by hand.

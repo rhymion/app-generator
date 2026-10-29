@@ -3,6 +3,10 @@ All notable changes to this project will be documented in this file.
 The format is based on Keep a Changelog (https://keepachangelog.com/),
 and this project adheres to Semantic Versioning (https://semver.org/).
 
+## [Unreleased]
+### Security
+- **The generated invalidate handler stub is no longer a Server Action** (Issue #1223). `lib/<entity>/invalidate_handler.ts` no longer starts with `'use server'`, so its export is not registered as a directly callable action; the permission and organization checks stay in the `actions.ts` wrapper and the REST route, which import it as ordinary server code. The stub is write-once: an app generated earlier must delete the `'use server'` line from its own copy. A generator test fails if a stub carries the directive. See `docs/knowledge/invalidate-no-handler-write-once-stub.md`.
+
 ## [6.0.1] - 2026-10-26
 ### Security
 - **Audit log actor relation.** Audit log entries no longer carry unrelated user fields in their actor relation.
