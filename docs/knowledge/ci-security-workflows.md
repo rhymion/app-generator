@@ -3,7 +3,7 @@
 ## Reporting policy
 
 `SECURITY.md` at the repository root is the policy GitHub shows on the
-Security tab. Reports go through GitHub private vulnerability reporting, which
+Security and quality tab. Reports go through GitHub private vulnerability reporting, which
 is enabled on the repository. The stated response targets are an
 acknowledgement within 5 business days and a first assessment within 10
 business days. The same text is carried by `app-template`.
