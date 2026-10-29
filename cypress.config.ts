@@ -503,6 +503,10 @@ export default defineConfig({
           const { populateAuditLogData } = require('./cypress/support/audit_log/helper');
           return await populateAuditLogData(length);
         },
+        async 'db:populateAuditLogForActor'(length: number) {
+          const { populateAuditLogForActorData } = require('./cypress/support/audit_log/helper');
+          return await populateAuditLogForActorData(length);
+        },
         async 'db:populateAuditLogFull'(length: number) {
           const { populateAuditLogFullData } = require('./cypress/support/audit_log/helper');
           return await populateAuditLogFullData(length);

@@ -81,3 +81,16 @@ export async function populateAuditLogFullData(length: number) {
   // Serialize Dates to ISO strings so Cypress cy.task can JSON-transfer results
   return JSON.parse(JSON.stringify(records));
 }
+
+// Rows caused by the seeded test user, so a spec can check that readers from another organization
+// than the test user's cannot reach them.
+export async function populateAuditLogForActorData(length: number) {
+  const actorUserId = (await getTestUser()).id;
+  const records = [];
+  for (let i = 1; i <= length; i++) {
+    records.push(
+      await prisma.audit_log.create({ data: { action: `Test Actor Action ${i}`, actor_user_id: actorUserId } }),
+    );
+  }
+  return JSON.parse(JSON.stringify(records));
+}

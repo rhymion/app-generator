@@ -7,7 +7,7 @@ export async function GET(request: NextRequest, { params }: Params) {
   try {
     const { id } = await params;
     const { userId: actorId } = await authenticate(request);
-    const item = await getAuditLogDetail(id);
+    const item = await getAuditLogDetail(id, actorId);
     if (!item) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }

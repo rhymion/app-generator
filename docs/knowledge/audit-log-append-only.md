@@ -7,6 +7,23 @@ data.** No code path then needs to update a row, so the table has no exception.
 This protects what was recorded. It does not guarantee that every event is recorded: `recordAuditEvent` is best-effort for
 callers outside a transaction (auth events) and swallows a write failure. Do not describe the log as complete.
 
+## Who can read a row
+
+`audit_log` has no organization column: a row describes an event, which may have no organization (a rejected sign-in for an
+unknown address) or may concern a system table. A row therefore belongs to the organizations of the user who caused it
+(`actor_user`), and `lib/audit_log/getters.ts` applies that scope to the list, the detail, the page data and the option search,
+on top of the `audit_log.read` permission.
+
+| Caller | Rows reached |
+|---|---|
+| Member of one or more organizations | Rows whose actor shares at least one of those organizations |
+| Member of no organization | Rows with no actor, and rows whose actor is in no organization |
+
+A deployment that does not use organizations is unaffected: every actor and every reader is in the second case. In a
+multi-organization deployment, events with no actor (a rejected sign-in for an unknown address) are visible only to readers
+outside every organization. The scope is the same for the REST routes (`/api/audit_log`, `/api/audit_log/<id>`) and the pages.
+An out-of-scope detail id answers `404`, as an unknown id does.
+
 ## Layers
 
 | Layer | Mechanism | Where |
