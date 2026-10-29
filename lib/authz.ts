@@ -3,7 +3,6 @@
 import { auth } from '@/auth';
 import prisma from '@/lib/prisma';
 import { cache } from 'react';
-import { TtlLruCache } from '@/lib/_ttl_lru';
 import { SELF_ONLY_ADMIN_BYPASS_ENTITIES } from '@/lib/self_only_admin_bypass_entities';
 import { AppError } from '@/lib/_errors';
 import { enterRequestScope, getActorOverride, memoizeInRequestScope } from '@/lib/_request_scope';
@@ -119,39 +118,6 @@ export async function resolvePermissions(
   };
 }
 
-/**
- * Per-process cache of (userId, model) → permission result (Phase 2 #3 from
- * performance-plan-session.md). The original implementation ran a 3-branch OR
- * permission query (`permission.findMany`) on every server-rendered page and
- * every API call, gated only by the per-request React `cache()` wrapper —
- * which does not dedupe inside a Next.js Route Handler (see
- * `getModelPermissions`'s own doc comment below); this per-process cache is
- * what actually bounds the Route Handler cost across requests. Within one
- * request, `lib/_request_scope.ts`'s `memoizeInRequestScope` now provides
- * the real one-call guarantee `cache()`'s comment used to (incorrectly)
- * claim on its own.
- *
- * Trade-off: a user's role/permission change takes effect within one TTL
- * window. We don't track a roles_version, so changes don't invalidate
- * instantly — `invalidatePermissionCache()` is exposed for callers that need
- * tighter bounds (admin tools, role-mutation endpoints).
- *
- * Gated on NODE_ENV === 'production' — which is always true here: `next build`
- * bakes NODE_ENV=production into the bundle regardless of the runtime env
- * (.env.test's NODE_ENV=test is not honored by a built server), so the cache
- * is effectively always on for `cy:test:api` runs too. `cy.task('db:reset')`
- * resets the DB between tests but cannot reach into the server's process to
- * clear this cache; without an explicit clear, a stale cached entry would
- * silently widen permissions for the next run — see
- * `invalidatePermissionCache()` below, invoked via the
- * `/api/test-utils/reset-caches` endpoint.
- */
-const PERMISSION_TTL_MS = 30 * 1000;
-const PERMISSION_MAX_ENTRIES = 1000;
-const permissionCacheEnabled = process.env.NODE_ENV === 'production';
-type PermissionEntry = { permissions: RichPermissions; userId: string };
-const permissionCache = new TtlLruCache<string, PermissionEntry>(PERMISSION_MAX_ENTRIES, PERMISSION_TTL_MS);
-
 type PermissionRow = {
   name: string;
   create: boolean;
@@ -163,12 +129,14 @@ type PermissionRow = {
 };
 
 /**
- * Per-process cache of userId → every permission row relevant to that user,
- * across ALL models (not just one). Backs `getPermissionRowsForUser` below.
- * Same TTL/size bounds as `permissionCache`; both are cleared together by
- * `invalidatePermissionCache()`.
+ * There is deliberately no cross-request cache of permission results: a
+ * per-process cache would let a revoked permission stay effective on every
+ * instance that cached it until its entry expired. Every request reads the
+ * database; the only deduplication is request-scoped (`memoizeInRequestScope`),
+ * which cannot outlive the request. The query is indexed and costs well under
+ * a millisecond at realistic tenant sizes. Do not add a cross-request cache
+ * here without a way to invalidate it on every instance (Issue #731).
  */
-const permissionRowsCache = new TtlLruCache<string, PermissionRow[]>(PERMISSION_MAX_ENTRIES, PERMISSION_TTL_MS);
 
 /**
  * Fetch every permission row relevant to a user in a single query, instead of
@@ -181,20 +149,14 @@ const permissionRowsCache = new TtlLruCache<string, PermissionRow[]>(PERMISSION_
  * unchanged, so which rows come back for a given model is identical to
  * before.
  *
- * Layered caching, same shape as `getModelPermissions`: request-scope
- * memoization (`memoizeInRequestScope`, dedups every model a request asks
- * about into the same call — works in Route Handlers as well as Server
- * Components/Actions, unlike the React `cache()` wrapper this function also
- * carries, which only dedupes inside a React render tree), then per-process
- * TTL LRU (`permissionRowsCache`, deduplicates across requests until expiry).
+ * Request-scope memoization (`memoizeInRequestScope`) dedups every model a
+ * request asks about into the same call — works in Route Handlers as well as
+ * Server Components/Actions, unlike the React `cache()` wrapper this function
+ * also carries, which only dedupes inside a React render tree. Nothing is
+ * cached across requests.
  */
 export const getPermissionRowsForUser = cache((resolvedUserId: string): Promise<PermissionRow[]> => {
   return memoizeInRequestScope(`permRows|${resolvedUserId}`, async () => {
-    if (permissionCacheEnabled) {
-      const cached = permissionRowsCache.get(resolvedUserId);
-      if (cached) return cached;
-    }
-
     const rows = await prisma.permission.findMany({
       where: {
         OR: [
@@ -221,15 +183,9 @@ export const getPermissionRowsForUser = cache((resolvedUserId: string): Promise<
       },
     });
 
-    if (permissionCacheEnabled) permissionRowsCache.set(resolvedUserId, rows);
     return rows;
   });
 });
-
-export async function invalidatePermissionCache(): Promise<void> {
-  permissionCache.clear();
-  permissionRowsCache.clear();
-}
 
 /**
  * Pure (no DB access) grouping of a set of permission rows (already filtered
@@ -297,12 +253,12 @@ export async function deriveRichPermissionsFromRows(rows: PermissionRow[]): Prom
  * Returning userId avoids a separate getSessionUserId() call in callers and
  * enables fully parallel fetching alongside entity data.
  *
- * Layered caching: request-scope memoization (`memoizeInRequestScope`,
- * dedups concurrent AND sequential calls within one request — Route
- * Handler, Server Action, or Server Component render alike), then
- * per-process TTL LRU (`permissionCache`, deduplicates across requests
- * until expiry). The underlying row fetch is itself batched across every
- * model a request asks about — see `getPermissionRowsForUser`.
+ * Request-scope memoization (`memoizeInRequestScope`) dedups concurrent AND
+ * sequential calls within one request — Route Handler, Server Action, or
+ * Server Component render alike. Nothing is cached across requests, so a
+ * revoke is honored by the next request in every process. The underlying
+ * row fetch is itself batched across every model a request asks about — see
+ * `getPermissionRowsForUser`.
  *
  * This is the ONLY place in the generated app that queries the DB for a
  * user's permissions — `requireApiPermission`/`requirePermission`/
@@ -328,12 +284,6 @@ export const getModelPermissions = cache(async (
   }
 
   return memoizeInRequestScope(`modelPerms|${resolvedUserId}|${model}`, async () => {
-    const cacheKey = `${resolvedUserId}|${model}`;
-    if (permissionCacheEnabled) {
-      const cached = permissionCache.get(cacheKey);
-      if (cached) return cached;
-    }
-
     // audit_log is a system-admin capability. Users holding the 'Administrator' role
     // get full CRUD access without an explicit permission record, so audit_log does
     // not appear in the user-facing permission list (permission.cy.ts count stays at 6).
@@ -344,7 +294,6 @@ export const getModelPermissions = cache(async (
       if (adminRoleCount > 0) {
         const adminPerms: RichPermissions = { ...READ_ONLY_FLAGS, general: READ_ONLY_FLAGS, creator: null, assignee: null };
         const result = { permissions: adminPerms, userId: resolvedUserId };
-        if (permissionCacheEnabled) permissionCache.set(cacheKey, result);
         return result;
       }
     }
@@ -372,20 +321,17 @@ export const getModelPermissions = cache(async (
         if (adminRoleCount > 0) {
           const adminPerms: RichPermissions = { ...READ_ONLY_FLAGS, general: READ_ONLY_FLAGS, creator: null, assignee: null };
           const result = { permissions: adminPerms, userId: resolvedUserId };
-          if (permissionCacheEnabled) permissionCache.set(cacheKey, result);
           return result;
         }
       }
       // Default: deny all if no explicit permissions
       const full = await deriveRichPermissionsFromRows([]);
       const result = { permissions: full, userId: resolvedUserId };
-      if (permissionCacheEnabled) permissionCache.set(cacheKey, result);
       return result;
     }
 
     const permissions = await deriveRichPermissionsFromRows(rows);
     const result = { permissions, userId: resolvedUserId };
-    if (permissionCacheEnabled) permissionCache.set(cacheKey, result);
     return result;
   });
 });

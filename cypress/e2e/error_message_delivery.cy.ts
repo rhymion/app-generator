@@ -18,7 +18,7 @@
 // (`@@unique([entity_name, approver_role_id])`, prisma/schema.prisma) and a
 // tracked-snapshot update path, and does not require org-scoping
 // infrastructure this dogfood schema does not currently have.
-import { TEST_CREDENTIALS } from '../support/test-credentials';
+import { TEST_API_KEY, TEST_CREDENTIALS } from '../support/test-credentials';
 import { apiCreateRole, apiCreateApprovalFlow } from '../support/approval_flow_seed';
 
 function assertNoReactErrorBoundary() {
@@ -99,7 +99,7 @@ describe('Error message delivery (cmd_695 — Server Action ActionFailure conver
 
   it('3) permission denied on delete ("Insufficient privilege") shows inline, not error.tsx', () => {
     apiCreateRole('Approver Perm Test').then((role) => {
-      apiCreateApprovalFlow({ entityName: 'user', approverRoleId: role.id }).then(() => {
+      apiCreateApprovalFlow({ entityName: 'user', approverRoleId: role.id }).then((flow) => {
         cy.task<string>('db:createSessionUserWithPermission', {
           entityName: 'approval_flow',
           flags: { read: true, delete: true },
@@ -120,23 +120,8 @@ describe('Error message delivery (cmd_695 — Server Action ActionFailure conver
             entityName: 'approval_flow',
             flags: { delete: false },
           });
-          // getModelPermissions() (lib/authz.ts) is process-cached
-          // (PERMISSION_TTL_MS = 30s) — the DB write above is invisible to
-          // the running server until that entry expires. POSTing
-          // /api/test-utils/reset-caches (cypress/support/db-helpers.ts's
-          // own approach after db:reset) did NOT reliably bust it here —
-          // empirically confirmed by a temporary diagnostic log in the
-          // generated remove{Entity} action: the read after two resets +
-          // 500ms still showed the pre-revoke `delete:true`, while the same
-          // read after simply waiting past the 30s TTL (no reset call at
-          // all) correctly showed `delete:false`. Root cause not fully
-          // isolated (a background request racing the reset and re-caching
-          // the stale value before the click is one candidate — see
-          // db-helpers.ts's own straggler-request note for the api-key
-          // cache's version of the same class of problem) — waiting out the
-          // TTL sidesteps it entirely and is deterministic rather than
-          // racy, at the cost of making this one test slow.
-          cy.wait(31000);
+          // No wait: permission checks read the database on every request, so
+          // the revoke above is visible to the very next Server Action call.
 
           cy.get('.MuiDataGrid-row').first().find('input[type="checkbox"]').click();
           // ResponsiveListClient mounts both the desktop (DataGridClient)
@@ -154,6 +139,11 @@ describe('Error message delivery (cmd_695 — Server Action ActionFailure conver
           // instead of crashing, and rolls back the optimistic removal.
           cy.contains('do not have permission').should('be.visible');
           cy.contains('.MuiDataGrid-cell', 'User').should('be.visible');
+          // The denied delete must not have removed the row.
+          cy.request({
+            url: `/api/approval_flow/${flow.id}`,
+            headers: { 'X-API-Key': TEST_API_KEY },
+          }).its('status').should('eq', 200);
           cy.screenshot('cmd695-3-permission-denied-fixed', { capture: 'fullPage' });
         });
       });

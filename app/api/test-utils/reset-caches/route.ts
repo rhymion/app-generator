@@ -1,11 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { clearApiKeyCache } from '@/lib/api-auth';
-import { invalidatePermissionCache } from '@/lib/authz';
 
 /**
  * POST /api/test-utils/reset-caches
  *
- * Clears the in-process api-key and permission LRUs so cypress can call this
+ * Clears the in-process api-key cache so cypress can call this
  * after `cy.task('db:reset')` and avoid stale-userId FK violations on the
  * next write.
  *
@@ -28,6 +27,5 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
   clearApiKeyCache();
-  await invalidatePermissionCache();
   return NextResponse.json({ ok: true });
 }
