@@ -128,11 +128,12 @@ export function getGeneratedTasks() {
       const notifications = await prisma.notification.findMany({ where: { user_id: userId } });
       return JSON.parse(JSON.stringify(notifications));
     },
-    // cmd_538: a second user sharing an organization with the seeded test
-    // user, so searchMentionUserOptions's org-scope filter surfaces them as
-    // a real "@" candidate — needed to prove mention notifications reach
-    // someone other than the (self-mentioning) actor.
-    async 'db:createMentionCandidateInSameOrg'(name: string) {
+    // A second user to mention. Mention candidates and notifications are scoped by the organization
+    // of the RECORD being commented on (never by the actor's), so the caller passes that record's
+    // organization_id: the user then belongs to it. For a record without an organization the
+    // caller passes none, and the user belongs to no organization at all -- which also proves that
+    // such a record does not scope its mentions.
+    async 'db:createMentionCandidate'({ name, organizationId }: { name: string; organizationId?: string | null }) {
       const { prisma } = require('./db-helpers');
       const { TEST_CREDENTIALS } = require('./test-credentials');
       const testUser = await prisma.user.findUnique({ where: { email: TEST_CREDENTIALS.email } });
@@ -144,14 +145,7 @@ export function getGeneratedTasks() {
           password: 'test-password',
           creator_id: testUser.id,
           updater_id: testUser.id,
-        },
-      });
-      await prisma.organization.create({
-        data: {
-          name: `Mention Org ${Date.now()}`,
-          creator_id: testUser.id,
-          updater_id: testUser.id,
-          users: { connect: [{ id: testUser.id }, { id: candidate.id }] },
+          ...(organizationId ? { organizations: { connect: [{ id: organizationId }] } } : {}),
         },
       });
       return JSON.parse(JSON.stringify(candidate));

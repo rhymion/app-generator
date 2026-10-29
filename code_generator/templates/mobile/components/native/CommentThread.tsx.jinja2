@@ -105,6 +105,8 @@ function failureText(t: (key: string) => string, failure: Extract<CommentWriteRe
  */
 function CommentComposer({
   testIdPrefix,
+  entity,
+  recordId,
   initialText,
   initialMentions,
   submitLabel,
@@ -112,6 +114,9 @@ function CommentComposer({
   onCancel,
 }: {
   testIdPrefix: string;
+  /** The record the comment belongs to: the mention candidates are the ones that record allows. */
+  entity: string;
+  recordId: string;
   initialText?: string;
   initialMentions?: PickedMention[];
   submitLabel: string;
@@ -123,7 +128,7 @@ function CommentComposer({
     initialText,
     initialMentions,
 {% endraw %}{% if has_mention %}{% raw %}
-    search: searchMentionUsers,
+    search: (q) => searchMentionUsers(q, { entity, id: recordId }),
 {% endraw %}{% endif %}{% raw %}
   });
   const [saving, setSaving] = useState(false);
@@ -215,6 +220,8 @@ function CommentActions({ comment, write, isAuthor }: { comment: CommentRow; wri
     return (
       <CommentComposer
         testIdPrefix={`comment-edit-${comment.id}`}
+        entity={write.entity}
+        recordId={write.recordId}
         initialText={comment.message}
         initialMentions={comment.mentions ?? []}
         submitLabel={t('Common.save')}
@@ -296,6 +303,8 @@ export function CommentThread({
       {write?.canComment ? (
         <CommentComposer
           testIdPrefix="comment-new"
+          entity={write.entity}
+          recordId={write.recordId}
           submitLabel={t('Common.add')}
           onSubmit={async (message) => {
             const result = await addComment(write.entity, write.recordId, message);

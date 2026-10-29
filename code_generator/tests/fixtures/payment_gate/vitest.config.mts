@@ -19,7 +19,7 @@ export default defineConfig({
     // What the gate's npm scripts set: lib/payment/ talks to the generated fake
     // Stripe client (re-exported by fake/stripe.ts). The tests that exercise
     // the switch itself override it per test.
-    env: { PAYMENT_FAKE_STRIPE: '1' },
+    env: { PAYMENT_FAKE_STRIPE: '1', AUTH_SECRET: 'payment-gate-fixture-secret' },
   },
   resolve: {
     alias: [

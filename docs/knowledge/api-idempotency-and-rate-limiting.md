@@ -110,6 +110,10 @@ one.** `lib/rate-limit/index.ts` already implements bucket-scoped limiting
 with an in-memory and a Redis adapter, auto-selected by `getRateLimiter()`
 based on `REDIS_URL`.
 
+The Redis adapter writes its keys as `rl:<RATE_LIMIT_KEY_PREFIX><bucket>:<key>`. The prefix is empty unless
+`RATE_LIMIT_KEY_PREFIX` is set; the Vercel env injection (`scripts/vercel-env.sh`) sets `production:` and `preview:`,
+so two environments that ever share a Redis instance keep separate budgets.
+
 New buckets, added to `PRODUCTION_BUCKETS`:
 
 - `api:read` — 300/minute, covers `GET` list/detail.
