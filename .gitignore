@@ -241,7 +241,8 @@ lib/dashboard/use_entity_approval_actions.ts
 !lib/audit_log/types.ts
 !lib/audit_log/virtual_resolvers.ts
 !lib/compliance/**
-!lib/mention/**
+!lib/mention/parser.ts
+!lib/mention/parser.test.ts
 !lib/legal/**
 !lib/openapi/**
 !lib/scheduled-tasks/system-actor.ts

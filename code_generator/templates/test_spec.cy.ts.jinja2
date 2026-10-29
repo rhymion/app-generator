@@ -410,7 +410,10 @@ describe('Testing {{ title }} pages and their behavior', () => {
     // (not just that the notify() call fires in isolation).
     it('3.1b mentioning a different user in a comment notifies that user', () => {
       cy.task<any[]>('db:populate{{ pascal }}', 1).then((records) => {
-        cy.task<{ id: string; name: string }>('db:createMentionCandidateInSameOrg', 'Mention Target Person').then((otherUser) => {
+        cy.task<{ id: string; name: string }>('db:createMentionCandidate', {
+          name: 'Mention Target Person',
+          organizationId: (records[0] as { organization_id?: string | null }).organization_id ?? null,
+        }).then((otherUser) => {
           cy.visit(`/en/{{ parent }}/edit/${records[0].id}`);
           cy.get('textarea[placeholder="Write a comment..."]').type('Hi @Mention');
           cy.get('[role="menuitem"]').contains(otherUser.name).click();

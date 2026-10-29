@@ -32,9 +32,19 @@ enables the same behavior for that entity.
 ## Approval request creation notification
 
 `notifyApprovalRequestCreated()` (`lib/_notifyApprovalRequest.ts`) is
-built to notify every user holding the approving role for a newly
-created `approval_request`, excluding the requester and optionally
-scoped to an organization.
+built to notify the users holding the approving role for a newly
+created `approval_request`, excluding the requester. Recipients are
+scoped by the organization of the record the approval is about, never by
+the acting user's: the function reads that record through the approvable
+(`resolveApprovableOrganization()`, `lib/approval_request/resolve_target.ts`)
+unless the caller passes `orgId` explicitly, so no call site has to
+remember to pass it. A record **without an organization** (no
+`organization_id` column, an empty value, or a row that cannot be read) does
+not narrow the approvers, and an acting user who belongs to no organization
+changes nothing. A record **with an organization** notifies only that
+organization's approvers — not an approver who merely shares another
+organization with the acting user. The order-reached notification below
+applies the same rule.
 
 For a top-level entity, it is wired into the edge-trigger block
 `generators.py` emits directly into `service.ts.jinja2`'s
