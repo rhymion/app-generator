@@ -171,9 +171,11 @@ On the first Google sign-in for a given email:
    It enforces:
    - `profile.email_verified !== false` (Google sets this for all
      completed accounts; an explicit `false` is rejected).
-   - `siteConfig.auth.allowedDomains` — if non-empty, the email's
-     `@domain` must be on the list (case-insensitive). Empty list =
-     allow all.
+   - `siteConfig.auth.allowedDomains` — if non-empty, a Google sign-in
+     must carry an `hd` (hosted domain) claim on the list
+     (case-insensitive); a personal Google account has no `hd` and is
+     rejected, whatever its email address looks like. Other providers
+     are matched on the email's `@domain`. Empty list = allow all.
    - The **credentials↔OAuth collision rule**: if a `user` row already
      exists for this email with `password !== null`, that account was
      created via `/register`. SSO sign-in is rejected with reason

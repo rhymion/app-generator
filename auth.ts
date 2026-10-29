@@ -13,6 +13,7 @@ import { verifyMfaCode } from "@/lib/mfa/verify";
 import { MfaRateLimitedError } from "@/lib/mfa/errors";
 import { createTenantBoundUser } from "@/lib/auth/create-user";
 import { isMockGoogleOAuthTestEnabled } from "@/lib/auth/mock-oauth-gate";
+import { isDomainAllowed } from "@/lib/auth/domain-allow-list";
 
 // Custom CredentialsSignin subclasses so @auth/core re-throws them as-is
 // (plain Error gets wrapped in CallbackRouteError and the code is lost).
@@ -264,12 +265,11 @@ export const authConfig: NextAuthConfig = {
       }
 
       // Optional per-deployment domain allow-list. Empty list = allow all.
-      // Match is case-insensitive on the `@domain` half of the email.
+      // Google is matched on its `hd` claim, other providers on the email
+      // domain (see lib/auth/domain-allow-list.ts).
       const allowed = siteConfig.auth?.allowedDomains ?? [];
       if (allowed.length > 0) {
-        const domain = email.split("@")[1]?.toLowerCase();
-        const normalised = allowed.map((d) => d.toLowerCase());
-        if (!domain || !normalised.includes(domain)) {
+        if (!isDomainAllowed(account.provider, email, profile as { hd?: unknown } | undefined, allowed)) {
           console.info(
             "[auth:signIn:reject]",
             JSON.stringify({

@@ -6,6 +6,7 @@
 // transaction has committed -- a Stripe round trip must not run inside a
 // database transaction.
 
+import { createHmac, timingSafeEqual } from 'node:crypto';
 import type Stripe from 'stripe';
 import prisma from '@/lib/prisma';
 import { stripe } from './stripe_client';
@@ -23,6 +24,36 @@ export const PENDING_SESSION_PREFIX = 'pending:';
 // pressing Cancel therefore holds the record for about half an hour, not a day;
 // a buyer who needs longer than this to pay finds the session expired.
 export const CHECKOUT_SESSION_LIFETIME_SECONDS = 31 * 60;
+
+// The Checkout request for one record is retried safely: Stripe returns the
+// first result for a repeated idempotency key, but only when the repeated
+// request carries identical parameters. `expires_at` is therefore snapped to
+// a fixed time bucket, so a retry that races the original lands on the same
+// value. The bucket start is never later than now, so the expiry stays at least
+// CHECKOUT_SESSION_LIFETIME_SECONDS - CHECKOUT_EXPIRY_BUCKET_SECONDS (30
+// minutes, Stripe's floor) ahead.
+export const CHECKOUT_EXPIRY_BUCKET_SECONDS = 60;
+
+/**
+ * Proof that the caller of the cancel page is the buyer this checkout was
+ * started for: an HMAC of the payable id, keyed by AUTH_SECRET, carried in the
+ * `cancel_url` Stripe sends only that buyer to. It is a pure function of the id,
+ * so a retried session-create request carries the same value. Returns null when
+ * no secret is configured, which makes both signing and checking fail closed.
+ */
+export function cancelToken(payableId: string): string | null {
+  const secret = process.env.AUTH_SECRET;
+  if (!secret) return null;
+  return createHmac('sha256', secret).update(`payment-cancel:${payableId}`).digest('hex');
+}
+
+function cancelTokenMatches(payableId: string, token: string | undefined): boolean {
+  const expected = cancelToken(payableId);
+  if (!expected || !token) return false;
+  const given = Buffer.from(token);
+  const wanted = Buffer.from(expected);
+  return given.length === wanted.length && timingSafeEqual(given, wanted);
+}
 
 /**
  * The origin Stripe sends the buyer back to after paying or cancelling.
@@ -71,21 +102,32 @@ export async function startPaymentCheckout(entityName: string, recordId: string)
   const source = await resolvePaymentSource(entityName, recordId);
   const quantity = await resolvePaymentQuantity(entityName, recordId);
   const origin = resolveCheckoutOrigin();
+  const token = cancelToken(payable.id);
+  if (!token) {
+    throw new Error('AUTH_SECRET is not set: cannot sign the Checkout cancel URL');
+  }
+  const bucketStart =
+    Math.floor(Date.now() / 1000 / CHECKOUT_EXPIRY_BUCKET_SECONDS) * CHECKOUT_EXPIRY_BUCKET_SECONDS;
 
-  const session = await stripe.checkout.sessions.create({
-    mode: 'payment',
-    line_items: [{ price: source.priceId, quantity }],
-    // Let the buyer enter a Stripe promotion code on the hosted page; the
-    // discounted total is what session.amount_total (recorded below) holds.
-    allow_promotion_codes: true,
-    // The webhook needs the *record*, not the actor: both keys point at the
-    // payable row, which names the entity and record.
-    client_reference_id: payable.id,
-    metadata: { payable_id: payable.id },
-    success_url: `${origin}/payment/success?session_id={CHECKOUT_SESSION_ID}`,
-    cancel_url: `${origin}/payment/cancel?payable_id=${payable.id}`,
-    expires_at: Math.floor(Date.now() / 1000) + CHECKOUT_SESSION_LIFETIME_SECONDS,
-  });
+  const session = await stripe.checkout.sessions.create(
+    {
+      mode: 'payment',
+      line_items: [{ price: source.priceId, quantity }],
+      // Let the buyer enter a Stripe promotion code on the hosted page; the
+      // discounted total is what session.amount_total (recorded below) holds.
+      allow_promotion_codes: true,
+      // The webhook needs the *record*, not the actor: both keys point at the
+      // payable row, which names the entity and record.
+      client_reference_id: payable.id,
+      metadata: { payable_id: payable.id },
+      success_url: `${origin}/payment/success?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${origin}/payment/cancel?payable_id=${payable.id}&token=${token}`,
+      expires_at: bucketStart + CHECKOUT_SESSION_LIFETIME_SECONDS,
+    },
+    // A client retry racing the original request gets the original session back
+    // instead of opening a second one for the same record.
+    { idempotencyKey: `payable-checkout:${payable.id}:${bucketStart}` },
+  );
   if (!session.url) {
     throw new Error('Stripe returned a Checkout Session without a URL');
   }
@@ -107,11 +149,15 @@ export async function startPaymentCheckout(entityName: string, recordId: string)
  * removes the unpaid record (removeUnpaidPayable in payment_webhook_dispatch.ts)
  * without waiting for the `checkout.session.expired` event, which stays as an
  * idempotent backstop. The cancel page is an unauthenticated GET, so the query
- * string alone never decides anything: a session Stripe reports as complete
+ * string alone never decides anything: the id must come with the token signed
+ * into the cancel URL (cancelToken), or nothing happens; and a session Stripe reports as complete
  * (paid, or payment still processing) or still open yields false and the record
  * stays.
  */
-export async function expirePendingCheckout(payableId: string): Promise<boolean> {
+export async function expirePendingCheckout(payableId: string, token?: string): Promise<boolean> {
+  if (!cancelTokenMatches(payableId, token)) {
+    return false;
+  }
   const payable = await prisma.payable.findUnique({ where: { id: payableId } });
   if (
     !payable ||

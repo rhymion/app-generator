@@ -4,7 +4,8 @@
 // `cancel_url` (lib/payment/checkout.ts, which appends ?payable_id=...).
 // Visiting it expires the still-open Checkout Session and, once Stripe
 // confirms the session is expired, removes the unpaid record right here -- the
-// query string alone never deletes anything, and a paid or still-processing
+// query string alone never deletes anything (the link must carry the signed
+// `token` that only the buyer's cancel_url has), and a paid or still-processing
 // session is left untouched. The `checkout.session.expired` webhook that
 // follows finds nothing left to do. Copy comes from the `Payment` i18n
 // namespace (messages/*.json) -- edit the keys there, or replace the markup
@@ -21,13 +22,13 @@ export default async function PaymentCancelPage({
   searchParams,
 }: {
   params: Promise<{ locale: string }>;
-  searchParams: Promise<{ payable_id?: string }>;
+  searchParams: Promise<{ payable_id?: string; token?: string }>;
 }) {
   const { locale } = await params;
-  const { payable_id: payableId } = await searchParams;
+  const { payable_id: payableId, token } = await searchParams;
   setRequestLocale(locale);
   if (payableId) {
-    if (await expirePendingCheckout(payableId)) {
+    if (await expirePendingCheckout(payableId, token)) {
       await removeUnpaidPayable(payableId);
     }
   }

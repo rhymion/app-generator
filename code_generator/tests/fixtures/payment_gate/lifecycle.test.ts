@@ -11,7 +11,7 @@ import { stripeState, resetStripe } from './fake/stripe';
 import { afterDeleteRan, auditRan, resetEntityService } from './fake/entity-service';
 import { stripe as paymentStripe } from '../lib/payment/stripe_client';
 import { fakeStripe } from '../lib/payment/fake_stripe';
-import { startPaymentCheckout, expirePendingCheckout, retrievePaidSession } from '../lib/payment/checkout';
+import { startPaymentCheckout, expirePendingCheckout, retrievePaidSession, cancelToken } from '../lib/payment/checkout';
 import { dispatchPaymentEvent, removeUnpaidPayable, confirmPaidSession } from '../lib/payment/payment_webhook_dispatch';
 
 // The generated paid_widget quantity hook is write-once and defaults to 1; a
@@ -76,13 +76,21 @@ describe('starting checkout', () => {
     expect(params.line_items).toEqual([{ price: 'price_catalog', quantity: 1 }]);
     expect(params.client_reference_id).toBe(payable.id);
     expect(params.metadata).toEqual({ payable_id: payable.id });
-    expect(params.cancel_url).toContain(`payable_id=${payable.id}`);
+    expect(params.cancel_url).toContain(`payable_id=${payable.id}&token=${cancelToken(payable.id)}`);
     // Stripe's floor is 30 minutes, its default 24 hours: ask for the floor plus slack.
     const lifetime = params.expires_at - Math.floor(Date.now() / 1000);
     expect(lifetime).toBeGreaterThanOrEqual(30 * 60);
     expect(lifetime).toBeLessThanOrEqual(32 * 60);
     expect(db.payable[0].stripe_checkout_session_id).toBe('cs_test_1');
     expect(db.payable[0].status).toBe('pending');
+  });
+
+  it('sends an idempotency key, and a racing retry gets the original session instead of a second one', async () => {
+    const payable = await createProvisional('paid_widget', 'w1');
+    const [a, b] = await Promise.all([startPaymentCheckout('paid_widget', 'w1'), startPaymentCheckout('paid_widget', 'w1')]);
+    expect(stripeState.created).toHaveLength(1);
+    expect(a).toBe(b);
+    expect(stripeState.createOptions[0].idempotencyKey).toMatch(new RegExp(`^payable-checkout:${payable.id}:`));
   });
 
   it('prices an entity with its own stripe_price_id', async () => {
@@ -277,8 +285,8 @@ describe('several x-payment entities behind one webhook', () => {
 });
 
 // What the generated cancel page does with a hit on /payment/cancel?payable_id=...
-async function visitCancelPage(payableId: string) {
-  if (await expirePendingCheckout(payableId)) {
+async function visitCancelPage(payableId: string, token: string | undefined = cancelToken(payableId) ?? undefined) {
+  if (await expirePendingCheckout(payableId, token)) {
     await removeUnpaidPayable(payableId);
   }
 }
@@ -301,6 +309,28 @@ describe('cancelling from the return page', () => {
     await visitCancelPage(payable.id);
     await dispatchPaymentEvent(expired('cs_test_1'));
     expect(afterDeleteRan).toEqual(['paid_widget:w1']); // deleted once, not twice
+  });
+
+  it('removes nothing without the cancel token, or with a wrong one, even though the session is open to expire', async () => {
+    const payable = await createProvisional('paid_widget', 'w1');
+    await startPaymentCheckout('paid_widget', 'w1');
+    await visitCancelPage(payable.id, '');
+    await visitCancelPage(payable.id, 'not-the-token');
+    await visitCancelPage(payable.id, cancelToken('someone-elses-payable')!);
+
+    expect(stripeState.expired).toEqual([]);
+    expect(db.paid_widget).toHaveLength(1);
+    expect(db.payable).toHaveLength(1);
+    expect(afterDeleteRan).toEqual([]);
+  });
+
+  it('removes nothing when no AUTH_SECRET is configured (fails closed)', async () => {
+    const payable = await createProvisional('paid_widget', 'w1');
+    await startPaymentCheckout('paid_widget', 'w1');
+    const token = cancelToken(payable.id)!;
+    vi.stubEnv('AUTH_SECRET', '');
+    await visitCancelPage(payable.id, token);
+    expect(db.payable).toHaveLength(1);
   });
 
   it('removes nothing while Stripe still reports the session open', async () => {
