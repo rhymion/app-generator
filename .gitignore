@@ -189,6 +189,8 @@ code_generator/.generated/
 # scripts/check_version_of_e2e_gate_fixture.sh (never committed).
 .generated-version-of-e2e-gate/
 .generated-mobile-entity-pw/
+# Single-run locks taken by the e2e gate scripts (scripts/gate_run_lock.sh).
+.generated-*.lock
 
 # sample data
 custom/

@@ -70,6 +70,10 @@ cleanup() {
     rm -rf "$BUILD_DIR"
   fi
 }
+# One run per checkout: take the lock before the cleanup trap exists, so a refused
+# second run never tears down the first run's stack (scripts/gate_run_lock.sh).
+source "$REPO_ROOT/scripts/gate_run_lock.sh"
+gate_run_lock "$BUILD_DIR.lock" "list-child-e2e-gate"
 trap cleanup EXIT
 
 echo "== list-child-e2e-gate (project $PROJECT, ports app=$APP_PORT postgres=$POSTGRES_PORT redis=$REDIS_PORT) =="
