@@ -73,46 +73,48 @@ fi
 
 DRY_RUN="${DRY_RUN:-false}"
 
-# AUTH_SECRET: generate-once-persist (if unset, generates and writes back to .env.production.local)
-if [[ -z "${AUTH_SECRET:-}" ]]; then
-  if [[ "$DRY_RUN" == "true" ]]; then
-    echo "[DRY-RUN] AUTH_SECRET not set — will generate with openssl rand -base64 32 and save to .env.production.local at runtime"
-    AUTH_SECRET="<DRY_RUN_AUTH_SECRET>"
-  else
-    AUTH_SECRET=$(openssl rand -base64 32)
-    _AUTH_SECRET_ESCAPED="$(_shell_dquote_escape "${AUTH_SECRET}")"
-    if grep -q "^AUTH_SECRET=" "${_ENV_FILE}" 2>/dev/null; then
-      sed -i "s|^AUTH_SECRET=.*|AUTH_SECRET=\"$(_sed_replacement_escape "${_AUTH_SECRET_ESCAPED}")\"|" "${_ENV_FILE}"
-    else
-      echo "AUTH_SECRET=\"${_AUTH_SECRET_ESCAPED}\"" >> "${_ENV_FILE}"
-    fi
-    echo "[INFO] AUTH_SECRET generated and saved to .env.production.local"
+# _ensure_generated_secret NAME: generate-once-persist. If NAME is unset, generate it with
+# openssl and write it back to .env.production.local so later runs reuse the same value.
+_ensure_generated_secret() {
+  local name="$1" value escaped
+  if [[ -n "${!name:-}" ]]; then
+    return 0
   fi
-  export AUTH_SECRET
-fi
+  if [[ "$DRY_RUN" == "true" ]]; then
+    echo "[DRY-RUN] ${name} not set — will generate with openssl rand -base64 32 and save to .env.production.local at runtime"
+    printf -v "$name" '%s' "<DRY_RUN_${name}>"
+  else
+    value=$(openssl rand -base64 32)
+    escaped="$(_shell_dquote_escape "${value}")"
+    if grep -q "^${name}=" "${_ENV_FILE}" 2>/dev/null; then
+      sed -i "s|^${name}=.*|${name}=\"$(_sed_replacement_escape "${escaped}")\"|" "${_ENV_FILE}"
+    else
+      echo "${name}=\"${escaped}\"" >> "${_ENV_FILE}"
+    fi
+    printf -v "$name" '%s' "$value"
+    echo "[INFO] ${name} generated and saved to .env.production.local"
+  fi
+  export "${name?}"
+}
 
-# CRON_SECRET (cmd_781): generate-once-persist, same pattern as AUTH_SECRET
-# above. Secures app/api/scheduled-tasks/[task]/route.ts — Vercel sends it
-# back as `Authorization: Bearer $CRON_SECRET` on every Cron Job invocation
-# once it's set on the project, but Vercel never generates/sets it itself.
-# Harmless to inject even when the schema declares no x-scheduled-task
-# entity (mirrors AUTH_SECRET's unconditional injection).
-if [[ -z "${CRON_SECRET:-}" ]]; then
-  if [[ "$DRY_RUN" == "true" ]]; then
-    echo "[DRY-RUN] CRON_SECRET not set — will generate with openssl rand -base64 32 and save to .env.production.local at runtime"
-    CRON_SECRET="<DRY_RUN_CRON_SECRET>"
-  else
-    CRON_SECRET=$(openssl rand -base64 32)
-    _CRON_SECRET_ESCAPED="$(_shell_dquote_escape "${CRON_SECRET}")"
-    if grep -q "^CRON_SECRET=" "${_ENV_FILE}" 2>/dev/null; then
-      sed -i "s|^CRON_SECRET=.*|CRON_SECRET=\"$(_sed_replacement_escape "${_CRON_SECRET_ESCAPED}")\"|" "${_ENV_FILE}"
-    else
-      echo "CRON_SECRET=\"${_CRON_SECRET_ESCAPED}\"" >> "${_ENV_FILE}"
-    fi
-    echo "[INFO] CRON_SECRET generated and saved to .env.production.local"
-  fi
-  export CRON_SECRET
-fi
+# Per-target secrets (Issue #1182). The Preview target must never receive the Production
+# value of a secret: a Preview deployment of any branch would then sign sessions, accept
+# cron calls and reach storage with Production's credentials. Production reads NAME;
+# Preview reads NAME_STAGING (the same suffix DATABASE_URL_STAGING already uses).
+#   - AUTH_SECRET and CRON_SECRET are generate-once-persist for both targets.
+#   - REDIS_URL, BLOB_READ_WRITE_TOKEN, GOOGLE_CLIENT_SECRET cannot be generated here:
+#     Preview gets them only from NAME_STAGING, and is left without them (never a copy
+#     of the Production value) when NAME_STAGING is unset or equals the Production value.
+#
+# AUTH_SECRET: changing it invalidates all sessions for that target.
+# CRON_SECRET (cmd_781): secures app/api/scheduled-tasks/[task]/route.ts — Vercel sends
+# it back as `Authorization: Bearer $CRON_SECRET` on every Cron Job invocation once it's
+# set on the project, but Vercel never generates/sets it itself. Harmless to inject even
+# when the schema declares no x-scheduled-task entity.
+_ensure_generated_secret AUTH_SECRET
+_ensure_generated_secret CRON_SECRET
+_ensure_generated_secret AUTH_SECRET_STAGING
+_ensure_generated_secret CRON_SECRET_STAGING
 
 # Required variables — abort with a clear message if missing (skip hard-fail in DRY_RUN
 # so the syntax/flow of a fresh checkout can still be exercised end-to-end).
@@ -137,7 +139,39 @@ BLOB_READ_WRITE_TOKEN="${BLOB_READ_WRITE_TOKEN:-}"
 NEXT_PUBLIC_APP_TITLE="${NEXT_PUBLIC_APP_TITLE:-}"
 NEXT_PUBLIC_APP_COPYRIGHT="${NEXT_PUBLIC_APP_COPYRIGHT:-}"
 
+REDIS_URL_STAGING="${REDIS_URL_STAGING:-}"
+BLOB_READ_WRITE_TOKEN_STAGING="${BLOB_READ_WRITE_TOKEN_STAGING:-}"
+GOOGLE_CLIENT_ID_STAGING="${GOOGLE_CLIENT_ID_STAGING:-}"
+GOOGLE_CLIENT_SECRET_STAGING="${GOOGLE_CLIENT_SECRET_STAGING:-}"
+
 export REDIS_URL VERCEL_PROJECT_NAME VERCEL_ORG_ID GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET BLOB_READ_WRITE_TOKEN NEXT_PUBLIC_APP_TITLE NEXT_PUBLIC_APP_COPYRIGHT
+export REDIS_URL_STAGING BLOB_READ_WRITE_TOKEN_STAGING GOOGLE_CLIENT_ID_STAGING GOOGLE_CLIENT_SECRET_STAGING
+
+# _target_value NAME TARGET: print the value to inject for NAME on TARGET (Issue #1182).
+# production -> $NAME. preview -> $NAME_STAGING, or nothing when that is unset or is
+# identical to the Production value (the variable is then skipped for Preview rather
+# than shared).
+_target_value() {
+  local name="$1" target="$2" staging_name prod_value staging_value
+  prod_value="${!name:-}"
+  if [[ "$target" != "preview" ]]; then
+    printf '%s' "$prod_value"
+    return 0
+  fi
+  staging_name="${name}_STAGING"
+  staging_value="${!staging_name:-}"
+  if [[ -z "$staging_value" ]]; then
+    if [[ -n "$prod_value" ]]; then
+      echo "WARNING: ${staging_name} is not set — ${name} is NOT injected into Preview (the Production value is never reused). Set ${staging_name} in .env.production.local to enable it." >&2
+    fi
+    return 0
+  fi
+  if [[ "$staging_value" == "$prod_value" ]]; then
+    echo "WARNING: ${staging_name} is identical to ${name} — ${name} is NOT injected into Preview. Use a distinct value per environment." >&2
+    return 0
+  fi
+  printf '%s' "$staging_value"
+}
 
 # ── inject_var: upsert one Vercel env var, never echoing the secret value ────
 # Usage: inject_var NAME VALUE TARGET
@@ -206,11 +240,21 @@ vercel_env_inject() {
   esac
 
   echo "=== Injecting Vercel env vars: target=${target} ==="
-  # DATABASE_URL here is the Neon owner's pooled URL. An app that runs as the
-  # restricted audit_log role (docs/knowledge/audit-log-append-only.md) sets
-  # DATABASE_URL to that role's connection string by hand, and this injection
-  # overwrites it. The role's password is never handled by this script.
-  echo "NOTE: DATABASE_URL (${target}) is set to the owner's pooled URL. If this app runs as the restricted audit_log role, set DATABASE_URL back to that role's connection string afterwards (docs/knowledge/audit-log-append-only.md)." >&2
+  # DATABASE_URL: an app that runs as the restricted audit_log role
+  # (docs/knowledge/audit-log-append-only.md) records that role's pooled connection
+  # string as DATABASE_URL_APP_PROD / DATABASE_URL_APP_STAGING in
+  # .env.production.local (Issue #1174). When it is set, it is what gets injected as
+  # DATABASE_URL, so re-running this script keeps the restricted role. DIRECT_URL stays
+  # the owner's unpooled URL: migrations need the owner. The role's password is only
+  # ever read from .env.production.local, never created or logged here.
+  local app_url_name="DATABASE_URL_APP_PROD"
+  [[ "$target" == "preview" ]] && app_url_name="DATABASE_URL_APP_STAGING"
+  if [[ -n "${!app_url_name:-}" ]]; then
+    db_url="${!app_url_name}"
+    echo "  DATABASE_URL (${target}): using the restricted-role URL from ${app_url_name}." >&2
+  else
+    echo "WARNING: ${app_url_name} is not set, so DATABASE_URL (${target}) is set to the OWNER's pooled URL. If this app runs as the restricted audit_log role, this overwrites it. Record the role's connection string as ${app_url_name} in .env.production.local and re-run (docs/knowledge/audit-log-append-only.md)." >&2
+  fi
   inject_var DATABASE_URL "$db_url" "$target"
   # DIRECT_URL: the unpooled Neon endpoint, consumed by prisma.config.ts for
   # `migrate:deploy` (both the one-time run in vercel-setup.sh Steps 3/5 and
@@ -220,12 +264,23 @@ vercel_env_inject() {
   # Prisma's migration engine takes. See
   # docs/knowledge/prisma-direct-vs-pooled-connection.md.
   inject_var DIRECT_URL "$direct_url" "$target"
-  inject_var AUTH_SECRET "$AUTH_SECRET" "$target"
-  inject_var CRON_SECRET "$CRON_SECRET" "$target"
-  inject_var REDIS_URL "$REDIS_URL" "$target"
-  inject_var BLOB_READ_WRITE_TOKEN "$BLOB_READ_WRITE_TOKEN" "$target"
-  inject_var GOOGLE_CLIENT_ID "$GOOGLE_CLIENT_ID" "$target"
-  inject_var GOOGLE_CLIENT_SECRET "$GOOGLE_CLIENT_SECRET" "$target"
+  # Every secret below is chosen per target (Issue #1182); see _target_value.
+  inject_var AUTH_SECRET "$(_target_value AUTH_SECRET "$target")" "$target"
+  inject_var CRON_SECRET "$(_target_value CRON_SECRET "$target")" "$target"
+  inject_var REDIS_URL "$(_target_value REDIS_URL "$target")" "$target"
+  # Rate-limit keys in Redis are namespaced per environment as a second layer, so two
+  # environments that ever share an instance still keep separate budgets
+  # (lib/rate-limit/redis.ts reads RATE_LIMIT_KEY_PREFIX).
+  inject_var RATE_LIMIT_KEY_PREFIX "${target}:" "$target"
+  inject_var BLOB_READ_WRITE_TOKEN "$(_target_value BLOB_READ_WRITE_TOKEN "$target")" "$target"
+  # A Google OAuth client ID is public; only its secret must differ. Preview uses
+  # GOOGLE_CLIENT_ID_STAGING when set (a separate OAuth client), else the shared ID.
+  local google_id="$GOOGLE_CLIENT_ID"
+  if [[ "$target" == "preview" && -n "$GOOGLE_CLIENT_ID_STAGING" ]]; then
+    google_id="$GOOGLE_CLIENT_ID_STAGING"
+  fi
+  inject_var GOOGLE_CLIENT_ID "$google_id" "$target"
+  inject_var GOOGLE_CLIENT_SECRET "$(_target_value GOOGLE_CLIENT_SECRET "$target")" "$target"
   inject_var AUTH_TRUST_HOST "true" "$target"
   # USE_NEON_ADAPTER: fixed flag, not a per-deployment secret — same pattern
   # as AUTH_TRUST_HOST above. Injected as the literal string "true" on both
