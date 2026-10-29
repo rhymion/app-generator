@@ -22,8 +22,18 @@ orphan cleanup.
   Vercel Blob objects use `access: 'private'`. The local-disk backend (no bucket and no Blob credential) writes under
   `.uploads/` at the project root, or under `ATTACHMENT_LOCAL_DIR`; it is never under `public/`, so no file is a
   static asset. The backend is chosen from the environment by `lib/attachment/storage.ts`: `GCS_BUCKET_NAME`, then
-  `BLOB_STORE_ID` or `BLOB_READ_WRITE_TOKEN` (Vercel Blob; the SDK uses the short-lived Vercel OIDC token when
-  `BLOB_STORE_ID` is set and the read-write token otherwise), then local disk.
+  `ATTACHMENT_BLOB_READ_WRITE_TOKEN`, `BLOB_STORE_ID` or `BLOB_READ_WRITE_TOKEN` (Vercel Blob), then local disk.
+- **The Blob store is addressed explicitly.** `blobTarget()` in `lib/attachment/storage.ts` resolves the store once and the
+  result is passed to every `put`, `get` and `del` call, so the store in use never depends on the Vercel Blob SDK's own
+  resolution order (in which an OIDC connection outranks `BLOB_READ_WRITE_TOKEN`). The order is:
+  `ATTACHMENT_BLOB_READ_WRITE_TOKEN` (an environment variable only, not a schema key), then `BLOB_STORE_ID` (the SDK
+  authenticates with the short-lived Vercel OIDC token), then `BLOB_READ_WRITE_TOKEN`. A project that sets only
+  `BLOB_READ_WRITE_TOKEN` behaves as before.
+- **Moving to a new Blob store.** `BLOB_READ_WRITE_TOKEN` is often managed by the platform's store connection, so the old
+  and the new store cannot both use that name. In order: (1) create the new store; (2) copy the existing objects into it
+  (the keys are opaque UUIDs and are kept as they are); (3) set `ATTACHMENT_BLOB_READ_WRITE_TOKEN` to the new store's
+  read-write token in a preview or staging environment and check an upload, a download and a delete there; (4) set it in
+  production and redeploy; (5) once downloads are verified, disconnect the old store and remove the old variables.
 - **No silent local-disk fallback on ephemeral platforms.** Local disk is not shared between instances and is lost on
   restart or scale-down. When `K_SERVICE` (Cloud Run) or `VERCEL` is set, `NODE_ENV` is not `development`, and neither a
   bucket, a Blob credential nor `ATTACHMENT_LOCAL_DIR` is configured, `storageBackend()` throws with a message naming the

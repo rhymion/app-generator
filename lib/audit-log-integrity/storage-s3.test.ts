@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { S3ObjectLockStorage, createS3ObjectLockStorageFromEnv, type S3ObjectLockClient } from './storage-s3';
+import { MAX_S3_RETENTION_DAYS, S3ObjectLockStorage, createS3ObjectLockStorageFromEnv, type S3ObjectLockClient } from './storage-s3';
 
 function fakeClient() {
   const objects = new Map<string, string>();
@@ -50,6 +50,15 @@ describe('S3ObjectLockStorage', () => {
     const { client } = fakeClient();
     expect(await new S3ObjectLockStorage(client, 'bucket', 30).get('missing')).toBeNull();
     expect(() => new S3ObjectLockStorage(client, 'bucket', 0)).toThrow(/whole number of days/);
+  });
+
+  it('rejects a retention above the maximum, and accepts the maximum itself', async () => {
+    const { client } = fakeClient();
+    expect(() => new S3ObjectLockStorage(client, 'bucket', MAX_S3_RETENTION_DAYS)).not.toThrow();
+    expect(() => new S3ObjectLockStorage(client, 'bucket', MAX_S3_RETENTION_DAYS + 1)).toThrow(/above the maximum/);
+    await expect(createS3ObjectLockStorageFromEnv({
+      AUDIT_LOG_S3_BUCKET: 'b', AUDIT_LOG_S3_REGION: 'us-east-1', AUDIT_LOG_S3_RETENTION_DAYS: '36500',
+    })).rejects.toThrow(/above the maximum/);
   });
 
   it('rejects a malformed AUDIT_LOG_S3_EXPECTED_BUCKET_OWNER', async () => {

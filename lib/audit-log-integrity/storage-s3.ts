@@ -26,6 +26,13 @@ export type S3ObjectLockClient = {
   getObject(params: { Bucket: string; Key: string; ExpectedBucketOwner?: string }): Promise<string | null>;
 };
 
+/**
+ * Upper bound on the retention period, in days (10 years). Object Lock COMPLIANCE retention cannot be
+ * shortened or removed by anyone, including the account root, so a typo such as an extra zero would be an
+ * irreversible storage-cost commitment. A larger value is rejected instead of being accepted silently.
+ */
+export const MAX_S3_RETENTION_DAYS = 3650;
+
 export class S3ObjectLockStorage implements AuditLogStorage {
   constructor(
     private readonly client: S3ObjectLockClient,
@@ -37,6 +44,13 @@ export class S3ObjectLockStorage implements AuditLogStorage {
   ) {
     if (!Number.isInteger(retentionDays) || retentionDays < 1) {
       throw new Error(`Retention must be a whole number of days, got: ${retentionDays}`);
+    }
+    if (retentionDays > MAX_S3_RETENTION_DAYS) {
+      throw new Error(
+        `Retention of ${retentionDays} days is above the maximum of ${MAX_S3_RETENTION_DAYS} days. ` +
+          'S3 Object Lock COMPLIANCE retention cannot be shortened or removed by anyone, including the account root; ' +
+          'check AUDIT_LOG_S3_RETENTION_DAYS for a typo.',
+      );
     }
   }
 
