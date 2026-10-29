@@ -1338,6 +1338,7 @@ def actions_context(ctx: dict) -> dict:
                 _perm_block = (
                     f"  if (id) {{\n"
                     f"    const existing = await prisma.{model}.findUnique({{ where: {{ id }}, select: {item_context_select} }});\n"
+                    f"    if (!existing) throw new AppError('NOT_FOUND', 'Not found');\n"
                     f"    await requireRecordPermission('{parent}', 'update', existing);\n"
                     f"  }} else {{\n"
                     f"    await requireEntityPermission('{parent}', 'create');\n"
@@ -1385,6 +1386,7 @@ def actions_context(ctx: dict) -> dict:
             _perm_block = (
                 f"  if (id) {{\n"
                 f"    const existing = await prisma.{model}.findUnique({{ where: {{ id }}, select: {item_context_select} }});\n"
+                f"    if (!existing) throw new AppError('NOT_FOUND', 'Not found');\n"
                 f"    await requireRecordPermission('{parent}', 'update', existing);\n"
                 f"  }} else {{\n"
                 f"    await requireEntityPermission('{parent}', 'create');\n"
@@ -1427,6 +1429,7 @@ def actions_context(ctx: dict) -> dict:
                 )
             _perm_block = (
                 f"  const existing = await prisma.{model}.findUnique({{ where: {{ id }}, select: {item_context_select} }});\n"
+                f"  if (!existing) throw new AppError('NOT_FOUND', 'Not found');\n"
                 f"  await requireRecordPermission('{parent}', 'update', existing);\n"
             )
             return (
