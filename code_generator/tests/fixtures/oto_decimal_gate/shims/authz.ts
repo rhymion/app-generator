@@ -80,3 +80,20 @@ export async function getSessionUserId(): Promise<string | null> {
 export async function getSessionUserIdOrThrow(): Promise<string> {
   throw new Error('fixture stub');
 }
+
+export async function canAccessEntity(
+  _model: ModelName,
+  _operation: Operation,
+  _userId?: string | null,
+): Promise<boolean> {
+  throw new Error('fixture stub');
+}
+
+export async function canAccessRecord(
+  _model: ModelName,
+  _operation: Operation,
+  _item: RecordContext,
+  _userId?: string | null,
+): Promise<boolean> {
+  throw new Error('fixture stub');
+}
