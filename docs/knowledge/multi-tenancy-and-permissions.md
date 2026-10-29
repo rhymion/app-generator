@@ -240,11 +240,11 @@ The referenced row must be *reachable* by the actor (`isRowReachable`, `lib/_rea
 2. for an `x-self-only` target, the actor created it (or holds the audited admin bypass); no permission widens this;
 3. otherwise the actor holds read permission on that row: a general grant, or a Creator/Assignee grant on a row they created / are assigned to.
 
-`x-filter-values` is not part of this decision. An unreachable row is reported exactly like a missing one (`NOT_FOUND`, "Not found"), so a write cannot be used to probe which ids exist.
+The decision is made on the model's own entity, not on a proxy view of it: read permission, organization and `x-self-only` are those of the model, and neither a proxy view's permission, its `x-filter-values` nor an `x-self-only` declared only on a view is consulted. An actor who holds permission only on a proxy view therefore cannot reference the model's rows (the safe side; `lib/_reachability.test.ts` pins this). An unreachable row is reported exactly like a missing one (`NOT_FOUND`, "Not found"), so a write cannot be used to probe which ids exist.
 
 Which foreign keys are checked is decided at generation time (`_fk_reference_check` in `build_context.py`): every client-writable foreign key except those to `organization` (own membership rule) and `user` (creator/assignee, covered by the server-value rules). Columns the server sets or that are read-only are not client writes and are not checked. A target that is not a generated entity has no permission rows to check and is skipped. An update compares against the stored value, so an unchanged reference is not re-checked.
 
-Records that *already* point at an unreachable row, and what an actor may do with them, are not decided here: re-pointing such a record away from that row and deleting it are open questions, as is whether `x-filter-values` should count towards reachability.
+Records that *already* point at an unreachable row, and what an actor may do with them, are not decided here: re-pointing such a record away from that row and deleting it are open questions.
 
 ### Permission cache
 
