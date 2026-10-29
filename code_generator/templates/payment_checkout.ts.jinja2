@@ -56,6 +56,26 @@ function cancelTokenMatches(payableId: string, token: string | undefined): boole
 }
 
 /**
+ * The origin Stripe sends the buyer back to after paying or cancelling.
+ * NEXTAUTH_URL (or its Auth.js alias AUTH_URL) must name the public origin of
+ * the deployment. Outside production an unset origin falls back to the local
+ * dev server; in production it throws instead, because a silent localhost
+ * default would send every buyer to http://localhost:3000 after paying.
+ */
+export function resolveCheckoutOrigin(): string {
+  const configured = (process.env.NEXTAUTH_URL || process.env.AUTH_URL || '').trim();
+  if (configured) {
+    return configured.replace(/\/+$/, '');
+  }
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error(
+      'NEXTAUTH_URL is not set: Stripe Checkout needs the public origin of this deployment for its return URLs',
+    );
+  }
+  return 'http://localhost:3000';
+}
+
+/**
  * Returns the hosted Checkout URL for the record, creating the session on
  * first call and resuming the still-open one afterwards (an idempotent
  * replay of the create request). Returns null when the record is already
@@ -81,7 +101,7 @@ export async function startPaymentCheckout(entityName: string, recordId: string)
 
   const source = await resolvePaymentSource(entityName, recordId);
   const quantity = await resolvePaymentQuantity(entityName, recordId);
-  const origin = process.env.NEXTAUTH_URL ?? 'http://localhost:3000';
+  const origin = resolveCheckoutOrigin();
   const token = cancelToken(payable.id);
   if (!token) {
     throw new Error('AUTH_SECRET is not set: cannot sign the Checkout cancel URL');
