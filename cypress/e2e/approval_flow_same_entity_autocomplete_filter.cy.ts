@@ -295,12 +295,8 @@ describe('approval_flow preceded_by/followed_by same-entity_name candidate filte
             followedBy_ids: [],
           },
         }).then((res) => {
-          // plain `throw new Error(...)` in validateSchemaRules (not
-          // ApiError) falls through handleApiError()'s 500 branch — same
-          // convention the generated api/approval_flow.cy.ts spec already
-          // uses (`.to.be.gte(400)`) for the pre-existing REQUIRED_FIELDS
-          // checks, not a cmd_646-specific choice.
-          expect(res.status).to.be.gte(400);
+          // The custom validation throws an AppError, which maps to 422.
+          expect(res.status).to.eq(422);
           expect(res.body?.error ?? JSON.stringify(res.body)).to.contain(
             "Preceded By must share this record's entity_name",
           );
@@ -325,12 +321,8 @@ describe('approval_flow preceded_by/followed_by same-entity_name candidate filte
               followedBy_ids: [crossEntityRow.id],
             },
           }).then((res) => {
-            // plain `throw new Error(...)` in validateSchemaRules (not
-          // ApiError) falls through handleApiError()'s 500 branch — same
-          // convention the generated api/approval_flow.cy.ts spec already
-          // uses (`.to.be.gte(400)`) for the pre-existing REQUIRED_FIELDS
-          // checks, not a cmd_646-specific choice.
-          expect(res.status).to.be.gte(400);
+          // The custom validation throws an AppError, which maps to 422.
+          expect(res.status).to.eq(422);
             expect(res.body?.error ?? JSON.stringify(res.body)).to.contain(
               "Followed By must share this record's entity_name",
             );
