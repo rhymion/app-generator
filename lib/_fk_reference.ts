@@ -15,7 +15,7 @@
 // server sets are not references the client chooses, and are never passed here.
 import { AppError } from '@/lib/_errors';
 import { isRowReachable } from '@/lib/_reachability';
-import { getAssociatedOrganizations } from '@/lib/organization/getters_associated';
+import { getAssociatedOrganizations } from '@/lib/organization/associated_internal';
 
 export type FkReference = {
   /** Prisma model name of the referenced entity. */

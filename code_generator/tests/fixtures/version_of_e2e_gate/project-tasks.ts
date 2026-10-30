@@ -141,6 +141,18 @@ export function getProjectTasks(): Record<string, (...args: any[]) => any> {
       });
       return { current_version_id: doc.current_version_id, versions };
     },
+    // Makes `email` a member of the organization.
+    async 'db:voEnrollUser'(p: { email: string; orgId: string }) {
+      await prisma.organization.update({ where: { id: p.orgId }, data: { users: { connect: [{ email: p.email }] } } });
+      return null;
+    },
+    // What a submit leaves behind for a version row: its status, and its approval records.
+    async 'db:voSubmitFootprint'(versionId: string) {
+      const row = await prisma.vo_item_version.findUniqueOrThrow({ where: { id: versionId }, select: { status: true, approvable_id: true } });
+      const requests = await prisma.approval_request.findMany({ where: { approvable_id: row.approvable_id }, select: { id: true } });
+      const history = await prisma.approval_history.count({ where: { approval_request_id: { in: requests.map((r) => r.id) } } });
+      return { status: row.status, requests: requests.length, history };
+    },
     async 'db:voLineCount'(versionId: string) {
       return prisma.vo_item_version_line.count({ where: { vo_item_version_id: versionId } });
     },

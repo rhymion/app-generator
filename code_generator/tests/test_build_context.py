@@ -2374,14 +2374,14 @@ class TestOrgRelationshipOptionalRenderedTemplates:
         from generators import service_context
         ctx = self._entity_ctx(organization_required=False)
         full_ctx = {**ctx, **service_context(ctx, TestOrgRelationshipOptional._schema(False))}
-        rendered = self._env().get_template('getters.ts.jinja2').render(**full_ctx)
+        rendered = self._env().get_template('getters_internal.ts.jinja2').render(**full_ctx)
         assert 'OR: [{ organization_id: { in: associatedOrganizationIds } }, { organization_id: null }]' in rendered
 
     def test_getters_list_stays_unfiltered_or_when_required(self):
         from generators import service_context
         ctx = self._entity_ctx(organization_required=True)
         full_ctx = {**ctx, **service_context(ctx, TestOrgRelationshipOptional._schema(True))}
-        rendered = self._env().get_template('getters.ts.jinja2').render(**full_ctx)
+        rendered = self._env().get_template('getters_internal.ts.jinja2').render(**full_ctx)
         assert 'and.push({ organization_id: { in: associatedOrganizationIds } });' in rendered
         assert 'organization_id: null' not in rendered
 
@@ -2448,7 +2448,7 @@ class TestOrgRelationshipOptionalAndScopingWithSelfOnly:
         this is the correct (safe) shape. The unsafe shape would be
         `creator_id` appearing INSIDE the `OR: [...]` array instead."""
         ctx = self._ctx()
-        rendered = self._env().get_template('getters.ts.jinja2').render(**ctx)
+        rendered = self._env().get_template('getters_internal.ts.jinja2').render(**ctx)
         # Detail getter's where block: OR line followed later by creator_id
         # as a sibling property (self_only, no admin_bypass -> unconditional).
         assert 'OR: [{ organization_id: { in: associatedOrganizationIds } }, { organization_id: null }],' in rendered
@@ -2517,7 +2517,7 @@ class TestOrgRelationshipOptionalAndScopingWithSelfOnly:
         ctx = build_context(_entity("widget"), schema)
         from generators import service_context
         full_ctx = {**ctx, **service_context(ctx, schema)}
-        rendered = self._env().get_template('getters.ts.jinja2').render(**full_ctx)
+        rendered = self._env().get_template('getters_internal.ts.jinja2').render(**full_ctx)
         assert "and.push({ OR: [{ organization_id: { in: associatedOrganizationIds } }, { organization_id: null }] });" in rendered
         assert "and.push({ OR: or });" in rendered
 
@@ -2677,7 +2677,7 @@ class TestDetailSelectForFieldsRestrictedEntity:
 
     def test_rendered_getters_uses_select_not_include_when_restricted(self):
         ctx = build_context(self._entity(["status"]), self._schema())
-        rendered = self._env().get_template("getters.ts.jinja2").render(**ctx)
+        rendered = self._env().get_template('getters_internal.ts.jinja2').render(**ctx)
         first_query = rendered.split("findUnique(", 1)[1].split(");", 1)[0]
         assert "select:" in first_query
         assert "include:" not in first_query
@@ -2688,7 +2688,7 @@ class TestDetailSelectForFieldsRestrictedEntity:
         shipment_line_status) -- pre-existing `include:`-based query,
         unchanged."""
         ctx = build_context(self._entity(None), self._schema())
-        rendered = self._env().get_template("getters.ts.jinja2").render(**ctx)
+        rendered = self._env().get_template('getters_internal.ts.jinja2').render(**ctx)
         first_query = rendered.split("findUnique(", 1)[1].split(");", 1)[0]
         # "select:" still appears nested inside include's own creator/updater
         # sub-objects (pre-existing, unrelated to this fix) -- what must NOT

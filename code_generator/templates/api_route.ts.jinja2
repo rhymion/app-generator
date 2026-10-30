@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { authenticate, requireApiPermission, handleApiError } from '@/lib/api-auth';
 import { getRateLimiter } from '@/lib/rate-limit';
 {% if can_list %}
-import { get{{ parent_pascal }}Page } from '@/lib/{{ parent }}/getters';
+import { get{{ parent_pascal }}Page } from '@/lib/{{ parent }}/getters_internal';
 import { parsePageOpts, MAX_PAGE_SIZE } from '@/lib/_pagination';
 {% endif %}
 {% if can_create %}
