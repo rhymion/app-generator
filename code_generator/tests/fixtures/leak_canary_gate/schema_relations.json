@@ -1,0 +1,9 @@
+{
+  "user": [
+    "created_lk_vaults lk_vault[] @relation(\"LkVaultCreator\")",
+    "updated_lk_vaults lk_vault[] @relation(\"LkVaultUpdater\")"
+  ],
+  "organization": [
+    "lk_vaults lk_vault[]"
+  ]
+}

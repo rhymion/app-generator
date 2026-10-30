@@ -153,6 +153,8 @@ code_generator/.generated/
 # (pre-existing gap alongside its seven siblings above, noticed while
 # running the update-generator gate for cmd_781 — unrelated to that task.)
 .generated-approval-lockdown-gate/
+.generated-leak-canary-gate/
+.generated-leak-canary-gate.lock
 
 # uri-kind-gate fixture check (cmd_792) scratch output —
 # scripts/check_uri_kind_gate_fixture.sh regenerates this from
