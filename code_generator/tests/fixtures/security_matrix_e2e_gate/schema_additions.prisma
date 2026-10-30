@@ -26,6 +26,12 @@ model sx_account {
   commentable_id  String       @unique
   commentable     commentable  @relation(fields: [commentable_id], references: [id], onDelete: Cascade)
   sx_tasks        sx_task[]
+  sx_profile      sx_profile?
+  sx_tickets      sx_ticket[]       @relation("SxTicketAccount")
+  sx_backup_tickets sx_ticket[]     @relation("SxTicketBackupAccount")
+  watched_tickets sx_ticket[]       @relation("SxTicketWatchers")
+  sx_ticket_lines sx_ticket_line[]  @relation("SxLineAccount")
+  sx_backup_ticket_lines sx_ticket_line[] @relation("SxLineBackupAccount")
   invalidated_at  DateTime?    @db.Timestamptz(0)
   created_at      DateTime     @default(now()) @db.Timestamptz(0)
   updated_at      DateTime     @updatedAt @db.Timestamptz(0)
@@ -85,6 +91,98 @@ model sx_split {
 
   @@index([title])
   @@index([organization_id])
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
+model sx_profile {
+  id              String       @id @default(cuid())
+  title           String
+  organization_id String
+  organization    organization @relation(fields: [organization_id], references: [id])
+  sx_account_id   String       @unique
+  sx_account      sx_account   @relation(fields: [sx_account_id], references: [id])
+  created_at      DateTime     @default(now()) @db.Timestamptz(0)
+  updated_at      DateTime     @updatedAt @db.Timestamptz(0)
+  creator_id      String
+  creator         user         @relation("SxProfileCreator", fields: [creator_id], references: [id])
+  updater_id      String
+  updater         user         @relation("SxProfileUpdater", fields: [updater_id], references: [id])
+
+  @@index([title])
+  @@index([organization_id])
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
+model sx_ticket {
+  id                   String           @id @default(cuid())
+  title                String
+  organization_id      String
+  organization         organization     @relation(fields: [organization_id], references: [id])
+  sx_account_id        String
+  sx_account           sx_account       @relation("SxTicketAccount", fields: [sx_account_id], references: [id])
+  sx_backup_account_id String?
+  sx_backup_account    sx_account?      @relation("SxTicketBackupAccount", fields: [sx_backup_account_id], references: [id])
+  watchers             sx_account[]     @relation("SxTicketWatchers")
+  sx_notes             sx_note[]
+  sx_ticket_lines      sx_ticket_line[]
+  created_at           DateTime         @default(now()) @db.Timestamptz(0)
+  updated_at           DateTime         @updatedAt @db.Timestamptz(0)
+  creator_id           String
+  creator              user             @relation("SxTicketCreator", fields: [creator_id], references: [id])
+  updater_id           String
+  updater              user             @relation("SxTicketUpdater", fields: [updater_id], references: [id])
+
+  @@index([title])
+  @@index([organization_id])
+  @@index([sx_account_id])
+  @@index([sx_backup_account_id])
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
+model sx_ticket_line {
+  id                   String      @id @default(cuid())
+  label                String
+  sx_ticket_id         String
+  sx_ticket            sx_ticket   @relation(fields: [sx_ticket_id], references: [id], onDelete: Cascade)
+  sx_account_id        String
+  sx_account           sx_account  @relation("SxLineAccount", fields: [sx_account_id], references: [id])
+  sx_backup_account_id String?
+  sx_backup_account    sx_account? @relation("SxLineBackupAccount", fields: [sx_backup_account_id], references: [id])
+  created_at           DateTime    @default(now()) @db.Timestamptz(0)
+  updated_at           DateTime    @updatedAt @db.Timestamptz(0)
+  creator_id           String
+  creator              user        @relation("SxLineCreator", fields: [creator_id], references: [id])
+  updater_id           String
+  updater              user        @relation("SxLineUpdater", fields: [updater_id], references: [id])
+
+  @@index([sx_ticket_id])
+  @@index([sx_account_id])
+  @@index([sx_backup_account_id])
+  @@index([label])
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
+model sx_note {
+  id              String       @id @default(cuid())
+  title           String
+  organization_id String
+  organization    organization @relation(fields: [organization_id], references: [id])
+  sx_ticket_id    String?
+  sx_ticket       sx_ticket?   @relation(fields: [sx_ticket_id], references: [id], onDelete: SetNull)
+  created_at      DateTime     @default(now()) @db.Timestamptz(0)
+  updated_at      DateTime     @updatedAt @db.Timestamptz(0)
+  creator_id      String
+  creator         user         @relation("SxNoteCreator", fields: [creator_id], references: [id])
+  updater_id      String
+  updater         user         @relation("SxNoteUpdater", fields: [updater_id], references: [id])
+
+  @@index([title])
+  @@index([organization_id])
+  @@index([sx_ticket_id])
   @@index([creator_id])
   @@index([updater_id])
 }
