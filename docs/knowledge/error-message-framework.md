@@ -57,7 +57,7 @@ org-isolation check applied, 2026-08-01).
 | U3 | Permission denied — LIST page | error.tsx (full page) | `getters.ts assertPermission` → throw |
 | U4 | Permission denied — DETAIL page | error.tsx (full page) | `getters.ts assertPermission` → throw |
 | U5 | Permission denied — CREATE form access | error.tsx (full page) | `getters.ts assertPermission` → throw |
-| U6 | Permission denied — UPDATE submit | error.tsx (full page) | `actions.ts requirePermission` → throw |
+| U6 | Permission denied — UPDATE submit | error.tsx (full page) | `actions.ts requireRecordPermission` → throw |
 | U7 | Permission denied — DELETE | error.tsx (full page) | `actions.ts: throw new Error('No permission to delete')` |
 | U8 | FK autocomplete denied (case g, before the FK-autocomplete fix) | error.tsx — page crashes | `getters.ts assertPermission` → throw (in Promise.all) |
 | U9 | FK autocomplete denied (case g, after the FK-autocomplete fix) | FK field disabled, no i18n text yet | `getters.ts` returns `{ permissionDenied: true }` |

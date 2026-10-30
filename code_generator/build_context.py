@@ -923,10 +923,10 @@ def _build_child_data(children_raw: list[dict], model: str, schema: dict,
                 _t = _r['target']
                 if _r['prop_name'] not in _written_cols or _t in ('organization', 'user'):
                     continue
-                _t_def = schema['definitions'].get(f'__{_t}', {}) or schema['definitions'].get(_t, {})
-                if _t_def.get('properties', {}).get('organization_id') is None:
+                _check = _fk_reference_check(schema, _t)
+                if _check is None:
                     continue
-                child_fk_write_checks.append({'prop': _r['prop_name'], 'target': _t})
+                child_fk_write_checks.append({'prop': _r['prop_name'], 'target': _t, 'self_only': _check['self_only']})
 
         child_var    = safe_var_name(prop_name)
         child_pascal = to_pascal_case(prop_name)
@@ -1145,6 +1145,31 @@ def _build_child_nested_update(children_data: list[dict]) -> str:
     return '\n'.join(lines)
 
 
+def _fk_reference_check(schema: dict, target: str) -> dict | None:
+    """How a write that points a foreign key at `target` must check the row it
+    names, or None when the reference is not one the client chooses.
+
+    Organization and user targets are excluded: the organization column has its
+    own membership rule, and foreign keys to user (creator, assignee) belong to
+    the server-value rules. Every other target is checked for reachability by
+    the actor (lib/_reachability.ts) -- the same conditions the target's own
+    list and detail reads apply: organization (when the target has the column),
+    x-self-only, and read permission. A target that is not a generated entity
+    has no permission rows to check and is skipped.
+    """
+    if target in ('organization', 'user'):
+        return None
+    defs = schema['definitions']
+    t_def = defs.get(f'__{target}', {}) or defs.get(target, {})
+    view_def = defs.get(target, {}) or {}
+    if t_def.get('properties', {}).get('organization_id') is None and not view_def.get('x-generate'):
+        return None
+    is_self_only, _bypass = get_self_only_flags(view_def)
+    if not is_self_only:
+        is_self_only, _bypass = get_self_only_flags(t_def)
+    return {'target': target, 'self_only': is_self_only}
+
+
 def _build_child_fk_check(children_data: list[dict], for_update: bool) -> str:
     """Service-layer check for the foreign keys carried by nested child rows:
     each one that points at an organization-scoped entity must reference a row
@@ -1168,9 +1193,10 @@ def _build_child_fk_check(children_data: list[dict], for_update: bool) -> str:
         entries = []
         for k in checks:
             p, t = k['prop'], k['target']
+            so_expr = ", selfOnly: true" if k.get('self_only') else ''
             prev_expr = f", previousId: f.id ? {prev}.get(f.id)?.{p} : undefined" if for_update else ''
             entries.append(
-                f"    ...{cv}Items.map((f) => ({{ model: '{t}', id: f.{p}{prev_expr}, "
+                f"    ...{cv}Items.map((f) => ({{ model: '{t}'{so_expr}, id: f.{p}{prev_expr}, "
                 f"load: (_id: string) => prisma.{t}.findUnique({{ where: {{ id: _id }} }}) as Promise<Record<string, unknown> | null> }})),"
             )
         blocks.append("  await assertFkReferencesUsable(actorId, [\n" + '\n'.join(entries) + "\n  ]);")
@@ -1359,7 +1385,7 @@ def _comment_parent_access_block(parent: str, model: str, key_where: str, op: st
     A comment write is a write on its parent record, so it runs the same gates the parent's own
     update action runs: the parent row is read through the caller's organization scope (and the
     x-self-only / x-filter-values scope, when declared), an out-of-scope or missing row is
-    NOT_FOUND, and requirePermission() then resolves the caller's permission for ``op`` against
+    NOT_FOUND, and requireRecordPermission() then resolves the caller's permission for ``op`` against
     that concrete row. Hiding the composer in the UI is not an enforcement boundary -- a Server
     Action is callable on its own. Assumes ``userId`` is already declared in the enclosing scope.
     """
@@ -1386,7 +1412,7 @@ def _comment_parent_access_block(parent: str, model: str, key_where: str, op: st
         f"    select: {item_select},\n"
         f"  }});\n"
         f"  if (!parentRow) throw new AppError('NOT_FOUND', 'Not found');\n"
-        f"  await requirePermission('{parent}', '{op}', parentRow, userId);\n"
+        f"  await requireRecordPermission('{parent}', '{op}', parentRow, userId);\n"
     )
 
 
@@ -1409,7 +1435,7 @@ def _build_mention_record_resolver(parent: str, model: str, item_select: str, sc
     """One entity's entry of the mention candidate search's record lookup.
 
     Runs the same read gates the entity's own detail page runs (organization scope,
-    x-self-only, x-filter-values, then requirePermission) on the record id the client sent, and
+    x-self-only, x-filter-values, then requireRecordPermission) on the record id the client sent, and
     returns the record's organization. A missing or unreadable record resolves to ``null``
     so the search can answer with no candidates instead of leaking any. An entity without an
     organization column resolves to ``{ organizationId: null }``: its mentions are not scoped.
@@ -1517,7 +1543,7 @@ export async function delete{parent_pascal}Comment(commentId: string): Promise<v
   const comment = await prisma.{child_model}.findUnique({{ where: {{ id: commentId }}, select: {{ creator_id: true, {parent_id_prop}: true }} }});
   if (!comment) return;
 {comment_access}  if (comment.creator_id !== userId) {{
-    await requirePermission('{parent}', 'delete', parentRow, userId);
+    await requireRecordPermission('{parent}', 'delete', parentRow, userId);
   }}
   await prisma.{child_model}.delete({{ where: {{ id: commentId }} }});
   revalidatePath('/{parent}');
@@ -1603,7 +1629,7 @@ export async function delete{parent_pascal}Comment(commentId: string): Promise<v
   const comment = await prisma.comment.findUnique({{ where: {{ id: commentId }}, select: {{ creator_id: true, commentable_id: true }} }});
   if (!comment) return;
 {comment_access}  if (comment.creator_id !== userId) {{
-    await requirePermission('{parent}', 'delete', parentRow, userId);
+    await requireRecordPermission('{parent}', 'delete', parentRow, userId);
   }}
   await deleteComment(commentId);
   revalidatePath('/{parent}');
@@ -3371,26 +3397,25 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     org_id_client_writable = bool(
         should_filter_by_org and _org_fk_prop and _org_fk_prop not in _ro_client_exclude
     )
-    # fk_write_checks: every client-writable FK whose target is an
-    # organization-scoped entity. service.ts verifies, before the value is
-    # written, that the referenced row sits in an organization the actor
-    # belongs to and that the actor may read it (lib/_fk_reference.ts).
-    # Targets without an organization_id column (and organization/user
-    # themselves) are system-global and are not checked here.
+    # fk_write_checks: every client-writable FK except those to organization
+    # and user (see _fk_reference_check). service.ts verifies, before the value
+    # is written, that the referenced row is reachable by the actor -- the
+    # target's organization, x-self-only and read permission, the conditions its
+    # own list and detail reads apply (lib/_reachability.ts, lib/_fk_reference.ts).
     fk_write_checks = []
     _client_var_by_prop = {p['prop']: p['var_name'] for p in client_prop_infos}
     for _r in _all_parent_rels_raw:
         _t = _r['target']
-        if _r['prop_name'] not in _client_var_by_prop or _t in ('organization', 'user'):
+        if _r['prop_name'] not in _client_var_by_prop:
             continue
-        _t_def = schema['definitions'].get(f'__{_t}', {}) or schema['definitions'].get(_t, {})
-        _t_org = _t_def.get('properties', {}).get('organization_id')
-        if _t_org is None:
+        _check = _fk_reference_check(schema, _t)
+        if _check is None:
             continue
         fk_write_checks.append({
             'prop': _r['prop_name'],
             'var': _client_var_by_prop[_r['prop_name']],
             'target': _t,
+            'self_only': _check['self_only'],
         })
     # x-server-value fields never go through the generic "just write the client
     # value" line below — server_value_data_lines (built further down) supplies
@@ -3688,7 +3713,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     )
 
     # Comment actions code. The write actions run the parent entity's own access gates
-    # (organization scope, x-self-only, x-filter-values, requirePermission) -- see
+    # (organization scope, x-self-only, x-filter-values, requireRecordPermission) -- see
     # _comment_parent_access_block.
     _comment_scope = {
         'should_filter_by_org': should_filter_by_org,

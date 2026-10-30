@@ -17,7 +17,7 @@ vi.mock('@/auth', () => ({
   auth: vi.fn(async () => ({ user: { id: 'user-test-1' } })),
 }));
 
-import { getModelPermissions, requirePermission, canAccess } from './authz';
+import { getModelPermissions, requireEntityPermission, canAccessEntity } from './authz';
 
 describe('default-deny: user with no permission records', () => {
   it('getModelPermissions returns all-false flags when rows=[]', async () => {
@@ -29,33 +29,33 @@ describe('default-deny: user with no permission records', () => {
     expect(permissions.delete).toBe(false);
   });
 
-  it('canAccess returns false for create when no permissions', async () => {
+  it('canAccessEntity returns false for create when no permissions', async () => {
     findMany.mockResolvedValueOnce([]);
-    const result = await canAccess('role', 'create', 'user-test-1');
+    const result = await canAccessEntity('role', 'create', 'user-test-1');
     expect(result).toBe(false);
   });
 
-  it('canAccess returns false for read when no permissions', async () => {
+  it('canAccessEntity returns false for read when no permissions', async () => {
     findMany.mockResolvedValueOnce([]);
-    const result = await canAccess('user', 'read', 'user-test-1');
+    const result = await canAccessEntity('user', 'read', 'user-test-1');
     expect(result).toBe(false);
   });
 
-  it('canAccess returns false for update when no permissions', async () => {
+  it('canAccessEntity returns false for update when no permissions', async () => {
     findMany.mockResolvedValueOnce([]);
-    const result = await canAccess('permission', 'update', 'user-test-1');
+    const result = await canAccessEntity('permission', 'update', 'user-test-1');
     expect(result).toBe(false);
   });
 
-  it('requirePermission throws Access denied for read when no permissions', async () => {
+  it('requireEntityPermission throws Access denied for read when no permissions', async () => {
     findMany.mockResolvedValueOnce([]);
-    await expect(requirePermission('role', 'read', undefined, 'user-test-1'))
+    await expect(requireEntityPermission('role', 'read', 'user-test-1'))
       .rejects.toThrow('Access denied: role.read');
   });
 
-  it('requirePermission throws Access denied for create when no permissions', async () => {
+  it('requireEntityPermission throws Access denied for create when no permissions', async () => {
     findMany.mockResolvedValueOnce([]);
-    await expect(requirePermission('dashboard', 'create', undefined, 'user-test-1'))
+    await expect(requireEntityPermission('dashboard', 'create', 'user-test-1'))
       .rejects.toThrow('Access denied: dashboard.create');
   });
 });
@@ -72,17 +72,17 @@ describe('explicit deny: user with DenyRole (all flags=false)', () => {
     },
   ];
 
-  it('canAccess returns false for all operations under DenyRole', async () => {
+  it('canAccessEntity returns false for all operations under DenyRole', async () => {
     for (const op of ['create', 'read', 'update', 'delete'] as const) {
       findMany.mockResolvedValueOnce(denyRows);
-      const result = await canAccess('organization', op, 'user-test-1');
+      const result = await canAccessEntity('organization', op, 'user-test-1');
       expect(result).toBe(false);
     }
   });
 
-  it('requirePermission throws when user has explicit DenyRole for delete', async () => {
+  it('requireEntityPermission throws when user has explicit DenyRole for delete', async () => {
     findMany.mockResolvedValueOnce(denyRows);
-    await expect(requirePermission('organization', 'delete', undefined, 'user-test-1'))
+    await expect(requireEntityPermission('organization', 'delete', 'user-test-1'))
       .rejects.toThrow('Access denied: organization.delete');
   });
 });
@@ -99,15 +99,15 @@ describe('grant: user with explicit full permissions is allowed', () => {
     },
   ];
 
-  it('canAccess returns true for read when Administrator role grants it', async () => {
+  it('canAccessEntity returns true for read when Administrator role grants it', async () => {
     findMany.mockResolvedValueOnce(grantRows);
-    const result = await canAccess('role', 'read', 'user-test-1');
+    const result = await canAccessEntity('role', 'read', 'user-test-1');
     expect(result).toBe(true);
   });
 
-  it('requirePermission succeeds when user has explicit full grant', async () => {
+  it('requireEntityPermission succeeds when user has explicit full grant', async () => {
     findMany.mockResolvedValueOnce(grantRows);
-    await expect(requirePermission('role', 'create', undefined, 'user-test-1'))
+    await expect(requireEntityPermission('role', 'create', 'user-test-1'))
       .resolves.toBeDefined();
   });
 });
@@ -143,13 +143,13 @@ describe('batched multi-model query: per-model grouping is equivalent to a per-m
 
   it('denies the requested model even when another model in the same batch is granted', async () => {
     findMany.mockResolvedValueOnce(multiModelRows);
-    const result = await canAccess('organization', 'read', 'user-test-1');
+    const result = await canAccessEntity('organization', 'read', 'user-test-1');
     expect(result).toBe(false);
   });
 
   it('resolves a global (role_id: null) row correctly when mixed with other models in the batch', async () => {
     findMany.mockResolvedValueOnce(multiModelRows);
-    const result = await canAccess('user', 'read', 'user-test-1');
+    const result = await canAccessEntity('user', 'read', 'user-test-1');
     expect(result).toBe(true);
   });
 

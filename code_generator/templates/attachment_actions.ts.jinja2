@@ -6,7 +6,7 @@
 
 {% if owners %}import { revalidatePath } from 'next/cache';
 {% endif %}import prisma from '@/lib/prisma';
-import { getSessionUserIdOrThrow{% if owners %}, getModelPermissions, resolvePermissions, type RichPermissions{% endif %} } from '@/lib/authz';
+import { getSessionUserIdOrThrow{% if owners %}, getModelPermissions, resolveRecordPermissions, type RichPermissions{% endif %} } from '@/lib/authz';
 import { AppError } from '@/lib/_errors';
 import { UNLINKED_ATTACHMENT_WHERE } from '@/lib/attachment/access';
 import { deleteStoredObject, isStorageKey } from '@/lib/attachment/storage';
@@ -24,7 +24,7 @@ export type AttachmentItemInput = {
 /**
  * Editing an attachment is editing its owner entity — there is no
  * attachment-specific permission, so this defers to the same
- * requirePermission('<model>', 'update', item) path every owner's own
+ * requireRecordPermission('<model>', 'update', item) path every owner's own
  * upsert action already uses (RBAC general.update, plus Creator/Assignee
  * item-level resolution). Attachments can only ever be added once the owner
  * exists (never at create time), so the only branch that matters here is
@@ -61,7 +61,7 @@ async function assertCanEditBridge(attachable_id: string): Promise<void> {
   if (!owner) throw new Error('Attachable not found');
 {% for owner in owners %}
   if (owner.{{ owner.name }}) {
-    const resolved = await resolvePermissions(basePermsByOwner['{{ owner.name }}'], owner.{{ owner.name }}, userId);
+    const resolved = await resolveRecordPermissions(basePermsByOwner['{{ owner.name }}'], owner.{{ owner.name }}, userId);
     if (!resolved.update) {
       throw new AppError('PERMISSION_DENIED', 'Access denied: {{ owner.name }}.update');
     }

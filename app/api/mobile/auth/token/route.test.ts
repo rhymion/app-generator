@@ -21,7 +21,7 @@ vi.mock('@/lib/mfa/totp', () => ({ verifyTotp }));
 vi.mock('@/lib/mfa/recovery', () => ({ verifyRecoveryCode: vi.fn().mockResolvedValue(false) }));
 
 vi.mock('@/lib/rate-limit', async () => (await import('@/test/helpers/real-rate-limiter')).realRateLimiterModule());
-vi.mock('@/lib/authz', () => ({ requirePermission: vi.fn(), getSessionUserId: vi.fn() }));
+vi.mock('@/lib/authz', () => ({ requireEntityPermission: vi.fn(), requireRecordPermission: vi.fn(), getSessionUserId: vi.fn() }));
 vi.mock('@/lib/mobile-auth', () => ({
   isMobileJwt: () => false,
   verifyMobileAccessToken: vi.fn(),

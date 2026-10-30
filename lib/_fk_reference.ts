@@ -1,17 +1,22 @@
 // Write-once (not regenerated). Shared by every generated service.ts
-// add/update function: before a foreign key to an organization-scoped entity
-// is written, the referenced row must live in an organization the actor
-// belongs to AND the actor must be allowed to read it -- the same two
-// conditions the referenced entity's own detail route applies. Any failure
-// is reported as NOT_FOUND so a write cannot be used to probe which ids
-// exist elsewhere.
+// add/update function: before a foreign key is written, the referenced row must
+// be reachable by the actor -- the same conditions the referenced entity's own
+// list and detail reads apply (see _reachability.ts). A row the actor cannot
+// reach is reported exactly like a row that does not exist (NOT_FOUND), so a
+// write cannot be used to probe which ids exist elsewhere.
+//
+// Which foreign keys are listed is decided at generation time: the
+// organization column, foreign keys to user (creator, assignee) and columns the
+// server sets are not references the client chooses, and are never passed here.
 import { AppError } from '@/lib/_errors';
-import { canAccess } from '@/lib/authz';
+import { isRowReachable } from '@/lib/_reachability';
 import { getAssociatedOrganizations } from '@/lib/organization/getters_associated';
 
 export type FkReference = {
   /** Prisma model name of the referenced entity. */
   model: string;
+  /** True when the referenced entity is x-self-only. */
+  selfOnly?: boolean;
   /** The value being written; empty values are not references. */
   id: string | null | undefined;
   /** The value currently stored (update only); an unchanged reference is not re-checked. */
@@ -26,17 +31,7 @@ export async function assertFkReferencesUsable(actorId: string, refs: FkReferenc
   const orgIds = new Set((await getAssociatedOrganizations(actorId)).map((o) => o.id));
   for (const ref of changed) {
     const row = await ref.load(ref.id as string);
-    if (!row) throw new AppError('NOT_FOUND', 'Not found');
-    const rowOrgId = row.organization_id;
-    // A null organization_id only exists when the target's organization column is optional.
-    if (typeof rowOrgId === 'string' && !orgIds.has(rowOrgId)) {
-      throw new AppError('NOT_FOUND', 'Not found');
-    }
-    const item = {
-      creator_id: (row.creator_id as string | null | undefined) ?? null,
-      assignee_id: (row.assignee_id as string | null | undefined) ?? null,
-    };
-    if (!(await canAccess(ref.model, 'read', actorId, item))) {
+    if (!row || !(await isRowReachable(actorId, orgIds, { model: ref.model, selfOnly: ref.selfOnly }, row))) {
       throw new AppError('NOT_FOUND', 'Not found');
     }
   }

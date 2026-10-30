@@ -12,7 +12,7 @@
 // by organization.
 
 {% if resolvers %}import prisma from '@/lib/prisma';
-import { requirePermission } from '@/lib/authz';
+import { requireRecordPermission } from '@/lib/authz';
 import { AppError } from '@/lib/_errors';
 {% endif %}{% if needs_associated_orgs %}import { getAssociatedOrganizations } from '@/lib/organization/getters_associated';
 {% endif %}

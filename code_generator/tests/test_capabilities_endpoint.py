@@ -217,10 +217,10 @@ class TestCapabilitiesRouteRendering:
         assert item_fetch in rendered
         assert rendered.index(coarse_check) < rendered.index(item_fetch)
         # The item-level re-check happens strictly after the item is
-        # fetched (resolvePermissions needs the item's creator_id/
+        # fetched (resolveRecordPermissions needs the item's creator_id/
         # assignee_id) -- proving this isn't just a coincidental ordering
         # of two independent statements.
-        resolve_call = 'const resolved = await resolvePermissions(basePerms, item, actorId);'
+        resolve_call = 'const resolved = await resolveRecordPermissions(basePerms, item, actorId);'
         assert resolve_call in rendered
         assert rendered.index(item_fetch) < rendered.index(resolve_call)
 

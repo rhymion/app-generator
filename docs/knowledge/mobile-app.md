@@ -117,7 +117,7 @@ The desktop-only user-identity link and sign-in link have no mobile counterpart 
 
 `GET /api/mobile/nav` returns `{ hiddenHrefs }`: the nav hrefs the caller cannot open. It applies the
 rule `app/[locale]/layout.tsx` applies to the desktop sidebar — an entity link is hidden when the caller
-lacks `read` on the entity — through the same `canAccess()`. The app prunes its tree with the answer and
+lacks `read` on the entity — through the same `canAccessEntity()`. The app prunes its tree with the answer and
 drops groups left empty. If the request fails the app shows no entity tabs rather than links the user may
 not be allowed to open.
 

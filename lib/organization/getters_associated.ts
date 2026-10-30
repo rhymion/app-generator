@@ -2,7 +2,7 @@
 
 import prisma from '@/lib/prisma';
 import type { Organization, OrganizationDetail } from '@/lib/organization/types';
-import { assertPermission, getModelPermissions, getSessionUserIdOrThrow, Operation, resolvePermissions, toPermissions } from '../authz';
+import { assertPermission, getModelPermissions, getSessionUserIdOrThrow, Operation, resolveEntityPermissions, resolveRecordPermissions, toPermissions } from '../authz';
 
 export async function getAssociatedOrganizations(userId: string): Promise<Organization[]> {
   const organizations = await prisma.organization.findMany({
@@ -98,7 +98,9 @@ export async function getAssociatedOrganizationDetailPageData(id: string, operat
     getAssociatedOrganizationDetail(id, userId),
     getModelPermissions('organization', userId),
   ]);
-  const resolved = await resolvePermissions(basePermissions, organization, userId ?? '');
+  const resolved = organization
+    ? await resolveRecordPermissions(basePermissions, organization, userId)
+    : await resolveEntityPermissions(basePermissions);
   await assertPermission(resolved, operation, 'organization');
   return { organization, userPermissions: await toPermissions(resolved) };
 }

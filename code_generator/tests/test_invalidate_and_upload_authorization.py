@@ -60,10 +60,10 @@ def _both(**context):
 
 def test_invalidate_resolves_permission_against_the_record():
     out = _both()
-    assert "resolvePermissions(basePerms, existing, userId)" in out['route']
+    assert "resolveRecordPermissions(basePerms, existing, userId)" in out['route']
     assert "findUnique({ where: { id }, select: " + ITEM_SELECT in out['route']
     assert "throw new ApiError(403, `Access denied: widget.delete`)" in out['route']
-    assert "resolvePermissions(_invalidateBasePerms, _invalidateItem, userId)" in out['action']
+    assert "resolveRecordPermissions(_invalidateBasePerms, _invalidateItem, userId)" in out['action']
     assert "findUnique({ where: { id }, select: " + ITEM_SELECT in out['action']
     assert "AppError('PERMISSION_DENIED', 'Access denied: widget.delete')" in out['action']
 
@@ -72,7 +72,7 @@ def test_invalidate_never_calls_the_item_less_permission_check_alone():
     out = _both()
     # the coarse gate is kept, but its result must be used for the record-level check
     assert "const basePerms = await requireApiPermission(userId, 'widget', 'delete');" in out['route']
-    assert "const _invalidateBasePerms = await requirePermission('widget', 'delete', undefined, userId);" in out['action']
+    assert "const _invalidateBasePerms = await requireEntityPermission('widget', 'delete', userId);" in out['action']
 
 
 def test_invalidate_org_scoped_entity_is_filtered_by_associated_organizations():
@@ -101,14 +101,14 @@ def test_invalidate_self_only_entity_requires_ownership():
     out = _both(is_self_only=True)
     assert 'existing.creator_id !== userId' in out['route']
     assert '_invalidateItem.creator_id !== userId' in out['action']
-    assert 'resolvePermissions' not in out['route']
-    assert 'resolvePermissions' not in out['action']
+    assert 'resolveRecordPermissions' not in out['route']
+    assert 'resolveRecordPermissions' not in out['action']
 
 
 def test_invalidate_record_lookup_precedes_the_handler_call():
     out = _both(invalidate_module='lib/x/handler', invalidate_handler='doIt')
-    assert out['route'].index('resolvePermissions(') < out['route'].index('await doIt(id)')
-    assert out['action'].index('resolvePermissions(') < out['action'].index('await doIt(id)')
+    assert out['route'].index('resolveRecordPermissions(') < out['route'].index('await doIt(id)')
+    assert out['action'].index('resolveRecordPermissions(') < out['action'].index('await doIt(id)')
 
 
 def test_upload_route_never_uses_the_client_filename_as_a_storage_location():

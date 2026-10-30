@@ -219,7 +219,7 @@ def test_record_resolver_of_an_org_scoped_entity_reads_the_record_through_its_ga
     assert 'ticket: async (recordId, userId) => {' in out
     assert 'where: { id: recordId, organization_id: { in: _assocOrgIds }, creator_id: userId, status: { in: [1] } }' in out
     assert 'select: { id: true, creator_id: true, organization_id: true }' in out
-    assert "await requirePermission('ticket', 'read', parentRow, userId);" in out
+    assert "await requireRecordPermission('ticket', 'read', parentRow, userId);" in out
     assert 'return { organizationId: parentRow.organization_id ?? null };' in out
     # a missing or unreadable record resolves to null, never to a scope
     assert 'if (error instanceof AppError) return null;' in out
@@ -230,7 +230,7 @@ def test_record_resolver_of_an_entity_without_an_organization_column_scopes_noth
     assert 'organization_id' not in out
     assert 'getAssociatedOrganizations' not in out
     assert 'return { organizationId: null };' in out
-    assert "await requirePermission('memo', 'read', parentRow, userId);" in out
+    assert "await requireRecordPermission('memo', 'read', parentRow, userId);" in out
 
 
 def test_search_template_takes_the_record_and_never_scopes_by_the_actor():
@@ -256,7 +256,7 @@ def test_record_org_template_resolves_only_known_entities_from_its_own_table():
 
 _RECORD_ORG_IMPORTS = (
     "import prisma from '@/lib/prisma';",
-    "import { requirePermission } from '@/lib/authz';",
+    "import { requireRecordPermission } from '@/lib/authz';",
     "import { AppError } from '@/lib/_errors';",
 )
 

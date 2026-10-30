@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { authenticate, requireApiPermission, handleApiError } from '@/lib/api-auth';
+import { authenticate, requireApiRecordPermission, handleApiError } from '@/lib/api-auth';
 import { getAuditLogDetail } from '@/lib/audit_log/getters';
 
 type Params = { params: Promise<{ id: string }> };
@@ -11,7 +11,7 @@ export async function GET(request: NextRequest, { params }: Params) {
     if (!item) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
-    await requireApiPermission(actorId, 'audit_log', 'read', item);
+    await requireApiRecordPermission(actorId, 'audit_log', 'read', item);
     return NextResponse.json(item);
   } catch (error) {
     return handleApiError(error);

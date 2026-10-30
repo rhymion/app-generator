@@ -2,7 +2,7 @@
 
 import prisma from '@/lib/prisma';
 import type { AuditLog, AuditLogDetail } from '@/lib/audit_log/types';
-import { assertPermission, getModelPermissions, resolvePermissions, toPermissions } from '@/lib/authz';
+import { assertPermission, getModelPermissions, resolveEntityPermissions, resolveRecordPermissions, toPermissions } from '@/lib/authz';
 import type { Operation, RichPermissions } from '@/lib/authz';
 import {
   type PageOpts, type PageResult,
@@ -56,7 +56,9 @@ export async function getAuditLogDetailPageData(id: string, operation: Operation
     getAuditLogDetail(id),
     getModelPermissions('audit_log'),
   ]);
-  const resolved = await resolvePermissions(basePermissions, auditLog, userId ?? '');
+  const resolved = auditLog
+    ? await resolveRecordPermissions(basePermissions, auditLog, userId ?? '')
+    : await resolveEntityPermissions(basePermissions);
   await assertPermission(resolved, operation, 'audit_log');
   return { auditLog, userPermissions: await toPermissions(resolved) };
 }

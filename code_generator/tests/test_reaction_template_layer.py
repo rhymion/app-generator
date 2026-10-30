@@ -266,10 +266,10 @@ class TestToggleReactionPermissionOrder:
         # different ownership rule and would otherwise collide with a
         # bare rendered.index() search.
         toggle_fn = rendered[rendered.index('export async function toggleTaskCommentReaction'):]
-        coarse_check = "const basePerms = await requirePermission('task', 'read', undefined, userId);"
+        coarse_check = "const basePerms = await requireEntityPermission('task', 'read', userId);"
         comment_fetch = 'const comment = await prisma.comment.findUnique({'
         parent_fetch = 'const parentRow = await prisma.task.findFirst({'
-        resolve_call = 'const resolved = parentRow ? await resolvePermissions(basePerms, parentRow, userId) : basePerms;'
+        resolve_call = 'const resolved = parentRow ? await resolveRecordPermissions(basePerms, parentRow, userId) : basePerms;'
         assert coarse_check in toggle_fn
         assert comment_fetch in toggle_fn
         assert parent_fetch in toggle_fn
@@ -277,9 +277,9 @@ class TestToggleReactionPermissionOrder:
         assert toggle_fn.index(coarse_check) < toggle_fn.index(comment_fetch)
         assert toggle_fn.index(comment_fetch) < toggle_fn.index(parent_fetch)
         assert toggle_fn.index(parent_fetch) < toggle_fn.index(resolve_call)
-        # No second requirePermission(model, 'read', item)-backed call for
+        # No second requireRecordPermission(model, 'read', item)-backed call for
         # this model -- the item-level check reuses basePerms.
-        assert "await requirePermission('task', 'read', parentRow ?? undefined);" not in toggle_fn
+        assert "await requireRecordPermission('task', 'read', parentRow ?? undefined);" not in toggle_fn
 
     def test_denied_read_throws_after_resolve(self):
         schema = _commentable_schema()

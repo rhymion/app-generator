@@ -19,21 +19,25 @@ export interface RichPermissions extends OperationFlags {
   assignee: OperationFlags | null;
 }
 
-export type ItemContext = {
+export type RecordContext = {
   creator_id?: string | null;
   assignee_id?: string | null;
   [key: string]: unknown;
-} | null | undefined;
+};
 
 export async function toPermissions(_p: RichPermissions): Promise<ModelPermissions> {
   throw new Error('fixture stub');
 }
 
-export async function resolvePermissions(
+export async function resolveRecordPermissions(
   _perms: RichPermissions,
-  _item: ItemContext,
+  _item: RecordContext,
   _userId: string,
 ): Promise<RichPermissions> {
+  throw new Error('fixture stub');
+}
+
+export async function resolveEntityPermissions(_perms: RichPermissions): Promise<RichPermissions> {
   throw new Error('fixture stub');
 }
 
@@ -48,20 +52,36 @@ export async function assertPermission(_permissions: OperationFlags, _operation:
   throw new Error('fixture stub');
 }
 
-export async function requirePermission(
+export async function requireEntityPermission(
   _model: ModelName,
   _operation: Operation,
-  _item?: ItemContext,
   _userId?: string | null,
 ): Promise<RichPermissions> {
   throw new Error('fixture stub');
 }
 
-export async function canAccess(
+export async function requireRecordPermission(
+  _model: ModelName,
+  _operation: Operation,
+  _item: RecordContext,
+  _userId?: string | null,
+): Promise<RichPermissions> {
+  throw new Error('fixture stub');
+}
+
+export async function canAccessEntity(
   _model: ModelName,
   _operation: Operation,
   _userId?: string | null,
-  _item?: ItemContext,
+): Promise<boolean> {
+  throw new Error('fixture stub');
+}
+
+export async function canAccessRecord(
+  _model: ModelName,
+  _operation: Operation,
+  _item: RecordContext,
+  _userId?: string | null,
 ): Promise<boolean> {
   throw new Error('fixture stub');
 }

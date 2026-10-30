@@ -65,9 +65,9 @@ describe('Dashboard widget editor', () => {
       cy.visit(`/en/dashboard/edit/${id}`);
       cy.get('[data-testid="widget-row-0"]').within(() => {
         cy.get('input[role="combobox"]').filter((_, el) => (el as HTMLInputElement).value === 'status').should('have.length', 1);
-        cy.contains('label', 'Group By Field').invoke('attr', 'for').then((inputId) => {
-          cy.get(`#${inputId}`).click();
-        });
+        // Reach the input through the DOM, not through the label's `for` id: MUI generates that id, and it can change
+        // between the server render and hydration, which detached the element between lookup and click.
+        cy.contains('label', 'Group By Field').parent().find('input[role="combobox"]').click();
       });
       cy.get('[role="listbox"] [role="option"]').should('have.length', 1).and('have.attr', 'aria-disabled', 'true');
     });

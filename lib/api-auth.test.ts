@@ -18,7 +18,7 @@ vi.mock('@/lib/prisma', () => ({
 }));
 
 vi.mock('@/lib/authz', () => ({
-  requirePermission: vi.fn(),
+  requireEntityPermission: vi.fn(), requireRecordPermission: vi.fn(),
   getSessionUserId,
 }));
 

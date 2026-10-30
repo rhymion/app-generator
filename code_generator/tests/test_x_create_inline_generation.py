@@ -179,7 +179,7 @@ def test_target_action_has_a_return_id_mode_that_only_creates(out):
     # An update would already be written when the id is returned, so the mix is refused
     # before anything else runs.
     assert "if (_returnId && data.get('id')) {" in actions
-    assert actions.index("data.get('__return_id')") < actions.index("requirePermission('inline_topic', 'create')")
+    assert actions.index("data.get('__return_id')") < actions.index("requireEntityPermission('inline_topic', 'create')")
     assert '_createdId = (await addInlineTopic(' in actions
 
 
@@ -190,7 +190,7 @@ def test_return_id_mode_returns_after_the_permission_and_validation_path(out):
     # the form-data validation and the create call (which runs the service validation
     # and the organisation check) are all above it.
     ret = body.index('if (_returnId) {')
-    assert body.index("requirePermission('inline_topic', 'create')") < ret
+    assert body.index("requireEntityPermission('inline_topic', 'create')") < ret
     assert body.index('_createdId = (await addInlineTopic(') < ret
     assert 'return { ok: true as const, id: _createdId as string };' in body
     # The normal path still redirects after it.

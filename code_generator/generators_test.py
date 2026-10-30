@@ -6393,7 +6393,7 @@ def db_helpers_context(
             if rel_target and rel_target in base_entities and rel.get('labelField'):
                 labelfield_entities |= relation_chain_targets(rel['labelField'], rel_target, schema)
     # Only entities with a live generated API route are ever subject to a
-    # requirePermission() check — entities with x-generate.api: false (e.g.
+    # requireRecordPermission() check — entities with x-generate.api: false (e.g.
     # approvable, commentable) or no x-generate at all (internal-only, e.g.
     # comment) have no route to call and so need no permission grant.
     labelfield_entities = {e for e in labelfield_entities if e in base_entities and _has_api(e)}

@@ -3,10 +3,11 @@
 add / update / delete<Entity>Comment are callable endpoints independent of the UI, so each one
 reads the parent record through the caller's organization scope (plus x-self-only and
 x-filter-values when declared) and resolves the caller's permission on that row with
-requirePermission(), the way upsert<Entity> does. Covers both comment shapes: the shared
+requireRecordPermission(), the way upsert<Entity> does. Covers both comment shapes: the shared
 commentable bridge and a per-entity comment child table."""
 from pathlib import Path
 
+import re
 import pytest
 
 from build_context import _build_comment_actions, _build_comment_actions_bridge
@@ -44,13 +45,13 @@ def test_every_write_reads_the_parent_through_the_org_scope_and_checks_permissio
         assert 'getAssociatedOrganizations(userId)' in body, name
         assert 'organization_id: { in: _assocOrgIds }' in body, name
         assert "if (!parentRow) throw new AppError('NOT_FOUND', 'Not found');" in body, name
-        assert "requirePermission('ticket', 'update', parentRow, userId)" in body, name
+        assert "requireRecordPermission('ticket', 'update', parentRow, userId)" in body, name
 
 
 @pytest.mark.parametrize('shape', SHAPES)
 def test_add_checks_before_it_writes_and_notifies_from_the_scoped_row(shape):
     body = _fn(SHAPES[shape](ORG), 'addTicketComment')
-    check = body.index("requirePermission('ticket', 'update', parentRow, userId)")
+    check = body.index("requireRecordPermission('ticket', 'update', parentRow, userId)")
     write = body.index('create')
     assert check < write
     assert 'parentRow.creator_id' in body and 'parentRow.assignee_id' in body
@@ -60,14 +61,14 @@ def test_add_checks_before_it_writes_and_notifies_from_the_scoped_row(shape):
 def test_edit_keeps_the_author_rule_and_checks_the_parent_before_writing(shape):
     body = _fn(SHAPES[shape](ORG), 'updateTicketComment')
     assert "throw new Error('Not authorized to edit this comment')" in body
-    assert body.index("requirePermission('ticket', 'update'") < body.index('update(' if shape == 'child' else 'updateComment(')
+    assert body.index("requireRecordPermission('ticket', 'update'") < body.index('update(' if shape == 'child' else 'updateComment(')
 
 
 @pytest.mark.parametrize('shape', SHAPES)
 def test_delete_by_a_non_author_still_needs_delete_permission_on_the_row(shape):
     body = _fn(SHAPES[shape](ORG), 'deleteTicketComment')
-    assert "requirePermission('ticket', 'update', parentRow, userId)" in body
-    assert "requirePermission('ticket', 'delete', parentRow, userId)" in body
+    assert "requireRecordPermission('ticket', 'update', parentRow, userId)" in body
+    assert "requireRecordPermission('ticket', 'delete', parentRow, userId)" in body
     assert body.index("'update', parentRow") < body.index("'delete', parentRow")
 
 
@@ -76,7 +77,7 @@ def test_an_entity_without_organization_scope_gets_the_permission_check_only(sha
     code = SHAPES[shape]({})
     assert 'getAssociatedOrganizations' not in code
     assert 'organization_id' not in code
-    assert "requirePermission('ticket', 'update', parentRow, userId)" in _fn(code, 'addTicketComment')
+    assert "requireRecordPermission('ticket', 'update', parentRow, userId)" in _fn(code, 'addTicketComment')
 
 
 @pytest.mark.parametrize('shape', SHAPES)
@@ -114,7 +115,8 @@ def mention(tmp_path_factory) -> Path:
 
 def test_generated_actions_file_imports_the_helpers_the_comment_checks_call(mention):
     actions = (mention / 'lib/mention_gate_item/actions.ts').read_text()
-    assert "requirePermission('mention_gate_item', 'update', parentRow, userId)" in actions
-    assert "import { getSessionUserIdOrThrow, requirePermission" in actions
+    assert "requireRecordPermission('mention_gate_item', 'update', parentRow, userId)" in actions
+    imported = re.search(r"import \{([^}]*)\} from '@/lib/authz';", actions).group(1)
+    assert 'getSessionUserIdOrThrow' in imported and 'requireRecordPermission' in imported
     assert "from '@/lib/_errors'" in actions
     assert 'AppError' in actions.split("from '@/lib/_errors'")[0].splitlines()[-1]

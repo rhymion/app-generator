@@ -40,7 +40,7 @@ export type ModelPermissions = OperationFlags;
 
 /**
  * Rich permissions carrying sub-objects for deferred item-level resolution.
- * Returned by getModelPermissions and resolvePermissions.
+ * Returned by getModelPermissions, resolveEntityPermissions and resolveRecordPermissions.
  * Stripped to ModelPermissions via toPermissions() before passing to components.
  *
  *   general  — from global permissions + user's non-special roles
@@ -49,7 +49,7 @@ export type ModelPermissions = OperationFlags;
  *
  * Top-level create/read/update/delete without item context: general | creator | assignee,
  * so assertPermission on list pages passes for Creator/Assignee-only users.
- * After resolvePermissions: accurately reflects the specific item.
+ * After resolveRecordPermissions: accurately reflects the specific record.
  */
 export interface RichPermissions extends OperationFlags {
   general: OperationFlags;
@@ -57,11 +57,12 @@ export interface RichPermissions extends OperationFlags {
   assignee: OperationFlags | null;
 }
 
-export type ItemContext = {
+/** The record a record-scoped check is about. Never null: a call site without a record must use an entity-only function. */
+export type RecordContext = {
   creator_id?: string | null;
   assignee_id?: string | null;
   [key: string]: unknown;
-} | null | undefined;
+};
 
 const EMPTY_FLAGS: OperationFlags = { create: false, read: false, update: false, delete: false, import: false };
 const READ_ONLY_FLAGS: OperationFlags = { create: false, read: true, update: false, delete: false, import: false };
@@ -83,18 +84,37 @@ export async function toPermissions(p: RichPermissions): Promise<ModelPermission
 }
 
 /**
- * Apply item-level context to compute final effective permissions.
- * Creator/Assignee roles can grant read/update/delete on items the user owns/is assigned to,
- * but never grant create (which is a model-level operation, not item-level).
+ * Entity-only check: what the user may do to this entity in general, without
+ * looking at any record. read/update/delete are the broadest answer
+ * (general | creator | assignee), so it fits list pages and "may this user
+ * ever do X" questions. It never resolves Creator/Assignee-scoped flags for a
+ * specific record and must not be used to authorize an operation on one.
+ * Use {@link resolveRecordPermissions} when a record is in hand.
  */
-export async function resolvePermissions(
+export async function resolveEntityPermissions(perms: RichPermissions): Promise<RichPermissions> {
+  return perms;
+}
+
+/**
+ * Record-scoped check: apply the record's creator/assignee to compute the
+ * effective permissions for that one record. Creator/Assignee roles can grant
+ * read/update/delete on records the user owns/is assigned to, but never grant
+ * create (which is an entity-level operation).
+ *
+ * The record is required (the type has no null/undefined), so a call site that
+ * has no record cannot reach the Creator/Assignee-scoped flags by accident --
+ * it has to call {@link resolveEntityPermissions} and say so. The returned
+ * read/update/delete are the record's own flags: general, plus the Creator
+ * and Assignee grants that actually match this record.
+ */
+export async function resolveRecordPermissions(
   perms: RichPermissions,
-  item: ItemContext,
+  item: RecordContext,
   userId: string,
 ): Promise<RichPermissions> {
   let { read, update, delete: del } = perms.general;
 
-  if (item && userId) {
+  if (userId) {
     if (item.creator_id === userId && perms.creator) {
       read = read || perms.creator.read;
       update = update || perms.creator.update;
@@ -305,8 +325,8 @@ export async function deriveRichPermissionsFromRows(rows: PermissionRow[]): Prom
  * model a request asks about — see `getPermissionRowsForUser`.
  *
  * This is the ONLY place in the generated app that queries the DB for a
- * user's permissions — `requireApiPermission`/`requirePermission`/
- * `canAccess` all resolve through this one function (see their own doc
+ * user's permissions — `requireApiPermission`/`requireEntityPermission`/
+ * `requireRecordPermission`/`canAccessEntity`/`canAccessRecord` all resolve through this one function (see their own doc
  * comments), so a request that asks about the same (model, userId) more
  * than once (e.g. a capabilities endpoint checking read, then update, then
  * delete on one item) issues at most one `permission.findMany` for it,
@@ -390,32 +410,61 @@ export const getModelPermissions = cache(async (
   });
 });
 
-export async function canAccess(
+/** Entity-only: may the user ever perform `operation` on this entity (any record)? */
+export async function canAccessEntity(
   model: ModelName,
   operation: Operation,
   userId?: string | null,
-  item?: ItemContext,
+): Promise<boolean> {
+  const { permissions } = await getModelPermissions(model, userId);
+  return Boolean((await resolveEntityPermissions(permissions))[operation]);
+}
+
+/** Record-scoped: may the user perform `operation` on this specific record? */
+export async function canAccessRecord(
+  model: ModelName,
+  operation: Operation,
+  item: RecordContext,
+  userId?: string | null,
 ): Promise<boolean> {
   const { permissions, userId: resolvedUserId } = await getModelPermissions(model, userId);
-  if (!item || !resolvedUserId) return Boolean(permissions[operation]);
-  return Boolean((await resolvePermissions(permissions, item, resolvedUserId))[operation]);
+  if (!resolvedUserId) return false;
+  return Boolean((await resolveRecordPermissions(permissions, item, resolvedUserId))[operation]);
 }
 
 /**
- * Assert permission, fetching it internally. Accepts an optional explicit userId
- * (for API key auth) or falls back to the session user.
- * Returns the resolved RichPermissions for use in filtering.
+ * Entity-only assertion, fetching permissions internally. Accepts an optional
+ * explicit userId (for API key auth) or falls back to the session user.
+ * Returns the RichPermissions for use in filtering.
  */
-export async function requirePermission(
+export async function requireEntityPermission(
   model: ModelName,
   operation: Operation,
-  item?: ItemContext,
+  userId?: string | null,
+): Promise<RichPermissions> {
+  const { permissions } = await getModelPermissions(model, userId);
+  const resolved = await resolveEntityPermissions(permissions);
+  if (!resolved[operation]) {
+    throw new AppError('PERMISSION_DENIED', `Access denied: ${model}.${operation}`);
+  }
+  return resolved;
+}
+
+/**
+ * Record-scoped assertion: the permission is resolved against the given
+ * record, so Creator/Assignee grants count only for records the user owns or
+ * is assigned to. Returns the record-resolved RichPermissions.
+ */
+export async function requireRecordPermission(
+  model: ModelName,
+  operation: Operation,
+  item: RecordContext,
   userId?: string | null,
 ): Promise<RichPermissions> {
   const { permissions, userId: resolvedUserId } = await getModelPermissions(model, userId);
-  const resolved = item && resolvedUserId
-    ? await resolvePermissions(permissions, item, resolvedUserId)
-    : permissions;
+  const resolved = resolvedUserId
+    ? await resolveRecordPermissions(permissions, item, resolvedUserId)
+    : await resolveEntityPermissions(permissions);
   if (!resolved[operation]) {
     throw new AppError('PERMISSION_DENIED', `Access denied: ${model}.${operation}`);
   }
