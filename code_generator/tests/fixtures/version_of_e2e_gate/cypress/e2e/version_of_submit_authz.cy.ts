@@ -25,7 +25,8 @@ function submitAs(email: string, versionId: string) {
     cy
       .request({
         method: 'POST',
-        url: '/vo_item_version',
+        // The action is bundled with the page that renders it; the request must target that page.
+        url: `/vo_item_version/view/${encodeURIComponent(versionId)}`,
         headers: { 'Next-Action': id, 'Content-Type': 'text/plain;charset=UTF-8', Accept: 'text/x-component' },
         body: JSON.stringify([versionId]),
         failOnStatusCode: false,
