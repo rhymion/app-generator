@@ -247,7 +247,7 @@ not made today.
 in `lib/authz.ts` (`SPECIAL_ROLE_NAMES`). Neither requires an explicit
 per-user role *connection* — every user implicitly qualifies for whichever
 applies to a given row (`creator_id === userId` / `assignee_id === userId`),
-evaluated per item by `resolvePermissions()`.
+evaluated per item by `resolveRecordPermissions()`.
 
 - **`Creator`**: granted exactly `setting.read` + `setting.update` and
   nothing else. This is the mechanism by which a non-admin user reaches

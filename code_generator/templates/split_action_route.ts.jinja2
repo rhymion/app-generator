@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireCaller, requireApiPermission, handleApiError, ApiError } from '@/lib/api-auth';
-import { resolvePermissions } from '@/lib/authz';
+import { resolveRecordPermissions } from '@/lib/authz';
 import prisma from '@/lib/prisma';
 {% if should_filter_by_org %}
 import { getAssociatedOrganizations } from '@/lib/organization/getters_associated';
@@ -83,7 +83,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     {% else %}
     // Record-level resolution (general / Creator / Assignee grants), as the
     // single-record PUT does.
-    const _resolved = await resolvePermissions(_basePerms, parent as Record<string, unknown>, userId);
+    const _resolved = await resolveRecordPermissions(_basePerms, parent as Record<string, unknown>, userId);
     if (!_resolved.{{ split_permission_op }}) throw new ApiError(403, 'Access denied: {{ entity_name }}.{{ split_permission_op }}');
     {% endif %}
 

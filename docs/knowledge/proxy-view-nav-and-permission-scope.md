@@ -72,7 +72,7 @@ raw `__`-prefixed entity, never the view.
 Used to require a definitions entry to carry a direct `id` property --
 which structurally excludes every proxy view (in the built schema they're an `allOf`
 wrapper, never own `id` directly), `setting` included. That's the wrong
-axis: `requirePermission()` (`lib/authz.ts`, called from
+axis: `requireRecordPermission()` (`lib/authz.ts`, called from
 `actions.ts.jinja2`) is keyed to each entity's own `parent`/route name,
 not the underlying Prisma model, so a proxy view needs its **own**
 grant-all-permissions entry -- granting only the shared model leaves

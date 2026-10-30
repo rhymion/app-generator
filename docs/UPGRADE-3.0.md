@@ -79,7 +79,7 @@ code without changing anything in the database:
 - **Organization-scoped mutation paths now deny cross-org access (cmd452)** —
   generated API routes and server actions for org-scoped entities previously
   authorized update/delete/CSV-import-update purely via
-  `creator_id`/`assignee_id` (`resolvePermissions()`), without checking
+  `creator_id`/`assignee_id` (`resolveRecordPermissions()`), without checking
   organization membership, so a user holding `general.update` /
   `general.delete` / `general.import` could act on another organization's
   record by ID (IDOR). 3.0 adds an explicit organization-membership check on

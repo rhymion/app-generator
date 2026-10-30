@@ -4,7 +4,7 @@ import { authenticate, requireApiPermission, handleApiError{% if needs_resolve %
 import { getRateLimiter } from '@/lib/rate-limit';
 {% if credential_confirmation and can_update %}import { confirmCredentialChange } from '@/lib/auth/credential-confirmation';
 {% endif %}{% if needs_resolve %}
-import { resolvePermissions } from '@/lib/authz';
+import { resolveRecordPermissions } from '@/lib/authz';
 {% endif %}
 {% if (can_view and comment_has_mention) or can_update or can_delete %}import prisma from '@/lib/prisma';
 {% endif %}{% if can_view %}
@@ -45,7 +45,7 @@ export async function GET(request: NextRequest, { params }: Params) {
     if (!item) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
-    const resolved = await resolvePermissions(basePerms, item, actorId);
+    const resolved = await resolveRecordPermissions(basePerms, item, actorId);
     if (!resolved.read) {
       throw new ApiError(403, `Access denied: {{ parent }}.read`);
     }
@@ -158,7 +158,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
 {% else %}
-    const resolved = await resolvePermissions(basePerms, existing, actorId);
+    const resolved = await resolveRecordPermissions(basePerms, existing, actorId);
     if (!resolved.update) {
       throw new ApiError(403, `Access denied: {{ parent }}.update`);
     }
@@ -248,7 +248,7 @@ export async function DELETE(request: NextRequest, { params }: Params) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
 {% else %}
-    const resolved = await resolvePermissions(basePerms, existing, actorId);
+    const resolved = await resolveRecordPermissions(basePerms, existing, actorId);
     if (!resolved.delete) {
       throw new ApiError(403, `Access denied: {{ parent }}.delete`);
     }

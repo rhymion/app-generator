@@ -69,7 +69,7 @@ def test_owner_read_goes_through_the_owners_own_permission_and_scope():
     assert "readOwner(actorId, 'product', () => getProductDetail(ownerId) as never)" in out
     # Read permission first (403), then the organization-scoped getter (404), then item-level resolution.
     body = out.split('async function readOwner(')[1].split('export async function')[0]
-    assert body.index('if (!base.read) return') < body.index('await load()') < body.index('resolvePermissions(')
+    assert body.index('if (!base.read) return') < body.index('await load()') < body.index('resolveRecordPermissions(')
     assert "return 'forbidden';" in body and "return 'not_found';" in body
 
 

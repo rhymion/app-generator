@@ -7,7 +7,7 @@ export async function getSessionUserIdOrThrow(): Promise<string> {
 export async function getModelPermissions(_model: string, _userId: string) {
   return { permissions: { update: true } as RichPermissions };
 }
-export async function resolvePermissions(
+export async function resolveRecordPermissions(
   _base: RichPermissions,
   owner: { id: string },
   _userId: string,

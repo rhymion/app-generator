@@ -6,7 +6,7 @@
 // scope as that record's own detail page. An attachment no owner references (uploaded, not yet
 // attached) can only be read by the user who uploaded it.
 import prisma from '@/lib/prisma';
-import { getModelPermissions, resolvePermissions } from '@/lib/authz';
+import { getModelPermissions, resolveRecordPermissions, type RecordContext } from '@/lib/authz';
 {% for o in getter_owners %}
 import { get{{ o.pascal }}Detail } from '@/lib/{{ o.name }}/getters';
 {% endfor %}
@@ -38,7 +38,7 @@ async function readOwner(
   // A record outside the caller's organizations (or, for a self-only entity, not the caller's own)
   // is not found, exactly as on the record's own detail route.
   if (!item) return 'not_found';
-  const resolved = await resolvePermissions(base, item as Parameters<typeof resolvePermissions>[1], actorId);
+  const resolved = await resolveRecordPermissions(base, item as RecordContext, actorId);
   return resolved.read ? 'allow' : 'forbidden';
 }
 

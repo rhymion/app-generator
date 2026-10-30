@@ -67,10 +67,41 @@ def _body(rendered: str, fn: str) -> str:
     return rendered[start:] if end == -1 else rendered[start:end]
 
 
-def test_only_org_scoped_targets_are_checked():
+def test_every_client_chosen_target_is_checked_except_organization_and_user():
     _, ctx, _ = _render(_schema())
+    # organization_id is not a reference the client chooses (own membership rule);
+    # gadget_id and unit_id are, and a target without an organization column is
+    # still checked for read permission.
+    assert [c['prop'] for c in ctx['fk_write_checks']] == ['gadget_id', 'unit_id']
+    assert [c['target'] for c in ctx['fk_write_checks']] == ['gadget', 'unit']
+    assert [c['self_only'] for c in ctx['fk_write_checks']] == [False, False]
+
+
+def test_user_pointing_foreign_keys_are_not_checked():
+    schema = _schema()
+    defs = schema['definitions']
+    defs.update(_entity_defs('user', {}, []))
+    defs['__widget']['properties']['owner_id'] = _fk('user')
+    _, ctx, _ = _render(schema)
+    assert 'owner_id' not in [c['prop'] for c in ctx['fk_write_checks']]
+    assert 'organization_id' not in [c['prop'] for c in ctx['fk_write_checks']]
+
+
+def test_a_self_only_target_is_marked_so_the_creator_rule_applies():
+    schema = _schema()
+    schema['definitions']['gadget']['x-self-only'] = True
+    rendered, ctx, _ = _render(schema)
+    assert [c['self_only'] for c in ctx['fk_write_checks']] == [True, False]
+    add_body = _body(rendered, 'addWidget')
+    assert "{ model: 'gadget', selfOnly: true, id:" in add_body
+    assert "{ model: 'unit', id:" in add_body
+
+
+def test_a_target_that_is_not_a_generated_entity_is_not_checked():
+    schema = _schema()
+    del schema['definitions']['unit']['x-generate']
+    _, ctx, _ = _render(schema)
     assert [c['prop'] for c in ctx['fk_write_checks']] == ['gadget_id']
-    assert ctx['fk_write_checks'][0]['target'] == 'gadget'
 
 
 def test_add_and_update_check_the_reference_before_writing():
@@ -83,13 +114,13 @@ def test_add_and_update_check_the_reference_before_writing():
     assert update_body.index('assertFkReferencesUsable') < update_body.index('prisma.$transaction')
     # update compares against the stored value so an unchanged reference is not re-checked
     assert 'previousId: _fkPrevious?.gadget_id' in update_body
-    assert "model: 'unit'" not in rendered
+    assert "model: 'unit'" in rendered
 
 
 def test_readonly_fk_is_not_a_client_write_and_is_not_checked():
     rendered, ctx, _ = _render(_schema(readonly_gadget=True))
-    assert ctx['fk_write_checks'] == []
-    assert 'assertFkReferencesUsable' not in rendered
+    assert [c['prop'] for c in ctx['fk_write_checks']] == ['unit_id']
+    assert "model: 'gadget'" not in rendered
 
 
 def _api_spec(primary_target_scoped: bool) -> tuple[dict, str]:

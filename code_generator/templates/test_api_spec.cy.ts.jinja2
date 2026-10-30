@@ -902,6 +902,7 @@ describe('API: {{ title }}', () => {
     // to, with the same 404 a missing row gets.
 {% if can_new %}
     it('G3.8 POST with a {{ fk_write_probe.prop }} in a foreign org returns 404 (existence hidden)', () => {
+      {% if can_list %}cy.request({ url: API_BASE, headers: { 'X-API-Key': TEST_API_KEY } }).its('body.total'){% else %}cy.wrap(null){% endif %}.then((totalBefore) => {
       cy.task<any>('db:populate{{ pascal }}Dependencies').then((deps) => {
         cy.task<any>('db:createCrossOrgScenario', { entityName: '{{ fk_write_probe.target }}', entityId: deps.{{ fk_write_probe.dep_var }}2.id }).then((scenario) => {
           cy.request({
@@ -918,11 +919,19 @@ describe('API: {{ title }}', () => {
           }).then((res) => {
             expect(res.status).to.eq(404);
           });
+{% if can_list %}
+          // Re-read: nothing was created.
+          cy.request({ url: API_BASE, headers: { 'X-API-Key': TEST_API_KEY } }).then((after) => {
+            expect(after.body.total).to.eq(totalBefore);
+          });
+{% endif %}
         });
+      });
       });
     });
 
     it('G3.9 bulk POST with a {{ fk_write_probe.prop }} in a foreign org reports Not found and does not create', () => {
+      {% if can_list %}cy.request({ url: API_BASE, headers: { 'X-API-Key': TEST_API_KEY } }).its('body.total'){% else %}cy.wrap(null){% endif %}.then((totalBefore) => {
       cy.task<any>('db:populate{{ pascal }}Dependencies').then((deps) => {
         cy.task<any>('db:createCrossOrgScenario', { entityName: '{{ fk_write_probe.target }}', entityId: deps.{{ fk_write_probe.dep_var }}2.id }).then((scenario) => {
           cy.request({
@@ -942,7 +951,14 @@ describe('API: {{ title }}', () => {
             expect(res.body.results[0].success).to.eq(false);
             expect(res.body.results[0].error).to.match(/^Not found/);
           });
+{% if can_list %}
+          // Re-read: nothing was created.
+          cy.request({ url: API_BASE, headers: { 'X-API-Key': TEST_API_KEY } }).then((after) => {
+            expect(after.body.total).to.eq(totalBefore);
+          });
+{% endif %}
         });
+      });
       });
     });
 {% endif %}
@@ -966,6 +982,12 @@ describe('API: {{ title }}', () => {
             }).then((res) => {
               expect(res.status).to.eq(404);
             });
+{% if can_view %}
+            // Re-read: the stored reference is unchanged.
+            cy.request({ url: `${API_BASE}/${records[0].id}`, headers: { 'X-API-Key': TEST_API_KEY } }).then((after) => {
+              expect(after.body.{{ fk_write_probe.prop }}).to.eq(records[0].{{ fk_write_probe.prop }});
+            });
+{% endif %}
           });
         });
       });
@@ -987,6 +1009,12 @@ describe('API: {{ title }}', () => {
               expect(res.body.results[0].success).to.eq(false);
               expect(res.body.results[0].error).to.match(/^Not found/);
             });
+{% if can_view %}
+            // Re-read: the stored reference is unchanged.
+            cy.request({ url: `${API_BASE}/${records[0].id}`, headers: { 'X-API-Key': TEST_API_KEY } }).then((after) => {
+              expect(after.body.{{ fk_write_probe.prop }}).to.eq(records[0].{{ fk_write_probe.prop }});
+            });
+{% endif %}
           });
         });
       });

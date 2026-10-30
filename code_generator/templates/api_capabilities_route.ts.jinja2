@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { authenticate, requireApiPermission, handleApiError, ApiError } from '@/lib/api-auth';
 import { get{{ parent_pascal }}Detail } from '@/lib/{{ parent }}/getters';
-import { resolvePermissions{% if has_approvable_bridge %}, getUserRoleIds{% endif %} } from '@/lib/authz';
+import { resolveRecordPermissions{% if has_approvable_bridge %}, getUserRoleIds{% endif %} } from '@/lib/authz';
 {% if has_edit_guard %}
 import { assertEditAllowed } from '@/lib/{{ parent }}/edit_guard';
 {% endif %}
@@ -54,7 +54,7 @@ export async function GET(request: NextRequest, { params }: Params) {
     // passed the coarse gate above via role membership alone (not a
     // general grant) may still turn out not to own/be assigned to THIS
     // specific item.
-    const resolved = await resolvePermissions(basePerms, item, actorId);
+    const resolved = await resolveRecordPermissions(basePerms, item, actorId);
     if (!resolved.read) {
       throw new ApiError(403, `Access denied: {{ parent }}.read`);
     }

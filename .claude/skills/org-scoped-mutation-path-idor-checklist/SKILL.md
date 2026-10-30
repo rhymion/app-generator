@@ -7,7 +7,7 @@ description: |
   (list/search/getDetail/export) commonly enforce the org-membership filter
   via buildAccessWhere/findFirst, but mutation paths are easy to leave on a
   bare findUnique/findMany fetch — organization_id passes through
-  lib/authz.ts's ItemContext index signature but resolvePermissions() never
+  lib/authz.ts's RecordContext index signature but resolveRecordPermissions() never
   checks it, so general.update/general.delete=true silently lets one org
   overwrite or delete another org's record (IDOR). Trigger when writing or
   reviewing a new generator template/mutation path for an org-scoped entity,
@@ -26,13 +26,13 @@ description: |
 
 ## North Star
 
-`lib/authz.ts`'s `ItemContext` only carries `creator_id` / `assignee_id` (plus
+`lib/authz.ts`'s `RecordContext` only carries `creator_id` / `assignee_id` (plus
 an `[key: string]: unknown` index signature that lets extra fields pass
-through silently without being checked). `resolvePermissions()` /
-`canAccess()` / `requireApiPermission()` / `requirePermission()` never look at
+through silently without being checked). `resolveRecordPermissions()` /
+`canAccessRecord()` / `requireApiRecordPermission()` / `requireRecordPermission()` (and their entity-only counterparts) never look at
 `organization_id` — the org boundary must be enforced by adding the filter to
 the **initial DB lookup** in the mutation path itself, not by extending
-`ItemContext`. Read paths (list, search, `getDetail`, export) already do this
+`RecordContext`. Read paths (list, search, `getDetail`, export) already do this
 correctly via `buildAccessWhere()` / org-filtered `findFirst`. Every mutation
 path added after that point has to independently repeat the same pattern —
 and three of them didn't, at HIGH severity, plus one LATENT MEDIUM.
@@ -57,16 +57,18 @@ entity:
 4. **When the org-filtered lookup returns null/empty, does the null/empty
    case actually short-circuit the permission check — or does it fall through
    to a `general.*` permission that grants access anyway?** —
-   `requirePermission(model, op, item, userId)` in `lib/authz.ts` falls back
-   to the top-level `general | creator | assignee` union permissions whenever
-   `item` is falsy. If the org-filtered fetch returns null (cross-org id) and
-   the code doesn't `throw`/404 on that null before calling
-   `requirePermission`, a user with `general.update = true` sails through the
-   permission check even though the record doesn't belong to their org — the
-   org filter only restricted what was *read*, not what gets *written*. This
-   was found live during test-writing for an `org_isolation.cy.ts` case and
-   required an explicit `if (!existing) throw` in addition to swapping
-   `findUnique` → org-filtered `findFirst`.
+   `requireRecordPermission(model, op, item, userId)` in `lib/authz.ts` needs a
+   record, so a null org-filtered result cannot be passed to it. The temptation
+   is to fall back to `requireEntityPermission(model, op, userId)`, which answers
+   with the top-level `general | creator | assignee` union. If the org-filtered
+   fetch returns null (cross-org id) and the code doesn't `throw`/404 on that
+   null before the permission check, a user with `general.update = true` sails
+   through even though the record doesn't belong to their org — the org filter
+   only restricted what was *read*, not what gets *written*. The entity-only
+   check is for the coarse gate in front of the lookup, never for deciding on a
+   record that was not found. This was found live during test-writing for an
+   `org_isolation.cy.ts` case and required an explicit `if (!existing) throw`
+   in addition to swapping `findUnique` → org-filtered `findFirst`.
 
 ## Byte-diff containment (generator template changes only)
 
@@ -114,6 +116,6 @@ diff clean.
   grant (point 4).
 - Do not apply a template/codegen fix without a two-way golden diff proving
   non-org-scoped entities are byte-for-byte unchanged.
-- Do not assume `ItemContext`'s `[key: string]: unknown` index signature means
+- Do not assume `RecordContext`'s `[key: string]: unknown` index signature means
   `organization_id` is checked anywhere — it passes through structurally but
-  `resolvePermissions()` never reads it.
+  `resolveRecordPermissions()` never reads it.

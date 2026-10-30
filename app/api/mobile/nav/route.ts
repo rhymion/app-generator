@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { authenticate, handleApiError } from '@/lib/api-auth';
-import { canAccess } from '@/lib/authz';
+import { canAccessEntity } from '@/lib/authz';
 import { siteConfig } from '@/lib/site-config';
 import prisma from '@/lib/prisma';
 import { SCHEDULED_TASK_ROLE_NAME } from '@/lib/scheduled-tasks/system-actor';
@@ -24,7 +24,7 @@ export async function GET(request: NextRequest) {
           ? (await prisma.role.count({
               where: { name: SCHEDULED_TASK_ROLE_NAME, users: { some: { id: userId } } },
             })) > 0
-          : canAccess(l.href.slice(1), 'read', userId),
+          : canAccessEntity(l.href.slice(1), 'read', userId),
       ),
     );
     const hiddenHrefs = entityLinks.filter((_, i) => !readable[i]).map((l) => l.href);
