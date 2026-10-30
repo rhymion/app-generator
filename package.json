@@ -12,6 +12,7 @@
     "cleanup": "python3 code_generator/build_user_schema.py code_generator/json_schema.yaml prisma/schema.prisma --out code_generator/.generated/json_schema.yaml && python3 code_generator/cleanup.py code_generator/.generated/json_schema.yaml ./ --prune-orphans --keep-stubs",
     "cleanup:all": "python3 code_generator/build_user_schema.py code_generator/json_schema.yaml prisma/schema.prisma --out code_generator/.generated/json_schema.yaml && python3 code_generator/cleanup.py code_generator/.generated/json_schema.yaml ./ --prune-orphans",
     "check:generated": "python3 code_generator/build_user_schema.py code_generator/json_schema.yaml prisma/schema.prisma --out code_generator/.generated/json_schema.yaml && python3 code_generator/check_generated.py code_generator/.generated/json_schema.yaml ./",
+    "check:security-matrix": "python3 code_generator/security_matrix.py check --manifest .security-manifest.json --tests cypress",
     "check:handwritten-routes": "python3 code_generator/check_handwritten_routes.py ./",
     "check:tracked-generated-imports": "python3 code_generator/check_tracked_generated_imports.py ./",
     "check:readme-sync": "bash scripts/check_readme_sync.sh",

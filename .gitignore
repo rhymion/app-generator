@@ -102,6 +102,7 @@ __pycache__/
 # code generator manifest — regenerated on every `generate-code`; cleanup reads
 # it but it churns with generated content, so it's kept out of version control.
 .generated-manifest.json
+.security-manifest.json
 
 # intermediate schema (cmd_395 Stage 1) — build_user_schema.py output, rebuilt
 # from user_schema.yaml + prisma/schema.prisma on every build. Never hand-edited,

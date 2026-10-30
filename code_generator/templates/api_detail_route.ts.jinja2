@@ -15,7 +15,7 @@ import { decodeMentions, extractMentionedUserIds, listMentions, type UserContext
 import { getTranslations } from 'next-intl/server';
 {% endif %}
 {% if can_update or can_delete %}
-import { {% if can_update %}update{{ parent_pascal }}{% endif %}{% if can_update and can_delete %}, {% endif %}{% if can_delete %}delete{{ parent_pascal }}{% endif %}{% if reservation_config and reservation_config.mode == 'count' %}, ReservationMutationError{% endif %} } from '@/lib/{{ parent }}/service';
+import { {% if can_update %}update{{ parent_pascal }}{% endif %}{% if can_update and can_delete %}, {% endif %}{% if can_delete %}delete{{ parent_pascal }}{% if fk_write_checks %}, assertDeleteReferencesReachable{{ parent_pascal }}{% endif %}{% endif %}{% if reservation_config and reservation_config.mode == 'count' %}, ReservationMutationError{% endif %} } from '@/lib/{{ parent }}/service';
 {% endif %}
 {% if should_filter_by_org and (can_update or can_delete) %}
 import { getAssociatedOrganizations } from '@/lib/organization/getters_associated';
@@ -252,6 +252,9 @@ export async function DELETE(request: NextRequest, { params }: Params) {
     if (!resolved.delete) {
       throw new ApiError(403, `Access denied: {{ parent }}.delete`);
     }
+{% endif %}
+{% if fk_write_checks %}
+    await assertDeleteReferencesReachable{{ parent_pascal }}(actorId, [id]);
 {% endif %}
     await delete{{ parent_pascal }}({% if is_audited %}actorId, {% endif %}[id]);
     return new NextResponse(null, { status: 204 });

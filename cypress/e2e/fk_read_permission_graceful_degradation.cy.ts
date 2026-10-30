@@ -115,14 +115,13 @@ describe('FK read-permission graceful degradation — browser session', () => {
     });
   });
 
-  it('c) an optional denied FK (requestor role) can be cleared; the required one (approver role) cannot', () => {
+  it('c) an optional denied FK (requestor role) cannot be cleared either; the reference is preserved', () => {
     // approval_flow has two FKs to role: requestor_role_id (optional) and
     // approver_role_id (required). Denying read on role makes both
-    // permission-denied at once, letting a single actor exercise the
-    // asymmetry: AppFieldRelation only renders a clear button
-    // (`!required && !!value`) for the optional one — clearing a required
-    // FK would leave the record permanently unsubmittable, since there is
-    // no way for this actor to pick a replacement.
+    // permission-denied at once. AppFieldRelation still renders a clear
+    // button for the optional one (`!required && !!value`), but a reference to
+    // a row the actor cannot reach may not be cleared or re-pointed by that
+    // actor: the save is refused and the stored reference is left untouched.
     createRole('Test Requestor Role C').then((requestorRoleId) => {
       createRole('Test Approver Role C').then((approverRoleId) => {
         createApprovalFlow({
@@ -144,15 +143,17 @@ describe('FK read-permission graceful degradation — browser session', () => {
             // calls happened in this process — round-trip the actual value
             // instead of assuming it's always the first-ever call).
             cy.getFieldValue('Approver Role').then((approverRoleLabel) => {
-              // Exactly one clear affordance on the page: the optional FK's.
-              cy.get('button[aria-label="clear"]').should('have.length', 1);
-              cy.get('button[aria-label="clear"]').click();
-              cy.clickButton('Save');
-              cy.url().should('include', '/approval_flow');
-              cy.url().should('not.include', '/approval_flow/edit');
-              cy.visit(`/en/approval_flow/view/${record.id}`);
-              cy.checkField('Requestor Role', '');
-              cy.checkField('Approver Role', approverRoleLabel);
+              cy.getFieldValue('Requestor Role').then((requestorRoleLabel) => {
+                // Exactly one clear affordance on the page: the optional FK's.
+                cy.get('button[aria-label="clear"]').should('have.length', 1);
+                cy.get('button[aria-label="clear"]').click();
+                cy.clickButton('Save');
+                // The save is refused, so the actor stays on the edit page.
+                cy.url().should('include', '/approval_flow/edit');
+                cy.visit(`/en/approval_flow/view/${record.id}`);
+                cy.checkField('Requestor Role', requestorRoleLabel);
+                cy.checkField('Approver Role', approverRoleLabel);
+              });
             });
           });
         });
