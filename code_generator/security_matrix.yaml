@@ -1,0 +1,60 @@
+# Security test matrix: the data that drives `.security-manifest.json` and
+# `npm run check:security-matrix` (code_generator/security_matrix.py).
+#
+# Everything the checker knows about the matrix is declared here, as data:
+#
+# - `axes`      one entry per matrix dimension. A cell is one value from every
+#               axis. Add an axis (an actor, an input case, ...) by adding an
+#               entry; the checker code is not touched.
+# - `requires`  on an axis value: flags (generator context booleans, evaluated per
+#               entity) that must all be true for the value to apply to the entity.
+# - `combine`   on an axis value: restricts which values of OTHER axes it can be
+#               combined with (`{axis: [values]}`); omitted = combines with all.
+# - `default`   on an axis: the value an existing test marker means when it does
+#               not name that axis yet, so adding an axis does not force every
+#               marker to be rewritten.
+# - `unmodelled_templates` route templates that are deliberately not an operation
+#               here, each with the reason (see test_security_matrix.py).
+#
+# A test claims a cell with a marker comment anywhere in a test file:
+#     security-cell: entity=<entity> operation=<op> case=<case>
+# A cell no test claims fails the check unless `security_matrix_allowlist.yaml`
+# lists it with a reason.
+version: 1
+
+axes:
+  operation:
+    values:
+      list:          {entry_point: route,  template: api_route.ts.jinja2,          requires: [can_api, can_list]}
+      create:        {entry_point: route,  template: api_route.ts.jinja2,          requires: [can_api, can_new]}
+      detail:        {entry_point: route,  template: api_detail_route.ts.jinja2,   requires: [can_api, can_view]}
+      update:        {entry_point: route,  template: api_detail_route.ts.jinja2,   requires: [can_api, can_edit]}
+      delete:        {entry_point: route,  template: api_detail_route.ts.jinja2,   requires: [can_api, can_delete]}
+      capabilities:  {entry_point: route,  template: api_capabilities_route.ts.jinja2, requires: [can_api, can_view]}
+      bulk_create:   {entry_point: route,  template: api_bulk_route.ts.jinja2,     requires: [can_api, can_new]}
+      bulk_update:   {entry_point: route,  template: api_bulk_route.ts.jinja2,     requires: [can_api, can_edit]}
+      bulk_delete:   {entry_point: route,  template: api_bulk_route.ts.jinja2,     requires: [can_api, can_delete]}
+      options:       {entry_point: route,  template: api_options_route.ts.jinja2,  requires: [can_api]}
+      export:        {entry_point: route,  template: api_export_route.ts.jinja2,   requires: [can_api, can_list, can_export]}
+      import:        {entry_point: route,  template: api_import_route.ts.jinja2,   requires: [can_api, import_eligible]}
+      invalidate:    {entry_point: route,  template: invalidate_action_route.ts.jinja2, requires: [can_invalidate]}
+      action_add:        {entry_point: action, requires: [can_new]}
+      action_update:     {entry_point: action, requires: [can_edit]}
+      action_delete:     {entry_point: action, requires: [can_delete]}
+      action_invalidate: {entry_point: action, requires: [can_invalidate]}
+  case:
+    values:
+      # An authenticated actor whose role lacks the permission.
+      permission_denied: {}
+      # An actor who holds the permission in their own organization and reaches
+      # into another one. Dropped for an entity with no organization column.
+      cross_org:
+        requires: [should_filter_by_org]
+
+# Route templates the generator renders under app/api/ for a single entity that
+# are not (yet) an `operation` above, with the reason.
+unmodelled_templates:
+  api_comments_route.ts.jinja2: comment routes are reached through the commented entity's detail permission
+  api_comment_item_route.ts.jinja2: comment routes are reached through the commented entity's detail permission
+  api_attachments_route.ts.jinja2: attachment panel route, covered by the attachment suites
+  split_action_route.ts.jinja2: split action, covered by the split suites

@@ -300,6 +300,8 @@ jobs:
         run: npm run test:e2e:build
       - name: Check generated code against the schema
         run: npm run check:generated
+      - name: Check every security-matrix cell has a test
+        run: npm run check:security-matrix
       - name: Run API E2E tests
         run: npm run test:e2e:cy:start
 

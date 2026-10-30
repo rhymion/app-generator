@@ -52,6 +52,7 @@ Run in this order:
 14e. `npm run test:version-of-e2e-gate` — builds and RUNS a fixture app (default schema + an `x-version-of` identity and version entity) and runs its Cypress API specs: version number at approval, one open draft per identity, `current_version_id`, deletion of settled non-approved drafts, the new version screen, the identity tombstone (see below)
 15. `npm run test:e2e:build`   — docker:up:test + generate-code + db:push + db:generate + db:seed-tenant + build
 16. `npm run check:generated`  — generated code matches templates/schema
+16a. `npm run check:security-matrix` — every cell of the security matrix (`code_generator/security_matrix.yaml`) has a test marker or an allowlist entry with a reason (see `docs/knowledge/security-test-matrix.md`); runs on the generated tree right after step 16
 17. `npm run test:e2e:cy:api`  — API Cypress specs only
 18. `npm run test:e2e:cy:ui`   — non-API Cypress specs (desktop, mobile and `cypress/e2e/auth/**`); the auth MFA spec needs `MOCK_GOOGLE_OAUTH_TEST=true` in `.env.test.local`, as the `e2e-tests` CI job sets it; keep `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` empty in the worktree's `.env.test.local` (a copied real value makes the auth specs fail with a 500 on `/api/auth/callback/google`) while leaving `MOCK_GOOGLE_OAUTH_TEST=true` set
 19. `npm audit --omit=dev --audit-level=high`
