@@ -47,3 +47,5 @@ Two checks that used to run only by hand are CI steps:
 
 A new violation reported by either is a finding to fix, not something to add
 to an allowlist to turn the run green.
+
+See also [security-asvs-coverage.md](security-asvs-coverage.md), which maps each OWASP ASVS 5.0 requirement to the code, test or Issue that covers it.
