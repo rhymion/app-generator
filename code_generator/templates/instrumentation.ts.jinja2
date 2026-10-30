@@ -9,8 +9,9 @@
 export async function register(): Promise<void> {
   if (process.env.NEXT_RUNTIME === 'nodejs') {
     const { ensureSearchIndexes } = await import('@/lib/db-init');
+    const { logger } = await import('@/lib/logger');
     await ensureSearchIndexes().catch((err: unknown) => {
-      console.error('ensureSearchIndexes() failed during startup:', err);
+      logger.error('ensureSearchIndexes() failed during startup:', err);
     });
   }
 }

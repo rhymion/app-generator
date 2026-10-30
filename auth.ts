@@ -1,3 +1,4 @@
+import { logger } from '@/lib/logger';
 import NextAuth, { CredentialsSignin } from "next-auth";
 import type { NextAuthConfig } from "next-auth";
 import type { Adapter, AdapterUser } from "@auth/core/adapters";
@@ -270,7 +271,7 @@ export const authConfig: NextAuthConfig = {
       const allowed = siteConfig.auth?.allowedDomains ?? [];
       if (allowed.length > 0) {
         if (!isDomainAllowed(account.provider, email, profile as { hd?: unknown } | undefined, allowed)) {
-          console.info(
+          logger.info(
             "[auth:signIn:reject]",
             JSON.stringify({
               at: new Date().toISOString(),
@@ -303,7 +304,7 @@ export const authConfig: NextAuthConfig = {
           select: { email: true },
         });
         if (current?.email !== email) {
-          console.info(
+          logger.info(
             "[auth:signIn:reject]",
             JSON.stringify({
               at: new Date().toISOString(),
@@ -349,7 +350,7 @@ export const authConfig: NextAuthConfig = {
         select: { id: true, password: true },
       });
       if (existing && existing.password !== null) {
-        console.info(
+        logger.info(
           "[auth:signIn:reject]",
           JSON.stringify({
             at: new Date().toISOString(),
@@ -461,7 +462,7 @@ export const authConfig: NextAuthConfig = {
     // auditing lands.
     async signIn({ user, account, isNewUser }) {
       const provider = account?.provider ?? "unknown";
-      console.info(
+      logger.info(
         "[auth:signIn]",
         JSON.stringify({
           at: new Date().toISOString(),
@@ -487,7 +488,7 @@ export const authConfig: NextAuthConfig = {
         (token as { id?: string } | null)?.id ??
         (session as { userId?: string } | null)?.userId ??
         null;
-      console.info(
+      logger.info(
         "[auth:signOut]",
         JSON.stringify({
           at: new Date().toISOString(),

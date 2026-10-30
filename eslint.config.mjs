@@ -58,6 +58,34 @@ const eslintConfig = defineConfig([
       ],
     },
   },
+  // Issue #1237: application code never writes to the console directly. It goes through
+  // lib/logger.ts, which redacts credential-like keys and email addresses first. This rule
+  // covers hand-written code and, because the gate lints after generate-code, generated code.
+  {
+    rules: {
+      "no-console": "error",
+    },
+  },
+  // The no-console allowlist. Every entry needs a reason; add a file here only when the console
+  // is that code's actual interface and no request, user or secret data can reach it.
+  {
+    files: [
+      // The logger itself is the one place that writes to the console.
+      "lib/logger.ts",
+      // Command-line tools and build/gate scripts: stdout/stderr is their output channel. They run
+      // in a terminal or a one-off job, never inside a request handler.
+      "scripts/**",
+      "utils/scripts/**",
+      // Generator, its tests and fixtures: developer tooling that never ships in a generated app.
+      "code_generator/**",
+      // Cypress runs in the test runner, not in the app.
+      "cypress/**",
+      "cypress.config.ts",
+    ],
+    rules: {
+      "no-console": "off",
+    },
+  },
   // Override default ignores of eslint-config-next.
   globalIgnores([
     // Default ignores of eslint-config-next:

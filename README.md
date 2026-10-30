@@ -596,6 +596,7 @@ All architectural documentation lives in `docs/knowledge/`:
 | [mobile-executable.md](docs/knowledge/mobile-executable.md) | Building the generated Expo app as a release `.apk`, the iOS routes, and pointing a real device at the server |
 | [scheduled-task-operations.md](docs/knowledge/scheduled-task-operations.md) | Scheduled tasks: ordering with `depends_on`, the run guard and business date, the admin page, `task:run-all`, and running them on GCP |
 | [audit-log-append-only.md](docs/knowledge/audit-log-append-only.md) | Append-only `audit_log`: client guard, row trigger, monthly partitions, chained digests, write-once storage, switching to the restricted database role |
+| [logging.md](docs/knowledge/logging.md) | `lib/logger.ts`: the redacting logger (credential-like keys, emails, Error objects), extending its rules, and the `no-console` lint rule with its allowlist |
 | [list-panel-trigram-filter.md](docs/knowledge/list-panel-trigram-filter.md) | The list search box over trigram columns and the column-level `x-trigram-filter` |
 | [api-key-expiry.md](docs/knowledge/api-key-expiry.md) | Optional `user.api_key_expires_at` checked in `authenticateApiKey()`; `null` never expires, an expired key is rejected with `401 API key expired.` |
 

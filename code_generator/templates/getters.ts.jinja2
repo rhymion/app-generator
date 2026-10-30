@@ -1,5 +1,6 @@
 'use server';
 
+import { logger } from '@/lib/logger';
 import prisma from '@/lib/prisma';
 {% if version_of %}
 import { AppError } from '@/lib/_errors';
@@ -261,7 +262,7 @@ export async function search{{ parent_pascal }}Options(
   try {
     virtualData = await resolveVirtualColumns(rowsRaw as unknown as ReadonlyArray<Record<string, unknown>>);
   } catch (e) {
-    console.warn('virtual resolver error:', e);
+    logger.warn('virtual resolver error:', e);
     virtualData = new Map();
   }
 {% endif %}

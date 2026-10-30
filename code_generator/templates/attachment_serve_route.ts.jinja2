@@ -1,4 +1,5 @@
 // AUTO-GENERATED - DO NOT EDIT
+import { logger } from '@/lib/logger';
 import { NextRequest, NextResponse } from 'next/server';
 import { authenticate, ApiError } from '@/lib/api-auth';
 import { getSessionUserId } from '@/lib/authz';
@@ -68,7 +69,7 @@ export async function GET(request: NextRequest, { params }: Params) {
     });
     return response ?? new NextResponse(null, { status: 404 });
   } catch (error) {
-    console.error('Attachment delivery error:', error);
+    logger.error('Attachment delivery error:', error);
     return new NextResponse(null, { status: 500 });
   }
 }

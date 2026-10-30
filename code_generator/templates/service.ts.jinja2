@@ -235,7 +235,7 @@ export async function add{{ parent_pascal }}(actorId: string{% if parent_params_
       // Nothing can be paid for. Remove the unpaid record through this
       // entity's own delete function (so x-reservation and any hand-written
       // afterDelete hook still run), then the payable row.
-      console.error('[x-payment] could not start checkout for {{ parent }}', result.id, e);
+      logger.error('[x-payment] could not start checkout for {{ parent }}', result.id, e);
       await delete{{ parent_pascal }}({% if is_audited %}actorId, {% endif %}[result.id]);
       await prisma.payable.deleteMany({ where: { entity_name: '{{ parent }}', record_id: result.id } });
       throw new AppError('UNKNOWN', 'Payment checkout could not be started');
