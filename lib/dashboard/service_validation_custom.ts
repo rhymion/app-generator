@@ -7,7 +7,7 @@ import { validateWidgets } from './widgets-validation';
 // validateCustomRules() is called unconditionally from validateOnAdd()/
 // validateOnUpdate() (see lib/dashboard/service_validation.ts), after the
 // generated schema-driven checks (required fields, one-to-one uniqueness).
-// Throw an Error to reject the save — the message surfaces to the caller
+// Throw an AppError to reject the save — its message surfaces to the caller
 // (UI form or direct API request) as the save failure.
 //
 // `data` is the same raw create/update payload service_validation.ts

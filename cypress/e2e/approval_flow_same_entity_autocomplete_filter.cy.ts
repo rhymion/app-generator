@@ -264,7 +264,10 @@ describe('approval_flow preceded_by/followed_by same-entity_name candidate filte
           cy.selectAutocomplete('Entity Name', 'Setting');
           cy.intercept('POST', `/en/approval_flow/edit/${editTarget.id}`).as('save');
           cy.clickButton('Save');
-          cy.wait('@save').its('response.statusCode').should('be.gte', 400);
+          // The Server Action reports the AppError in its payload (HTTP 200)
+          // rather than crashing, so the proof of rejection is the unchanged
+          // record below.
+          cy.wait('@save');
           // Strongest available proof the save never committed: the record
           // is unchanged server-side, independent of the client's crashed
           // rendering (see comment above).
@@ -295,12 +298,8 @@ describe('approval_flow preceded_by/followed_by same-entity_name candidate filte
             followedBy_ids: [],
           },
         }).then((res) => {
-          // plain `throw new Error(...)` in validateSchemaRules (not
-          // ApiError) falls through handleApiError()'s 500 branch — same
-          // convention the generated api/approval_flow.cy.ts spec already
-          // uses (`.to.be.gte(400)`) for the pre-existing REQUIRED_FIELDS
-          // checks, not a cmd_646-specific choice.
-          expect(res.status).to.be.gte(400);
+          // The custom validation throws an AppError, which maps to 422.
+          expect(res.status).to.eq(422);
           expect(res.body?.error ?? JSON.stringify(res.body)).to.contain(
             "Preceded By must share this record's entity_name",
           );
@@ -325,12 +324,8 @@ describe('approval_flow preceded_by/followed_by same-entity_name candidate filte
               followedBy_ids: [crossEntityRow.id],
             },
           }).then((res) => {
-            // plain `throw new Error(...)` in validateSchemaRules (not
-          // ApiError) falls through handleApiError()'s 500 branch — same
-          // convention the generated api/approval_flow.cy.ts spec already
-          // uses (`.to.be.gte(400)`) for the pre-existing REQUIRED_FIELDS
-          // checks, not a cmd_646-specific choice.
-          expect(res.status).to.be.gte(400);
+          // The custom validation throws an AppError, which maps to 422.
+          expect(res.status).to.eq(422);
             expect(res.body?.error ?? JSON.stringify(res.body)).to.contain(
               "Followed By must share this record's entity_name",
             );
