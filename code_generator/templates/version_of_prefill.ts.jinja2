@@ -6,7 +6,7 @@
 import prisma from '@/lib/prisma';
 import { assertPermission, getModelPermissions{% if detail_takes_user_id %}, getSessionUserIdOrThrow{% endif %} } from '@/lib/authz';
 import { AppError } from '@/lib/_errors';
-import { get{{ pascal }}Detail } from './getters';
+import { get{{ pascal }}Detail } from './getters_internal';
 import { assertSingleOpenDraft } from './version_of';
 
 export type NewVersionPrefill =

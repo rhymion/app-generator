@@ -17,7 +17,7 @@ vi.mock('@/lib/mobile-auth', () => ({
 vi.mock('@/lib/prisma', () => ({ default: { user: { findFirst: userFindFirst } } }));
 vi.mock('@/lib/rate-limit', async () => (await import('@/test/helpers/real-rate-limiter')).realRateLimiterModule());
 vi.mock('@/lib/authz', () => ({ requirePermission, getSessionUserId: vi.fn() }));
-vi.mock('@/lib/audit_log/getters', () => ({ getAuditLogPage, getAuditLogDetail }));
+vi.mock('@/lib/audit_log/getters_internal', () => ({ getAuditLogPage, getAuditLogDetail }));
 
 import { NextRequest } from 'next/server';
 import { GET as listRoute } from './route';

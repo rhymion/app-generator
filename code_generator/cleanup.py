@@ -97,6 +97,7 @@ HANDWRITTEN_ALLOWLIST: frozenset[str] = frozenset([
     "app/api/audit_log/route.ts",
     "app/api/audit_log/[id]/route.ts",
     "lib/audit_log/getters.ts",
+    "lib/audit_log/getters_internal.ts",
     "lib/audit_log/types.ts",
     # always-generated cypress support files, git-tracked (not gitignored)
     "cypress/support/db-helpers.ts",
@@ -504,7 +505,7 @@ def _prune_orphans(out: Path, entities: list, keep_stubs: bool = False) -> None:
             if not any((lib_dir / f).exists() for f in ('types.ts', 'getters.ts')):
                 continue  # not an entity lib dir
             orphan_lib_dirs.add(parent)
-            for fname in ('types.ts', 'getters.ts', 'actions.ts', 'service.ts', 'chart-getters.ts'):
+            for fname in ('types.ts', 'getters.ts', 'getters_internal.ts', 'actions.ts', 'service.ts', 'chart-getters.ts'):
                 f = lib_dir / fname
                 if not _is_protected(f):
                     _delete(f)
@@ -628,6 +629,7 @@ def _clean_schema_driven(out: Path, entities: list, test_entities: list,
         # lib/
         _delete(lib_dir / 'types.ts')
         _delete(lib_dir / 'getters.ts')
+        _delete(lib_dir / 'getters_internal.ts')
         if can_new or can_edit or can_delete:
             _delete(lib_dir / 'service.ts')
             _delete(lib_dir / 'actions.ts')

@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { authenticate, requireApiPermission, handleApiError } from '@/lib/api-auth';
 import { getRateLimiter } from '@/lib/rate-limit';
 {% if can_update or can_delete %}import prisma from '@/lib/prisma';
-{% endif %}{% if should_filter_by_org and (can_update or can_delete) %}import { getAssociatedOrganizations } from '@/lib/organization/getters_associated';
+{% endif %}{% if should_filter_by_org and (can_update or can_delete) %}import { getAssociatedOrganizations } from '@/lib/organization/associated_internal';
 {% endif %}{% if can_create %}
 import { add{{ parent_pascal }} } from '@/lib/{{ parent }}/service';
 {% endif %}

@@ -610,7 +610,7 @@ def test_list_sort_filter_and_search_use_the_rest_list_parameters(out):
 def test_list_sorts_and_filters_by_a_relation_display_column_like_the_web_list(out):
     # mobile_task shows its mobile_group foreign key in x-display.table, so the REST list's
     # relation display column `mobile_group` (sorted and filtered by the group's name) is offered.
-    getters = (out / 'lib' / 'mobile_task' / 'getters.ts').read_text()
+    getters = (out / 'lib' / 'mobile_task' / 'getters_internal.ts').read_text()
     assert "RELATION_FILTER_FIELDS: RelationFilterMap = { 'mobile_group': { field: 'name' } }" in getters
     client = _read(out, 'lib/mobile_task/mobile_client.ts')
     sort_keys = json.loads(re.search(r'MOBILE_TASK_SORT_KEYS: string\[\] = (\[.*?\]);', client, re.S).group(1))

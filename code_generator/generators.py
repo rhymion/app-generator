@@ -4051,7 +4051,7 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
                or reservation_self_case_notifies or approval_edge_trigger_create_code
                or approval_edge_trigger_update_code) else '')
         + (f"\nimport {{ recordAuditEvent }} from '@/lib/audit-log';" if is_audited else '')
-        + (f"\nimport {{ getAssociatedOrganizations }} from '@/lib/organization/getters_associated';" if org_id_client_writable and (can_create or can_update) else '')
+        + (f"\nimport {{ getAssociatedOrganizations }} from '@/lib/organization/associated_internal';" if org_id_client_writable and (can_create or can_update) else '')
         + ("\nimport { assertFkReferencesUsable } from '@/lib/_fk_reference';" if (fk_write_checks or child_fk_check_create or child_fk_check_update) and (can_create or can_update) else '')
         + (f"\nimport {{ AppError, p2002Field }} from '@/lib/_errors';" if can_create or can_update else '')
         + (ctx.get('child_exclusive_imports', '') if can_create or can_update else '')

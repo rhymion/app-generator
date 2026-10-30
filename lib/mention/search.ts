@@ -33,7 +33,7 @@
 
 import prisma from '@/lib/prisma';
 import { getSessionUserIdOrThrow, getModelPermissions } from '@/lib/authz';
-import { getAssociatedOrganizations } from '@/lib/organization/getters_associated';
+import { getAssociatedOrganizations } from '@/lib/organization/associated_internal';
 
 export interface MentionUserOption {
   id: string;
