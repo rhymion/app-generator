@@ -264,7 +264,10 @@ describe('approval_flow preceded_by/followed_by same-entity_name candidate filte
           cy.selectAutocomplete('Entity Name', 'Setting');
           cy.intercept('POST', `/en/approval_flow/edit/${editTarget.id}`).as('save');
           cy.clickButton('Save');
-          cy.wait('@save').its('response.statusCode').should('be.gte', 400);
+          // The Server Action reports the AppError in its payload (HTTP 200)
+          // rather than crashing, so the proof of rejection is the unchanged
+          // record below.
+          cy.wait('@save');
           // Strongest available proof the save never committed: the record
           // is unchanged server-side, independent of the client's crashed
           // rendering (see comment above).
