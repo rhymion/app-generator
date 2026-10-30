@@ -11,6 +11,13 @@ import NavGroupWrapper from "@/components/_standard/NavGroupWrapper";
 const navTranslationKeys: Record<string, string> = {
   "/": "home",
   "/audit_log": "auditLog",
+  "/user": "user",
+  "/role": "role",
+  "/organization": "organization",
+  "/permission": "permission",
+  "/approval_flow": "approvalFlow",
+  "/dashboard": "dashboard",
+  "/app_setting": "appSetting",
 };
 
 export default function Sidebar({ hiddenHrefs = [] }: { hiddenHrefs?: string[] }) {
