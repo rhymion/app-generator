@@ -7,7 +7,7 @@
 // exist elsewhere.
 import { AppError } from '@/lib/_errors';
 import { canAccess } from '@/lib/authz';
-import { getAssociatedOrganizations } from '@/lib/organization/getters_associated';
+import { getAssociatedOrganizations } from '@/lib/organization/associated_internal';
 
 export type FkReference = {
   /** Prisma model name of the referenced entity. */

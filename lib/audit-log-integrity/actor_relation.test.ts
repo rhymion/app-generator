@@ -20,7 +20,7 @@ vi.mock('@/lib/authz', () => ({
   toPermissions: vi.fn(),
 }));
 
-import { getAuditLogDetail, getAuditLogPage } from '@/lib/audit_log/getters';
+import { getAuditLogDetail, getAuditLogPage } from '@/lib/audit_log/getters_internal';
 import type { RichPermissions } from '@/lib/authz';
 
 const ACTOR_SELECT = { id: true, name: true };

@@ -1773,6 +1773,7 @@ def generate(schema_path: str, output_dir: str) -> None:
                 'user_arg': detail_takes_user_id[parent],
             })
         _write(lib_dir / 'getters.ts', _render(env, 'getters.ts.jinja2', getters_ctx))
+        _write(lib_dir / 'getters_internal.ts', _render(env, 'getters_internal.ts.jinja2', getters_ctx))
 
         # --- autocomplete/list custom filter stubs (cmd_377/379 DP-1) ---
         # search{Target}Options()/get{Target}Page() in getters.ts (just written

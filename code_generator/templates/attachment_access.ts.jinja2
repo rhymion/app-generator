@@ -8,7 +8,7 @@
 import prisma from '@/lib/prisma';
 import { getModelPermissions, resolvePermissions } from '@/lib/authz';
 {% for o in getter_owners %}
-import { get{{ o.pascal }}Detail } from '@/lib/{{ o.name }}/getters';
+import { get{{ o.pascal }}Detail } from '@/lib/{{ o.name }}/getters_internal';
 {% endfor %}
 
 /**

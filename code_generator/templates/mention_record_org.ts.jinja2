@@ -14,7 +14,7 @@
 {% if resolvers %}import prisma from '@/lib/prisma';
 import { requirePermission } from '@/lib/authz';
 import { AppError } from '@/lib/_errors';
-{% endif %}{% if needs_associated_orgs %}import { getAssociatedOrganizations } from '@/lib/organization/getters_associated';
+{% endif %}{% if needs_associated_orgs %}import { getAssociatedOrganizations } from '@/lib/organization/associated_internal';
 {% endif %}
 export interface MentionRecordOrganization {
   organizationId: string | null;

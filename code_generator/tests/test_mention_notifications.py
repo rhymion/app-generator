@@ -287,4 +287,4 @@ def test_record_org_emits_resolver_imports_when_there_are_resolvers():
     out = _render_record_org(resolver)
     for line in _RECORD_ORG_IMPORTS:
         assert line in out
-    assert "import { getAssociatedOrganizations } from '@/lib/organization/getters_associated';" in out
+    assert "import { getAssociatedOrganizations } from '@/lib/organization/associated_internal';" in out

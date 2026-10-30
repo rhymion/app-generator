@@ -26,7 +26,8 @@
 'use server';
 
 import prisma from '@/lib/prisma';
-import { getSessionUserIdOrThrow } from '@/lib/authz';
+import { getSessionUserIdOrThrow, requirePermission } from '@/lib/authz';{% if should_filter_by_org %}
+import { getAssociatedOrganizations } from '@/lib/organization/associated_internal';{% endif %}
 import { notifyApprovalRequestCreated } from '@/lib/_notifyApprovalRequest';
 import { resolveApprovableOrganization } from '@/lib/approval_request/resolve_target';
 import { createId } from '@paralleldrive/cuid2';
@@ -45,6 +46,7 @@ import { InsufficientPoolCapacityError } from '@/lib/{{ reservation_error_import
 export async function submitForApproval{{ parent_pascal }}(id: string): Promise<ActionFailure | void> {
   const actorId = await getSessionUserIdOrThrow();
   try {
+{{ submit_for_approval_authz_code }}
     await prisma.$transaction(async (tx) => {
 {{ submit_for_approval_action_code }}
     }, { isolationLevel: 'Serializable' });

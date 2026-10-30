@@ -8,7 +8,7 @@ import { resolveApprovableOrganization } from '@/lib/approval_request/resolve_ta
 import { assertApprovalOrder } from '@/lib/approval_request/order-check';
 import { isTerminalReject, dispatchOnRejected } from '@/lib/approval_request/on_rejected_dispatch';
 import { dispatchBeforeReject } from '@/lib/approval_request/on_before_reject_dispatch';
-import { getApprovalRequestRecipient } from '@/lib/approval_request/actions';
+import { getApprovalRequestRecipient } from '@/lib/approval_request/actions_internal';
 import { notify } from '@/lib/_notifier';
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {

@@ -102,7 +102,7 @@ def test_internal_bridge_fk_columns_are_left_out_of_the_panel(out):
 
 def test_rest_allow_list_still_accepts_the_internal_bridge_fk_columns(out):
     # Only the panel drops them; the REST list keeps accepting the columns so existing callers do not break.
-    getters = (out / 'lib' / 'mobile_asset' / 'getters.ts').read_text()
+    getters = (out / 'lib' / 'mobile_asset' / 'getters_internal.ts').read_text()
     assert "'attachable_id'" in re.search(r'SORTABLE_FIELDS = new Set<string>\(\[(.*?)\]\)', getters).group(1)
     assert "'attachable_id'" in re.search(r'FILTERABLE_FIELDS = new Set<string>\(\[(.*?)\]\)', getters).group(1)
 
