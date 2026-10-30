@@ -232,6 +232,71 @@ def test_the_actor_header_is_not_forwarded(canaries, manifest, tmp_path):
     assert lc.ACTOR_HEADER not in seen and seen["x-api-key"] == "k"
 
 
+def _raw_request(port, request_line):
+    import socket
+    with socket.create_connection(("127.0.0.1", port), timeout=5) as sock:
+        sock.sendall(f"{request_line}\r\nHost: x\r\nConnection: close\r\n\r\n".encode())
+        return sock.recv(4096).decode("latin-1")
+
+
+@pytest.mark.parametrize("path, ok", [("/a/b?x=1", True), ("//evil.example/x", False), ("http://evil.example/x", False),
+                                      ("evil", False), ("", False)])
+def test_only_an_origin_form_path_is_relayable(path, ok):
+    # The stdlib handler already collapses a leading "//"; the check stays as a second line.
+    assert lc._is_relayable_path(path) is ok
+
+
+@pytest.mark.parametrize("path", ["http://evil.example/x", "evil"])
+def test_a_path_that_would_retarget_the_relay_is_refused(canaries, manifest, tmp_path, path):
+    seen = []
+
+    class Record(BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_GET(self):
+            seen.append(self.path)
+            self.send_response(200)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+    upstream = HTTPServer(("127.0.0.1", 0), Record)
+    _serve(upstream)
+    proxy = lc.make_proxy(f"http://127.0.0.1:{upstream.server_port}", lc._Recorder(canaries, manifest, tmp_path / "h"))
+    _serve(proxy)
+    try:
+        reply = _raw_request(proxy.server_port, f"GET {path} HTTP/1.0")
+    finally:
+        proxy.shutdown()
+        upstream.shutdown()
+    assert reply.startswith("HTTP/1.0 400") and seen == []
+
+
+def test_a_response_header_value_with_crlf_is_refused(canaries, manifest, tmp_path):
+    class Split(BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+    upstream = HTTPServer(("127.0.0.1", 0), Split)
+    _serve(upstream)
+    proxy = lc.make_proxy(f"http://127.0.0.1:{upstream.server_port}", lc._Recorder(canaries, manifest, tmp_path / "h"))
+    _serve(proxy)
+    original = lc.http.client.HTTPResponse.getheaders
+    lc.http.client.HTTPResponse.getheaders = lambda self: [("X-Split", "a\r\nSet-Cookie: injected=1")]
+    try:
+        reply = _raw_request(proxy.server_port, "GET /ok HTTP/1.0")
+    finally:
+        lc.http.client.HTTPResponse.getheaders = original
+        proxy.shutdown()
+        upstream.shutdown()
+    assert reply.startswith("HTTP/1.0 502") and "injected" not in reply
+
+
 def test_verdict_passes_with_no_hits_and_fails_naming_each_one(capsys):
     assert lc.verdict([]) == 0
     assert lc.verdict([{"canary": "c", "surface": "server_log", "where": "/tmp/x", "form": "raw", "actor": "n/a"}]) == 1

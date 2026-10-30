@@ -232,6 +232,11 @@ class _ThreadingServer(socketserver.ThreadingMixIn, HTTPServer):
     allow_reuse_address = True
 
 
+def _is_relayable_path(path: str) -> bool:
+    """Only an origin-form path is relayed; "//host" and absolute URLs would retarget the request."""
+    return path.startswith("/") and not path.startswith("//")
+
+
 def make_proxy(upstream: str, recorder: _Recorder, host: str = "127.0.0.1", port: int = 0) -> _ThreadingServer:
     """A reverse proxy that records. Redirects are passed on, not followed, so a Location is seen."""
     target = urlsplit(upstream)
@@ -258,6 +263,9 @@ def make_proxy(upstream: str, recorder: _Recorder, host: str = "127.0.0.1", port
                 self.end_headers()
                 self.wfile.write(payload)
                 return
+            if not _is_relayable_path(self.path):
+                self.send_error(400, "refused: not an origin-form path")
+                return
             headers = {k: v for k, v in self.headers.items()
                        if k.lower() not in HOP_BY_HOP | {ACTOR_HEADER, "accept-encoding", "host"}}
             headers["Accept-Encoding"] = "identity"
@@ -274,6 +282,9 @@ def make_proxy(upstream: str, recorder: _Recorder, host: str = "127.0.0.1", port
                 return
             finally:
                 conn.close()
+            if any("\r" in v or "\n" in v for _, v in resp_headers):
+                self.send_error(502, "refused: CR/LF in an upstream header value")
+                return
             route = f"{self.command} {self.path.split('?')[0]}"
             recorder.record(scan_response(recorder.canaries, recorder.manifest, route=route, actor=actor,
                                           status_line=status_line, headers=resp_headers, body=payload))
