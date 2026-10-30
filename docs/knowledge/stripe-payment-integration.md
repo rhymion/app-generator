@@ -418,8 +418,10 @@ For a local machine see "Local webhook forwarding" above.
    `STRIPE_PUBLISHABLE_KEY` (both from the mode the environment uses) and
    `STRIPE_WEBHOOK_SECRET` (from that environment's endpoint). Also set
    `NEXTAUTH_URL` to the public origin: the Checkout success and cancel URLs
-   are built from it (`lib/payment/checkout.ts`), and it falls back to
-   `http://localhost:3000` when unset, which sends the buyer back to
+   are built from it (`lib/payment/checkout.ts`, `resolveCheckoutOrigin()`;
+   `AUTH_URL` is accepted as an alias). Outside production an unset value falls
+   back to `http://localhost:3000`; in production starting a Checkout throws
+   instead, so a missing value fails loudly rather than sending the buyer back to
    localhost after paying.
 5. **Check it end to end.** Pay with a Stripe test card in a test-mode
    environment (see [testing](https://docs.stripe.com/testing)) and confirm the

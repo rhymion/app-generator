@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [master, main, develop]
 
+# Least privilege by default; a job that needs more declares it itself.
+permissions:
+  contents: read
+
 concurrency:
   # pull_request runs: keyed on the PR's head branch, and a newer push to the
   # same PR cancels the superseded run (the old behaviour, still wanted --
@@ -36,7 +40,7 @@ jobs:
     outputs:
       docs_only: ${{ steps.check.outputs.docs_only }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
       - name: Classify this diff as docs-only or not (machine-checked path judgment)
@@ -115,15 +119,15 @@ jobs:
     # step and no `detect-changes` gating -- it reads only committed files, so
     # it always runs, on every push and PR.
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: bash scripts/check-example-file-leaks.sh
 
   lint:
     name: Lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24.18.0'
           cache: 'npm'
@@ -134,8 +138,8 @@ jobs:
     name: Unit Tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24.18.0'
           cache: 'npm'
@@ -153,15 +157,15 @@ jobs:
     # continuous half so non-Dependabot PRs can't introduce vulnerable deps
     # by accident. Policy lives in AGENTS.md ("Dependency auditing").
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24.18.0'
           cache: 'npm'
       - run: npm ci
       - name: npm audit (production deps, high+)
         run: npm audit --omit=dev --audit-level=high
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.12'
       - name: pip install (audit tool + project deps for resolution)
@@ -183,8 +187,8 @@ jobs:
     # check. Who reviews this output and how often is documented in the
     # same doc; this job only produces the signal, it does not consume it.
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24.18.0'
           cache: 'npm'
@@ -222,7 +226,7 @@ jobs:
           '
       - name: Upload audit JSON artifact
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: npm-audit-full-scope
           path: audit-full-scope.json
@@ -236,18 +240,18 @@ jobs:
     env:
       NODE_ENV: test
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24.18.0'
           cache: 'npm'
       - name: Cache Cypress binary
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/Cypress
           key: cypress-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
       - run: npm ci
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.12'
       - run: pip install -r requirements.txt
@@ -294,6 +298,8 @@ jobs:
           fi
       - name: Generate code, start test database, push schema and build
         run: npm run test:e2e:build
+      - name: Check generated code against the schema
+        run: npm run check:generated
       - name: Run API E2E tests
         run: npm run test:e2e:cy:start
 
@@ -313,18 +319,18 @@ jobs:
     env:
       NODE_ENV: test
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24.18.0'
           cache: 'npm'
       - name: Cache Cypress binary
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/Cypress
           key: cypress-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
       - run: npm ci
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.12'
       - run: pip install -r requirements.txt
@@ -347,18 +353,18 @@ jobs:
     env:
       NODE_ENV: test
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24.18.0'
           cache: 'npm'
       - name: Cache Cypress binary
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/Cypress
           key: cypress-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
       - run: npm ci
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.12'
       - run: pip install -r requirements.txt
@@ -380,18 +386,18 @@ jobs:
     env:
       NODE_ENV: test
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24.18.0'
           cache: 'npm'
       - name: Cache Cypress binary
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/Cypress
           key: cypress-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
       - run: npm ci
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.12'
       - run: pip install -r requirements.txt
@@ -413,18 +419,18 @@ jobs:
     env:
       NODE_ENV: test
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24.18.0'
           cache: 'npm'
       - name: Cache Cypress binary
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/Cypress
           key: cypress-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
       - run: npm ci
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.12'
       - run: pip install -r requirements.txt
@@ -449,18 +455,18 @@ jobs:
     env:
       NODE_ENV: test
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24.18.0'
           cache: 'npm'
       - name: Cache Cypress binary
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/Cypress
           key: cypress-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
       - run: npm ci
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.12'
       - run: pip install -r requirements.txt
@@ -470,13 +476,25 @@ jobs:
     name: Python Generator Tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.12'
       - run: pip install -r requirements.txt
       - name: Run pytest
         run: pytest code_generator/tests
+
+  handwritten-routes:
+    name: Hand-written Route Guards
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - name: Check hand-written API routes
+        run: npm run check:handwritten-routes
 
   mention-gate-fixture:
     name: Mention Gate Fixture Check
@@ -491,13 +509,13 @@ jobs:
     # unit-tests/pytest above, per docs/knowledge/gate-exemption-must-be-
     # machine-checkable.md. See docs/knowledge/mention-system.md.
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24.18.0'
           cache: 'npm'
       - run: npm ci
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.12'
       - run: pip install -r requirements.txt
@@ -519,13 +537,13 @@ jobs:
     # docs/knowledge/schema-yaml-configuration.md "user.image and the
     # comment/mention creator avatar".
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24.18.0'
           cache: 'npm'
       - run: npm ci
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.12'
       - run: pip install -r requirements.txt
@@ -546,13 +564,13 @@ jobs:
     # mention-gate-fixture above, per docs/knowledge/gate-exemption-must-be-
     # machine-checkable.md. See scripts/check_decimal_gate_fixture.sh.
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24.18.0'
           cache: 'npm'
       - run: npm ci
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.12'
       - run: pip install -r requirements.txt
@@ -574,13 +592,13 @@ jobs:
     # mention-gate-fixture above, per docs/knowledge/gate-exemption-must-be-
     # machine-checkable.md. See scripts/check_oto_mandatory_gate_fixture.sh.
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24.18.0'
           cache: 'npm'
       - run: npm ci
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.12'
       - run: pip install -r requirements.txt
@@ -606,13 +624,13 @@ jobs:
     # docs/knowledge/gate-exemption-must-be-machine-checkable.md. See
     # scripts/check_oto_decimal_gate_fixture.sh.
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24.18.0'
           cache: 'npm'
       - run: npm ci
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.12'
       - run: pip install -r requirements.txt
@@ -637,13 +655,13 @@ jobs:
     # above, per docs/knowledge/gate-exemption-must-be-machine-checkable.md.
     # See scripts/check_chart_decimal_gate_fixture.sh.
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24.18.0'
           cache: 'npm'
       - run: npm ci
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.12'
       - run: pip install -r requirements.txt
@@ -673,13 +691,13 @@ jobs:
     # docs/knowledge/gate-exemption-must-be-machine-checkable.md.
     # See scripts/check_chart_scalar_gate_fixture.sh.
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24.18.0'
           cache: 'npm'
       - run: npm ci
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.12'
       - run: pip install -r requirements.txt
@@ -703,13 +721,13 @@ jobs:
     # gate-exemption-must-be-machine-checkable.md. See
     # scripts/check_approval_lockdown_gate_fixture.sh.
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24.18.0'
           cache: 'npm'
       - run: npm ci
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.12'
       - run: pip install -r requirements.txt
@@ -732,13 +750,13 @@ jobs:
     # exemption-must-be-machine-checkable.md. See
     # scripts/check_payment_gate_fixture.sh.
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24.18.0'
           cache: 'npm'
       - run: npm ci
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.12'
       - run: pip install -r requirements.txt
@@ -762,13 +780,13 @@ jobs:
     # payment-gate-fixture above, per docs/knowledge/gate-exemption-must-be-
     # machine-checkable.md. See scripts/check_direct_attachment_gate_fixture.sh.
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24.18.0'
           cache: 'npm'
       - run: npm ci
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.12'
       - run: pip install -r requirements.txt
@@ -793,13 +811,13 @@ jobs:
     # docs/knowledge/gate-exemption-must-be-machine-checkable.md. See
     # scripts/check_uri_kind_gate_fixture.sh.
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24.18.0'
           cache: 'npm'
       - run: npm ci
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.12'
       - run: pip install -r requirements.txt
@@ -822,13 +840,13 @@ jobs:
     # uri-kind-gate-fixture above, per docs/knowledge/gate-exemption-must-
     # be-machine-checkable.md. See scripts/check_filter_sort_gate_fixture.sh.
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24.18.0'
           cache: 'npm'
       - run: npm ci
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.12'
       - run: pip install -r requirements.txt
@@ -848,7 +866,7 @@ jobs:
     env:
       NODE_ENV: test
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
       - name: Decide whether the mobile suite applies to this diff
@@ -866,12 +884,12 @@ jobs:
           else
             echo "applies=$(bash scripts/mobile_pw_gate_applies.sh "$BASE")" >> "$GITHUB_OUTPUT"
           fi
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         if: steps.scope.outputs.applies == 'yes'
         with:
           node-version: '24.18.0'
           cache: 'npm'
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         if: steps.scope.outputs.applies == 'yes'
         with:
           python-version: '3.12'
