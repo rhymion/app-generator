@@ -265,7 +265,7 @@ export async function update{{ parent_pascal }}(actorId: string, id: string{% if
   const _fkPrevious = await prisma.{{ model }}.findUnique({ where: { id }, select: { {% for c in fk_write_checks %}{{ c.prop }}: true, {% endfor %}} });
   await assertFkReferencesUsable(actorId, [
 {% for c in fk_write_checks %}
-    { model: '{{ c.target }}',{% if c.self_only %} selfOnly: true,{% endif %} id: {{ c.var }}, previousId: _fkPrevious?.{{ c.prop }}, load: (_id) => prisma.{{ c.target }}.findUnique({ where: { id: _id } }) as Promise<Record<string, unknown> | null> },
+    { model: '{{ c.target }}',{% if c.self_only %} selfOnly: true,{% endif %} id: {{ c.var }}, previousId: _fkPrevious?.{{ c.prop }},{% if c.required %} required: true,{% endif %} load: (_id) => prisma.{{ c.target }}.findUnique({ where: { id: _id } }) as Promise<Record<string, unknown> | null> },
 {% endfor %}
   ]);
 {% endif %}
@@ -479,6 +479,23 @@ export async function update{{ parent_pascal }}(actorId: string, id: string{% if
 }
 {% endif %}
 {% if can_delete %}
+{% if fk_write_checks %}
+// A record whose stored reference points at a row the actor cannot reach is not
+// deletable by that actor (the same reachability that refuses to re-point or
+// clear that reference in update{{ parent_pascal }}). Called by every
+// user-facing delete entrance before delete{{ parent_pascal }}.
+export async function assertDeleteReferencesReachable{{ parent_pascal }}(actorId: string, ids: string[]): Promise<void> {
+  const _rows = await prisma.{{ model }}.findMany({ where: { id: { in: ids } }, select: { {% for c in fk_write_checks %}{{ c.prop }}: true, {% endfor %}} });
+  for (const _row of _rows) {
+    await assertStoredFkReferencesReachable(actorId, [
+{% for c in fk_write_checks %}
+      { model: '{{ c.target }}',{% if c.self_only %} selfOnly: true,{% endif %} id: _row.{{ c.prop }}, load: (_id) => prisma.{{ c.target }}.findUnique({ where: { id: _id } }) as Promise<Record<string, unknown> | null> },
+{% endfor %}
+    ]);
+  }
+}
+
+{% endif %}
 {% if is_audited %}
 export async function delete{{ parent_pascal }}(actorId: string | null, ids: string[]): Promise<void> {
 {% if reservation_mutation_guard_delete %}

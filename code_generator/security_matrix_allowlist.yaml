@@ -1,0 +1,85 @@
+# Cells of the security matrix that have no test, each with the reason.
+# A cell not listed here and not claimed by a `security-cell:` marker fails
+# `npm run check:security-matrix`. An entry that matches no cell, or whose cells
+# are all tested now, also fails, so this list shrinks as the gaps are filled.
+# Keys: `entity` (or `*`) plus one key per axis in security_matrix.yaml (omitted = any).
+exempt:
+  - operation: action_add
+    case: cross_org
+    reason: Server Actions have no direct test yet; the audit of missing cells is tracked in Issue #1231.
+  - operation: action_add
+    case: permission_denied
+    reason: Server Actions have no direct test yet; the audit of missing cells is tracked in Issue #1231.
+  - operation: action_delete
+    case: permission_denied
+    reason: Server Actions have no direct test yet; the audit of missing cells is tracked in Issue #1231.
+  - operation: action_invalidate
+    case: permission_denied
+    reason: Server Actions have no direct test yet; the audit of missing cells is tracked in Issue #1231.
+  - operation: action_update
+    case: cross_org
+    reason: Server Actions have no direct test yet; the audit of missing cells is tracked in Issue #1231.
+  - operation: action_update
+    case: permission_denied
+    reason: Server Actions have no direct test yet; the audit of missing cells is tracked in Issue #1231.
+  - operation: bulk_create
+    case: cross_org
+    reason: No generated denial test for this route yet; the gap is listed in Issue #1229.
+  - operation: bulk_create
+    case: permission_denied
+    reason: No generated denial test for this route yet; the gap is listed in Issue #1229.
+  - operation: bulk_delete
+    case: permission_denied
+    reason: No generated denial test for this route yet; the gap is listed in Issue #1229.
+  - operation: bulk_update
+    case: permission_denied
+    reason: No generated denial test for this route yet; the gap is listed in Issue #1229.
+  - operation: capabilities
+    case: cross_org
+    reason: No generated denial test for this operation yet; the audit of missing cells is tracked in Issue #1231.
+  - operation: capabilities
+    case: permission_denied
+    reason: No generated denial test for this operation yet; the audit of missing cells is tracked in Issue #1231.
+  - entity: approval_flow
+    operation: create
+    case: permission_denied
+    reason: This entity's API tests are hand-written, not generated from the API spec template, and do not claim this cell yet (audit tracked in Issue #1231).
+  - entity: approval_flow
+    operation: delete
+    case: permission_denied
+    reason: This entity's API tests are hand-written, not generated from the API spec template, and do not claim this cell yet (audit tracked in Issue #1231).
+  - operation: detail
+    case: permission_denied
+    reason: No generated denial test for this route yet; the gap is listed in Issue #1229.
+  - operation: export
+    case: cross_org
+    reason: No generated denial test for this route yet; the gap is listed in Issue #1229.
+  - entity: approval_flow
+    operation: export
+    case: permission_denied
+    reason: This entity's API tests are hand-written, not generated from the API spec template, and do not claim this cell yet (audit tracked in Issue #1231).
+  - entity: approval_flow
+    operation: import
+    case: permission_denied
+    reason: This entity's API tests are hand-written, not generated from the API spec template, and do not claim this cell yet (audit tracked in Issue #1231).
+  - operation: invalidate
+    case: permission_denied
+    reason: No generated denial test for this operation yet; the audit of missing cells is tracked in Issue #1231.
+  - operation: list
+    case: cross_org
+    reason: No generated denial test for this operation yet; the audit of missing cells is tracked in Issue #1231.
+  - entity: approval_flow
+    operation: list
+    case: permission_denied
+    reason: This entity's API tests are hand-written, not generated from the API spec template, and do not claim this cell yet (audit tracked in Issue #1231).
+  - operation: options
+    case: permission_denied
+    reason: No generated denial test for this route yet; the gap is listed in Issue #1229.
+  - entity: approval_flow
+    operation: update
+    case: permission_denied
+    reason: This entity's API tests are hand-written, not generated from the API spec template, and do not claim this cell yet (audit tracked in Issue #1231).
+  - entity: setting
+    operation: update
+    case: permission_denied
+    reason: This entity's API tests are hand-written, not generated from the API spec template, and do not claim this cell yet (audit tracked in Issue #1231).

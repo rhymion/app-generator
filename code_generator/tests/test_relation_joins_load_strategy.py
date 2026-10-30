@@ -92,7 +92,7 @@ def test_schema_prisma_declares_relation_joins_preview_feature():
 def test_detail_getter_uses_join_strategy_when_relation_is_included():
     with tempfile.TemporaryDirectory() as tmp:
         out = _run_fixture_pipeline('decimal_gate', Path(tmp))
-        getters = (out / 'lib' / 'decimal_gate_wrapper' / 'getters.ts').read_text()
+        getters = (out / 'lib' / 'decimal_gate_wrapper' / 'getters_internal.ts').read_text()
         assert 'include: {' in getters, getters
         assert "relationLoadStrategy: 'join'," in getters, (
             "decimal_gate_wrapper's getDetail includes relations (lines, "
@@ -116,7 +116,7 @@ def test_list_getter_uses_join_strategy_when_relation_is_included():
     query (unlike creator/updater, which only the detail getter embeds)."""
     with tempfile.TemporaryDirectory() as tmp:
         out = _run_dogfood_pipeline(Path(tmp))
-        getters = (out / 'lib' / 'permission' / 'getters.ts').read_text()
+        getters = (out / 'lib' / 'permission' / 'getters_internal.ts').read_text()
         body = _list_getter_body(getters, 'permission')
         assert 'include: { role: true }' in body, body
         assert "relationLoadStrategy: 'join'," in body, (
@@ -135,7 +135,7 @@ def test_no_relation_load_strategy_emitted_in_list_getter_without_a_relation():
     emitting unconditionally."""
     with tempfile.TemporaryDirectory() as tmp:
         out = _run_dogfood_pipeline(Path(tmp))
-        getters = (out / 'lib' / 'organization' / 'getters.ts').read_text()
+        getters = (out / 'lib' / 'organization' / 'getters_internal.ts').read_text()
         body = _list_getter_body(getters, 'organization')
         assert 'include:' not in body, body
         assert 'relationLoadStrategy' not in body, (

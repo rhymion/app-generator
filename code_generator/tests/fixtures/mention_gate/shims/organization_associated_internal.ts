@@ -1,4 +1,4 @@
-// Fixture-only stand-in for @/lib/organization/getters_associated (cmd_538,
+// Fixture-only stand-in for @/lib/organization/associated_internal (cmd_538,
 // extending the mention-gate check to cover FormUpsert.tsx).
 // lib/mention/record_org.ts (schema-global, generated whenever any field has
 // x-mention: true) imports getAssociatedOrganizations() when a hosting entity

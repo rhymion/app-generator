@@ -1,6 +1,6 @@
 {
   "name": "my-next",
-  "version": "6.0.1",
+  "version": "6.1.0",
   "private": true,
   "packageManager": "npm@11.16.0",
   "engines": {
@@ -12,6 +12,7 @@
     "cleanup": "python3 code_generator/build_user_schema.py code_generator/json_schema.yaml prisma/schema.prisma --out code_generator/.generated/json_schema.yaml && python3 code_generator/cleanup.py code_generator/.generated/json_schema.yaml ./ --prune-orphans --keep-stubs",
     "cleanup:all": "python3 code_generator/build_user_schema.py code_generator/json_schema.yaml prisma/schema.prisma --out code_generator/.generated/json_schema.yaml && python3 code_generator/cleanup.py code_generator/.generated/json_schema.yaml ./ --prune-orphans",
     "check:generated": "python3 code_generator/build_user_schema.py code_generator/json_schema.yaml prisma/schema.prisma --out code_generator/.generated/json_schema.yaml && python3 code_generator/check_generated.py code_generator/.generated/json_schema.yaml ./",
+    "check:security-matrix": "python3 code_generator/security_matrix.py check --manifest .security-manifest.json --tests cypress",
     "check:handwritten-routes": "python3 code_generator/check_handwritten_routes.py ./",
     "check:tracked-generated-imports": "python3 code_generator/check_tracked_generated_imports.py ./",
     "check:readme-sync": "bash scripts/check_readme_sync.sh",
@@ -60,6 +61,7 @@
     "test:list-child-e2e-gate": "bash scripts/check_list_child_e2e_gate_fixture.sh",
     "test:comment-rest-e2e-gate": "bash scripts/check_comment_rest_e2e_gate_fixture.sh",
     "test:version-of-e2e-gate": "bash scripts/check_version_of_e2e_gate_fixture.sh",
+    "test:security-matrix-e2e-gate": "bash scripts/check_security_matrix_e2e_gate_fixture.sh",
     "test:scheduled-task-e2e-gate": "bash scripts/check_scheduled_task_e2e_gate_fixture.sh",
     "test:timezone-migration": "bash scripts/check_timezone_migration.sh",
     "test:business-date-migration": "bash scripts/check_business_date_migration.sh",

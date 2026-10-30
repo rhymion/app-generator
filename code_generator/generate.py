@@ -115,6 +115,7 @@ from generators_test import (
 from schema_deriver import collect_unique_columns, parse_prisma_schema
 from validation_context import build_validation_context
 from manifest import ManifestRecorder, sha256_file, sha256_text
+import security_matrix
 
 
 # ---------------------------------------------------------------------------
@@ -1640,6 +1641,8 @@ def generate(schema_path: str, output_dir: str) -> None:
     # direct-attachment foreign key.
     parent_pascal_by_parent: dict[str, str] = {}
     direct_attachment_owners: list[dict] = []
+    # Per-entity flags the security matrix (security_matrix.yaml) evaluates.
+    security_entity_flags: dict[str, dict] = {}
 
     for entity in entities:
         parent     = entity['parent']
@@ -1773,6 +1776,7 @@ def generate(schema_path: str, output_dir: str) -> None:
                 'user_arg': detail_takes_user_id[parent],
             })
         _write(lib_dir / 'getters.ts', _render(env, 'getters.ts.jinja2', getters_ctx))
+        _write(lib_dir / 'getters_internal.ts', _render(env, 'getters_internal.ts.jinja2', getters_ctx))
 
         # --- autocomplete/list custom filter stubs (cmd_377/379 DP-1) ---
         # search{Target}Options()/get{Target}Page() in getters.ts (just written
@@ -2084,6 +2088,14 @@ def generate(schema_path: str, output_dir: str) -> None:
                 _write(components_dir / 'ImportModal.tsx',
                        _render(env, 'components/ImportModal.tsx.jinja2', ctx))
                 print(f'  ImportModal → components/{parent}/ImportModal.tsx')
+
+        security_entity_flags[parent] = {
+            'can_api': bool(can_api), 'can_list': bool(can_list), 'can_view': bool(can_view),
+            'can_new': bool(can_new), 'can_edit': bool(can_edit), 'can_delete': bool(can_delete),
+            'can_export': bool(can_export), 'can_invalidate': bool(can_invalidate),
+            'import_eligible': bool(ctx.get('import_eligible')),
+            'should_filter_by_org': bool(ctx.get('should_filter_by_org')),
+        }
 
         # --- Invalidate action route (independent of can_api) ---
         if can_invalidate:
@@ -3929,6 +3941,13 @@ def generate(schema_path: str, output_dir: str) -> None:
                 print('  Cloud: output:standalone already present in next.config.ts')
         else:
             print('  Cloud: next.config.ts not found — skipping standalone injection')
+
+    # --- security manifest: every cell of the security test matrix that applies ---
+    # Consumed by `npm run check:security-matrix`, which compares it with the
+    # security-cell markers in the tests.
+    _write(out / security_matrix.MANIFEST_FILENAME, json.dumps(
+        security_matrix.build_manifest(security_matrix.load_matrix(), security_entity_flags),
+        indent=2) + '\n')
 
     # --- cmd_941 gate (1): write-once side-effect asymmetry ---
     # Must run after every service_after_*.ts stub for this run has been

@@ -1,53 +1,9 @@
 'use server';
 
 import prisma from '@/lib/prisma';
-import type { Organization, OrganizationDetail } from '@/lib/organization/types';
+import type { Organization } from '@/lib/organization/types';
+import { getAssociatedOrganizationDetail } from '@/lib/organization/associated_internal';
 import { assertPermission, getModelPermissions, getSessionUserIdOrThrow, Operation, resolveEntityPermissions, resolveRecordPermissions, toPermissions } from '../authz';
-
-export async function getAssociatedOrganizations(userId: string): Promise<Organization[]> {
-  const organizations = await prisma.organization.findMany({
-    where: {
-      users: {
-        some: {
-          id: userId
-        }
-      }
-    },
-  });
-  return organizations.map((organization) => ({
-    id: organization.id,
-    name: organization.name,
-    description: organization.description,
-    creator_id: organization.creator_id,
-  }));
-}
-
-export async function getAssociatedOrganizationDetail(id: string, userId: string): Promise<OrganizationDetail | null> {
-  const organization = await prisma.organization.findUnique({
-    where: { 
-      id,
-      users: {
-        some: {
-          id: userId
-        }
-      }
-    },
-    include: { 
-      users: {
-        where: { id: userId }
-      }
-    },
-  });
-
-  if (!organization) {
-    return null;
-  }
-
-  return {
-    ...organization,
-    users: organization.users,
-  };
-}
 
 /**
  * Lightweight search for the organization autocomplete picker. Restricted to
