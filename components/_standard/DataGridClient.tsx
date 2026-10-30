@@ -79,6 +79,7 @@ interface DataGridClientProps<T extends BaseEntity> {
   entityLabel?: string;
   displayFields?: DisplayFieldConfig<T>[];
   permissions?: ModelPermissions;
+  /** Column rendered as the link to the record's view page. No default: when omitted no column is a link. */
   primaryField?: keyof T;
   /** When true, edit and create links open in a new tab. Use in parent-embedded bridge grids. */
   openLinksInNewTab?: boolean;
@@ -114,7 +115,7 @@ export default function DataGridClient<T extends BaseEntity>({
   entityLabel = 'Item',
   displayFields,
   permissions = { create: true, read: true, update: true, delete: true, import: true },
-  primaryField = 'name' as keyof T,
+  primaryField,
   openLinksInNewTab,
   allowCreate = true,
   allowEdit = true,

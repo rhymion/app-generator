@@ -229,6 +229,38 @@ describe('API: Mobile Auth (mobile token auth)', () => {
     });
   });
 
+  describe('erasure of the user (anonymizeUser)', () => {
+    it('rejects the access token and the refresh token issued before the erasure', () => {
+      cy.task<{ id: string; email: string; password: string }>('db:createSecondMobileUser').then((u) => {
+        login(u.email, u.password).then((loginRes) => {
+          const pair = loginRes.body as TokenPair;
+          cy.request({ url: SESSIONS_URL, headers: bearer(pair.access_token) }).its('status').should('eq', 200);
+
+          // Invalidating a user takes the user entity's delete right, which the seeded Administrator lacks.
+          cy.task('db:setEntityPermission', {
+            email: TEST_CREDENTIALS.email,
+            entityName: 'user',
+            flags: { delete: true },
+          });
+          cy.request({
+            method: 'POST',
+            url: `/api/user/${u.id}/actions/invalidate`,
+            headers: { 'X-API-Key': TEST_API_KEY },
+          }).its('status').should('be.within', 200, 299);
+
+          cy.request({ url: SESSIONS_URL, headers: bearer(pair.access_token), failOnStatusCode: false })
+            .its('status').should('eq', 401);
+          cy.request({
+            method: 'POST',
+            url: REFRESH_URL,
+            body: { refresh_token: pair.refresh_token },
+            failOnStatusCode: false,
+          }).its('status').should('eq', 401);
+        });
+      });
+    });
+  });
+
   describe('DELETE /api/mobile/auth/token (logout)', () => {
     it('requires authentication (401 without a token)', () => {
       cy.request({ method: 'DELETE', url: TOKEN_URL, failOnStatusCode: false }).then((res) => {

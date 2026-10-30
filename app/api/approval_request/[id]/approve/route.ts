@@ -123,6 +123,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     // cmd_541 (trigger #4): mirrors actions_core.ts's approveApprovalRequest() — see cmd_479 note above on why both implementations must be kept in parity.
     if (orderReachedApprovableId && orderReachedFlowIds.length > 0) {
       await notifyApprovalOrderReached(prisma, orderReachedApprovableId, orderReachedFlowIds, {
+        resolveOrganization: resolveApprovableOrganization,
         excludeUserId: userId,
         targetEntityName: entityName,
         targetId,

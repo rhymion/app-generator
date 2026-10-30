@@ -189,6 +189,8 @@ code_generator/.generated/
 # scripts/check_version_of_e2e_gate_fixture.sh (never committed).
 .generated-version-of-e2e-gate/
 .generated-mobile-entity-pw/
+# Single-run locks taken by the e2e gate scripts (scripts/gate_run_lock.sh).
+.generated-*.lock
 
 # sample data
 custom/
@@ -223,6 +225,7 @@ lib/dashboard/use_entity_approval_actions.ts
 !lib/attachment/upload_core.ts
 !lib/attachment/link.ts
 !lib/attachment/orphan_cleanup.ts
+!lib/attachment/owner_cleanup.ts
 !lib/attachment/url.ts
 !lib/attachment/*.test.ts
 !lib/approval_flow/autocomplete_filter.ts
@@ -243,7 +246,8 @@ lib/dashboard/use_entity_approval_actions.ts
 !lib/audit_log/types.ts
 !lib/audit_log/virtual_resolvers.ts
 !lib/compliance/**
-!lib/mention/**
+!lib/mention/parser.ts
+!lib/mention/parser.test.ts
 !lib/legal/**
 !lib/openapi/**
 !lib/scheduled-tasks/system-actor.ts
@@ -379,6 +383,8 @@ cypress/e2e/api/*.cy.ts
 !cypress/e2e/api/direct_attachment_rest.cy.ts
 !cypress/e2e/api/upload_path_safety.cy.ts
 !cypress/e2e/api/user_invalidate_record_scope.cy.ts
+!cypress/e2e/api/setting_write_only_omitted.cy.ts
+!cypress/e2e/api/setting_credential_confirmation.cy.ts
 
 # ── cypress/support/ ──
 cypress/support/*/

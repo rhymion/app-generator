@@ -5,12 +5,16 @@
 // per-entity): emitted once whenever any schema definition has an
 // x-mention: true field, alongside lib/mention/parser.ts.
 //
-// Org scope: `user` has no organization_id FK (unlike the entities covered by
-// should_filter_by_org / lookup_entity_filter_by_org — cmd_521's axis), so
-// candidates are restricted via the M2M organization membership relation
-// (getAssociatedOrganizations) instead. An actor with no organization
-// membership gets an empty candidate list — they may still write comments,
-// they just cannot mention anyone (org-isolation policy).
+// Scope: the record the mention is for, not the person typing. The caller names
+// that record (`record.entity` + `record.id`, both client-supplied); the server
+// re-reads it through the entity's own read gates (lib/mention/record_org.ts)
+// and derives its organization itself. A record without an organization (no
+// organization_id column, or an empty value) does not scope the candidates --
+// an actor with no organization membership still gets candidates. A record with
+// an organization offers only members of that organization, even to a caller
+// who shares a different organization with them. A record the caller cannot
+// read, or that does not exist, yields no candidates at all. No record (a form
+// for a record that is not saved yet) does not scope either.
 //
 // Permission: intends the same Option B graceful-degradation contract as
 // searchXxxOptions() (cmd_516) — a `user` read-permission denial should
@@ -33,12 +37,18 @@
 
 import prisma from '@/lib/prisma';
 import { getSessionUserIdOrThrow, getModelPermissions } from '@/lib/authz';
-import { getAssociatedOrganizations } from '@/lib/organization/associated_internal';
+import { resolveMentionRecordOrganization } from '@/lib/mention/record_org';
 
 export interface MentionUserOption {
   id: string;
   name: string;
   email: string;
+}
+
+/** The record a mention is being written for. Client-supplied: the server reads it again. */
+export interface MentionRecordRef {
+  entity: string;
+  id: string;
 }
 
 export interface MentionSearchResult {
@@ -48,6 +58,7 @@ export interface MentionSearchResult {
 
 export async function searchMentionUserOptions(
   query: string,
+  record?: MentionRecordRef | null,
 ): Promise<MentionSearchResult> {
   const userId = await getSessionUserIdOrThrow();
   const { permissions } = await getModelPermissions('user', userId);
@@ -55,13 +66,21 @@ export async function searchMentionUserOptions(
     return { options: [], permissionDenied: true };
   }
 
-  const actorOrgs = await getAssociatedOrganizations(userId);
-  const actorOrgIds = actorOrgs.map((organization) => organization.id);
+  let orgFilter = {};
+  if (record) {
+    const resolved = await resolveMentionRecordOrganization(
+      String(record.entity),
+      String(record.id),
+      userId,
+    );
+    // Unknown entity, missing record or a record the caller cannot read: nothing to suggest.
+    if (!resolved) return { options: [], permissionDenied: false };
+    if (resolved.organizationId) {
+      orgFilter = { organizations: { some: { id: resolved.organizationId } } };
+    }
+  }
 
   const trimmed = query.trim();
-  const orgFilter = actorOrgIds.length > 0
-    ? { organizations: { some: { id: { in: actorOrgIds } } } }
-    : { id: '__no_org_membership__' }; // no org membership → no candidates (safe empty)
   const nameFilter = trimmed
     ? { name: { contains: trimmed, mode: 'insensitive' as const } }
     : {};

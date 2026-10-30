@@ -364,6 +364,49 @@ def test_required_naming_an_unknown_name_raises_standalone():
         })
 
 
+def _approval_flow_entry(relation, *, as_array=False):
+    ref = {"$ref": "#/definitions/role"}
+    return {
+        "x-generate": {"list": True},
+        "properties": {relation: {"type": "array", "items": ref} if as_array else ref},
+        "required": [relation],
+    }
+
+
+def test_required_naming_a_to_one_relation_with_not_null_fk_warns_redundant():
+    # approval_flow.approver_role_id is NOT NULL, so naming approver_role is redundant.
+    with pytest.warns(UserWarning, match=r"approval_flow\.required.*'approver_role'.*already required"):
+        out = _build_with_required("approval_flow", _approval_flow_entry("approver_role"))
+    assert out["definitions"]["approval_flow"]["allOf"][1]["required"] == ["approver_role"]
+
+
+def test_required_naming_a_to_one_relation_with_nullable_fk_raises():
+    # approval_flow.requestor_role_id is nullable, so Prisma does not require requestor_role.
+    with pytest.raises(UserSchemaError, match=r"approval_flow\.required.*'requestor_role'.*nullable foreign key.*requestor_role_id"):
+        _build_with_required("approval_flow", _approval_flow_entry("requestor_role"))
+
+
+def test_required_naming_a_to_one_relation_with_nullable_fk_raises_standalone():
+    # attachment.attachable_id is nullable.
+    with pytest.raises(UserSchemaError, match=r"attachment\.required.*'attachable'.*nullable foreign key"):
+        _build_with_required("attachment", {
+            "properties": {"attachable": {"$ref": "#/definitions/attachable"}},
+            "required": ["attachable"],
+        })
+
+
+def test_required_naming_an_array_relation_is_not_subject_to_the_to_one_check():
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        out = _build_with_required("role", {
+            "x-generate": {"list": True},
+            "properties": {"users": {"type": "array", "items": {"$ref": "#/definitions/user"}}},
+            "required": ["users"],
+        })
+    assert out["definitions"]["role"]["allOf"][1]["required"] == ["users"]
+
+
 def test_standalone_required_keeps_id_and_prisma_required_columns():
     """A standalone entity used to have its derived `required` list replaced
     by the user's, dropping `id`. It is now a union, as for a paired entity."""

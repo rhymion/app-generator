@@ -1,8 +1,10 @@
 // AUTO-GENERATED - DO NOT EDIT
 import { NextRequest, NextResponse } from 'next/server';
-import { authenticate, requireApiPermission, handleApiError } from '@/lib/api-auth';
+import { authenticate, requireApiPermission, handleApiError, ApiError } from '@/lib/api-auth';
+import { AppError } from '@/lib/_errors';
 import { getRateLimiter } from '@/lib/rate-limit';
-{% if can_update or can_delete %}import prisma from '@/lib/prisma';
+{% if credential_confirmation and can_update %}import { confirmCredentialChange } from '@/lib/auth/credential-confirmation';
+{% endif %}{% if can_update or can_delete %}import prisma from '@/lib/prisma';
 {% endif %}{% if should_filter_by_org and (can_update or can_delete) %}import { getAssociatedOrganizations } from '@/lib/organization/associated_internal';
 {% endif %}{% if can_create %}
 import { add{{ parent_pascal }} } from '@/lib/{{ parent }}/service';
@@ -22,6 +24,15 @@ type BulkResult<T> = BulkSuccess<T> | BulkFailure;
 interface BulkResponse<T> {
   results: BulkResult<T>[];
   summary: { total: number; succeeded: number; failed: number };
+}
+
+// Per-item failure text. The app's own typed errors carry caller-facing text;
+// anything else (a driver, SDK or database error) is logged here and answered
+// with a generic message so internal wording never reaches the client.
+function bulkErrorText(err: unknown): string {
+  if (err instanceof AppError || err instanceof ApiError) return err.message;
+  console.error('[bulk] item failed', err instanceof Error ? err.name : typeof err);
+  return 'Internal error';
 }
 
 function makeBulkResponse<T>(results: BulkResult<T>[]): BulkResponse<T> {
@@ -73,7 +84,7 @@ export async function POST(request: NextRequest) {
         const result = await add{{ parent_pascal }}({{ service_args_for_create }});
         bulkResults.push({ index: i, success: true, data: result });
       } catch (err) {
-        bulkResults.push({ index: i, success: false, error: err instanceof Error ? err.message : String(err) });
+        bulkResults.push({ index: i, success: false, error: bulkErrorText(err) });
       }
     }
 
@@ -178,10 +189,22 @@ export async function PUT(request: NextRequest) {
 {% endfor %}
 {% endif %}
       try {
+{% if credential_confirmation %}
+        // Issue #1188: as on the single PUT, a password change needs the current
+        // password and turning MFA off needs a TOTP/recovery code.
+        const _credential = await confirmCredentialChange(id, {
+          password: {{ credential_password_var }},
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          currentPassword: (bulkItems[i] as any).current_password,
+          mfaEnabled: {{ credential_mfa_var }},
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          mfaCode: (bulkItems[i] as any).mfa_code,
+        });
+{% endif %}
         await update{{ parent_pascal }}({{ service_args_for_update }}, null);
         bulkResults.push({ index: i, success: true, data: { success: true } });
       } catch (err) {
-        bulkResults.push({ index: i, success: false, error: err instanceof Error ? err.message : String(err) });
+        bulkResults.push({ index: i, success: false, error: bulkErrorText(err) });
       }
     }
 

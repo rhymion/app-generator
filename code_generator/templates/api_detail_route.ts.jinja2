@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 {% set needs_resolve = can_view or (can_update and not is_self_only) or (can_delete and not is_self_only) %}
 import { authenticate, requireApiPermission, handleApiError{% if needs_resolve %}, ApiError{% endif %} } from '@/lib/api-auth';
 import { getRateLimiter } from '@/lib/rate-limit';
-{% if needs_resolve %}
+{% if credential_confirmation and can_update %}import { confirmCredentialChange } from '@/lib/auth/credential-confirmation';
+{% endif %}{% if needs_resolve %}
 import { resolvePermissions } from '@/lib/authz';
 {% endif %}
 {% if (can_view and comment_has_mention) or can_update or can_delete %}import prisma from '@/lib/prisma';
@@ -174,6 +175,16 @@ export async function PUT(request: NextRequest, { params }: Params) {
       }
 {% endfor %}
     }
+{% endif %}
+{% if credential_confirmation %}
+    // Issue #1188: the same proof the settings page asks for -- the current
+    // password to change the password, a TOTP/recovery code to turn MFA off.
+    const _credential = await confirmCredentialChange(id, {
+      password: {{ credential_password_var }},
+      currentPassword: body.current_password,
+      mfaEnabled: {{ credential_mfa_var }},
+      mfaCode: body.mfa_code,
+    });
 {% endif %}
     await update{{ parent_pascal }}({{ service_args_for_update }}, null);
     return NextResponse.json({ success: true });

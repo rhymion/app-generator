@@ -265,6 +265,7 @@ export function createApprovalActions(deps: ApprovalActionDeps) {
     // approvable-target link (entityName/targetId) already resolved above.
     if (orderReachedApprovableId && orderReachedFlowIds.length > 0) {
       await notifyApprovalOrderReached(prisma, orderReachedApprovableId, orderReachedFlowIds, {
+        resolveOrganization: deps.resolveApprovableOrganization,
         excludeUserId: userId,
         targetEntityName: entityName,
         targetId,

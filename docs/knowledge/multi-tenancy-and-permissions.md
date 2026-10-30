@@ -266,6 +266,12 @@ Machine clients use the `X-API-Key` header (or `Authorization: Bearer <key>`):
 export async function authenticateApiKey(request: NextRequest): Promise<{ userId: string }>
 ```
 
+When a request carries more than one credential, one order applies in every
+helper (`authenticate`, `resolveActorId`, `requireCaller`, `requireDualAuth`)
+and in routes that accept both a token and a session (`/api/notifications`):
+`X-API-Key` first, then `Authorization: Bearer` (a mobile access token if it
+has three dot-separated segments, otherwise an API key), then the session cookie.
+
 The API key is looked up against `user.api_key` in the DB. A TTL LRU cache (5 min, 1000 entries) reduces DB load. The cache is gated to production (`process.env.NODE_ENV === 'production'`) so Cypress test resets do not encounter stale entries.
 
 ### Dual authentication (session OR API key)
@@ -348,6 +354,18 @@ export async function GET(request: NextRequest) {
 
 The project does **not** have a `middleware.ts` at the project root. Route-level auth is enforced inside each API handler and server action — there is no middleware-layer blanket rejection of unauthenticated requests. Protection depends entirely on each handler calling `getSessionUserId()` or `authenticateApiKey()`.
 
+### Hand-written API routes: `npm run check:handwritten-routes`
+
+`check_generated.py` only covers files the generator writes. A route you add under `app/api/**/route.ts` yourself goes through neither the service layer nor that check, so `code_generator/check_handwritten_routes.py` scans those routes separately.
+
+- **Which routes**: every `route.ts` under `app/api/` that is not a regenerated file (not listed in `.generated-manifest.json` as an overwritten file, and without the `AUTO-GENERATED` marker). A write-once stub counts as hand-written once generated.
+- **What counts as a write**: an exported `POST`, `PUT`, `PATCH` or `DELETE` handler, or a direct `prisma.<model>.create/update/delete/upsert/...Many(` call.
+- **What is flagged**: a writing route whose source (comments stripped) has no call to `requireApiPermission(`, `requirePermission(` or `requireScheduledTaskRole(` (permission check), or no call to `getRateLimiter(` (rate limiting). Each missing guard is reported separately. Authentication alone (`authenticate(`, `requireSession(`, ...) is not a permission check.
+- **Limits**: it is a per-file text match and does not follow imports. A route that delegates both guards to a shared wrapper in another file must call the helper itself or be listed in the allowlist. A match shows the call is present, not that it guards the right operation or checks the right organization; review still decides that.
+- **Exemptions**: `code_generator/check_handwritten_routes_allowlist.yaml` (or a file passed with `--allowlist`). An entry names the route `path`, the guards it skips (`permission`, `rate-limit`) and a required `reason`. An entry that no longer matches a flagged route is reported as stale. The shipped list covers the routes this repository writes by hand; a consumer keeps its own list.
+
+Run it from the project root after `npm run generate-code` (the manifest is written then). Exit status: 0 clean, 1 violations or stale entries, 2 configuration error. The generator's own pytest (`test_check_handwritten_routes.py`) runs it against this repository's routes with the shipped allowlist. It is not part of the CI workflow or the generator's completion gate.
+
 ---
 
 ## 4. Org-scoped filtering — when it fires
@@ -394,7 +412,7 @@ A foreign key is a reference, so writing one is checked as well. In the generate
 
 ### App-level filtering, not database-level
 
-Org-based isolation is enforced by Prisma `where` clauses inside generated getters, not by Postgres row-level security (RLS). A bug in the application layer — e.g., a hand-written query that omits the org filter — would silently expose cross-organization data. The `check_generated.py` tool (`code_generator/check_generated.py`) guards against direct `prisma.<model>.write` calls outside the service layer, but cannot guarantee the where clauses in custom code are correct.
+Org-based isolation is enforced by Prisma `where` clauses inside generated getters, not by Postgres row-level security (RLS). A bug in the application layer — e.g., a hand-written query that omits the org filter — would silently expose cross-organization data. The `check_generated.py` tool (`code_generator/check_generated.py`) guards against direct `prisma.<model>.write` calls outside the service layer, but cannot guarantee the where clauses in custom code are correct. Hand-written routes are scanned by a separate check, described in section 3 ("Hand-written API routes").
 
 See `docs/multi-tenancy.md` § "Decisions" for the rationale (app-layer for v1, RLS deferred until compliance requires it).
 

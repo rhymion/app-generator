@@ -385,34 +385,115 @@ describe('API: @-mention user search', () => {
       .should('eq', 401);
   });
 
-  it('returns only users of the caller\'s organizations, through an API key and a mobile access token', () => {
-    cy.task<{ orgA: { id: string }; orgB: { id: string } }>('db:createCrossOrgScenario', { entityName: 'mention' }).then(({ orgA, orgB }) => {
-      cy.task<string>('db:createApiUserWithPermission', { entityName: 'user', flags: { read: true }, label: 'mentionown', organizationId: orgA.id });
-      cy.task<string>('db:createApiUserWithPermission', { entityName: 'user', flags: { read: true }, label: 'mentionforeign', organizationId: orgB.id });
-      search('?q=mentionown').then((res) => {
-        expect(res.status).to.eq(200);
-        const body = res.body as { options: { id: string; name: string; email: string }[]; permissionDenied: boolean };
-        expect(body.permissionDenied).to.eq(false);
-        expect(body.options.map((o) => o.name)).to.deep.equal(['API User (mentionown/user)']);
-        expect(Object.keys(body.options[0]).sort()).to.deep.equal(['email', 'id', 'name']);
-      });
-      search('?q=mentionforeign').then((res) => {
-        expect(res.status).to.eq(200);
-        expect((res.body as { options: unknown[] }).options).to.deep.equal([]);
-      });
-      cy.request('POST', '/api/mobile/auth/token', {
-        email: TEST_CREDENTIALS.email,
-        password: TEST_CREDENTIALS.password,
-      }).then((login) => {
-        const headers = { Authorization: `Bearer ${(login.body as { access_token: string }).access_token}` };
-        cy.request({ url: '/api/mention/users?q=mentionforeign', headers }).then((res) => {
-          expect((res.body as { options: unknown[] }).options).to.deep.equal([]);
+  type SearchBody = { options: { id: string; name: string; email: string }[]; permissionDenied: boolean };
+  const names = (res: Cypress.Response<unknown>) => (res.body as SearchBody).options.map((o) => o.name);
+
+  it('a record with an organization offers only that organization\'s users, not one who merely shares another organization with the caller', () => {
+    cy.task<Ticket[]>('db:populateCrTicket', 1).then(([ticket]) => {
+      // The caller (the seeded test user) also belongs to a second organization (orgA) that is not the record's.
+      cy.task<{ orgA: { id: string }; orgB: { id: string } }>('db:createCrossOrgScenario', { entityName: 'mention' }).then(({ orgA, orgB }) => {
+        cy.task<string>('db:createApiUserWithPermission', { entityName: 'user', flags: { read: true }, label: 'mentionown', organizationId: ticket.organization_id });
+        cy.task<string>('db:createApiUserWithPermission', { entityName: 'user', flags: { read: true }, label: 'mentionsharedother', organizationId: orgA.id });
+        cy.task<string>('db:createApiUserWithPermission', { entityName: 'user', flags: { read: true }, label: 'mentionforeign', organizationId: orgB.id });
+        const forTicket = (q: string) => `?q=${q}&entity=cr_ticket&id=${ticket.id}`;
+        search(forTicket('mentionown')).then((res) => {
+          expect(res.status).to.eq(200);
+          const body = res.body as SearchBody;
+          expect(body.permissionDenied).to.eq(false);
+          expect(names(res)).to.deep.equal(['API User (mentionown/user)']);
+          expect(Object.keys(body.options[0]).sort()).to.deep.equal(['email', 'id', 'name']);
         });
-        cy.request({ url: '/api/mention/users?q=mentionown', headers }).then((res) => {
-          expect((res.body as { options: unknown[] }).options).to.have.length(1);
+        search(forTicket('mentionsharedother')).then((res) => expect(names(res)).to.deep.equal([]));
+        search(forTicket('mentionforeign')).then((res) => expect(names(res)).to.deep.equal([]));
+        cy.request('POST', '/api/mobile/auth/token', {
+          email: TEST_CREDENTIALS.email,
+          password: TEST_CREDENTIALS.password,
+        }).then((login) => {
+          const headers = { Authorization: `Bearer ${(login.body as { access_token: string }).access_token}` };
+          cy.request({ url: `/api/mention/users${forTicket('mentionforeign')}`, headers }).then((res) => {
+            expect(names(res)).to.deep.equal([]);
+          });
+          cy.request({ url: `/api/mention/users${forTicket('mentionown')}`, headers }).then((res) => {
+            expect(names(res)).to.deep.equal(['API User (mentionown/user)']);
+          });
         });
       });
     });
+  });
+
+  it('a record without an organization column offers users of any organization, also to a caller who belongs to none', () => {
+    cy.task<{ id: string }[]>('db:populateCrMemo', 1).then(([memo]) => {
+      const forMemo = `?q=mentionmemo&entity=cr_memo&id=${memo.id}`;
+      cy.task<string>('db:createApiUserWithPermission', { entityName: 'user', flags: { read: true }, label: 'mentionmemonoorg' });
+      // The seeded test user belongs to no organization yet: the record is what decides, and it scopes nothing.
+      search(forMemo).then((res) => {
+        expect(res.status).to.eq(200);
+        expect(names(res)).to.deep.equal(['API User (mentionmemonoorg/user)']);
+      });
+      cy.task<{ orgB: { id: string } }>('db:createCrossOrgScenario', { entityName: 'mentionmemo' }).then(({ orgB }) => {
+        cy.task<string>('db:createApiUserWithPermission', { entityName: 'user', flags: { read: true }, label: 'mentionmemoforeign', organizationId: orgB.id });
+        search(forMemo).then((res) => {
+          expect(names(res)).to.deep.equal([
+            'API User (mentionmemoforeign/user)',
+            'API User (mentionmemonoorg/user)',
+          ]);
+        });
+      });
+      // A caller who may read the record but not users is told so, with no candidates.
+      cy.task<string>('db:createApiUserWithPermission', { entityName: 'cr_memo', flags: { read: true }, label: 'memoreader' }).then((key) => {
+        search(forMemo, key).then((res) => {
+          expect(res.body).to.deep.equal({ options: [], permissionDenied: true });
+        });
+      });
+    });
+  });
+
+  it('yields no candidates for a record of another organization, a record that does not exist or an unknown entity', () => {
+    cy.task<Ticket[]>('db:populateCrTicket', 1).then(([ticket]) => {
+      cy.task<string>('db:createApiUserWithPermission', { entityName: 'user', flags: { read: true }, label: 'mentionleak', organizationId: ticket.organization_id });
+      // The ticket moves to an organization the caller does not belong to.
+      cy.task<{ entityInOrgB: { id: string } }>('db:createCrossOrgScenario', { entityName: 'cr_ticket', entityId: ticket.id }).then(() => {
+        for (const query of [
+          `?q=mentionleak&entity=cr_ticket&id=${ticket.id}`,
+          '?q=mentionleak&entity=cr_ticket&id=does-not-exist',
+          `?q=mentionleak&entity=not_an_entity&id=${ticket.id}`,
+          `?q=mentionleak&entity=constructor&id=${ticket.id}`,
+        ]) {
+          search(query).then((res) => {
+            expect(res.status).to.eq(200);
+            expect(res.body).to.deep.equal({ options: [], permissionDenied: false });
+          });
+        }
+      });
+    });
+  });
+
+  it('yields no candidates for a record the caller may not read', () => {
+    cy.task<Ticket[]>('db:populateCrTicket', 1).then(([ticket]) => {
+      cy.task<string>('db:createApiUserWithPermission', { entityName: 'user', flags: { read: true }, label: 'mentionreadable', organizationId: ticket.organization_id });
+      // Holds read on users, but no permission at all on cr_ticket.
+      cy.task<string>('db:createApiUserWithPermission', { entityName: 'cr_asset', flags: { read: true }, label: 'noticketread', organizationId: ticket.organization_id }).then((key) => {
+        search(`?q=a&entity=cr_ticket&id=${ticket.id}`, key).then((res) => {
+          expect(res.status).to.eq(200);
+          expect((res.body as SearchBody).options).to.deep.equal([]);
+        });
+      });
+    });
+  });
+
+  it('without a record nothing is scoped by one (a form for a record that is not saved yet)', () => {
+    cy.task<{ orgB: { id: string } }>('db:createCrossOrgScenario', { entityName: 'mentionnorecord' }).then(({ orgB }) => {
+      cy.task<string>('db:createApiUserWithPermission', { entityName: 'user', flags: { read: true }, label: 'mentionnorecord', organizationId: orgB.id });
+      search('?q=mentionnorecord').then((res) => {
+        expect(names(res)).to.deep.equal(['API User (mentionnorecord/user)']);
+      });
+    });
+  });
+
+  it('rejects an entity without an id and an id without an entity, and an over-long entity', () => {
+    search('?q=a&entity=cr_ticket').its('status').should('eq', 400);
+    search('?q=a&id=abc').its('status').should('eq', 400);
+    search(`?q=a&entity=${'e'.repeat(201)}&id=abc`).its('status').should('eq', 400);
   });
 
   it('returns at most 20 users, ordered by name, for an empty query', () => {
@@ -433,15 +514,6 @@ describe('API: @-mention user search', () => {
       search('?q=a', key).then((res) => {
         expect(res.status).to.eq(200);
         expect(res.body).to.deep.equal({ options: [], permissionDenied: true });
-      });
-    });
-  });
-
-  it('answers an empty list for a caller with no organization membership', () => {
-    cy.task<string>('db:createApiUserWithPermission', { entityName: 'user', flags: { read: true }, label: 'noorg' }).then((key) => {
-      search('?q=a', key).then((res) => {
-        expect(res.status).to.eq(200);
-        expect(res.body).to.deep.equal({ options: [], permissionDenied: false });
       });
     });
   });

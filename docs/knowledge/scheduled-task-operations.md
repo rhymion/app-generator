@@ -553,7 +553,8 @@ check (below) when it matches. **Vercel does not generate or set this for
 you** — `scripts/vercel-env.sh` now does (generate-once-persist into
 `.env.production.local`, injected via `vercel_env_inject`, mirroring
 `AUTH_SECRET`'s existing pattern), so running `scripts/vercel-setup.sh` is
-enough; no separate manual step. See `.env.example`/
+enough; no separate manual step. Production and Preview get different
+values (`CRON_SECRET` and `CRON_SECRET_STAGING`). See `.env.example`/
 `.env.vercel.production.local.example`.
 
 If `CRON_SECRET` is unset, an unauthenticated Vercel Cron request falls

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { S3ObjectLockStorage, type S3ObjectLockClient } from './storage-s3';
+import { MAX_S3_RETENTION_DAYS, S3ObjectLockStorage, createS3ObjectLockStorageFromEnv, type S3ObjectLockClient } from './storage-s3';
 
 function fakeClient() {
   const objects = new Map<string, string>();
@@ -32,9 +32,39 @@ describe('S3ObjectLockStorage', () => {
     await expect(s.put('a.json', '{"x":2}')).rejects.toThrow(/Refusing to overwrite/);
   });
 
+  it('passes ExpectedBucketOwner on put and get only when configured', async () => {
+    const calls: unknown[] = [];
+    const client: S3ObjectLockClient = {
+      async putObject(params) { calls.push(params); },
+      async getObject(params) { calls.push(params); return null; },
+    };
+    await new S3ObjectLockStorage(client, 'bucket', 30, now, '123456789012').put('a.json', '{}');
+    expect(calls).toHaveLength(2);
+    for (const c of calls) expect(c).toMatchObject({ ExpectedBucketOwner: '123456789012' });
+    calls.length = 0;
+    await new S3ObjectLockStorage(client, 'bucket', 30, now).put('a.json', '{}');
+    for (const c of calls) expect(c).not.toHaveProperty('ExpectedBucketOwner');
+  });
+
   it('returns null for a missing key and rejects a non-positive retention', async () => {
     const { client } = fakeClient();
     expect(await new S3ObjectLockStorage(client, 'bucket', 30).get('missing')).toBeNull();
     expect(() => new S3ObjectLockStorage(client, 'bucket', 0)).toThrow(/whole number of days/);
+  });
+
+  it('rejects a retention above the maximum, and accepts the maximum itself', async () => {
+    const { client } = fakeClient();
+    expect(() => new S3ObjectLockStorage(client, 'bucket', MAX_S3_RETENTION_DAYS)).not.toThrow();
+    expect(() => new S3ObjectLockStorage(client, 'bucket', MAX_S3_RETENTION_DAYS + 1)).toThrow(/above the maximum/);
+    await expect(createS3ObjectLockStorageFromEnv({
+      AUDIT_LOG_S3_BUCKET: 'b', AUDIT_LOG_S3_REGION: 'us-east-1', AUDIT_LOG_S3_RETENTION_DAYS: '36500',
+    })).rejects.toThrow(/above the maximum/);
+  });
+
+  it('rejects a malformed AUDIT_LOG_S3_EXPECTED_BUCKET_OWNER', async () => {
+    await expect(createS3ObjectLockStorageFromEnv({
+      AUDIT_LOG_S3_BUCKET: 'b', AUDIT_LOG_S3_REGION: 'us-east-1', AUDIT_LOG_S3_RETENTION_DAYS: '30',
+      AUDIT_LOG_S3_EXPECTED_BUCKET_OWNER: 'not-an-id',
+    })).rejects.toThrow(/12-digit/);
   });
 });

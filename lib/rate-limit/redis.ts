@@ -33,6 +33,23 @@
 import Redis, { type RedisOptions } from 'ioredis';
 
 import type { RateLimitBucketConfig, RateLimitDecision, RateLimiter } from './index';
+import { createInMemoryRateLimiter } from './in-memory';
+
+// Upper bound on how long one `check()` may wait on Redis before it is treated
+// as a Redis failure (Issues #1176, #1178). ioredis' defaults (20 retries per
+// command, backoff up to 2 s, 10 s connect timeout, queued commands) let an
+// unreachable Redis hold a request for roughly 80 seconds; every auth path
+// awaits the limiter first, so the failure path must be reached in seconds.
+const DEFAULT_REDIS_TIMEOUT_MS = 2_000;
+// After a Redis failure, skip Redis for this long and use the in-memory
+// fallback directly, so a sustained outage costs one timeout per window
+// instead of one per request.
+const DEFAULT_REDIS_COOLDOWN_MS = 5_000;
+
+const readPositiveMs = (raw: string | undefined, fallback: number) => {
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+};
 
 // Single round-trip: trim expired timestamps, count what remains, and either
 // record this request or report when the next slot frees up. Returning a
@@ -68,8 +85,14 @@ export type CreateRedisRateLimiterOptions = {
   client?: Redis;
   /** Override the connection URL. Falls back to `process.env.REDIS_URL`. */
   url?: string;
+  /** Prefix inserted after `rl:` in every key. Falls back to `process.env.RATE_LIMIT_KEY_PREFIX`. */
+  keyPrefix?: string;
   /** Extra ioredis options merged in when constructing the client internally. */
   ioredisOptions?: RedisOptions;
+  /** Max wait for one Redis check. Falls back to `RATE_LIMIT_REDIS_TIMEOUT_MS`, then 2000. */
+  timeoutMs?: number;
+  /** How long to bypass Redis after a failure. Falls back to `RATE_LIMIT_REDIS_COOLDOWN_MS`, then 5000. */
+  cooldownMs?: number;
 };
 
 export function createRedisRateLimiter(
@@ -83,10 +106,36 @@ export function createRedisRateLimiter(
         'Set REDIS_URL=redis://localhost:6379 for local Docker, or the provider URL in prod.',
     );
   }
+  const timeoutMs = options.timeoutMs ?? readPositiveMs(process.env.RATE_LIMIT_REDIS_TIMEOUT_MS, DEFAULT_REDIS_TIMEOUT_MS);
+  const cooldownMs = options.cooldownMs ?? readPositiveMs(process.env.RATE_LIMIT_REDIS_COOLDOWN_MS, DEFAULT_REDIS_COOLDOWN_MS);
   // `lazyConnect: true` defers the TCP dial until the first command so module
   // import order doesn't matter — useful inside Next.js middleware.
+  // Short retry/backoff/timeouts so an unreachable Redis errors within about
+  // `timeoutMs` instead of ioredis' default ~80 s (Issue #1176).
   const client =
-    options.client ?? new Redis(url!, { lazyConnect: true, ...options.ioredisOptions });
+    options.client ??
+    new Redis(url!, {
+      lazyConnect: true,
+      connectTimeout: timeoutMs,
+      commandTimeout: timeoutMs,
+      maxRetriesPerRequest: 1,
+      retryStrategy: (times) => Math.min(times * 200, 1_000),
+      ...options.ioredisOptions,
+    });
+
+  // Issue #1178: while Redis is failing (outage, or the provider's command
+  // quota is exhausted and every command errors), checks fall back to a
+  // per-process in-memory limiter with the same buckets instead of allowing
+  // everything, so exhausting the external quota does not switch limiting off.
+  // Per-process counters are weaker than the shared ones but bound each
+  // instance's traffic.
+  const fallback = createInMemoryRateLimiter(buckets);
+  let redisDownUntil = 0;
+
+  // Environment namespace for the Redis keys (Issue #1182). Empty by default, so keys
+  // are unchanged unless the deploy sets RATE_LIMIT_KEY_PREFIX (the Vercel env
+  // injection sets `production:` / `preview:`).
+  const keyPrefix = options.keyPrefix ?? process.env.RATE_LIMIT_KEY_PREFIX ?? '';
 
   let callCounter = 0;
 
@@ -108,25 +157,39 @@ export function createRedisRateLimiter(
       const now = Date.now();
       // Disambiguate ZSET members written in the same millisecond.
       const member = `${now}:${++callCounter}`;
-      const cacheKey = `rl:${bucket}:${key}`;
+      const cacheKey = `rl:${keyPrefix}${bucket}:${key}`;
 
       // Issue #587: an unreachable/erroring Redis must not take auth down
       // with it. The rate limiter is a defensive gate in front of auth, not
       // auth itself — availability outweighs the marginal brute-force
-      // protection lost while Redis is down. Fail OPEN, but never silently:
-      // every fail-open is logged so the degraded window is visible in
-      // server logs / audit tooling rather than only inferred after the
-      // fact from an absence of 429s.
+      // protection lost while Redis is down. Fail OPEN (the request is never
+      // rejected because of the Redis fault itself), but never silently:
+      // every failure is logged so the degraded window is visible in server
+      // logs / audit tooling rather than only inferred after the fact from
+      // an absence of 429s. Since Issue #1178 the degraded window is still
+      // limited by the per-process in-memory fallback, and since Issue #1176
+      // the failure is reached within `timeoutMs`.
+      if (now < redisDownUntil) return fallback.check(bucket, key);
+
+      let timer: ReturnType<typeof setTimeout> | undefined;
       try {
-        const raw = (await client.eval(
-          SLIDING_WINDOW_LUA,
-          1,
-          cacheKey,
-          String(now),
-          String(cfg.windowMs),
-          String(cfg.limit),
-          member,
-        )) as [number, number, number, number];
+        const raw = (await Promise.race([
+          client.eval(
+            SLIDING_WINDOW_LUA,
+            1,
+            cacheKey,
+            String(now),
+            String(cfg.windowMs),
+            String(cfg.limit),
+            member,
+          ),
+          new Promise<never>((_, reject) => {
+            timer = setTimeout(
+              () => reject(new Error(`rate-limit Redis check timed out after ${timeoutMs}ms`)),
+              timeoutMs,
+            );
+          }),
+        ])) as [number, number, number, number];
 
         const [allowedNum, remaining, retryMs, resetAt] = raw;
         return {
@@ -139,6 +202,7 @@ export function createRedisRateLimiter(
         // Same "log and continue" contract as lib/audit-log.ts's DB-hiccup
         // handling: a broken Redis must never take auth down with it, but
         // the degraded window must be visible in server logs, not silent.
+        redisDownUntil = Date.now() + cooldownMs;
         console.error(
           '[rate-limit:fail_open]',
           JSON.stringify({
@@ -147,12 +211,9 @@ export function createRedisRateLimiter(
             error: err instanceof Error ? err.message : String(err),
           }),
         );
-        return {
-          allowed: true,
-          remaining: Number.POSITIVE_INFINITY,
-          retryAfterSeconds: 0,
-          resetAt: now,
-        };
+        return fallback.check(bucket, key);
+      } finally {
+        if (timer) clearTimeout(timer);
       }
     },
   };

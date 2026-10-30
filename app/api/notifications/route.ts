@@ -9,7 +9,7 @@ import { INBOX_CAP, TTL_MS, type Notification } from '@/lib/_notifier';
  *
  * Returns the current user's notification list (newest first) and unread
  * count. Authenticated via the NextAuth session cookie, or via an
- * `Authorization: Bearer` mobile access token when that header is present —
+ * `Authorization: Bearer` mobile access token or `X-API-Key` when either header is present —
  * this endpoint powers the in-app bell (web and mobile), not external
  * integrations.
  *
@@ -20,7 +20,7 @@ import { INBOX_CAP, TTL_MS, type Notification } from '@/lib/_notifier';
  */
 export async function GET(request: NextRequest) {
   let userId: string | null;
-  if (request.headers.get('Authorization')) {
+  if (request.headers.get('Authorization') || request.headers.get('X-API-Key')) {
     try {
       userId = (await authenticate(request)).userId;
     } catch (error) {

@@ -6,6 +6,7 @@ import { pinSslModeVerifyFull } from './db-url';
 import { resolvePrismaPoolMax } from './prisma-pool';
 import { cacheOnGlobal } from './global-singleton';
 import { auditLogAppendOnlyExtension } from './audit-log-integrity/guard';
+import { formatSlowQueryLog } from './prisma-slow-query';
 
 const globalForPrisma = global as unknown as Record<string, unknown>;
 
@@ -46,9 +47,7 @@ function attachSlowQueryListener(client: PrismaClient<'query'>): void {
   client.$on('query', (e: Prisma.QueryEvent) => {
     if (e.duration >= slowQueryThresholdMs) {
       // Single-line WARN so log aggregators can grep on `prisma slow-query`.
-      console.warn(
-        `[prisma slow-query ${e.duration}ms] ${e.query} -- params=${e.params}`,
-      );
+      console.warn(formatSlowQueryLog(e));
     }
   });
 }

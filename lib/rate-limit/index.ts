@@ -86,6 +86,10 @@ const PRODUCTION_BUCKETS: Record<string, RateLimitBucketConfig> = {
   // spraying candidates against the 10^6 TOTP space or the recovery-code
   // list is not.
   'auth:mfa:challenge':      { limit: 10, windowMs: 5 * 60_000 },
+  // 10 current-password confirmations per user per 5 minutes, spent by the
+  // REST write path that changes a password. Keyed by user id like the MFA
+  // bucket above, so an API key cannot be used to guess the current password.
+  'auth:password:confirm':   { limit: 10, windowMs: 5 * 60_000 },
   // Per-API-key REST ceilings (ai-agent-integration-design.md "Idempotency
   // keys and rate limiting — resolved design"). Keyed by the caller's
   // resolved user id, not IP: an API caller (agent or otherwise) can share
@@ -113,6 +117,10 @@ const PRODUCTION_BUCKETS: Record<string, RateLimitBucketConfig> = {
   // of the key (never the raw secret). Only failures are counted, so a valid
   // key is never throttled by this bucket.
   'auth:apikey':             { limit: 10, windowMs: 60_000 },
+  // 30 file uploads per user per 10 minutes (Issue #1158). Keyed by the
+  // authenticated user id: the upload route only requires a signed-in caller,
+  // so the account, not the IP, is the identity that consumes storage.
+  'upload:file':             { limit: 30, windowMs: 10 * 60_000 },
 };
 
 // The Cypress UI suite intentionally logs in fresh for every `it()` (each
@@ -146,6 +154,8 @@ const apiWriteLimitOverride = Number(process.env.RATE_LIMIT_API_WRITE_LIMIT);
 // legitimately logs the same seeded identity in several times per run.
 const mobileAuthTokenLimitOverride = Number(process.env.RATE_LIMIT_MOBILE_AUTH_TOKEN_LIMIT);
 
+const uploadLimitOverride = Number(process.env.RATE_LIMIT_UPLOAD_LIMIT);
+
 export const DEFAULT_BUCKETS: Record<string, RateLimitBucketConfig> = {
   ...PRODUCTION_BUCKETS,
   ...(Number.isFinite(credentialsLimitOverride) && credentialsLimitOverride > 0
@@ -159,6 +169,9 @@ export const DEFAULT_BUCKETS: Record<string, RateLimitBucketConfig> = {
     : {}),
   ...(Number.isFinite(mobileAuthTokenLimitOverride) && mobileAuthTokenLimitOverride > 0
     ? { 'mobile:auth:token': { limit: mobileAuthTokenLimitOverride, windowMs: 15 * 60_000 } }
+    : {}),
+  ...(Number.isFinite(uploadLimitOverride) && uploadLimitOverride > 0
+    ? { 'upload:file': { limit: uploadLimitOverride, windowMs: 10 * 60_000 } }
     : {}),
 };
 

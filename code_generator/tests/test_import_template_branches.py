@@ -649,3 +649,25 @@ def test_org_filter_optional_or_does_not_collide_with_key_equivalence_or(env):
         "{ AND: keyMatchConds, OR: [{ organization_id: { in: _importOrgIds } }, "
         "{ organization_id: null }] };"
     ) in rendered
+
+
+def test_import_route_checks_content_type_and_null_byte(env):
+    ctx = _ctx()
+    rendered = env.get_template('api_import_route.ts.jinja2').render(**ctx)
+    # Content-Type is checked before the body is read.
+    assert "request.headers.get('content-type')" in rendered
+    assert 'UNSUPPORTED_MEDIA_TYPE' in rendered
+    assert 'status: 415' in rendered
+    assert rendered.index('UNSUPPORTED_MEDIA_TYPE') < rendered.index('await request.json()')
+    # text/plain stays accepted alongside application/json.
+    assert "'application/json'" in rendered and "'text/plain'" in rendered
+    # A NUL byte in the CSV text is refused before parsing.
+    assert "csvRaw.includes('\\u0000')" in rendered
+    assert 'INVALID_CSV' in rendered
+    assert rendered.index('INVALID_CSV') < rendered.index('Papa.parse')
+
+
+def test_import_not_supported_stub_has_no_content_type_check(env):
+    ctx = _ctx(import_can_create=False, import_can_update=False)
+    rendered = env.get_template('api_import_route.ts.jinja2').render(**ctx)
+    assert 'UNSUPPORTED_MEDIA_TYPE' not in rendered

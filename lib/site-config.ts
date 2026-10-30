@@ -66,9 +66,10 @@ export const siteConfig = {
    * Authentication providers exposed on the login page. See AuthProviderId
    * above for the runtime gating contract.
    *
-   * `allowedDomains` (optional) restricts OAuth sign-in to email addresses
-   * whose `@domain` is on the list (case-insensitive). Empty array = allow
-   * all. The check only runs for OAuth providers — credentials accounts are
+   * `allowedDomains` (optional) restricts OAuth sign-in to a list of domains
+   * (case-insensitive). Google sign-ins are matched on Google's `hd` claim, so
+   * a personal Google account never passes; other providers are matched on the
+   * email's `@domain`. Empty array = allow all. The check only runs for OAuth providers — credentials accounts are
    * created by an admin path, not self-service, so a domain filter there
    * would be defence-in-depth at best.
    */

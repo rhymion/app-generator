@@ -13,11 +13,13 @@ import type { {{ parent_pascal }}Detail } from '@/lib/{{ parent }}/types';
 const CHILDREN: ChildSpec[] = {{ children | tojson }};
 
 // FormView passes permissions / role ids to every view component; the reads here enforce their own.
-export default function VersionHistory({ src }: { src: { id: string }; permissions?: unknown; currentUserRoleIds?: string[]; currentUserId?: string | null }) {
+// showNewVersionLink={false} (x-custom-components props) drops the New version button, for an identity
+// that starts a new version from a component of its own.
+export default function VersionHistory({ src, showNewVersionLink = true }: { src: { id: string }; showNewVersionLink?: boolean; permissions?: unknown; currentUserRoleIds?: string[]; currentUserId?: string | null }) {
   return (
     <VersionHistoryPanel
       identityId={src.id}
-      newVersionHref={`/{{ parent }}/new?new_version_of=${encodeURIComponent(src.id)}`}
+      newVersionHref={showNewVersionLink ? `/{{ parent }}/new?new_version_of=${encodeURIComponent(src.id)}` : undefined}
       numberField="{{ number }}"
       fields={VERSION_FIELDS}
       childSpecs={CHILDREN}

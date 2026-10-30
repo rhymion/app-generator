@@ -45,7 +45,7 @@ interface ResponsiveListClientProps<T extends BaseEntity> {
   entityLabel?: string;
   displayFields?: DisplayFieldConfig<T>[];
   permissions?: ModelPermissions;
-  /** Which field to display as the card title on mobile. Defaults to 'name'. */
+  /** Which field is the record link (table) / card title (mobile). No default: when omitted there is no link column and the card title is the record id. */
   primaryField?: keyof T;
   /** Pixel width below which to switch to card layout. Defaults to 768. */
   mobileBreakpoint?: number;

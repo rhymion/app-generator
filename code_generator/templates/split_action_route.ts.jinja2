@@ -7,6 +7,7 @@ import { getAssociatedOrganizations } from '@/lib/organization/associated_intern
 {% endif %}
 {% if has_approvable %}
 import { notifyApprovalRequestCreated } from '@/lib/_notifyApprovalRequest';
+import { resolveApprovableOrganization } from '@/lib/approval_request/resolve_target';
 import { createId } from '@paralleldrive/cuid2';
 {% endif %}
 

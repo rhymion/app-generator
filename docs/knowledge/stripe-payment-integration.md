@@ -54,12 +54,17 @@ of `x-payment`.
      `payable` row.
    A failure inside the dispatch makes the route answer 500, so Stripe
    redelivers the event.
-5. **Cancel page.** `/payment/cancel?payable_id=...` expires the still-open
+5. **Cancel page.** `/payment/cancel?payable_id=...&token=...` expires the still-open
    session (`stripe.checkout.sessions.expire`) and, only when Stripe reports
    the session as `expired`, removes the record in the same request
    (`removeUnpaidPayable()`: the entity's `delete{Entity}()`, then the
    `payable` row). The page is an unauthenticated GET, so the query string
-   decides nothing on its own: a session Stripe reports as still open or as
+   decides nothing on its own. The `token` is an HMAC of the payable id keyed
+   by `AUTH_SECRET` (`cancelToken()` in `lib/payment/checkout.ts`), put only in
+   the `cancel_url` Stripe sends the buyer to; a request without it, or with a
+   token for another record, does nothing, and so does every request when
+   `AUTH_SECRET` is unset. Starting a checkout also fails without `AUTH_SECRET`.
+   A session Stripe reports as still open or as
    complete (paid, or payment still processing) leaves the record in place,
    and a `paid` row is never removed. The `checkout.session.expired` event
    that follows finds no `payable` row and does nothing, so it stays as an
@@ -102,7 +107,18 @@ The cancel and success pages are write-once files: an app generated before
 these changes keeps its old pages (the cancel page only expires the session; the
 success page is static). Copy the `removeUnpaidPayable` and
 `retrievePaidSession`/`confirmPaidSession` calls from the generated templates
-to get the new behaviour.
+to get the new behaviour. An old cancel page does not pass the `token` query
+parameter to `expirePendingCheckout()`, so it no longer expires the session or
+removes the record; the `checkout.session.expired` webhook removes it when the
+session expires. Pass `token` from `searchParams` as the generated page does.
+
+**Creating the session is idempotent.** `startPaymentCheckout()` passes Stripe
+an idempotency key built from the payable id and a one-minute time bucket, and
+snaps `expires_at` to the same bucket so a repeated request carries identical
+parameters. A client retry that races the original request gets the original
+session back instead of opening a second one for the same record. A retry that
+crosses a bucket boundary is not deduplicated; once the real session id is
+attached, later calls resume that session.
 
 Idempotency needs no separate table. A repeated success event for a `paid`
 row does nothing, and a repeated expiry event finds no `payable` row. An
@@ -402,8 +418,10 @@ For a local machine see "Local webhook forwarding" above.
    `STRIPE_PUBLISHABLE_KEY` (both from the mode the environment uses) and
    `STRIPE_WEBHOOK_SECRET` (from that environment's endpoint). Also set
    `NEXTAUTH_URL` to the public origin: the Checkout success and cancel URLs
-   are built from it (`lib/payment/checkout.ts`), and it falls back to
-   `http://localhost:3000` when unset, which sends the buyer back to
+   are built from it (`lib/payment/checkout.ts`, `resolveCheckoutOrigin()`;
+   `AUTH_URL` is accepted as an alias). Outside production an unset value falls
+   back to `http://localhost:3000`; in production starting a Checkout throws
+   instead, so a missing value fails loudly rather than sending the buyer back to
    localhost after paying.
 5. **Check it end to end.** Pay with a Stripe test card in a test-mode
    environment (see [testing](https://docs.stripe.com/testing)) and confirm the

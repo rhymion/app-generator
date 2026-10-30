@@ -1,6 +1,6 @@
 {
   "name": "my-next",
-  "version": "6.0.1",
+  "version": "6.1.0",
   "private": true,
   "packageManager": "npm@11.16.0",
   "engines": {
@@ -12,6 +12,8 @@
     "cleanup": "python3 code_generator/build_user_schema.py code_generator/json_schema.yaml prisma/schema.prisma --out code_generator/.generated/json_schema.yaml && python3 code_generator/cleanup.py code_generator/.generated/json_schema.yaml ./ --prune-orphans --keep-stubs",
     "cleanup:all": "python3 code_generator/build_user_schema.py code_generator/json_schema.yaml prisma/schema.prisma --out code_generator/.generated/json_schema.yaml && python3 code_generator/cleanup.py code_generator/.generated/json_schema.yaml ./ --prune-orphans",
     "check:generated": "python3 code_generator/build_user_schema.py code_generator/json_schema.yaml prisma/schema.prisma --out code_generator/.generated/json_schema.yaml && python3 code_generator/check_generated.py code_generator/.generated/json_schema.yaml ./",
+    "check:handwritten-routes": "python3 code_generator/check_handwritten_routes.py ./",
+    "check:tracked-generated-imports": "python3 code_generator/check_tracked_generated_imports.py ./",
     "check:readme-sync": "bash scripts/check_readme_sync.sh",
     "validate:schema": "python3 code_generator/build_user_schema.py code_generator/json_schema.yaml prisma/schema.prisma --out code_generator/.generated/json_schema.yaml && python3 code_generator/validate_schema_cli.py code_generator/.generated/json_schema.yaml ./",
     "cy:open": "cross-env NODE_ENV=test cypress open",

@@ -171,9 +171,11 @@ On the first Google sign-in for a given email:
    It enforces:
    - `profile.email_verified !== false` (Google sets this for all
      completed accounts; an explicit `false` is rejected).
-   - `siteConfig.auth.allowedDomains` — if non-empty, the email's
-     `@domain` must be on the list (case-insensitive). Empty list =
-     allow all.
+   - `siteConfig.auth.allowedDomains` — if non-empty, a Google sign-in
+     must carry an `hd` (hosted domain) claim on the list
+     (case-insensitive); a personal Google account has no `hd` and is
+     rejected, whatever its email address looks like. Other providers
+     are matched on the email's `@domain`. Empty list = allow all.
    - The **credentials↔OAuth collision rule**: if a `user` row already
      exists for this email with `password !== null`, that account was
      created via `/register`. SSO sign-in is rejected with reason
@@ -289,6 +291,29 @@ to close) if it shows up in profiling for a specific deployment.
 `crypto.randomInt`, which rejection-samples internally, so every character is
 equally likely. Codes are shown as `abcd-efgh` and stored bcrypt-hashed.
 
+**Confirming a password change or an MFA disable over REST (Issue #1188):**
+the account settings page asks for the current password before it accepts a new
+one and for a TOTP or recovery code before it turns MFA off. The REST update
+routes of the self-only account view (`PUT /api/setting/:id` and
+`PUT /api/setting/bulk`, generated for a self-only view of the `user` model that
+has both `password` and `mfa_enabled`) ask for the same proof through
+`confirmCredentialChange()` (`lib/auth/credential-confirmation.ts`), so an API
+key or a mobile token alone cannot change either:
+
+- A non-empty `password` needs `current_password` (HTTP 400 when missing, 403
+  when wrong or when the account has no password). The new password is sent in
+  plain text and stored as a bcrypt hash. Wrong attempts spend the
+  `auth:password:confirm` bucket (10 per user per 5 minutes, keyed by user id
+  like `auth:mfa:challenge`); a spent budget answers `429` with `Retry-After`.
+- `mfa_enabled: false` on an account that has MFA on needs `mfa_code`, a current
+  TOTP or recovery code (HTTP 400 when missing, 403 when invalid). It runs
+  `disableMfa()`, so the secret and the recovery codes are cleared exactly as on
+  the settings page, and shares the `auth:mfa:challenge` budget.
+- `mfa_enabled: true` on an account that has MFA off answers 400: MFA is turned
+  on only through the enrollment flow on the settings page.
+- Omitting `password`, sending it empty, omitting `mfa_enabled` or repeating the
+  stored value needs no confirmation.
+
 **Rate limiting the challenge itself (Issue #588):** `proxy.ts`'s
 rate-limit matcher only covers `/api/auth/*` — `/mfa-challenge` is a
 normal page route whose Server Action (`completeMfaChallenge`,
@@ -310,6 +335,18 @@ blocked. The challenge action maps it to `{ ok: false, error: 'RATE_LIMITED',
 retryAfterSeconds }`, the mobile token route to `429` with `Retry-After`, and
 credentials sign-in reports it as an invalid code.
 
+**Client address for rate-limit keys.** The per-IP buckets (`auth:*` in
+`proxy.ts`, `auth:register`, `mobile:auth:token`) key on `clientIp()`
+(`lib/rate-limit/client-ip.ts`). `X-Forwarded-For` is a list that each proxy
+appends to, so its left-most entries are whatever the client sent. `clientIp()`
+therefore takes the entry `TRUSTED_PROXY_HOPS` positions from the right
+(default `1`: the platform edge, which appends the peer address it saw).
+Set `TRUSTED_PROXY_HOPS=2` when a further trusted proxy (for example an
+external load balancer) sits in front of the platform edge. A platform that
+overwrites the header yields a single entry, which is returned as is. When
+the list is shorter than the hop count the left-most entry is used.
+`X-Real-IP` is consulted only when `X-Forwarded-For` is absent.
+
 **Self-registration and API keys.** `POST /api/auth/register` is limited per
 client IP by the `auth:register` bucket (5 requests / 10 min) and answers
 `429` with `Retry-After` when it is spent. `authenticateApiKey`
@@ -327,16 +364,27 @@ account code (materially lower severity than a stolen-session attacker
 against someone else's second factor) and were out of the fix's stated
 scope.
 
-**Fail-open on a Redis outage (Issue #587):** the rate limiter is a
-defensive gate in front of auth, not auth itself. `lib/rate-limit/
-redis.ts`'s `check()` now catches any error from the underlying
-`ioredis` `eval` call (connection refused, timeout, …) and returns an
-`allowed: true` decision instead of throwing — an unreachable Redis must
-never take the entire `/api/auth/*` surface down with a 500. Every
-fail-open is logged (`console.error`, tagged `[rate-limit:fail_open]`,
-same "log and continue" contract as `lib/audit-log.ts`'s DB-write
-fail-open) so the degraded window is visible in server logs rather than
-silently inferred from an absence of 429s.
+**Redis outage: the limiter never rejects because of the fault (Issues #587,
+#1176, #1178):** the rate limiter is a defensive gate in front of auth, not
+auth itself. `lib/rate-limit/redis.ts`'s `check()` catches any error from the
+underlying `ioredis` `eval` call (connection refused, timeout, a provider
+that answers every command with a quota error, ...) and never throws — an
+unreachable Redis must not take the `/api/auth/*` surface down with a 500.
+Instead of allowing everything, a failed check is answered by a per-process
+in-memory limiter built from the same buckets, so exhausting the provider's
+command quota does not switch limiting off; the counters are per instance,
+so the effective ceiling is weaker than the shared one. Every failure is
+logged (`console.error`, tagged `[rate-limit:fail_open]`, same "log and
+continue" contract as `lib/audit-log.ts`) so the degraded window is visible
+in server logs.
+
+The failure is reached within seconds: the client is built with
+`connectTimeout` and `commandTimeout` of 2000 ms, `maxRetriesPerRequest: 1`
+and a backoff capped at 1 s, and each check is also bounded by the same
+timeout (`RATE_LIMIT_REDIS_TIMEOUT_MS`, default 2000). After a failure Redis
+is bypassed for 5 s (`RATE_LIMIT_REDIS_COOLDOWN_MS`) and the in-memory
+limiter answers directly, so a sustained outage costs one timeout per
+cooldown window rather than one per request.
 
 **API keys are unaffected by any of this.** `authenticateApiKey()`
 (`lib/api-auth.ts`) has no MFA check by design — API keys are
@@ -432,6 +480,11 @@ end up in hosting runtime logs). A user is identified by id only:
 touch `audit_log`: the table is append-only (see
 [audit-log-append-only.md](audit-log-append-only.md)) and `actor_user_id` stays
 as the pseudonymous key. The person is erased on the `user` row.
+
+Erasure also ends the person's sessions. The web `jwt()` callback in `auth.ts` returns `null` for a user whose
+`anonymized_at` is set, so Auth.js treats the cookie as no session and clears it (the callback already reads the user
+row on every session read). Mobile access tokens are rejected by `verifyMobileAccessToken()` for the same reason, and
+`anonymizeUser()` revokes the user's `mobile_session` rows so their refresh tokens stop working.
 Failed credential and MFA sign-ins are not recorded in `audit_log`; they
 are throttled by the Redis rate limits described above. Rows written by
 earlier versions may still hold `metadata.email` in a deployed database;
@@ -487,7 +540,11 @@ in `code_generator/json_schema.yaml` omits `password`.
 The credentials `authorize()` in `auth.ts` rejects accounts where
 `password === null`, returning the same "Invalid credentials" message
 as a missing account. This avoids leaking that an email is registered
-as an SSO account when a credentials sign-in is attempted.
+as an SSO account when a credentials sign-in is attempted. The password
+check goes through `verifyPassword()` (`lib/auth/password-check.ts`), which
+runs a bcrypt comparison against a throwaway hash of the same cost when there
+is no stored hash, so an unknown or SSO-only account does not answer faster
+than a wrong password. `POST /api/mobile/auth/token` uses the same helper.
 
 If an SSO user later wants to *also* sign in with a password, an admin
 (or a future self-serve flow) sets `password` to a bcrypt hash. No
@@ -551,5 +608,4 @@ The following are explicitly out of scope for the current implementation:
 - **MFA / TOTP**: Shipped in v1 (S5 phase 5a) for the credentials provider, opt-in per user. Shipped for the OAuth path too as of S8 — see "MFA on the OAuth path" below. Admin-mandated MFA is still deferred.
 - **Account linking UI**: Shipped in v1 (S7). `/setting/accounts` lists and connects/detaches OAuth providers; cross-email linking deferred. See `lib/account-link/`, `auth.ts`.
 - **Audit-log table**: Not implemented. Auth events log to `console.info` only. Prisma model with role/permission hooks deferred.
-- **Rate limiting on `/api/auth/*`**: Not implemented. Planned: Next.js proxy + Upstash Redis.
 - **Per-tenant SSO (SAML)**: Not implemented. Would use SAML Jackson / WorkOS with per-tenant domain binding.

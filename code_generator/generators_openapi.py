@@ -130,11 +130,16 @@ def _record_properties(ctx: dict, all_props: dict) -> dict:
     the create-request schema below already treat as not client-writable.
     """
     readonly_names = _READONLY_FIELDS | set(ctx.get('readonly_fields') or [])
+    # Credential material (password, api_key, ...) is accepted on write and never
+    # returned on a read, which is exactly JSON Schema's `writeOnly` (Issue #1159).
+    write_only_names = set(ctx.get('write_only_field_names') or [])
     properties = {}
     for name, defn in all_props.items():
         cleaned = _clean_field_schema(defn)
         if name in readonly_names:
             cleaned = {**cleaned, 'readOnly': True}
+        if name in write_only_names:
+            cleaned = {**cleaned, 'writeOnly': True}
         properties[name] = cleaned
     # Base fields the entity does not declare itself still appear on every
     # response row, so the record schema must describe them (#762 gap 2).
@@ -346,11 +351,29 @@ def build_entity_openapi(ctx: dict) -> dict:
     if ctx.get('write_locked_values'):
         record_schema['x-write-locked-values'] = ctx['write_locked_values']
 
+    write_only_names = set(ctx.get('write_only_field_names') or [])
     create_properties = {
-        name: _clean_field_schema(defn)
+        name: (
+            {**_clean_field_schema(defn), 'writeOnly': True}
+            if name in write_only_names
+            else _clean_field_schema(defn)
+        )
         for name, defn in filtered_props.items()
         if name not in _READONLY_FIELDS
     }
+    # Confirmation inputs of the self-only account view (Issue #1188): read by
+    # the update routes only, never stored on the record.
+    if ctx.get('credential_confirmation'):
+        create_properties['current_password'] = {
+            'type': 'string',
+            'writeOnly': True,
+            'description': 'The current password. Required on update when `password` is sent.',
+        }
+        create_properties['mfa_code'] = {
+            'type': 'string',
+            'writeOnly': True,
+            'description': 'A current TOTP or recovery code. Required on update to set `mfa_enabled` to false.',
+        }
     # Relation/child-list inputs the REST routes read (Issue #777): a
     # connect-style relation takes a flat id list (`<child>_ids`), an owned
     # child list takes row objects (an existing row keeps its `id`).
@@ -856,11 +879,21 @@ def assemble_openapi_document(entity_specs: list[dict], *, mention_search: bool 
                     {'name': 'q', 'in': 'query', 'required': False,
                      'schema': {'type': 'string', 'maxLength': 200},
                      'description': 'Substring of the user name; empty returns the first users by name.'},
+                    {'name': 'entity', 'in': 'query', 'required': False,
+                     'schema': {'type': 'string', 'maxLength': 200},
+                     'description': 'Entity of the record the mention is for. Give it together with id.'},
+                    {'name': 'id', 'in': 'query', 'required': False,
+                     'schema': {'type': 'string', 'maxLength': 200},
+                     'description': (
+                         'Id of the record the mention is for. When the record has an organization, only '
+                         'that organization\'s users are offered; a record the caller cannot read yields no '
+                         'candidates.'
+                     )},
                 ],
                 'responses': {
                     '200': {
                         'description': (
-                            'At most 20 users in the caller\'s organizations, ordered by name. '
+                            'At most 20 users, ordered by name, limited to the record\'s organization when it has one. '
                             'A caller who may not read users gets an empty list with permissionDenied true.'
                         ),
                         'content': {'application/json': {'schema': {

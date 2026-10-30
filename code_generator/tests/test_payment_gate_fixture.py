@@ -486,3 +486,46 @@ def test_x_payment_generated_ui_spec_follows_the_checkout_redirect(tmp_path):
     # A create redirects to the checkout URL (the success page under the fake
     # client); both create tests must expect that, then return to the list.
     assert spec.count("cy.url().should('include', '/payment/success');") == 2
+
+
+def test_x_payment_checkout_origin_never_silently_defaults_to_localhost(tmp_path):
+    import json
+    import subprocess
+
+    out = _run_pipeline(PAYMENT_FIXTURE_DIR, tmp_path)
+    checkout = (out / 'lib' / 'payment' / 'checkout.ts').read_text()
+    # The old one-line fallback is gone and the call site uses the resolver.
+    assert "process.env.NEXTAUTH_URL ?? 'http://localhost:3000'" not in checkout
+    assert 'const origin = resolveCheckoutOrigin();' in checkout
+
+    # Run the generated resolver itself (type stripping, no Stripe imports).
+    match = re.search(r'export function resolveCheckoutOrigin\(\): string \{.*?\n\}\n', checkout, re.S)
+    assert match, 'resolveCheckoutOrigin() not found in the generated checkout.ts'
+    script = tmp_path / 'resolver.ts'
+    script.write_text(match.group(0) + '''
+const results: Record<string, string> = {};
+for (const [name, env] of Object.entries(JSON.parse(process.argv[2]) as Record<string, Record<string, string>>)) {
+  for (const key of ['NEXTAUTH_URL', 'AUTH_URL', 'NODE_ENV']) delete process.env[key];
+  Object.assign(process.env, env);
+  try { results[name] = resolveCheckoutOrigin(); } catch (e) { results[name] = 'THROWS: ' + (e as Error).message; }
+}
+console.log(JSON.stringify(results));
+''')
+    cases = {
+        'configured': {'NEXTAUTH_URL': 'https://shop.example.com/', 'NODE_ENV': 'production'},
+        'alias': {'AUTH_URL': 'https://alias.example.com', 'NODE_ENV': 'production'},
+        'prod_unset': {'NODE_ENV': 'production'},
+        'prod_blank': {'NEXTAUTH_URL': '  ', 'NODE_ENV': 'production'},
+        'dev_unset': {'NODE_ENV': 'development'},
+    }
+    proc = subprocess.run(
+        ['node', '--experimental-strip-types', '--no-warnings', str(script), json.dumps(cases)],
+        capture_output=True, text=True,
+    )
+    assert proc.returncode == 0, proc.stderr
+    got = json.loads(proc.stdout)
+    assert got['configured'] == 'https://shop.example.com'
+    assert got['alias'] == 'https://alias.example.com'
+    assert got['prod_unset'].startswith('THROWS: NEXTAUTH_URL is not set')
+    assert got['prod_blank'].startswith('THROWS: NEXTAUTH_URL is not set')
+    assert got['dev_unset'] == 'http://localhost:3000'

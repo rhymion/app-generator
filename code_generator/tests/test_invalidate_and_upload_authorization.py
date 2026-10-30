@@ -123,3 +123,11 @@ def test_upload_route_answers_with_the_attachment_id_never_a_path_or_url():
     out = _render('upload_route.ts.jinja2')
     assert 'return NextResponse.json(stored, { status: 200 });' in out
     assert 'url' not in out.replace('request.url', '')
+
+
+def test_upload_route_rate_limits_per_user_before_parsing_the_body():
+    out = _render('upload_route.ts.jinja2')
+    assert "getRateLimiter().check('upload:file', userId)" in out
+    assert "status: 429" in out and "'Retry-After'" in out
+    # Checked after authentication and before the multipart body is read.
+    assert out.index('requireCaller(request)') < out.index("check('upload:file'") < out.index('request.formData()')

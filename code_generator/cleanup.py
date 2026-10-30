@@ -114,6 +114,8 @@ HANDWRITTEN_ALLOWLIST: frozenset[str] = frozenset([
     # @mention support (conditional on x-mention: true fields existing)
     "lib/mention/parser.ts",
     "lib/mention/search.ts",
+    "lib/mention/recipients.ts",
+    "lib/mention/record_org.ts",
     # reaction feature named constants (conditional on reaction fields existing)
     "lib/reaction_constants.ts",
     # Timezone enum mapping (always generated; the enum is part of the base schema)

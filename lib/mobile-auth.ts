@@ -14,6 +14,7 @@
 import { SignJWT, jwtVerify, type JWTPayload } from 'jose';
 import { createHmac, randomBytes } from 'node:crypto';
 import { createId } from '@paralleldrive/cuid2';
+import prisma from '@/lib/prisma';
 
 export const MOBILE_ACCESS_TOKEN_TYPE = 'mobile_access';
 export const ACCESS_TOKEN_TTL_SECONDS = 15 * 60; // 900s
@@ -49,14 +50,15 @@ export async function signMobileAccessToken(userId: string, sessionId: string): 
 }
 
 /**
- * Verify a mobile access token: signature + expiry (jose) and the `type`
- * claim (rejects NextAuth web JWTs). Deliberately stateless — no DB lookup
- *: the mobile_session row is only
- * consulted at issuance/rotation/revocation time, not on every
- * access-token-authenticated request. Consequence of that choice: a token
- * issued just before logout / device revocation stays valid for up to its
- * remaining ~15-minute lifetime — an accepted, explicitly-recorded window,
- * not a bug.
+ * Verify a mobile access token: signature + expiry (jose), the `type`
+ * claim (rejects NextAuth web JWTs) and that the user has not been erased.
+ * The mobile_session row is deliberately NOT consulted on every request: it
+ * is read at issuance/rotation/revocation time only. Consequence of that
+ * choice: a token issued just before logout / device revocation stays valid
+ * for up to its remaining ~15-minute lifetime — an accepted,
+ * explicitly-recorded window, not a bug. Erasure is the exception: one
+ * primary-key lookup of the user rejects a token of an anonymized user
+ * immediately (the same cost class as the web session's `jwt()` callback).
  */
 export async function verifyMobileAccessToken(
   token: string,
@@ -75,6 +77,11 @@ export async function verifyMobileAccessToken(
   const sessionId = payload.session_id;
   if (typeof userId !== 'string' || typeof sessionId !== 'string') {
     throw new MobileAuthError('Malformed token payload');
+  }
+
+  const user = await prisma.user.findUnique({ where: { id: userId }, select: { anonymized_at: true } });
+  if (!user || user.anonymized_at) {
+    throw new MobileAuthError('Invalid or expired access token');
   }
 
   return { userId, sessionId };
