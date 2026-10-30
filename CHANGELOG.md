@@ -52,6 +52,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 - **Generated specs expect the seeded label of a second FK to the same target when its key is a string** (follow-up to Issue #851). The populate helper gives the second same-target FK's dependency row a suffixed string key (for example `Test Agent Code A 2`), but the generated view-page check still expected the unsuffixed label, so the Create examples of such an entity failed. The expected label now follows the key the helper seeded.
 - **GCP deploy reads the attachment bucket under the name the storage code uses** (Issue #1160). `scripts/gcp-deploy.sh` now maps the `app-gcs-bucket-name` secret to `GCS_BUCKET_NAME` (it set `GCS_BUCKET`, which nothing read, so uploads silently went to local disk). Re-run the deploy script to update an existing service. Attachment storage also throws on Cloud Run or Vercel when no backend is configured, instead of falling back to local disk; set `ATTACHMENT_LOCAL_DIR` to opt in to a persistent local path. See `docs/knowledge/attachment-storage.md`.
 - **Vercel Blob is selected by `BLOB_STORE_ID` as well as the read-write token** (Issue #1168), so a project using OIDC only no longer falls through to local disk.
+- **The dashboard widget editor spec no longer fails intermittently on a detached element** (Issue #1056). It looked up the group-by input by the label's generated `for` id, which can change between the server render and hydration; it now reaches the input through the DOM. Test-only change.
 
 ## [6.0.1] - 2026-10-26
 ### Security
