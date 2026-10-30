@@ -160,3 +160,21 @@ def test_invalidate_rest_route_answers_a_failure_result_with_an_error_status(mod
     call = 'eraseWidget(id)' if module else 'invalidateWidget(id)'
     assert f'const result: unknown = await {call};' in out
     assert out.index('.success === false') < out.index('NextResponse.json(result, { status: 500 })') < out.index('NextResponse.json(result ?? { success: true })')
+
+
+def _has_module_level_use_server(source: str) -> bool:
+    """True when the file starts (after comments/blank lines) with a 'use server' directive."""
+    for line in source.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith('//'):
+            continue
+        return stripped.rstrip(';').strip('\'"') == 'use server'
+    return False
+
+
+def test_anonymize_user_module_is_not_a_server_action_module() -> None:
+    """anonymizeUser() trusts the id it is given; the permission checks live in the invalidate
+    wrapper and REST route. A module-level 'use server' would register it as a directly callable action."""
+    assert not _has_module_level_use_server(_render_anonymize(_default_schema()))
+    assert not _has_module_level_use_server((_ROOT / 'templates' / 'anonymize_user.ts.jinja2').read_text(encoding='utf-8'))
+    assert not _has_module_level_use_server((_ROOT.parent / 'lib' / 'compliance' / 'anonymize_user.ts').read_text(encoding='utf-8'))
