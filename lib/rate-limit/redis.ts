@@ -85,6 +85,8 @@ export type CreateRedisRateLimiterOptions = {
   client?: Redis;
   /** Override the connection URL. Falls back to `process.env.REDIS_URL`. */
   url?: string;
+  /** Prefix inserted after `rl:` in every key. Falls back to `process.env.RATE_LIMIT_KEY_PREFIX`. */
+  keyPrefix?: string;
   /** Extra ioredis options merged in when constructing the client internally. */
   ioredisOptions?: RedisOptions;
   /** Max wait for one Redis check. Falls back to `RATE_LIMIT_REDIS_TIMEOUT_MS`, then 2000. */
@@ -130,6 +132,11 @@ export function createRedisRateLimiter(
   const fallback = createInMemoryRateLimiter(buckets);
   let redisDownUntil = 0;
 
+  // Environment namespace for the Redis keys (Issue #1182). Empty by default, so keys
+  // are unchanged unless the deploy sets RATE_LIMIT_KEY_PREFIX (the Vercel env
+  // injection sets `production:` / `preview:`).
+  const keyPrefix = options.keyPrefix ?? process.env.RATE_LIMIT_KEY_PREFIX ?? '';
+
   let callCounter = 0;
 
   return {
@@ -150,7 +157,7 @@ export function createRedisRateLimiter(
       const now = Date.now();
       // Disambiguate ZSET members written in the same millisecond.
       const member = `${now}:${++callCounter}`;
-      const cacheKey = `rl:${bucket}:${key}`;
+      const cacheKey = `rl:${keyPrefix}${bucket}:${key}`;
 
       // Issue #587: an unreachable/erroring Redis must not take auth down
       // with it. The rate limiter is a defensive gate in front of auth, not

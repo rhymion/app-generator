@@ -72,6 +72,12 @@ The corrected flow is three separate scripts, run in order:
 1. `scripts/vercel-setup.sh` (`app-template/scripts/vercel-setup.sh`, a symlink into
    the `app-generator` submodule) — provisions Neon/Upstash/Blob, links the Vercel
    project, injects env vars. Does **not** touch the database.
+   The Preview (`staging`) Neon branch is created schema-only from `production`
+   (`init_source: schema-only`), so it never holds a copy of production data. A
+   schema-only branch has the production tables but an empty `_prisma_migrations`;
+   create it before production is first migrated (a first-time setup does), or baseline
+   it with `prisma migrate resolve --applied`. A `staging` branch created by an earlier
+   version of the script keeps its copied data until it is deleted and recreated.
 2. `scripts/vercel-deploy.sh [--prod]` — first deploy; `vercel-build` creates the schema
    via `migrate:deploy`.
 3. `scripts/vercel-seed.sh [--prod]` — bootstraps tenant/admin data (`db:seed-baseline`,

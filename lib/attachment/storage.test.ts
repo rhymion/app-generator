@@ -35,6 +35,7 @@ vi.mock('@google-cloud/storage', () => ({
 
 import {
   deleteStoredObject,
+  blobTarget,
   isStorageKey,
   localStorageRoot,
   newStorageKey,
@@ -43,7 +44,7 @@ import {
   storageBackend,
 } from './storage';
 
-const ENV_KEYS = ['GCS_BUCKET_NAME', 'BLOB_READ_WRITE_TOKEN', 'ATTACHMENT_LOCAL_DIR'] as const;
+const ENV_KEYS = ['GCS_BUCKET_NAME', 'BLOB_READ_WRITE_TOKEN', 'BLOB_STORE_ID', 'ATTACHMENT_BLOB_READ_WRITE_TOKEN', 'ATTACHMENT_LOCAL_DIR'] as const;
 const saved: Record<string, string | undefined> = {};
 
 beforeEach(() => {
@@ -78,6 +79,20 @@ describe('storage keys', () => {
     for (const bad of ['', '../etc/passwd', '1700000000000-abc123/contract.pdf', '/api/gcs/x', 'a/b', 'contract.pdf']) {
       expect(isStorageKey(bad)).toBe(false);
     }
+  });
+});
+
+describe('blobTarget', () => {
+  it('prefers ATTACHMENT_BLOB_READ_WRITE_TOKEN, then BLOB_STORE_ID, then BLOB_READ_WRITE_TOKEN', () => {
+    const all = { ATTACHMENT_BLOB_READ_WRITE_TOKEN: 'a', BLOB_STORE_ID: 's', BLOB_READ_WRITE_TOKEN: 'b' };
+    expect(blobTarget(all)).toEqual({ token: 'a' });
+    expect(blobTarget({ BLOB_STORE_ID: 's', BLOB_READ_WRITE_TOKEN: 'b' })).toEqual({ storeId: 's' });
+    expect(blobTarget({ BLOB_READ_WRITE_TOKEN: 'b' })).toEqual({ token: 'b' });
+    expect(blobTarget({})).toEqual({});
+  });
+
+  it('selects Vercel Blob when only the attachment token is set', () => {
+    expect(storageBackend({ ATTACHMENT_BLOB_READ_WRITE_TOKEN: 'a' })).toBe('vercel');
   });
 });
 
@@ -156,14 +171,26 @@ describe('Vercel Blob backend', () => {
     expect(blob.put).toHaveBeenCalledTimes(1);
     const [pathname, , options] = blob.put.mock.calls[0];
     expect(pathname).toBe(key);
-    expect(options).toMatchObject({ access: 'private', addRandomSuffix: false, contentType: 'image/png' });
+    expect(options).toMatchObject({ access: 'private', addRandomSuffix: false, contentType: 'image/png', token: 'token' });
+  });
+
+  it('addresses the store explicitly on put, get and del', async () => {
+    const key = newStorageKey();
+    blob.put.mockResolvedValue({});
+    blob.get.mockResolvedValue(null);
+    await putStoredObject(key, Buffer.from('x'), 'image/png');
+    await serveStoredObject(key, SERVE);
+    await deleteStoredObject(key);
+    expect(blob.put.mock.calls[0][2]).toMatchObject({ token: 'token' });
+    expect(blob.get).toHaveBeenCalledWith(key, { access: 'private', token: 'token' });
+    expect(blob.del).toHaveBeenCalledWith(key, { token: 'token' });
   });
 
   it('delivers the bytes through the route with the decrypted name as the disposition', async () => {
     const key = newStorageKey();
     blob.get.mockResolvedValue({ statusCode: 200, stream: new Response('bytes').body, headers: new Headers() });
     const res = await serveStoredObject(key, SERVE);
-    expect(blob.get).toHaveBeenCalledWith(key, { access: 'private' });
+    expect(blob.get).toHaveBeenCalledWith(key, { access: 'private', token: 'token' });
     expect(res?.status).toBe(200);
     expect(res?.headers.get('content-disposition')).toBe(SERVE.disposition);
     expect(await res!.text()).toBe('bytes');

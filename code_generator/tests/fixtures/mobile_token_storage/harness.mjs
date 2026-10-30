@@ -1,7 +1,7 @@
 // Runs the generated mobile lib/token-storage.ts (Node strips the types) against injected
 // stand-ins for react-native, expo-constants, expo-secure-store and expo-local-authentication.
 // argv[2]: path to the .ts file; argv[3]: JSON scenario
-//   { executionEnvironment, platformOS, hasHardware, isEnrolled, rejectLocked }
+//   { executionEnvironment, platformOS, hasHardware, isEnrolled, isEnrolledAfterSave, authCheckThrows, rejectLocked }
 // Prints JSON { calls, read } where `calls` records every SecureStore call with its options.
 import { registerHooks } from 'node:module';
 import { pathToFileURL } from 'node:url';
@@ -9,6 +9,9 @@ import { pathToFileURL } from 'node:url';
 const [, , tsPath, scenarioJson] = process.argv;
 const scenario = JSON.parse(scenarioJson);
 const calls = [];
+const warnings = [];
+console.warn = (message) => warnings.push(String(message));
+let saved = false;
 const store = new Map();
 const web = new Map();
 globalThis.localStorage = {
@@ -24,8 +27,11 @@ const mocks = {
     ExecutionEnvironment: { Bare: 'bare', Standalone: 'standalone', StoreClient: 'storeClient' },
   },
   'expo-local-authentication': {
-    hasHardwareAsync: async () => scenario.hasHardware,
-    isEnrolledAsync: async () => scenario.isEnrolled,
+    hasHardwareAsync: async () => {
+      if (scenario.authCheckThrows) throw new Error('auth api down');
+      return scenario.hasHardware;
+    },
+    isEnrolledAsync: async () => (saved && 'isEnrolledAfterSave' in scenario ? scenario.isEnrolledAfterSave : scenario.isEnrolled),
   },
   'expo-secure-store': {
     setItemAsync: async (key, value, options) => {
@@ -72,5 +78,6 @@ try {
 } catch (e) {
   saveError = String(e.message);
 }
+saved = true;
 const read = await mod.getRefreshToken();
-console.log(JSON.stringify({ calls, read, saveError }));
+console.log(JSON.stringify({ calls, read, saveError, warnings }));

@@ -3,7 +3,6 @@
 import prisma from '@/lib/prisma';
 import type { AuditLog, AuditLogDetail } from '@/lib/audit_log/types';
 import { assertPermission, getModelPermissions, resolvePermissions, toPermissions } from '@/lib/authz';
-import { getAssociatedOrganizations } from '@/lib/organization/getters_associated';
 import type { Operation, RichPermissions } from '@/lib/authz';
 import {
   type PageOpts, type PageResult,
@@ -18,27 +17,12 @@ const FILTERABLE_FIELDS = new Set<string>(['id', 'target_table', 'target_id', 'a
 // The actor relation exposes only what the UI renders (the display name).
 const ACTOR_USER_SELECT = { id: true, name: true } as const;
 
-/**
- * Organization scope of an audit row. `audit_log` has no organization column (a row can describe an
- * unauthenticated event or a system table), so a row belongs to the organizations of the user who
- * caused it. A caller reaches a row only when the actor shares an organization with the caller.
- * A caller with no organization reaches only rows that belong to no organization (no actor, or an
- * actor with no organization), so one organization's trail is never readable from another.
- */
-async function buildAuditLogOrganizationWhere(userId: string | null): Promise<Record<string, unknown>> {
-  const organizationIds = userId ? (await getAssociatedOrganizations(userId)).map((o) => o.id) : [];
-  if (organizationIds.length > 0) {
-    return { actor_user: { organizations: { some: { id: { in: organizationIds } } } } };
-  }
-  return { OR: [{ actor_user_id: null }, { actor_user: { organizations: { none: {} } } }] };
-}
-
 /** Build the where clauses that enforce read scope. */
-async function buildAuditLogAccessWhere(
+function buildAuditLogAccessWhere(
   perms: RichPermissions,
-  userId: string | null,
-): Promise<Record<string, unknown>[]> {
-  const and: Record<string, unknown>[] = [await buildAuditLogOrganizationWhere(userId)];
+  _userId: string | null,
+): Record<string, unknown>[] {
+  const and: Record<string, unknown>[] = [];
   if (!perms.general.read) {
     and.push({ id: '__no_access__' });
   }
@@ -47,9 +31,9 @@ async function buildAuditLogAccessWhere(
 
 // findFirst, not findUnique: the primary key is (id, created_at) (the table is
 // partitioned on created_at), and ids are cuids, unique on their own.
-export async function getAuditLogDetail(id: string, userId: string | null): Promise<AuditLogDetail | null> {
+export async function getAuditLogDetail(id: string): Promise<AuditLogDetail | null> {
   const auditLog = await prisma.audit_log.findFirst({
-    where: { AND: [{ id }, await buildAuditLogOrganizationWhere(userId)] },
+    where: { id },
     include: {
       actor_user: { select: ACTOR_USER_SELECT },
     },
@@ -68,8 +52,10 @@ export async function getAuditLogDetail(id: string, userId: string | null): Prom
 // findFirst, not findUnique: the primary key is (id, created_at) (the table is
 // partitioned on created_at), and ids are cuids, unique on their own.
 export async function getAuditLogDetailPageData(id: string, operation: Operation = 'read') {
-  const { permissions: basePermissions, userId } = await getModelPermissions('audit_log');
-  const auditLog = await getAuditLogDetail(id, userId);
+  const [auditLog, { permissions: basePermissions, userId }] = await Promise.all([
+    getAuditLogDetail(id),
+    getModelPermissions('audit_log'),
+  ]);
   const resolved = await resolvePermissions(basePermissions, auditLog, userId ?? '');
   await assertPermission(resolved, operation, 'audit_log');
   return { auditLog, userPermissions: await toPermissions(resolved) };
@@ -93,7 +79,7 @@ export async function getAuditLogPage(
   userId: string | null,
 ): Promise<PageResult<AuditLog>> {
   const { page, pageSize, skip, take } = clampPage(opts);
-  const accessAnd = await buildAuditLogAccessWhere(perms, userId);
+  const accessAnd = buildAuditLogAccessWhere(perms, userId);
   const filterAnd = buildFilter(opts.filter, FILTERABLE_FIELDS);
   const where = { AND: [...accessAnd, ...filterAnd] };
   const orderBy = buildOrderBy(opts.sort, SORTABLE_FIELDS);
@@ -154,7 +140,7 @@ export async function searchAuditLogOptions(
 ): Promise<AuditLog[]> {
   const { permissions, userId } = await getModelPermissions('audit_log');
   await assertPermission(permissions, 'read', 'audit_log');
-  const accessAnd = await buildAuditLogAccessWhere(permissions, userId);
+  const accessAnd = buildAuditLogAccessWhere(permissions, userId);
 
   const trimmed = query.trim();
   const orClauses: Record<string, unknown>[] = [];

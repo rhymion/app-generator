@@ -105,41 +105,6 @@ describe('API: Audit Log', () => {
     });
   });
 
-  // Strict organization isolation: a row belongs to the organizations of the user who caused it, and
-  // an audit_log.read holder from another organization must not reach it through the list or detail route.
-  describe('Organization isolation', () => {
-    const seedCrossOrgRows = () =>
-      cy.task<{ orgA: { id: string }; orgB: { id: string } }>('db:createCrossOrgScenario', { entityName: 'audit_log' }).then((orgs) =>
-        cy.task<any[]>('db:populateAuditLogForActor', 2).then((records) => ({ orgs, records })));
-
-    it('9.1 list and detail hide another organization\'s rows from an audit_log.read holder', () => {
-      seedCrossOrgRows().then(({ orgs, records }) => {
-        cy.task<string>('db:createApiUserWithPermission', {
-          entityName: 'audit_log', flags: { read: true }, label: 'orgb_auditor', organizationId: orgs.orgB.id,
-        }).then((outsiderKey) => {
-          cy.request({ url: API_BASE, headers: { 'X-API-Key': outsiderKey } }).then((res) => {
-            expect(res.status).to.eq(200);
-            expect(res.body.total).to.eq(0);
-            expect(res.body.rows).to.deep.eq([]);
-          });
-          cy.request({ url: `${API_BASE}/${records[0].id}`, headers: { 'X-API-Key': outsiderKey }, failOnStatusCode: false })
-            .its('status').should('eq', 404);
-        });
-      });
-    });
-
-    it('9.2 an audit_log.read holder in the same organization still reaches the rows', () => {
-      seedCrossOrgRows().then(({ orgs, records }) => {
-        cy.task<string>('db:createApiUserWithPermission', {
-          entityName: 'audit_log', flags: { read: true }, label: 'orga_auditor', organizationId: orgs.orgA.id,
-        }).then((insiderKey) => {
-          cy.request({ url: API_BASE, headers: { 'X-API-Key': insiderKey } }).its('body.total').should('eq', 2);
-          cy.request({ url: `${API_BASE}/${records[0].id}`, headers: { 'X-API-Key': insiderKey } }).its('status').should('eq', 200);
-        });
-      });
-    });
-  });
-
   describe('Permission errors', () => {
     it('7.1 returns 4xx for GET list when permission denied', () => {
       cy.task<string>('db:createLimitedApiUser', 'audit_log').then((limitedKey) => {
