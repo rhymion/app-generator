@@ -247,11 +247,8 @@ ALLOWLIST: list[tuple[str, str, str]] = [
      r'|invalidatePermissionCache',
      'PENDING (tracked publicly as #1214): accept an arbitrary subject / unauthenticated cache flush; '
      'not part of this change.'),
-    (r'lib/[a-z0-9_]+/submit_actions\.ts', r'submitForApproval\w+',
-     'PENDING-RULING (N2): session-bound but no permission check; the intended gate (flow requestor role '
-     'only vs. a permission) awaits a ruling. Remove this entry when the fix lands.'),
 ]
-PENDING_ALLOWLIST_PATHS = {r'lib/authz\.ts', r'lib/[a-z0-9_]+/submit_actions\.ts'}
+PENDING_ALLOWLIST_PATHS = {r'lib/authz\.ts'}
 
 # Function-level (inline) directives in page files: each is an opts-only closure
 # over a fetch*Page helper that itself checks session + read permission.
@@ -441,3 +438,21 @@ def test_inline_function_level_directives_are_a_known_closed_set():
     }
     assert found == INLINE_DIRECTIVE_ALLOWLIST
     assert templates == INLINE_DIRECTIVE_TEMPLATE_ALLOWLIST
+
+
+# ---- the generated submit action authorizes before it judges ----
+
+def test_generated_submit_action_checks_update_permission_before_the_transaction(generated_roots):
+    vo_root = generated_roots[-1]
+    files = sorted((vo_root / 'lib').glob('*/submit_actions.ts'))
+    assert files, 'the version-of fixture must emit submit actions'
+    for f in files:
+        text = f.read_text()
+        check = text.index("requirePermission(")
+        assert "'update'" in text[check:check + 120]
+        lookup = text.index('_existing = await prisma.')
+        assert lookup < check < text.index('prisma.$transaction')
+        # a row that is not visible to the actor is answered like a missing row
+        assert "throw new AppError('NOT_FOUND'" in text[lookup:check]
+        if 'organization_id' in text[lookup:check]:
+            assert 'getAssociatedOrganizations(actorId)' in text[:lookup + 200]
