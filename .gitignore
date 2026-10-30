@@ -189,6 +189,9 @@ code_generator/.generated/
 # version-of-e2e-gate: disposable app copy built and run by
 # scripts/check_version_of_e2e_gate_fixture.sh (never committed).
 .generated-version-of-e2e-gate/
+# security-matrix-e2e-gate: disposable app copy built and run by
+# scripts/check_security_matrix_e2e_gate_fixture.sh (never committed).
+.generated-security-matrix-e2e-gate/
 .generated-mobile-entity-pw/
 # Single-run locks taken by the e2e gate scripts (scripts/gate_run_lock.sh).
 .generated-*.lock
@@ -215,12 +218,14 @@ lib/dashboard/actions.ts
 lib/dashboard/catalog.ts
 lib/dashboard/access-scope.ts
 lib/dashboard/getters.ts
+lib/dashboard/getters_internal.ts
 lib/dashboard/service.ts
 lib/dashboard/types.ts
 lib/dashboard/use_entity_form.ts
 lib/dashboard/use_entity_capabilities.ts
 lib/dashboard/use_entity_approval_actions.ts
 !lib/organization/getters_associated.ts
+!lib/organization/associated_internal.ts
 !lib/attachment/storage.ts
 !lib/attachment/upload_core.ts
 !lib/attachment/link.ts
@@ -232,6 +237,7 @@ lib/dashboard/use_entity_approval_actions.ts
 !lib/approval_flow/service_validation_custom.ts
 !lib/app_setting/service_validation_custom.ts
 !lib/approval_request/actions.ts
+!lib/approval_request/actions_internal.ts
 !lib/approval_request/actions.test.ts
 !lib/approval_request/actions_core.ts
 !lib/approval_request/order-check.ts
@@ -241,6 +247,7 @@ lib/dashboard/use_entity_approval_actions.ts
 !lib/approval_request/submit_predicate.test.ts
 !lib/setting/password-actions.ts
 !lib/audit_log/getters.ts
+!lib/audit_log/getters_internal.ts
 !lib/audit_log/types.ts
 !lib/audit_log/virtual_resolvers.ts
 !lib/compliance/**

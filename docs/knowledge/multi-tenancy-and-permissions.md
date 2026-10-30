@@ -77,11 +77,11 @@ This is a deliberate design choice, not an oversight: audit records exist to let
 
 ### How filtering is applied in Prisma where clauses
 
-For an entity with `should_filter_by_org = True`, the generated `lib/{entity}/getters.ts` (from `code_generator/templates/getters.ts.jinja2`) inserts an `organization_id` filter into every query:
+For an entity with `should_filter_by_org = True`, the generated `lib/{entity}/getters_internal.ts` (from `code_generator/templates/getters_internal.ts.jinja2`) inserts an `organization_id` filter into every query:
 
 ```typescript
-// Generated: lib/{entity}/getters.ts
-import { getAssociatedOrganizations } from '@/lib/organization/getters_associated';
+// Generated: lib/{entity}/getters_internal.ts
+import { getAssociatedOrganizations } from '@/lib/organization/associated_internal';
 
 const associatedOrganizations = await getAssociatedOrganizations(userId);
 const associatedOrganizationIds = associatedOrganizations.map((o) => o.id);
@@ -108,7 +108,7 @@ function build{Entity}AccessWhere(perms, userId, associatedOrganizationIds) {
 }
 ```
 
-`getAssociatedOrganizations(userId)` is defined in `lib/organization/getters_associated.ts` and fetches only organizations the user is a member of:
+`getAssociatedOrganizations(userId)` is defined in `lib/organization/associated_internal.ts` and fetches only organizations the user is a member of:
 
 ```typescript
 await prisma.organization.findMany({

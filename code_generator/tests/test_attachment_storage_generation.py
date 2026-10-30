@@ -49,7 +49,7 @@ def test_unlinked_filter_names_the_bridge_and_every_direct_back_relation():
 
 def test_each_owner_detail_getter_is_imported_once():
     out = _access(direct=[_direct('doc', 'file_id', 'doc_file'), _direct('doc', 'scan_id', 'doc_scan')])
-    assert out.count("import { getDocDetail } from '@/lib/doc/getters';") == 1
+    assert out.count("import { getDocDetail } from '@/lib/doc/getters_internal';") == 1
     # ... and a lookup is generated per foreign key.
     assert "prisma.doc.findFirst({ where: { file_id: attachment.id }" in out
     assert "prisma.doc.findFirst({ where: { scan_id: attachment.id }" in out

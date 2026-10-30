@@ -7,7 +7,7 @@
 import { getModelPermissions } from '@/lib/authz';
 import type { RichPermissions } from '@/lib/authz';
 import { AppError } from '@/lib/_errors';
-import { getAssociatedOrganizations } from '@/lib/organization/getters_associated';
+import { getAssociatedOrganizations } from '@/lib/organization/associated_internal';
 import { trySelfOnlyAdminBypass } from '@/lib/self_only';
 import { DASHBOARD_ACCESS_SCOPES } from './access-scope';
 

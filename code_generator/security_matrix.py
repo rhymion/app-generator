@@ -9,7 +9,7 @@ value. Adding an axis, a value or a combination rule edits the YAML only.
   * `check()` compares that manifest with the `security-cell:` markers found in
     test files and with the allowlist, and returns the problems.
 
-CLI: python3 security_matrix.py check --manifest M --tests DIR [DIR...] [--allowlist F]
+CLI: python3 security_matrix.py check --manifest M --tests DIR [DIR...] [--allowlist F [F...]]
 """
 from __future__ import annotations
 
@@ -196,11 +196,14 @@ def check(manifest: dict, markers: dict[str, list[str]], allowlist: list[dict], 
     }
 
 
-def run_check(manifest_path: Path, test_roots: list[Path], allowlist_path: Path, matrix_path: Path = MATRIX_PATH) -> int:
+def run_check(manifest_path: Path, test_roots: list[Path], allowlist_path: Path | list[Path],
+              matrix_path: Path = MATRIX_PATH) -> int:
     matrix = load_matrix(matrix_path)
     manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
     markers, errors = scan_markers(test_roots, matrix)
-    result = check(manifest, markers, load_allowlist(allowlist_path, matrix), matrix)
+    paths = [allowlist_path] if isinstance(allowlist_path, Path) else allowlist_path
+    allowlist = [e for p in paths for e in load_allowlist(p, matrix)]
+    result = check(manifest, markers, allowlist, matrix)
     problems = list(errors)
     problems += [f'cell has no test and no allowlist entry: {c}' for c in result['missing']]
     problems += [f'marker names a cell that does not exist: {c}' for c in result['unknown_markers']]
@@ -219,7 +222,7 @@ def main(argv=None) -> int:
     c = sub.add_parser('check')
     c.add_argument('--manifest', required=True, type=Path)
     c.add_argument('--tests', required=True, nargs='+', type=Path)
-    c.add_argument('--allowlist', type=Path, default=ALLOWLIST_PATH)
+    c.add_argument('--allowlist', nargs='+', type=Path, default=[ALLOWLIST_PATH])
     c.add_argument('--matrix', type=Path, default=MATRIX_PATH)
     args = ap.parse_args(argv)
     return run_check(args.manifest, args.tests, args.allowlist, args.matrix)

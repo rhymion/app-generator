@@ -109,6 +109,7 @@ const eslintConfig = defineConfig([
     ".generated-list-child-e2e-gate/**",
     ".generated-scheduled-task-e2e-gate/**",
     ".generated-version-of-e2e-gate/**",
+    ".generated-security-matrix-e2e-gate/**",
     // Disposable app copy built by scripts/run_mobile_entity_playwright.sh.
     ".generated-mobile-entity-pw/**",
     // Local Python virtualenv (code_generator/tests pytest deps) — never

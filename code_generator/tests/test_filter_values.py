@@ -209,13 +209,13 @@ class TestGettersTemplate:
     def test_no_filter_values_no_generated_code(self):
         schema = _schema_with_filter()
         ctx = build_context(_entity(), schema)
-        rendered = _render("getters.ts.jinja2", ctx)
+        rendered = _render("getters_internal.ts.jinja2", ctx)
         assert "x-filter-values" not in rendered
 
     def test_access_where_pushes_in_clause(self):
         schema = _schema_with_filter(filter_values={"status": ["active", "pending"]})
         ctx = build_context(_entity(), schema)
-        rendered = _render("getters.ts.jinja2", ctx)
+        rendered = _render("getters_internal.ts.jinja2", ctx)
         assert 'and.push({ status: { in: ["active", "pending"] } })' in rendered
 
     def test_access_where_multiple_fields_and_composed(self):
@@ -223,14 +223,14 @@ class TestGettersTemplate:
             filter_values={"status": ["active"], "is_archived": [False]}
         )
         ctx = build_context(_entity(), schema)
-        rendered = _render("getters.ts.jinja2", ctx)
+        rendered = _render("getters_internal.ts.jinja2", ctx)
         assert 'and.push({ status: { in: ["active"] } })' in rendered
         assert 'and.push({ is_archived: { in: [false] } })' in rendered
 
     def test_detail_inline_where_includes_filter(self):
         schema = _schema_with_filter(filter_values={"status": ["active"]})
         ctx = build_context(_entity(), schema)
-        rendered = _render("getters.ts.jinja2", ctx)
+        rendered = _render("getters_internal.ts.jinja2", ctx)
         assert "status: { in: [\"active\"] }," in rendered
 
     def test_composes_with_self_only(self):
@@ -239,7 +239,7 @@ class TestGettersTemplate:
             is_self_only=True,
         )
         ctx = build_context(_entity(), schema)
-        rendered = _render("getters.ts.jinja2", ctx)
+        rendered = _render("getters_internal.ts.jinja2", ctx)
         # Both conditions land in the same `and` array — never an OR
         # between them (AND composition, per ruling_C).
         assert "and.push({ creator_id: userId })" in rendered
