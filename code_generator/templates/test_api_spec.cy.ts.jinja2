@@ -615,6 +615,7 @@ describe('API: {{ title }}', () => {
 
   describe('Permission errors', () => {
     it('7.1 returns 4xx for GET list when permission denied', () => {
+      // security-cell: entity={{ parent }} operation=list case=permission_denied
       cy.task<string>('db:createLimitedApiUser', '{{ parent }}').then((limitedKey) => {
         cy.request({ url: API_BASE, headers: { 'X-API-Key': limitedKey }, failOnStatusCode: false })
           .then((res) => {
@@ -625,6 +626,7 @@ describe('API: {{ title }}', () => {
 {% if can_new %}
 
     it('7.2 returns 4xx for POST when permission denied', () => {
+      // security-cell: entity={{ parent }} operation=create case=permission_denied
 {% if has_deps %}
       cy.task<any>('db:populate{{ pascal }}Dependencies').then((deps) => {
 {% endif %}
@@ -651,6 +653,7 @@ describe('API: {{ title }}', () => {
 {% if can_edit %}
 
     it('7.3 returns 4xx for PUT when permission denied', () => {
+      // security-cell: entity={{ parent }} operation=update case=permission_denied
       cy.task<any>('db:populate{{ pascal }}', 1).then((records) => {
         cy.task<string>('db:createLimitedApiUser', '{{ parent }}').then((limitedKey) => {
           cy.request({
@@ -669,6 +672,7 @@ describe('API: {{ title }}', () => {
 {% if can_delete %}
 
     it('7.4 returns 4xx for DELETE when permission denied', () => {
+      // security-cell: entity={{ parent }} operation=delete case=permission_denied
       cy.task<any>('db:populate{{ pascal }}', 1).then((records) => {
         cy.task<string>('db:createLimitedApiUser', '{{ parent }}').then((limitedKey) => {
           cy.request({
@@ -690,6 +694,7 @@ describe('API: {{ title }}', () => {
     // this used to require a SESSION-loginable actor (cy.login) because the
     // route read getSessionUserId() exclusively; that exclusivity is gone.
     it('7.5 returns 4xx for GET export when permission denied', () => {
+      // security-cell: entity={{ parent }} operation=export case=permission_denied
       cy.task<string>('db:createLimitedApiUser', '{{ parent }}').then((limitedKey) => {
         cy.request({
           url: `${API_BASE}/export`,
@@ -706,6 +711,7 @@ describe('API: {{ title }}', () => {
     // cmd_658: see the 7.5 comment above — import resolves the actor the same
     // dual-auth way (cmd_648) and no longer needs a session-loginable actor.
     it('7.6 returns 4xx for POST import when permission denied', () => {
+      // security-cell: entity={{ parent }} operation=import case=permission_denied
       cy.task<string>('db:createLimitedApiUser', '{{ parent }}').then((limitedKey) => {
         cy.request({
           method: 'POST',
@@ -731,6 +737,7 @@ describe('API: {{ title }}', () => {
   describe('Cross-organization isolation (G3)', () => {
 {% if can_new %}
     it('G3.1 POST with foreign organization_id returns 404 (existence hidden)', () => {
+      // security-cell: entity={{ parent }} operation=create case=cross_org
 {% if has_deps %}
       cy.task<any>('db:populate{{ pascal }}Dependencies').then((deps) => {
 {% endif %}
@@ -762,6 +769,7 @@ describe('API: {{ title }}', () => {
 {% if can_view %}
 
     it('G3.2 GET on entity in foreign org returns 404 (existence hidden)', () => {
+      // security-cell: entity={{ parent }} operation=detail case=cross_org
       cy.task<any>('db:populate{{ pascal }}', 1).then((records) => {
         cy.task<any>('db:createCrossOrgScenario', { entityName: '{{ parent }}', entityId: records[0].id }).then((scenario) => {
           cy.request({
@@ -778,6 +786,7 @@ describe('API: {{ title }}', () => {
 {% if can_edit %}
 
     it('G3.3 PUT on entity in foreign org returns 404 (existence hidden)', () => {
+      // security-cell: entity={{ parent }} operation=update case=cross_org
       cy.task<any>('db:populate{{ pascal }}', 1).then((records) => {
         cy.task<any>('db:createCrossOrgScenario', { entityName: '{{ parent }}', entityId: records[0].id }).then((scenario) => {
           cy.request({
@@ -806,6 +815,7 @@ describe('API: {{ title }}', () => {
     // from a not-found response.
 {% if primary_is_fk and not primary_fk_is_ua %}
     it('G3.4 PUT setting organization_id to a foreign org returns 404 (existence hidden)', () => {
+      // security-cell: entity={{ parent }} operation=update case=cross_org
       cy.task<any>('db:populate{{ pascal }}Dependencies').then((deps) => {
         cy.task<any[]>('db:populate{{ pascal }}', 1).then((records) => {
           cy.task<any>('db:createCrossOrgScenario', { entityName: '{{ parent }}' }).then((scenario) => {
@@ -830,6 +840,7 @@ describe('API: {{ title }}', () => {
     });
 {% else %}
     it('G3.4 PUT setting organization_id to a foreign org returns 404 (existence hidden)', () => {
+      // security-cell: entity={{ parent }} operation=update case=cross_org
       cy.task<any[]>('db:populate{{ pascal }}', 1).then((records) => {
         cy.task<any>('db:createCrossOrgScenario', { entityName: '{{ parent }}' }).then((scenario) => {
           cy.request({
@@ -856,6 +867,7 @@ describe('API: {{ title }}', () => {
     // organization must come back as a failed "Not found" item, exactly like a
     // missing id, and must not be written.
     it('G3.6 bulk PUT on entity in foreign org reports Not found and does not write', () => {
+      // security-cell: entity={{ parent }} operation=bulk_update case=cross_org
       cy.task<any>('db:populate{{ pascal }}', 1).then((records) => {
         cy.task<any>('db:createCrossOrgScenario', { entityName: '{{ parent }}', entityId: records[0].id }).then((scenario) => {
           cy.request({
@@ -877,6 +889,7 @@ describe('API: {{ title }}', () => {
 {% if can_delete %}
 
     it('G3.7 bulk DELETE on entity in foreign org reports Not found and does not delete', () => {
+      // security-cell: entity={{ parent }} operation=bulk_delete case=cross_org
       cy.task<any>('db:populate{{ pascal }}', 1).then((records) => {
         cy.task<any>('db:createCrossOrgScenario', { entityName: '{{ parent }}', entityId: records[0].id }).then((scenario) => {
           cy.request({
@@ -902,6 +915,7 @@ describe('API: {{ title }}', () => {
     // to, with the same 404 a missing row gets.
 {% if can_new %}
     it('G3.8 POST with a {{ fk_write_probe.prop }} in a foreign org returns 404 (existence hidden)', () => {
+      // security-cell: entity={{ parent }} operation=create case=cross_org
       {% if can_list %}cy.request({ url: API_BASE, headers: { 'X-API-Key': TEST_API_KEY } }).its('body.total'){% else %}cy.wrap(null){% endif %}.then((totalBefore) => {
       cy.task<any>('db:populate{{ pascal }}Dependencies').then((deps) => {
         cy.task<any>('db:createCrossOrgScenario', { entityName: '{{ fk_write_probe.target }}', entityId: deps.{{ fk_write_probe.dep_var }}2.id }).then((scenario) => {
@@ -931,6 +945,7 @@ describe('API: {{ title }}', () => {
     });
 
     it('G3.9 bulk POST with a {{ fk_write_probe.prop }} in a foreign org reports Not found and does not create', () => {
+      // security-cell: entity={{ parent }} operation=bulk_create case=cross_org
       {% if can_list %}cy.request({ url: API_BASE, headers: { 'X-API-Key': TEST_API_KEY } }).its('body.total'){% else %}cy.wrap(null){% endif %}.then((totalBefore) => {
       cy.task<any>('db:populate{{ pascal }}Dependencies').then((deps) => {
         cy.task<any>('db:createCrossOrgScenario', { entityName: '{{ fk_write_probe.target }}', entityId: deps.{{ fk_write_probe.dep_var }}2.id }).then((scenario) => {
@@ -965,6 +980,7 @@ describe('API: {{ title }}', () => {
 {% if can_edit %}
 
     it('G3.10 PUT with a {{ fk_write_probe.prop }} in a foreign org returns 404 (existence hidden)', () => {
+      // security-cell: entity={{ parent }} operation=update case=cross_org
       cy.task<any>('db:populate{{ pascal }}Dependencies').then((deps) => {
         cy.task<any[]>('db:populate{{ pascal }}', 1).then((records) => {
           cy.task<any>('db:createCrossOrgScenario', { entityName: '{{ fk_write_probe.target }}', entityId: deps.{{ fk_write_probe.dep_var }}2.id }).then((scenario) => {
@@ -994,6 +1010,7 @@ describe('API: {{ title }}', () => {
     });
 
     it('G3.11 bulk PUT with a {{ fk_write_probe.prop }} in a foreign org reports Not found and does not write', () => {
+      // security-cell: entity={{ parent }} operation=bulk_update case=cross_org
       cy.task<any>('db:populate{{ pascal }}Dependencies').then((deps) => {
         cy.task<any[]>('db:populate{{ pascal }}', 1).then((records) => {
           cy.task<any>('db:createCrossOrgScenario', { entityName: '{{ fk_write_probe.target }}', entityId: deps.{{ fk_write_probe.dep_var }}2.id }).then((scenario) => {
@@ -1135,6 +1152,7 @@ describe('API: {{ title }}', () => {
     // picker does: a record of a foreign organization is never offered, a
     // record the caller may see still is.
     it('G3.5 GET {{ api_path }}/options never returns an entity in a foreign org', () => {
+      // security-cell: entity={{ parent }} operation=options case=cross_org
       cy.task<any[]>('db:populate{{ pascal }}', 2).then((records) => {
         cy.task<any>('db:createCrossOrgScenario', { entityName: '{{ parent }}', entityId: records[1].id }).then((scenario) => {
           cy.request({
