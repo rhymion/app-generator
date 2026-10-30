@@ -26,7 +26,7 @@ vi.mock('@/lib/api-auth', () => ({
     }
   },
 }));
-vi.mock('@/lib/organization/getters_associated', () => ({
+vi.mock('@/lib/organization/associated_internal', () => ({
   getAssociatedOrganizations: m.getAssociatedOrganizations,
 }));
 vi.mock('@/lib/self_only', () => ({ trySelfOnlyAdminBypass: m.trySelfOnlyAdminBypass }));

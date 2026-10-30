@@ -36,6 +36,7 @@ The `x-generate` block in the entity definition controls which outputs are activ
 |---|---|---|
 | `lib/{entity}/types.ts` | `types.ts.jinja2` | Always |
 | `lib/{entity}/getters.ts` | `getters.ts.jinja2` | Always |
+| `lib/{entity}/getters_internal.ts` | `getters_internal.ts.jinja2` | Always |
 | `lib/{entity}/service.ts` | `service.ts.jinja2` | Always |
 | `lib/{entity}/service_validation.ts` | `service_validation.ts.jinja2` | Always |
 | `lib/{entity}/actions.ts` | `actions.ts.jinja2` | Always |

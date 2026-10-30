@@ -158,6 +158,7 @@ def _generated_files_for_entity(entity: dict, root: Path) -> list[Path]:
     # lib/
     files.append(lib_dir / 'types.ts')
     files.append(lib_dir / 'getters.ts')
+    files.append(lib_dir / 'getters_internal.ts')
     files.append(lib_dir / 'chart-getters.ts')
     if can_new or can_edit or can_delete:
         files.append(lib_dir / 'service.ts')

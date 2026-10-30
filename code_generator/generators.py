@@ -3306,6 +3306,41 @@ def _build_approval_edge_trigger_update_code(
     )
 
 
+def _build_submit_for_approval_authz_code(
+    parent: str,
+    model: str,
+    should_filter_by_org: bool,
+    org_relationship_optional: bool,
+    item_context_select: str,
+    permission_op: str = 'update',
+) -> str:
+    """Authorization step of the submit action, emitted BEFORE the
+    transaction (inside the action's try, so an AppError becomes an
+    ActionFailure)."""
+    # Same gate as the ordinary edit path (upsert<E>): before anything is
+    # judged, the actor needs UPDATE permission on this row, organization and
+    # creator/assignee scope included. A row outside the actor's organizations
+    # is answered exactly like a row that does not exist. permission_op is
+    # 'update' unless the schema disabled edit (see service_context).
+    if should_filter_by_org:
+        _org_where = (
+            "OR: [{ organization_id: { in: _orgIds } }, { organization_id: null }]"
+            if org_relationship_optional
+            else "organization_id: { in: _orgIds }"
+        )
+        _lookup = (
+            f"    const _orgIds = (await getAssociatedOrganizations(actorId)).map((o) => o.id);\n"
+            f"    const _existing = await prisma.{model}.findFirst({{ where: {{ id, {_org_where} }}, select: {item_context_select} }});\n"
+        )
+    else:
+        _lookup = f"    const _existing = await prisma.{model}.findUnique({{ where: {{ id }}, select: {item_context_select} }});\n"
+    return (
+        _lookup
+        + f"    if (!_existing) throw new AppError('NOT_FOUND', 'Not found');\n"
+        + f"    await requireRecordPermission('{parent}', '{permission_op}', _existing, actorId);\n"
+    )
+
+
 def _build_submit_for_approval_action_code(
     approvable_fk: str,
     parent: str,
@@ -3445,6 +3480,20 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
     approval_edge_trigger_create_code = ''
     approval_edge_trigger_update_code = ''
     submit_for_approval_action_code = ''
+    # Coarse permission, chosen with the SAME formula the grant-all-permissions
+    # gate and the split route use: update when edit is enabled, else create
+    # when new is enabled, else read. A permission the schema disabled can never
+    # be assigned, so requiring it would lock every caller out.
+    _submit_permission_op = 'update'
+    if schema:
+        _submit_grants = _seed_entity_grant_flags(parent, schema.get('definitions', {}), True)
+        _submit_permission_op = next(
+            (op for op in ('update', 'create', 'read') if _submit_grants[op]), 'read'
+        )
+    submit_for_approval_authz_code = _build_submit_for_approval_authz_code(
+        parent, model, should_filter_by_org, bool(ctx.get('org_relationship_optional')), ctx['item_context_select'],
+        _submit_permission_op,
+    )
     # x-version-of: at most one open draft per identity, checked in the same
     # transaction as the create (a throw rolls the new row back).
     _version_of = version_of_for(parent, schema) if schema else None
@@ -4059,7 +4108,7 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
                or reservation_self_case_notifies or approval_edge_trigger_create_code
                or approval_edge_trigger_update_code) else '')
         + (f"\nimport {{ recordAuditEvent }} from '@/lib/audit-log';" if is_audited else '')
-        + (f"\nimport {{ getAssociatedOrganizations }} from '@/lib/organization/getters_associated';" if org_id_client_writable and (can_create or can_update) else '')
+        + (f"\nimport {{ getAssociatedOrganizations }} from '@/lib/organization/associated_internal';" if org_id_client_writable and (can_create or can_update) else '')
         + ("\nimport { assertFkReferencesUsable } from '@/lib/_fk_reference';" if (fk_write_checks or child_fk_check_create or child_fk_check_update) and (can_create or can_update) else '')
         + ("\nimport { assertStoredFkReferencesReachable } from '@/lib/_fk_reference';" if fk_write_checks and can_delete else '')
         + (f"\nimport {{ AppError, p2002Field }} from '@/lib/_errors';" if can_create or can_update else '')
@@ -4131,6 +4180,7 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
         'version_of_delete_code':             version_of_delete_code,
         'approval_edge_trigger_update_code':  approval_edge_trigger_update_code,
         'submit_for_approval_action_code':    submit_for_approval_action_code,
+        'submit_for_approval_authz_code':     submit_for_approval_authz_code,
         'reservation_error_import_model':     reservation_error_import_model,
         # cmd_923b: exposed so generate.py can gate the service_after_submit.ts
         # write-once stub on the same predicate this function already uses to

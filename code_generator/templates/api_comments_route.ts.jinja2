@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { authenticate, requireApiPermission, withActor, handleApiError, ApiError } from '@/lib/api-auth';
 import { getRateLimiter } from '@/lib/rate-limit';
 import { resolveRecordPermissions } from '@/lib/authz';
-import { get{{ parent_pascal }}Detail } from '@/lib/{{ parent }}/getters';
+import { get{{ parent_pascal }}Detail } from '@/lib/{{ parent }}/getters_internal';
 import { add{{ parent_pascal }}Comment } from '@/lib/{{ parent }}/actions';
 
 // POST /api/{{ parent }}/[id]/comments

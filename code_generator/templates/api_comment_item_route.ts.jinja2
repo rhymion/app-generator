@@ -3,7 +3,7 @@ import { authenticate, requireApiPermission, withActor, handleApiError, ApiError
 import { getRateLimiter } from '@/lib/rate-limit';
 import { resolveRecordPermissions } from '@/lib/authz';
 import prisma from '@/lib/prisma';
-import { get{{ parent_pascal }}Detail } from '@/lib/{{ parent }}/getters';
+import { get{{ parent_pascal }}Detail } from '@/lib/{{ parent }}/getters_internal';
 import { update{{ parent_pascal }}Comment, delete{{ parent_pascal }}Comment } from '@/lib/{{ parent }}/actions';
 
 // PATCH  /api/{{ parent }}/[id]/comments/[commentId]   Body: { message: string }  ->  200 { success: true }
