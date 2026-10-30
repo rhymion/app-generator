@@ -338,6 +338,22 @@ The release commit (`chore(release): X.Y.Z`) must, before the `vX.Y.Z` tag is cr
 `package.json` is the only machine-readable version of the app; leaving it behind makes the
 tag, the changelog and the package disagree.
 
+## Security (hand-written code)
+
+Rules for routes, Server Actions and services you write in an app:
+
+1. **Use the wrappers.** Authenticate with `authenticate()`, check the permission with `requireApiPermission()` /
+   `requireApiRecordPermission()` (`lib/api-auth.ts`) and rate-limit with `getRateLimiter()` in every route.
+   `npm run check:handwritten-routes` flags a writing route without them.
+2. **Write only through the checked service entry points** (`lib/<entity>/service.ts`), never with a direct
+   `prisma.<model>.create/update/delete`; look rows up within the caller's organizations before changing them.
+   `npm run check:generated` enforces this for generated code; for your own code the review does.
+3. **Add a security matrix test for every new route**: an actor without the permission and an actor from another
+   organization, with `expectDeniedFor` and a `security-cell:` marker; `npm run check:security-matrix` checks the claims.
+
+See `docs/knowledge/security-test-helpers.md`, `docs/knowledge/security-test-matrix.md` and the
+`org-scoped-mutation-path-idor-checklist` skill (`.claude/skills/`).
+
 ## Sanity check
 
 Before stopping, review the change and answer:

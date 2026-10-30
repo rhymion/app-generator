@@ -398,7 +398,7 @@ The project does **not** have a `middleware.ts` at the project root. Route-level
 - **Limits**: it is a per-file text match and does not follow imports. A route that delegates both guards to a shared wrapper in another file must call the helper itself or be listed in the allowlist. A match shows the call is present, not that it guards the right operation or checks the right organization; review still decides that.
 - **Exemptions**: `code_generator/check_handwritten_routes_allowlist.yaml` (or a file passed with `--allowlist`). An entry names the route `path`, the guards it skips (`permission`, `rate-limit`) and a required `reason`. An entry that no longer matches a flagged route is reported as stale. The shipped list covers the routes this repository writes by hand; a consumer keeps its own list.
 
-Run it from the project root after `npm run generate-code` (the manifest is written then). Exit status: 0 clean, 1 violations or stale entries, 2 configuration error. The generator's own pytest (`test_check_handwritten_routes.py`) runs it against this repository's routes with the shipped allowlist. It is not part of the CI workflow or the generator's completion gate.
+Run it from the project root after `npm run generate-code` (the manifest is written then). Exit status: 0 clean, 1 violations or stale entries, 2 configuration error. The generator's own pytest (`test_check_handwritten_routes.py`) runs it against this repository's routes with the shipped allowlist. It runs in CI as the `Hand-written Route Guards` job; it is not part of the generator's completion gate.
 
 ---
 

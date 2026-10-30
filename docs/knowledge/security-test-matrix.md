@@ -11,7 +11,7 @@ by a test nor listed, with a reason, in the allowlist.
 | `code_generator/security_matrix.yaml` | The matrix as data: axes, their values, which entity flags make a value apply, which values combine. |
 | `code_generator/security_matrix.py` | Expands the matrix per entity (the manifest) and compares it with the tests. Names no axis or value. |
 | `code_generator/security_matrix_allowlist.yaml` | Cells without a test, each with a written reason. |
-| `.security-manifest.json` | Written by `generate-code` (git-ignored): the applicable cells per entity. |
+| `.security-manifest.json` | Written by `generate-code` (git-ignored): the applicable cells per entity and the `denied_status` of each case. |
 
 ## Claiming a cell
 
@@ -23,6 +23,11 @@ A test carries a comment anywhere in the file:
 
 The generated API spec (`test_api_spec.cy.ts.jinja2`) carries these markers for its permission-denied and
 cross-organization tests. A hand-written spec claims a cell the same way, with the entity written out.
+
+Tests of hand-written code use the shipped helpers (`expectDeniedFor`, see `docs/knowledge/security-test-helpers.md`),
+which take the cell, assert the status the matrix declares for its case (`denied_status` in the YAML, copied to the
+manifest) and re-read the database to prove a denied write did not persist. A test file that calls `expectDeniedFor`
+without any marker fails the check.
 
 A marker that names a cell the manifest does not have, an allowlist entry that matches no cell, and an allowlist
 entry whose cells are all tested now each fail the check too, so neither list can drift from the tree.

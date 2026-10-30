@@ -10,6 +10,8 @@
 #               entity) that must all be true for the value to apply to the entity.
 # - `combine`   on an axis value: restricts which values of OTHER axes it can be
 #               combined with (`{axis: [values]}`); omitted = combines with all.
+# - `denied_status` on an axis value: the HTTP status a denial in this value must return. The
+#               security test helpers (`expectDeniedFor`) assert the status a test passes against it.
 # - `default`   on an axis: the value an existing test marker means when it does
 #               not name that axis yet, so adding an axis does not force every
 #               marker to be rewritten.
@@ -45,11 +47,12 @@ axes:
   case:
     values:
       # An authenticated actor whose role lacks the permission.
-      permission_denied: {}
+      permission_denied: {denied_status: 403}
       # An actor who holds the permission in their own organization and reaches
       # into another one. Dropped for an entity with no organization column.
       cross_org:
         requires: [should_filter_by_org]
+        denied_status: 404
 
 # Route templates the generator renders under app/api/ for a single entity that
 # are not (yet) an `operation` above, with the reason.
