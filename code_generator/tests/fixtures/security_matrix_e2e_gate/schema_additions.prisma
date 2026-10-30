@@ -1,0 +1,90 @@
+// Fixture models for the security-matrix-e2e-gate (appended to a COPY of prisma/schema.prisma by
+// scripts/check_security_matrix_e2e_gate_fixture.sh; the default schema is never edited). The
+// back-fields the default `user`, `organization`, `commentable`, `approvable` and `attachable`
+// models need are listed in schema_relations.json and inserted into the copy by the same script.
+
+enum SxTaskStatus {
+  draft
+  pending
+  approved
+  rejected
+}
+
+enum SxSplitStatus {
+  pending
+  split
+  rejected
+}
+
+model sx_account {
+  id              String       @id @default(cuid())
+  name            String
+  organization_id String
+  organization    organization @relation(fields: [organization_id], references: [id])
+  assignee_id     String?
+  assignee        user?        @relation("SxAccountAssignee", fields: [assignee_id], references: [id])
+  commentable_id  String       @unique
+  commentable     commentable  @relation(fields: [commentable_id], references: [id], onDelete: Cascade)
+  sx_tasks        sx_task[]
+  invalidated_at  DateTime?    @db.Timestamptz(0)
+  created_at      DateTime     @default(now()) @db.Timestamptz(0)
+  updated_at      DateTime     @updatedAt @db.Timestamptz(0)
+  creator_id      String
+  creator         user         @relation("SxAccountCreator", fields: [creator_id], references: [id])
+  updater_id      String
+  updater         user         @relation("SxAccountUpdater", fields: [updater_id], references: [id])
+
+  @@index([name])
+  @@index([organization_id])
+  @@index([assignee_id])
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
+model sx_task {
+  id              String       @id @default(cuid())
+  title           String
+  status          SxTaskStatus @default(draft)
+  organization_id String
+  organization    organization @relation(fields: [organization_id], references: [id])
+  sx_account_id   String
+  sx_account      sx_account   @relation(fields: [sx_account_id], references: [id])
+  assignee_id     String?
+  assignee        user?        @relation("SxTaskAssignee", fields: [assignee_id], references: [id])
+  approvable_id   String       @unique
+  approvable      approvable   @relation(fields: [approvable_id], references: [id], onDelete: Cascade)
+  attachable_id   String       @unique
+  attachable      attachable   @relation(fields: [attachable_id], references: [id])
+  created_at      DateTime     @default(now()) @db.Timestamptz(0)
+  updated_at      DateTime     @updatedAt @db.Timestamptz(0)
+  creator_id      String
+  creator         user         @relation("SxTaskCreator", fields: [creator_id], references: [id])
+  updater_id      String
+  updater         user         @relation("SxTaskUpdater", fields: [updater_id], references: [id])
+
+  @@index([title])
+  @@index([organization_id])
+  @@index([sx_account_id])
+  @@index([assignee_id])
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
+model sx_split {
+  id              String        @id @default(cuid())
+  title           String
+  status          SxSplitStatus @default(pending)
+  organization_id String
+  organization    organization  @relation(fields: [organization_id], references: [id])
+  created_at      DateTime      @default(now()) @db.Timestamptz(0)
+  updated_at      DateTime      @updatedAt @db.Timestamptz(0)
+  creator_id      String
+  creator         user          @relation("SxSplitCreator", fields: [creator_id], references: [id])
+  updater_id      String
+  updater         user          @relation("SxSplitUpdater", fields: [updater_id], references: [id])
+
+  @@index([title])
+  @@index([organization_id])
+  @@index([creator_id])
+  @@index([updater_id])
+}

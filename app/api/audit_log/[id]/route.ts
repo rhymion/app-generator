@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { authenticate, requireApiRecordPermission, handleApiError } from '@/lib/api-auth';
-import { getAuditLogDetail } from '@/lib/audit_log/getters';
+import { getAuditLogDetail } from '@/lib/audit_log/getters_internal';
 
 type Params = { params: Promise<{ id: string }> };
 export async function GET(request: NextRequest, { params }: Params) {

@@ -1,0 +1,32 @@
+# Cells of the security-matrix-e2e-gate fixture entities that have no test yet, each with the reason.
+# Used together with code_generator/security_matrix_allowlist.yaml by the fixture gate only
+# (the default-schema check would see these entries as stale).
+exempt:
+  - operation: delete
+    case: cross_org
+    reason: No generated cross-organization test for the single-record DELETE route yet; the gap is listed in Issue #1229.
+  - operation: invalidate
+    case: cross_org
+    reason: No generated cross-organization test for the invalidate route yet; the audit of missing cells is tracked in Issue #1231.
+  - operation: action_delete
+    case: cross_org
+    reason: Server Actions have no direct test yet; the audit of missing cells is tracked in Issue #1231.
+  - operation: action_invalidate
+    case: cross_org
+    reason: Server Actions have no direct test yet; the audit of missing cells is tracked in Issue #1231.
+  - entity: sx_open_task
+    operation: list
+    case: permission_denied
+    reason: The security fixture declares this proxy view without a generated test (x-generate.test is false), so no API spec is generated for it; the audit of missing cells is tracked in Issue #1231.
+  - entity: sx_open_task
+    operation: detail
+    case: cross_org
+    reason: The security fixture declares this proxy view without a generated test (x-generate.test is false), so no API spec is generated for it; the audit of missing cells is tracked in Issue #1231.
+  - entity: sx_open_task
+    operation: options
+    case: cross_org
+    reason: The security fixture declares this proxy view without a generated test (x-generate.test is false), so no API spec is generated for it; the audit of missing cells is tracked in Issue #1231.
+  - entity: sx_open_task
+    operation: export
+    case: permission_denied
+    reason: The security fixture declares this proxy view without a generated test (x-generate.test is false), so no API spec is generated for it; the audit of missing cells is tracked in Issue #1231.

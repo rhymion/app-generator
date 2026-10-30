@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { authenticate, requireApiPermission, handleApiError, ApiError } from '@/lib/api-auth';
-import { get{{ parent_pascal }}Detail } from '@/lib/{{ parent }}/getters';
+import { get{{ parent_pascal }}Detail } from '@/lib/{{ parent }}/getters_internal';
 import { resolveRecordPermissions{% if has_approvable_bridge %}, getUserRoleIds{% endif %} } from '@/lib/authz';
 {% if has_edit_guard %}
 import { assertEditAllowed } from '@/lib/{{ parent }}/edit_guard';
