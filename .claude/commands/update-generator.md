@@ -50,7 +50,8 @@ Run in this order:
 14c. `npm run test:comment-rest-e2e-gate` — builds and RUNS a fixture app (default schema + a commentable entity scoped by organization) and runs its Cypress specs: the REST routes for adding, editing and deleting a comment, the @-mention user search, and the attachments route for an `attachable` bridge owner (see below)
 14d. `npm run test:scheduled-task-e2e-gate` — builds and RUNS a fixture app (default schema + three scheduled tasks) and runs its Cypress API specs: the scheduled-task admin REST routes `/api/scheduled-task-runs` (see below)
 14e. `npm run test:version-of-e2e-gate` — builds and RUNS a fixture app (default schema + an `x-version-of` identity and version entity) and runs its Cypress API specs: version number at approval, one open draft per identity, `current_version_id`, deletion of settled non-approved drafts, the new version screen, the identity tombstone (see below)
-14f. `npm run test:leak-canary-gate` — builds and RUNS a fixture app (default schema + a fixture entity with a write-only field), seeds a unique marker into every secret field and secret environment variable (`code_generator/leak_canary.yaml`), crawls every GET route behind a recording proxy and fails when a marker appears in a response, export, header, download name, redirect, the server output, the client bundle or a source map (see `docs/knowledge/leak-canary-test.md`)
+14f. `npm run test:security-matrix-e2e-gate` — builds and RUNS a fixture app (default schema + organization-scoped entities that refer to each other by foreign key, with an assignee, invalidation, approval, attachments, comments, splitting and an `x-filter-values` view), runs `check:security-matrix` on the merged schema, then the generated API specs of those entities (see below)
+14g. `npm run test:leak-canary-gate` — builds and RUNS a fixture app (default schema + a fixture entity with a write-only field), seeds a unique marker into every secret field and secret environment variable (`code_generator/leak_canary.yaml`), crawls every GET route behind a recording proxy and fails when a marker appears in a response, export, header, download name, redirect, the server output, the client bundle or a source map (see `docs/knowledge/leak-canary-test.md`)
 15. `npm run test:e2e:build`   — docker:up:test + generate-code + db:push + db:generate + db:seed-tenant + build
 16. `npm run check:generated`  — generated code matches templates/schema
 16a. `npm run check:security-matrix` — every cell of the security matrix (`code_generator/security_matrix.yaml`) has a test marker or an allowlist entry with a reason (see `docs/knowledge/security-test-matrix.md`); runs on the generated tree right after step 16
@@ -461,6 +462,23 @@ child rows and a one-to-one holder), and the identity tombstone (delete refused
 after an approved version, new draft refused for an invalidated identity). The
 specs are permanent. CI runs
 it as `version-of-e2e-gate-fixture`, skipped for a docs-only diff exactly like
+`e2e-tests`; locally it always runs.
+
+**Step 14f (`test:security-matrix-e2e-gate`)**: same machinery as steps 14a-14e.
+`scripts/check_security_matrix_e2e_gate_fixture.sh` copies the working tree into a
+disposable `.generated-security-matrix-e2e-gate/`, merges
+`code_generator/tests/fixtures/security_matrix_e2e_gate/` into the copy and builds
+it with its own docker compose project, ports and `AUTH_SECRET`. The default schema
+has no entity that mixes organization scope, a foreign key to another
+organization-scoped entity, an assignee and the opt-in features, so the generated
+security tests never ran against such an entity in the mandatory gate. The gate
+checks that the security manifest still lists the operations that prove each
+feature is generated, runs `check:security-matrix` on the merged schema (the
+default allowlist plus the fixture's own `allowlist.yaml`), then runs the generated
+API specs `cypress/e2e/api/sx_*.cy.ts`. A cell the fixture surfaces without a test
+goes in the fixture's `allowlist.yaml` with a reason, or gets a test. See
+`docs/knowledge/security-test-matrix.md`. CI runs it as
+`security-matrix-e2e-gate-fixture`, skipped for a docs-only diff exactly like
 `e2e-tests`; locally it always runs.
 
 Step 21 only proves both README files were touched, not that their content

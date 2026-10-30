@@ -1,7 +1,7 @@
 // AUTO-GENERATED - DO NOT EDIT
 import { Prisma } from '@/app/generated/prisma/client';
 import prisma from '@/lib/prisma';
-{% if has_org_filtered_search_entity %}import { getAssociatedOrganizations } from '@/lib/organization/getters_associated';
+{% if has_org_filtered_search_entity %}import { getAssociatedOrganizations } from '@/lib/organization/associated_internal';
 {% endif %}import { getPermissionRowsForUser, deriveRichPermissionsFromRows } from '@/lib/authz';
 
 export interface SearchResult {

@@ -1,6 +1,11 @@
 // GENERATED ONCE — safe to edit (will not be overwritten on regeneration)
 
-'use server';
+// Deliberately NOT a 'use server' module: every function exported from a
+// 'use server' module is registered as a Server Action that clients can call
+// directly. This handler holds no permission or organization checks; they run
+// in the invalidate{{ parent_pascal }} wrapper in actions.ts and in the invalidate REST route,
+// which both import this module as ordinary server-side code. Do not add the
+// directive here.
 {% if has_invalidated_at_column -%}
 import prisma from '@/lib/prisma';
 

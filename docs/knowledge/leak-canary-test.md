@@ -3,7 +3,7 @@
 Information-leak tests that check known routes one by one cannot find a route nobody thought to check. The leak canary
 puts a unique marker in every secret and searches every output for it.
 
-`npm run test:leak-canary-gate` (`scripts/check_leak_canary_gate_fixture.sh`, step 14f of the update-generator gate, CI job
+`npm run test:leak-canary-gate` (`scripts/check_leak_canary_gate_fixture.sh`, step 14g of the update-generator gate, CI job
 `leak-canary-gate-fixture`) builds and runs an app generated from the default schema plus the fixture schema in
 `code_generator/tests/fixtures/leak_canary_gate/` (kept out of the default schema), and fails when a marker appears
 where it must not. A failure names the canary (the field or variable), the surface and the route or file.

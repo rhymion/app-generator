@@ -5,7 +5,7 @@ import { resolveRecordPermissions } from '@/lib/authz';
 {% endif %}
 import prisma from '@/lib/prisma';
 {% if should_filter_by_org %}
-import { getAssociatedOrganizations } from '@/lib/organization/getters_associated';
+import { getAssociatedOrganizations } from '@/lib/organization/associated_internal';
 {% endif %}
 {% if has_invalidate_guard %}
 import { assertInvalidateAllowed } from '@/lib/{{ parent }}/invalidate_guard';
