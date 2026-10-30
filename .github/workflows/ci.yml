@@ -403,6 +403,39 @@ jobs:
       - run: pip install -r requirements.txt
       - run: npm run test:comment-rest-e2e-gate
 
+  leak-canary-gate-fixture:
+    name: Leak Canary Gate Fixture Check
+    # Puts a unique marker value into every secret-bearing field and secret environment
+    # variable (code_generator/leak_canary.yaml), builds and runs an app generated from the
+    # default schema plus the fixture schema in code_generator/tests/fixtures/leak_canary_gate/,
+    # crawls every GET route behind a recording proxy and fails when a marker appears in a
+    # response, export, header, redirect, the server output, the client bundle or a source map.
+    # Same cost class as comment-rest-e2e-gate-fixture above, so it is gated on detect-changes the
+    # same way; the local gate (npm run test:leak-canary-gate, step 14f of
+    # .claude/commands/update-generator.md) runs it without that exemption.
+    needs: detect-changes
+    if: needs.detect-changes.outputs.docs_only != 'true'
+    runs-on: ubuntu-latest
+    env:
+      NODE_ENV: test
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24.18.0'
+          cache: 'npm'
+      - name: Cache Cypress binary
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/Cypress
+          key: cypress-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - run: npm ci
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - run: npm run test:leak-canary-gate
+
   scheduled-task-e2e-gate-fixture:
     name: Scheduled Task E2E Gate Fixture Check
     # Builds and runs a whole app generated from the default schema plus the
