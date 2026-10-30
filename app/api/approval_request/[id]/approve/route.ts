@@ -8,7 +8,7 @@ import { resolveApprovableOrganization } from '@/lib/approval_request/resolve_ta
 import { assertApprovalOrder, findNewlyActionableFollowFlowIds } from '@/lib/approval_request/order-check';
 import { dispatchOnApproved } from '@/lib/approval_request/on_approved_dispatch';
 import { dispatchBeforeApprove } from '@/lib/approval_request/on_before_approve_dispatch';
-import { getApprovalRequestRecipient } from '@/lib/approval_request/actions';
+import { getApprovalRequestRecipient } from '@/lib/approval_request/actions_internal';
 import { notify } from '@/lib/_notifier';
 import { notifyApprovalOrderReached } from '@/lib/_notifyApprovalRequest';
 

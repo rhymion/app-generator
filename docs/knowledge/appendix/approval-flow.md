@@ -176,7 +176,11 @@ name via `resolveApprovableModel()` before dispatching to either.
 ### 16.6 Approval actions
 
 Approval actions live in `lib/approval_request/actions.ts` (a manually maintained file, not
-generated). Two server actions are provided:
+generated). Two server actions are provided. Only entry points that derive the acting user from
+the session may be exported from that file: it starts with a module-level server-function
+directive, so every export is a callable endpoint. Helpers that must run only after the caller
+has been checked, such as `getApprovalRequestRecipient()`, live in
+`lib/approval_request/actions_internal.ts`, which has no directive:
 
 | Action | Permission check | Result |
 |---|---|---|
