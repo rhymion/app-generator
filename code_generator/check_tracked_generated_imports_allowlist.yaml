@@ -1,0 +1,80 @@
+# check_tracked_generated_imports_allowlist.yaml -- exemptions for
+# code_generator/check_tracked_generated_imports.py
+#
+# Each entry is a tracked file that deliberately imports a git-ignored generated
+# file (generated-caller wiring). A new hand-written file must not import a
+# generated file the clean-checkout Unit Tests job lacks; add an entry only when
+# the wiring is intentional, with a reason.
+exemptions:
+  - path: app/api/approval_request/[id]/approve/route.ts
+    targets:
+      - lib/approval_request/on_approved_dispatch
+      - lib/approval_request/on_before_approve_dispatch
+      - lib/approval_request/resolve_target
+    reason: Approval route handlers call the generated per-entity dispatch tables; the generated approval_request module exists only in generated apps and these routes are not reached by the clean-checkout Unit Tests job.
+  - path: app/api/approval_request/[id]/reject/route.ts
+    targets:
+      - lib/approval_request/on_before_reject_dispatch
+      - lib/approval_request/on_rejected_dispatch
+      - lib/approval_request/resolve_target
+    reason: Approval route handlers call the generated per-entity dispatch tables; the generated approval_request module exists only in generated apps and these routes are not reached by the clean-checkout Unit Tests job.
+  - path: app/api/approval_request/[id]/withdraw/route.ts
+    targets:
+      - lib/approval_request/on_before_withdraw_dispatch
+      - lib/approval_request/on_withdrawn_dispatch
+      - lib/approval_request/resolve_target
+    reason: Approval route handlers call the generated per-entity dispatch tables; the generated approval_request module exists only in generated apps and these routes are not reached by the clean-checkout Unit Tests job.
+  - path: components/_standard/AttachmentSection.tsx
+    targets:
+      - lib/attachment/bridge_actions
+    reason: Shared component wired to the generated attachment bridge actions, which exist only in generated apps.
+  - path: components/dashboard/catalog-source.ts
+    targets:
+      - lib/dashboard/catalog.ts
+    reason: Dashboard component source reads the generated catalog, which exists only in generated apps.
+  - path: lib/approval_request/actions.ts
+    targets:
+      - lib/approval_request/on_approved_dispatch
+      - lib/approval_request/on_before_approve_dispatch
+      - lib/approval_request/on_before_reject_dispatch
+      - lib/approval_request/on_before_withdraw_dispatch
+      - lib/approval_request/on_rejected_dispatch
+      - lib/approval_request/on_withdrawn_dispatch
+      - lib/approval_request/resolve_target
+    reason: Hand-written approval actions call the generated dispatch/resolver modules, which exist only in generated apps.
+  - path: lib/dashboard/access-where.ts
+    targets:
+      - lib/dashboard/access-scope.ts
+    reason: Dashboard helpers read the generated catalog/access-scope modules, which exist only in generated apps.
+  - path: lib/dashboard/aggregate-core.ts
+    targets:
+      - lib/dashboard/catalog.ts
+    reason: Dashboard helpers read the generated catalog/access-scope modules, which exist only in generated apps.
+  - path: lib/dashboard/localize-output.test.ts
+    targets:
+      - lib/dashboard/catalog.ts
+    reason: Dashboard helpers read the generated catalog/access-scope modules, which exist only in generated apps.
+  - path: lib/dashboard/localize-output.ts
+    targets:
+      - lib/dashboard/catalog.ts
+    reason: Dashboard helpers read the generated catalog/access-scope modules, which exist only in generated apps.
+  - path: lib/dashboard/readable-entities.ts
+    targets:
+      - lib/dashboard/catalog.ts
+    reason: Dashboard helpers read the generated catalog/access-scope modules, which exist only in generated apps.
+  - path: lib/dashboard/service_validation_custom.ts
+    targets:
+      - lib/dashboard/catalog.ts
+    reason: Dashboard helpers read the generated catalog/access-scope modules, which exist only in generated apps.
+  - path: lib/organization/getters_associated.ts
+    targets:
+      - lib/organization/types
+    reason: Hand-written getter uses a generated types module that exists only in generated apps.
+  - path: lib/scheduled-tasks/run-all.test.ts
+    targets:
+      - lib/scheduled-tasks/run-guard
+    reason: Scheduled-task runner wired to the generated run-guard module, which exists only in generated apps.
+  - path: lib/scheduled-tasks/run-all.ts
+    targets:
+      - lib/scheduled-tasks/run-guard
+    reason: Scheduled-task runner wired to the generated run-guard module, which exists only in generated apps.
