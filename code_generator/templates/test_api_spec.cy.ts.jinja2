@@ -1036,6 +1036,115 @@ describe('API: {{ title }}', () => {
         });
       });
     });
+
+    // A record that points at a row the caller cannot reach cannot be moved off
+    // it: the stored target is moved into a foreign organization after the
+    // record exists, then the record is re-pointed at a reachable row.
+    it('G3.12 PUT re-pointing {{ fk_write_probe.prop }} away from a row in a foreign org returns 403 and writes nothing', () => {
+      cy.task<any>('db:populate{{ pascal }}Dependencies').then((deps) => {
+        cy.task<any[]>('db:populate{{ pascal }}', 1).then((records) => {
+          const stored = records[0].{{ fk_write_probe.prop }};
+          expect(deps.{{ fk_write_probe.dep_var }}2.id).to.not.eq(stored);
+          cy.task<any>('db:createCrossOrgScenario', { entityName: '{{ fk_write_probe.target }}', entityId: stored }).then(() => {
+            cy.request({
+              method: 'PUT',
+              url: `${API_BASE}/${records[0].id}`,
+              headers: { 'X-API-Key': TEST_API_KEY },
+              body: {
+{% for ln in fk_write_put_body %}
+{{ ln }}
+{% endfor %}
+                {{ fk_write_probe.prop }}: deps.{{ fk_write_probe.dep_var }}2.id,
+              },
+              failOnStatusCode: false,
+            }).then((res) => {
+              expect(res.status).to.eq(403);
+            });
+{% if can_view %}
+            // Re-read: the stored reference is unchanged.
+            cy.request({ url: `${API_BASE}/${records[0].id}`, headers: { 'X-API-Key': TEST_API_KEY } }).then((after) => {
+              expect(after.body.{{ fk_write_probe.prop }}).to.eq(stored);
+            });
+{% endif %}
+          });
+        });
+      });
+    });
+
+    it('G3.13 bulk PUT re-pointing {{ fk_write_probe.prop }} away from a row in a foreign org reports an error and writes nothing', () => {
+      cy.task<any>('db:populate{{ pascal }}Dependencies').then((deps) => {
+        cy.task<any[]>('db:populate{{ pascal }}', 1).then((records) => {
+          const stored = records[0].{{ fk_write_probe.prop }};
+          expect(deps.{{ fk_write_probe.dep_var }}2.id).to.not.eq(stored);
+          cy.task<any>('db:createCrossOrgScenario', { entityName: '{{ fk_write_probe.target }}', entityId: stored }).then(() => {
+            cy.request({
+              method: 'PUT',
+              url: `${API_BASE}/bulk`,
+              headers: { 'X-API-Key': TEST_API_KEY },
+              body: [{ id: records[0].id, {{ fk_write_probe.prop }}: deps.{{ fk_write_probe.dep_var }}2.id }],
+              failOnStatusCode: false,
+            }).then((res) => {
+              expect(res.status).to.eq(207);
+              expect(res.body.summary.succeeded).to.eq(0);
+              expect(res.body.results[0].success).to.eq(false);
+            });
+{% if can_view %}
+            // Re-read: the stored reference is unchanged.
+            cy.request({ url: `${API_BASE}/${records[0].id}`, headers: { 'X-API-Key': TEST_API_KEY } }).then((after) => {
+              expect(after.body.{{ fk_write_probe.prop }}).to.eq(stored);
+            });
+{% endif %}
+          });
+        });
+      });
+    });
+{% endif %}
+{% if can_delete %}
+
+    it('G3.14 DELETE of a record whose {{ fk_write_probe.prop }} points at a row in a foreign org returns 403 and keeps the record', () => {
+      cy.task<any>('db:populate{{ pascal }}Dependencies').then(() => {
+        cy.task<any[]>('db:populate{{ pascal }}', 1).then((records) => {
+          cy.task<any>('db:createCrossOrgScenario', { entityName: '{{ fk_write_probe.target }}', entityId: records[0].{{ fk_write_probe.prop }} }).then(() => {
+            cy.request({
+              method: 'DELETE',
+              url: `${API_BASE}/${records[0].id}`,
+              headers: { 'X-API-Key': TEST_API_KEY },
+              failOnStatusCode: false,
+            }).then((res) => {
+              expect(res.status).to.eq(403);
+            });
+{% if can_view %}
+            // Re-read: the record is still there.
+            cy.request({ url: `${API_BASE}/${records[0].id}`, headers: { 'X-API-Key': TEST_API_KEY } }).its('status').should('eq', 200);
+{% endif %}
+          });
+        });
+      });
+    });
+
+    it('G3.15 bulk DELETE of a record whose {{ fk_write_probe.prop }} points at a row in a foreign org reports an error and keeps the record', () => {
+      cy.task<any>('db:populate{{ pascal }}Dependencies').then(() => {
+        cy.task<any[]>('db:populate{{ pascal }}', 1).then((records) => {
+          cy.task<any>('db:createCrossOrgScenario', { entityName: '{{ fk_write_probe.target }}', entityId: records[0].{{ fk_write_probe.prop }} }).then(() => {
+            cy.request({
+              method: 'DELETE',
+              url: `${API_BASE}/bulk`,
+              headers: { 'X-API-Key': TEST_API_KEY },
+              body: [{ id: records[0].id }],
+              failOnStatusCode: false,
+            }).then((res) => {
+              expect(res.status).to.eq(207);
+              expect(res.body.summary.succeeded).to.eq(0);
+              expect(res.body.results[0].success).to.eq(false);
+            });
+{% if can_view %}
+            // Re-read: the record is still there.
+            cy.request({ url: `${API_BASE}/${records[0].id}`, headers: { 'X-API-Key': TEST_API_KEY } }).its('status').should('eq', 200);
+{% endif %}
+          });
+        });
+      });
+    });
 {% endif %}
 
 {% endif %}

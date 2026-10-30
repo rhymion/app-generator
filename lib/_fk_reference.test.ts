@@ -11,7 +11,7 @@ vi.mock('@/lib/organization/getters_associated', () => ({ getAssociatedOrganizat
 vi.mock('@/lib/authz', () => ({ canAccessRecord, canAccessEntity }));
 vi.mock('@/lib/self_only', () => ({ trySelfOnlyAdminBypass: selfOnlyBypass }));
 
-import { assertFkReferencesUsable } from './_fk_reference';
+import { assertFkReferencesUsable, assertStoredFkReferencesReachable } from './_fk_reference';
 
 const ref = (row: Record<string, unknown> | null, extra: Record<string, unknown> = {}) => ({
   model: 'item',
@@ -70,8 +70,12 @@ describe('assertFkReferencesUsable', () => {
   });
 
   it('checks a reference that changed', async () => {
+    // The stored row (item-0) is reachable; the new one (item-1) is in another organization.
+    const load = vi.fn((id: string) =>
+      Promise.resolve(id === 'item-0' ? { organization_id: 'org-1' } : { organization_id: 'org-2' }),
+    );
     await expect(
-      assertFkReferencesUsable('u1', [ref({ organization_id: 'org-2' }, { previousId: 'item-0' })]),
+      assertFkReferencesUsable('u1', [ref(null, { previousId: 'item-0', load })]),
     ).rejects.toMatchObject({ code: 'NOT_FOUND' });
   });
 
@@ -99,5 +103,73 @@ describe('assertFkReferencesUsable', () => {
       canAccessEntity.mockResolvedValue(false);
       await expect(assertFkReferencesUsable('u1', [selfOnly({ organization_id: 'org-1', creator_id: 'u1' })])).rejects.toMatchObject({ code: 'NOT_FOUND' });
     });
+  });
+});
+
+describe('references the actor cannot reach (leaving and deleting)', () => {
+  const unreachable = { organization_id: 'org-2' };
+  const loadByPrevious = (rows: Record<string, Record<string, unknown> | null>) =>
+    vi.fn((id: string) => Promise.resolve(rows[id] ?? null));
+
+  it('refuses to re-point a reference away from an unreachable row as PERMISSION_DENIED', async () => {
+    const load = loadByPrevious({ 'item-0': unreachable, 'item-1': { organization_id: 'org-1' } });
+    await expect(
+      assertFkReferencesUsable('u1', [ref({ organization_id: 'org-1' }, { previousId: 'item-0', load })]),
+    ).rejects.toMatchObject({ code: 'PERMISSION_DENIED' });
+  });
+
+  it('refuses to clear an optional reference to an unreachable row', async () => {
+    const load = loadByPrevious({ 'item-0': unreachable });
+    await expect(
+      assertFkReferencesUsable('u1', [ref(null, { id: null, previousId: 'item-0', load })]),
+    ).rejects.toMatchObject({ code: 'PERMISSION_DENIED' });
+  });
+
+  it('does not treat an empty value on a required column as clearing (the service keeps the stored value)', async () => {
+    const load = loadByPrevious({ 'item-0': unreachable });
+    await expect(
+      assertFkReferencesUsable('u1', [ref(null, { id: null, previousId: 'item-0', required: true, load })]),
+    ).resolves.toBeUndefined();
+    expect(load).not.toHaveBeenCalled();
+  });
+
+  it('accepts re-pointing away from a reachable row', async () => {
+    const load = loadByPrevious({ 'item-0': { organization_id: 'org-1' }, 'item-1': { organization_id: 'org-1' } });
+    await expect(
+      assertFkReferencesUsable('u1', [ref({ organization_id: 'org-1' }, { previousId: 'item-0', load })]),
+    ).resolves.toBeUndefined();
+  });
+
+  it('does not look at the stored row when the value is sent back unchanged', async () => {
+    const load = vi.fn();
+    await expect(
+      assertFkReferencesUsable('u1', [ref(null, { id: 'item-0', previousId: 'item-0', load })]),
+    ).resolves.toBeUndefined();
+    expect(load).not.toHaveBeenCalled();
+  });
+
+  it('refuses a delete while a stored reference points at an unreachable row', async () => {
+    const load = loadByPrevious({ 'item-0': unreachable });
+    await expect(
+      assertStoredFkReferencesReachable('u1', [{ model: 'item', id: 'item-0', load }]),
+    ).rejects.toMatchObject({ code: 'PERMISSION_DENIED' });
+  });
+
+  it('refuses a delete when the stored target is x-self-only and owned by someone else', async () => {
+    const load = loadByPrevious({ 'item-0': { organization_id: 'org-1', creator_id: 'u2' } });
+    await expect(
+      assertStoredFkReferencesReachable('u1', [{ model: 'item', selfOnly: true, id: 'item-0', load }]),
+    ).rejects.toMatchObject({ code: 'PERMISSION_DENIED' });
+  });
+
+  it('allows a delete when every stored reference is reachable, empty, or dangling', async () => {
+    const load = loadByPrevious({ 'item-0': { organization_id: 'org-1' } });
+    await expect(
+      assertStoredFkReferencesReachable('u1', [
+        { model: 'item', id: 'item-0', load },
+        { model: 'item', id: null, load },
+        { model: 'item', id: 'gone', load },
+      ]),
+    ).resolves.toBeUndefined();
   });
 });
