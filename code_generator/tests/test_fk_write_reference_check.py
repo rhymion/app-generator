@@ -47,10 +47,10 @@ def _schema(readonly_gadget: bool = False) -> dict:
     return {'definitions': defs}
 
 
-def _render(schema: dict) -> tuple[str, dict, str]:
+def _render(schema: dict, gen: dict | None = None) -> tuple[str, dict, str]:
     entity = {
         'parent': 'widget', 'model': 'widget', 'definition_key': 'widget', 'children': [],
-        'generate_config': {**_GEN, 'fields': None},
+        'generate_config': {**_GEN, **(gen or {}), 'fields': None},
     }
     ctx = build_context(entity, schema)
     svc_ctx = {**ctx, **service_context(ctx, schema)}
@@ -150,3 +150,107 @@ def test_generated_spec_has_no_fk_write_cases_for_a_global_target():
     ctx, out = _api_spec(primary_target_scoped=False)
     assert ctx['fk_write_probe'] is None
     assert 'G3.8' not in out
+
+
+def test_update_does_not_treat_an_empty_required_reference_as_clearing():
+    rendered, ctx, _ = _render(_schema())
+    # gadget_id and unit_id are both required on widget: an empty value on update
+    # means "keep the stored value" (fk_preservation), so it is not a clearing.
+    assert [c['required'] for c in ctx['fk_write_checks']] == [True, True]
+    update_body = _body(rendered, 'updateWidget')
+    assert "previousId: _fkPrevious?.gadget_id, required: true," in update_body
+    assert 'required: true' not in _body(rendered, 'addWidget')
+
+
+def test_an_optional_reference_is_not_marked_required():
+    schema = _schema()
+    schema['definitions']['__widget']['required'].remove('unit_id')
+    _, ctx, _ = _render(schema)
+    assert [c['required'] for c in ctx['fk_write_checks']] == [True, False]
+
+
+def test_delete_helper_checks_the_stored_references_of_the_rows_being_deleted():
+    rendered, _, _ = _render(_schema())
+    helper = _body(rendered, 'assertDeleteReferencesReachableWidget')
+    assert 'prisma.widget.findMany' in helper
+    assert 'assertStoredFkReferencesReachable(actorId' in helper
+    assert "model: 'gadget', id: _row.gadget_id" in helper
+    assert "model: 'unit', id: _row.unit_id" in helper
+    # defined before the delete it guards, and the delete itself stays unchanged
+    assert rendered.index('assertDeleteReferencesReachableWidget') < rendered.index('export async function deleteWidget')
+
+
+def test_delete_helper_marks_a_self_only_target():
+    schema = _schema()
+    schema['definitions']['gadget']['x-self-only'] = True
+    rendered, _, _ = _render(schema)
+    assert "model: 'gadget', selfOnly: true, id: _row.gadget_id" in _body(rendered, 'assertDeleteReferencesReachableWidget')
+
+
+def test_no_delete_helper_without_delete_or_without_checked_references():
+    schema = _schema()
+    rendered, _, _ = _render(schema, {'delete': False})
+    assert 'assertDeleteReferencesReachableWidget' not in rendered
+    schema = _schema()
+    for k in ('gadget_id', 'unit_id'):
+        del schema['definitions']['__widget']['properties'][k]
+        schema['definitions']['__widget']['required'].remove(k)
+    rendered, ctx, _ = _render(schema)
+    assert not ctx['fk_write_checks']
+    assert 'assertDeleteReferencesReachableWidget' not in rendered
+
+
+def test_the_service_imports_the_stored_reference_check_only_when_it_deletes():
+    rendered, _, _ = _render(_schema())
+    assert "import { assertStoredFkReferencesReachable } from '@/lib/_fk_reference';" in rendered
+    no_delete, _, _ = _render(_schema(), {'delete': False})
+    assert 'assertStoredFkReferencesReachable' not in no_delete
+
+
+def _delete_entrances(schema: dict) -> dict[str, str]:
+    from generate import _make_env
+    from generators import actions_context
+
+    entity = {
+        'parent': 'widget', 'model': 'widget', 'definition_key': 'widget', 'children': [],
+        'generate_config': {**_GEN, 'fields': None},
+    }
+    ctx = build_context(entity, schema)
+    env = _make_env()
+    full = {**ctx, **actions_context(ctx)}
+    return {
+        'detail': env.get_template('api_detail_route.ts.jinja2').render(**ctx),
+        'bulk': env.get_template('api_bulk_route.ts.jinja2').render(**ctx),
+        'action_imports': full['service_imports'],
+    }
+
+
+def test_every_user_facing_delete_entrance_runs_the_reference_check_before_deleting():
+    out = _delete_entrances(_schema())
+    detail = out['detail']
+    assert 'assertDeleteReferencesReachableWidget(actorId, [id]);' in detail
+    assert detail.index('assertDeleteReferencesReachableWidget(actorId') < detail.index('await deleteWidget(')
+    bulk = out['bulk']
+    assert 'assertDeleteReferencesReachableWidget(actorId, [id]);' in bulk
+    assert bulk.index('assertDeleteReferencesReachableWidget(actorId') < bulk.index('await deleteWidget(')
+    assert 'assertDeleteReferencesReachableWidget' in out['action_imports']
+
+
+def test_delete_entrances_do_not_call_the_check_when_there_is_nothing_to_check():
+    schema = _schema()
+    for k in ('gadget_id', 'unit_id'):
+        del schema['definitions']['__widget']['properties'][k]
+        schema['definitions']['__widget']['required'].remove(k)
+    out = _delete_entrances(schema)
+    assert 'assertDeleteReferencesReachable' not in out['detail']
+    assert 'assertDeleteReferencesReachable' not in out['bulk']
+    assert 'assertDeleteReferencesReachable' not in out['action_imports']
+
+
+def test_generated_spec_covers_leaving_an_unreachable_reference_and_deleting():
+    _, out = _api_spec(primary_target_scoped=True)
+    for case in ('G3.12 PUT', 'G3.13 bulk PUT', 'G3.14 DELETE', 'G3.15 bulk DELETE'):
+        assert case in out
+    # a status code is named, and the DB is read again afterwards
+    assert 'expect(res.status).to.eq(403);' in out
+    assert 'expect(after.body.gadget_id).to.eq(stored);' in out
