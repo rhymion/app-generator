@@ -1,0 +1,26 @@
+{
+  "user": [
+    "created_sx_accounts sx_account[] @relation(\"SxAccountCreator\")",
+    "updated_sx_accounts sx_account[] @relation(\"SxAccountUpdater\")",
+    "assigned_sx_accounts sx_account[] @relation(\"SxAccountAssignee\")",
+    "created_sx_tasks sx_task[] @relation(\"SxTaskCreator\")",
+    "updated_sx_tasks sx_task[] @relation(\"SxTaskUpdater\")",
+    "assigned_sx_tasks sx_task[] @relation(\"SxTaskAssignee\")",
+    "created_sx_splits sx_split[] @relation(\"SxSplitCreator\")",
+    "updated_sx_splits sx_split[] @relation(\"SxSplitUpdater\")"
+  ],
+  "organization": [
+    "sx_accounts sx_account[]",
+    "sx_tasks sx_task[]",
+    "sx_splits sx_split[]"
+  ],
+  "commentable": [
+    "sx_account sx_account?"
+  ],
+  "approvable": [
+    "sx_task sx_task?"
+  ],
+  "attachable": [
+    "sx_task sx_task?"
+  ]
+}
