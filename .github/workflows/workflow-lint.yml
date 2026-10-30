@@ -1,0 +1,64 @@
+name: Workflow Lint
+
+# actionlint checks workflow syntax and expressions; zizmor checks them for
+# unsafe patterns (script injection through untrusted expressions, excessive
+# permissions, `pull_request_target` misuse, unpinned actions, persisted
+# credentials). Both fail the run on any finding.
+#
+# The `paths` filter is deliberate here: the checks only matter when a workflow
+# changes. Do not add this workflow's checks to branch
+# protection as required checks, or a PR that touches no workflow would wait for
+# a check that never runs.
+on:
+  pull_request:
+    branches: [master, main, develop]
+    paths: ['.github/**']
+  push:
+    branches: [main, develop]
+    paths: ['.github/**']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: workflow-lint-${{ github.head_ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  actionlint:
+    name: actionlint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install actionlint
+        env:
+          ACTIONLINT_VERSION: '1.7.12'
+          ACTIONLINT_SHA256: '8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8'
+        run: |
+          set -euo pipefail
+          curl -fsSL -o actionlint.tar.gz "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          echo "${ACTIONLINT_SHA256}  actionlint.tar.gz" | sha256sum -c -
+          tar -xzf actionlint.tar.gz actionlint
+      - name: Run actionlint
+        run: ./actionlint -color
+
+  zizmor:
+    name: zizmor
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+      # Offline audits only: no token is needed and none is passed.
+      - name: Run zizmor
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet 'zizmor==1.31.1'
+          zizmor --no-online-audits --format plain .github
