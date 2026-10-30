@@ -456,3 +456,20 @@ def test_generated_submit_action_checks_update_permission_before_the_transaction
         assert "throw new AppError('NOT_FOUND'" in text[lookup:check]
         if 'organization_id' in text[lookup:check]:
             assert 'getAssociatedOrganizations(actorId)' in text[:lookup + 200]
+
+
+def test_submit_action_permission_op_follows_the_entity_x_generate_flags():
+    # An entity whose schema disabled edit can never be granted 'update', so the
+    # submit check falls back (update -> create -> read) like the split route.
+    from generators import _seed_entity_grant_flags, _build_submit_for_approval_authz_code
+
+    def op_for(gen):
+        defs = {'thing': {'x-generate': gen}}
+        grants = _seed_entity_grant_flags('thing', defs, True)
+        return next((op for op in ('update', 'create', 'read') if grants[op]), 'read')
+
+    assert op_for({}) == 'update'
+    assert op_for({'edit': False}) == 'create'
+    assert op_for({'edit': False, 'new': False}) == 'read'
+    code = _build_submit_for_approval_authz_code('thing', 'thing', False, False, '{ id: true }', 'create')
+    assert "requirePermission('thing', 'create', _existing, actorId)" in code
