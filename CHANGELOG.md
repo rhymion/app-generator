@@ -3,7 +3,7 @@ All notable changes to this project will be documented in this file.
 The format is based on Keep a Changelog (https://keepachangelog.com/),
 and this project adheres to Semantic Versioning (https://semver.org/).
 
-## [Unreleased]
+## [6.1.0] - 2026-10-30
 ### Security
 - **Internal helper modules are no longer registered as callable server endpoints.** Several helper modules, in the generator templates and in hand-maintained `lib/` code, no longer start with the `'use server'` directive, and the read helpers of the generated getters, the audit-log getters, the associated-organization getters and the approval-request actions moved into `*_internal.ts` modules. The permission and organization checks stay in the `actions.ts` wrappers and the REST routes, which import the helpers as ordinary server code. A generator test lists every module that carries the directive and fails when one exports a function that is not an intended endpoint. An app picks this up on its next `generate-code`.
 - **The generated invalidate handler stub is no longer a Server Action** (Issue #1223). `lib/<entity>/invalidate_handler.ts` no longer starts with `'use server'`. The stub is write-once: an app generated earlier must delete the `'use server'` line from its own copy. A generator test fails if a stub carries the directive. See `docs/knowledge/invalidate-no-handler-write-once-stub.md`.
