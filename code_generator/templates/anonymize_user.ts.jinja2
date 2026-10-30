@@ -1,4 +1,9 @@
-'use server';
+// Deliberately NOT a 'use server' module: every function exported from a
+// 'use server' module is registered as a Server Action that clients can call
+// directly. anonymizeUser() trusts the id it is given and holds no permission or
+// organization checks; they run in the invalidate wrapper in the entity's
+// actions.ts and in the invalidate REST route, which both import this module as
+// ordinary server-side code. Do not add the directive here.
 
 // Implements GDPR Art.17 right to erasure via anonymization (irreversible PII scrub).
 // Auto-generated from x-pii annotations on the user entity.
