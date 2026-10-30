@@ -291,3 +291,30 @@ describe('requireDualAuth and requireScheduledTaskRole with a mobile access toke
     ).rejects.toMatchObject({ statusCode: 403 });
   });
 });
+
+describe('handleApiError with an unexpected error', () => {
+  it('returns a generic 500 body and keeps the original text out of the response', async () => {
+    const leaky = new Error(
+      'Invalid `prisma.user.findMany()` invocation: code P2022 column "users.secret_col" does not exist; ' +
+        'SELECT "public"."user"."secret_col" FROM "public"."user" at /srv/app/lib/prisma.ts:42:7',
+    );
+    leaky.stack = 'Error: boom\n    at /srv/app/lib/prisma.ts:42:7';
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const res = handleApiError(leaky);
+    const text = JSON.stringify(await res.json());
+    expect(res.status).toBe(500);
+    expect(text).toBe(JSON.stringify({ error: 'Internal server error' }));
+    for (const fragment of ['P2022', 'SELECT', 'secret_col', '/srv/app', 'prisma.ts']) {
+      expect(text).not.toContain(fragment);
+    }
+    expect(logged).toHaveBeenCalledWith('API error:', leaky);
+    logged.mockRestore();
+  });
+
+  it('still returns an intentional AppError message to the client', async () => {
+    const { AppError } = await import('./_errors');
+    const res = handleApiError(new AppError('VALIDATION', 'Start date must be before end date'));
+    expect(res.status).toBe(422);
+    expect((await res.json()).error).toBe('Start date must be before end date');
+  });
+});

@@ -103,7 +103,6 @@ export async function anonymizeUser(userId: string): Promise<AnonymizeUserResult
     });
   } catch (err) {
     // The detail stays in the server log; callers get a generic message.
-    // userId is escaped (JSON.stringify) so a crafted id cannot forge a log line.
     console.error('[anonymizeUser] transaction failed', JSON.stringify(userId), err instanceof Error ? err.name : typeof err);
     errors.push('Anonymization failed');
     return { success: false, userId, anonymizedAt, errors };

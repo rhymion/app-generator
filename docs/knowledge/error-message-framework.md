@@ -776,3 +776,11 @@ Steps 1–5 are write-once lib / config changes. Steps 6–12 are generator temp
 ## Unexpected errors in route responses
 
 A route answers with the caller-facing text of the app's own typed errors (`AppError`, `ApiError`). Any other exception (a driver, SDK or database error) is logged on the server and answered with a generic message. This applies to `POST /api/auth/register` (`REGISTRATION_FAILED`), the per-item failures of the bulk routes (`Internal error`), the CSV-import commit path (`WRITE_FAILED`), the Stripe webhook route (`Webhook signature verification failed`) and the errors reported by `anonymizeUser()`. Log lines carry the error class and code, never the message, because a message can embed call arguments.
+
+## Unexpected errors in REST responses
+
+`handleApiError` (`lib/api-auth.ts`) answers an `ApiError` or `AppError` with its message and status. Any other thrown value is unexpected: the response is `500` with the generic body `{"error":"Internal server error"}` and the original goes to the server log only, because library and database errors can carry SQL fragments, column names or file paths. Text meant for the caller must therefore be raised as an `AppError` (`VALIDATION` maps to 422, `CONFLICT` to 409). `lib/api-auth.test.ts` throws an error containing a Prisma code, a SQL fragment and a file path and asserts none of them reach the response.
+
+## Secret comparison and response headers
+
+Compare bearer or shared secrets with `secretsEqual()` (`lib/_secret_compare.ts`), never with `===`; `code_generator/tests/test_secret_comparison_static.py` enforces this. Default security response headers come from `lib/security-headers.ts` (wired in `next.config.ts`, checked by `cypress/e2e/api/security_headers.cy.ts`). The only Content-Security-Policy directive sent is `frame-ancestors 'none'`.
