@@ -34,7 +34,7 @@ from generate import generate
 REPO_ROOT = Path(__file__).resolve().parents[2]
 FIXTURE_DIR = REPO_ROOT / 'code_generator' / 'tests' / 'fixtures' / 'invalidate_gate'
 
-DIRECTIVE = re.compile(r"""\A(?:\s*//[^\n]*\n|\s*/\*.*?\*/)*\s*['"]use server['"]""", re.S)
+DIRECTIVE = re.compile(r"""\A(?:\s*//[^\n]*\n|\s*/\*[^*]*\*+(?:[^/*][^*]*\*+)*/)*\s*['"]use server['"]""")
 EXPORT = re.compile(r'^export\s+(?:async\s+)?function\s+(\w+)', re.M)
 
 # Exports that trust a caller-supplied identity / permissions.
@@ -381,6 +381,20 @@ def test_classifier_accepts_a_session_derived_permission_check():
         '}\n'
     )
     assert findings_for(text) == {}
+
+
+def test_directive_matcher_handles_comments_and_runs_in_linear_time():
+    import time
+
+    assert DIRECTIVE.match("'use server'")
+    assert DIRECTIVE.match('// note\n/* a */\n"use server"')
+    assert DIRECTIVE.match('/* a ** b */ \'use server\'')
+    assert not DIRECTIVE.match("export const x = 1\n'use server'")
+    assert not DIRECTIVE.match('/* never closed\n\'use server\'')
+    # An unterminated block comment followed by many comment openers must fail fast.
+    start = time.perf_counter()
+    assert not DIRECTIVE.match('/*' * 20000)
+    assert time.perf_counter() - start < 0.5
 
 
 def test_classifier_ignores_modules_without_the_directive():
