@@ -82,10 +82,18 @@ export const siteConfig = {
   navLinks: [
     { label: "Home", href: "/", external: false },
     { label: "Audit Log", href: "/audit_log", group: "administration", order: 80 },
+      { label: "User", href: "/user", group: "administration", order: 10 },
+    { label: "Role", href: "/role", group: "administration", order: 20 },
+    { label: "Organization", href: "/organization", group: "administration", order: 40 },
+    { label: "Permission", href: "/permission", group: "administration", order: 30 },
+    { label: "Approval Flow", href: "/approval_flow", group: "administration", order: 50 },
+    { label: "Dashboard", href: "/dashboard", group: "administration", order: 60 },
+    { label: "App Setting", href: "/app_setting", group: "administration", order: 70 },
   ] satisfies NavLink[],
 
   /** Sidebar navigation groups (nested menu headers). Filled by generate-code from x-nav-groups (the default schema declares "administration") — see NavGroup above. */
   navGroups: [
+      { slug: "administration", labelKey: "groups.administration", order: 900, icon: "Settings" },
   ] satisfies NavGroup[],
 
   /**
