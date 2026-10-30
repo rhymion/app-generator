@@ -334,6 +334,16 @@ def _source_files(root: Path):
                 yield p
 
 
+def _tracked_paths(root: Path):
+    """Paths git tracks under lib/ and app/, or None when git cannot say."""
+    try:
+        out = subprocess.run(['git', 'ls-files', '-z', '--', 'lib', 'app'], cwd=root,
+                             capture_output=True, text=True, check=True).stdout
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    return {root / name for name in out.split('\0') if name}
+
+
 # ---- the classifier itself (synthetic shapes) ----
 
 _PREAMBLE = "'use server';\nimport prisma from '@/lib/prisma';\n"
@@ -443,8 +453,11 @@ def test_allow_list_has_no_stale_entries_and_pending_ones_are_exactly_the_known_
 def test_inline_function_level_directives_are_a_known_closed_set():
     # The module-level scan cannot see a directive inside a function body; list
     # every file that has one so a new one is a deliberate decision.
+    # Only tracked files count: git-ignored generate-code output (app/[locale]/<entity>/)
+    # appears in a worktree that ran generate-code and must not change the result.
+    tracked = _tracked_paths(REPO_ROOT)
     sources = [p for p in _source_files(REPO_ROOT)
-               if INLINE_DIRECTIVE.search(p.read_text()) and not DIRECTIVE.search(p.read_text())]
+               if (tracked is None or p in tracked) and INLINE_DIRECTIVE.search(p.read_text()) and not DIRECTIVE.search(p.read_text())]
     found = {p.relative_to(REPO_ROOT).as_posix() for p in sources}
     templates = {
         p.relative_to(REPO_ROOT).as_posix()
