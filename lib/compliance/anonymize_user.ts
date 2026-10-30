@@ -1,4 +1,9 @@
-'use server';
+// Deliberately NOT a 'use server' module: every function exported from a
+// 'use server' module is registered as a Server Action that clients can call
+// directly. anonymizeUser() trusts the id it is given and holds no permission or
+// organization checks; they run in the invalidate wrapper in the entity's
+// actions.ts and in the invalidate REST route, which both import this module as
+// ordinary server-side code. Do not add the directive here.
 
 // Implements GDPR Art.17 right to erasure via anonymization (irreversible PII scrub).
 // Auto-generated from x-pii annotations on the user entity.
@@ -98,7 +103,7 @@ export async function anonymizeUser(userId: string): Promise<AnonymizeUserResult
     });
   } catch (err) {
     // The detail stays in the server log; callers get a generic message.
-    console.error('[anonymizeUser] transaction failed', userId, err instanceof Error ? err.name : typeof err);
+    console.error('[anonymizeUser] transaction failed', JSON.stringify(userId), err instanceof Error ? err.name : typeof err);
     errors.push('Anonymization failed');
     return { success: false, userId, anonymizedAt, errors };
   }
@@ -109,7 +114,7 @@ export async function anonymizeUser(userId: string): Promise<AnonymizeUserResult
     try {
       await removeStoredFile(avatar.path);
     } catch (err) {
-      console.error('[anonymizeUser] avatar file removal failed', userId, err instanceof Error ? err.name : typeof err);
+      console.error('[anonymizeUser] avatar file removal failed', JSON.stringify(userId), err instanceof Error ? err.name : typeof err);
       errors.push('Stored avatar file was not removed');
     }
   }

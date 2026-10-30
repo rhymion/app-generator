@@ -69,13 +69,19 @@ should_filter_by_org = has_org_rel and model not in ('organization', 'user')
 
 The `should_filter_by_org` flag is threaded into every generated getter and API route for that entity.
 
+### `audit_log` is exempt from org-scoped filtering
+
+`audit_log` is not a schema-defined entity (it has no `code_generator/json_schema.yaml` `definitions` entry) and carries no `organization_id` column, so the `should_filter_by_org` mechanism above never applies to it. Reading it is gated purely by role: `lib/authz.ts`'s `getModelPermissions()` grants users holding the `Administrator` role a read-only shortcut for this model with no organization restriction, before it ever consults the `permission` table (see "Default deny" below). No other role has a permission row for `audit_log`, so every other user is denied outright -- there is no partial, per-organization view.
+
+This is a deliberate design choice, not an oversight: audit records exist to let an administrator review activity across the whole deployment. If per-organization narrowing is ever added, it must be keyed on the organization of the *target record* each entry is about (the same basis mentions and approval-flow notifications already use), which would require a column copied at write time -- not the viewer's own organization membership, which is unrelated to what a given audit entry concerns.
+
 ### How filtering is applied in Prisma where clauses
 
-For an entity with `should_filter_by_org = True`, the generated `lib/{entity}/getters.ts` (from `code_generator/templates/getters.ts.jinja2`) inserts an `organization_id` filter into every query:
+For an entity with `should_filter_by_org = True`, the generated `lib/{entity}/getters_internal.ts` (from `code_generator/templates/getters_internal.ts.jinja2`) inserts an `organization_id` filter into every query:
 
 ```typescript
-// Generated: lib/{entity}/getters.ts
-import { getAssociatedOrganizations } from '@/lib/organization/getters_associated';
+// Generated: lib/{entity}/getters_internal.ts
+import { getAssociatedOrganizations } from '@/lib/organization/associated_internal';
 
 const associatedOrganizations = await getAssociatedOrganizations(userId);
 const associatedOrganizationIds = associatedOrganizations.map((o) => o.id);
@@ -102,7 +108,7 @@ function build{Entity}AccessWhere(perms, userId, associatedOrganizationIds) {
 }
 ```
 
-`getAssociatedOrganizations(userId)` is defined in `lib/organization/getters_associated.ts` and fetches only organizations the user is a member of:
+`getAssociatedOrganizations(userId)` is defined in `lib/organization/associated_internal.ts` and fetches only organizations the user is a member of:
 
 ```typescript
 await prisma.organization.findMany({

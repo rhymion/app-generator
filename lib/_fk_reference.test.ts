@@ -7,7 +7,7 @@ const { getOrgs, canAccessRecord, canAccessEntity, selfOnlyBypass } = vi.hoisted
   selfOnlyBypass: vi.fn(),
 }));
 
-vi.mock('@/lib/organization/getters_associated', () => ({ getAssociatedOrganizations: getOrgs }));
+vi.mock('@/lib/organization/associated_internal', () => ({ getAssociatedOrganizations: getOrgs }));
 vi.mock('@/lib/authz', () => ({ canAccessRecord, canAccessEntity }));
 vi.mock('@/lib/self_only', () => ({ trySelfOnlyAdminBypass: selfOnlyBypass }));
 

@@ -127,8 +127,8 @@ the requester of the outcome) must be duplicated in both places; while
 investigating the link-target fix, the REST routes were found to have
 *no* Trigger #3 notify call at all (not a link bug — a fully missing
 notification, pre-existing before that link-target fix). Fixed by copying the same
-post-transaction `getApprovalRequestRecipient()` + `notify()` block from
-`actions.ts` into both route handlers. If either implementation changes
+post-transaction `getApprovalRequestRecipient()` (now in `actions_internal.ts`) + `notify()`
+block from `actions.ts` into both route handlers. If either implementation changes
 its post-approval/rejection side effects, check whether the other needs
 the same change — there's no shared code path enforcing parity.
 

@@ -108,3 +108,35 @@ def test_no_module_branch_route_imports_same_stub(tmp_path):
     out = _run_pipeline(tmp_path)
     route = (out / 'app' / 'api' / 'sprocket' / '[id]' / 'actions' / 'invalidate' / 'route.ts').read_text()
     assert "import { invalidateSprocket } from '@/lib/sprocket/invalidate_handler';" in route
+
+
+def _has_module_level_use_server(source: str) -> bool:
+    """True when the file starts (after comments/blank lines) with a 'use server' directive."""
+    for line in source.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith('//'):
+            continue
+        return stripped.rstrip(';').strip('\'"') == 'use server'
+    return False
+
+
+def test_invalidate_handler_stub_is_not_a_server_action_module(tmp_path):
+    """The write-once handler stub holds no permission checks (they live in the actions.ts
+    wrapper and the REST route), so it must not be a module-level 'use server' module:
+    every export of such a module is registered as a directly callable Server Action."""
+    out = _run_pipeline(tmp_path)
+    # sprocket: stub with the default invalidated_at update; cog: throwing stub.
+    for entity in ('sprocket', 'cog'):
+        stub = out / 'lib' / entity / 'invalidate_handler.ts'
+        assert stub.exists(), f'{entity}: invalidate without a handler must get a stub'
+        assert not _has_module_level_use_server(stub.read_text()), entity
+
+        # The wrapper that carries the checks stays the registered Server Action.
+        actions = (out / 'lib' / entity / 'actions.ts').read_text()
+        assert _has_module_level_use_server(actions), entity
+        assert f'lib/{entity}/invalidate_handler' in actions
+
+
+def test_stub_template_has_no_module_level_use_server():
+    template = REPO_ROOT / 'code_generator' / 'templates' / 'invalidate_handler_stub.ts.jinja2'
+    assert not _has_module_level_use_server(template.read_text())
