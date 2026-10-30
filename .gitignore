@@ -214,6 +214,7 @@ lib/dashboard/actions.ts
 lib/dashboard/catalog.ts
 lib/dashboard/access-scope.ts
 lib/dashboard/getters.ts
+lib/dashboard/getters_internal.ts
 lib/dashboard/service.ts
 lib/dashboard/types.ts
 lib/dashboard/use_entity_form.ts
