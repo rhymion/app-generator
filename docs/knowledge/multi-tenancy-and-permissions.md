@@ -244,7 +244,18 @@ The decision is made on the model's own entity, not on a proxy view of it: read 
 
 Which foreign keys are checked is decided at generation time (`_fk_reference_check` in `build_context.py`): every client-writable foreign key except those to `organization` (own membership rule) and `user` (creator/assignee, covered by the server-value rules). Columns the server sets or that are read-only are not client writes and are not checked. A target that is not a generated entity has no permission rows to check and is skipped. An update compares against the stored value, so an unchanged reference is not re-checked.
 
-Records that *already* point at an unreachable row, and what an actor may do with them, are not decided here: re-pointing such a record away from that row and deleting it are open questions.
+#### Records that already point at a row the actor cannot reach
+
+The same reachability test is applied to the value a record *currently* stores. A record whose foreign key points at a row the actor cannot reach (another organization, no read permission, outside their Creator/Assignee scope, or someone else's `x-self-only` row) is still visible to the actor, but its reference is not theirs to take away:
+
+- **Re-pointing** that foreign key to another row, or **clearing** it (setting an optional foreign key to `null`, or omitting it), is refused with `PERMISSION_DENIED` (HTTP 403; the record itself is visible to the actor, so nothing is masked as `NOT_FOUND`). Nothing is written.
+- **Deleting** the record is refused the same way ("if you cannot update it, you cannot delete it"). `assertDeleteReferencesReachable<Entity>` in `service.ts` runs in the single-record route, the bulk route and the Server Action before `delete<Entity>`; the bulk route reports the item as `Access denied` and deletes the rest.
+- Updating *other* fields is unchanged, as long as the foreign key is sent back unchanged. An omitted **required** foreign key keeps its stored value (as before), so it is not a clearing.
+- A stored id with no row behind it protects nothing and does not block the write or the delete.
+
+Both directions use the same predicate (`isRowReachable`), so the rule for "may point at" and "may leave" cannot drift apart. The system-driven deletes (payment rollback, the payment webhook) have no acting user and are not subject to it. Rows of nested child entities are covered when a parent update re-points or clears their foreign keys; the removal of a child row as part of a parent update, and the cascade of a parent delete, are not separately checked.
+
+Tests: `lib/_fk_reference.test.ts` (the predicate), `code_generator/tests/test_fk_write_reference_check.py` (what is generated), and the generated API specs G3.12–G3.15, which move the stored target into another organization after the record exists, name the expected status code, and read the record back to prove nothing was written or deleted.
 
 ### Permission cache
 

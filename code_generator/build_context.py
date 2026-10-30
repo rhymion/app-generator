@@ -3416,6 +3416,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
             'var': _client_var_by_prop[_r['prop_name']],
             'target': _t,
             'self_only': _check['self_only'],
+            'required': bool(_r.get('required')),
         })
     # x-server-value fields never go through the generic "just write the client
     # value" line below — server_value_data_lines (built further down) supplies

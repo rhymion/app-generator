@@ -1475,6 +1475,7 @@ def actions_context(ctx: dict) -> dict:
         f'add{parent_pascal}'    if can_create else '',
         f'update{parent_pascal}' if can_update else '',
         f'delete{parent_pascal}' if can_delete else '',
+        f'assertDeleteReferencesReachable{parent_pascal}' if can_delete and ctx.get('fk_write_checks') else '',
     ]
     error_imports = ', InsufficientPoolCapacityError, ReservationMutationError' if has_reservation else ''
     service_imports = ', '.join(f for f in service_fns if f) + error_imports
@@ -4060,6 +4061,7 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
         + (f"\nimport {{ recordAuditEvent }} from '@/lib/audit-log';" if is_audited else '')
         + (f"\nimport {{ getAssociatedOrganizations }} from '@/lib/organization/getters_associated';" if org_id_client_writable and (can_create or can_update) else '')
         + ("\nimport { assertFkReferencesUsable } from '@/lib/_fk_reference';" if (fk_write_checks or child_fk_check_create or child_fk_check_update) and (can_create or can_update) else '')
+        + ("\nimport { assertStoredFkReferencesReachable } from '@/lib/_fk_reference';" if fk_write_checks and can_delete else '')
         + (f"\nimport {{ AppError, p2002Field }} from '@/lib/_errors';" if can_create or can_update else '')
         + (ctx.get('child_exclusive_imports', '') if can_create or can_update else '')
         + (f"\nimport {{ getModelPermissions }} from '@/lib/authz';" if server_value_override_fields and can_create else '')
