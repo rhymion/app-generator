@@ -87,7 +87,7 @@ describe('redact', () => {
     expect(input.password).toBe('p');
     expect(redact(7)).toBe(7);
     expect(redact(null)).toBeNull();
-    expect(redact(10n)).toBe('10');
+    expect(redact(BigInt(10))).toBe('10');
   });
 
   it('serialises dates, maps and sets', () => {
