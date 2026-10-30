@@ -119,9 +119,17 @@ def test_feature_beyond_plain_crud_is_ineligible(key, value):
 
 
 @pytest.mark.parametrize('category', ['image', 'file_uri'])
-def test_field_without_a_native_widget_is_ineligible(category):
-    ctx = _ctx(field_categories={'text': ['name'], category: ['x']})
-    assert 'has a' in mobile_ineligible_reason(ctx)
+def test_url_field_with_an_upload_kind_is_eligible_and_drawn_as_plain_text(category):
+    # A URL column takes a pasted URL only: no upload path, so the entity keeps its native screens.
+    ctx = _ctx(field_categories={'text': ['name'], category: ['photo']})
+    assert mobile_ineligible_reason(ctx) is None
+    ctx.update(
+        filtered_props={'name': {'type': 'string'}, 'photo': {'type': 'string', 'format': 'uri'}},
+        model_def={}, readonly_fields=[], parent='asset', parent_pascal='Asset',
+    )
+    spec = build_mobile_entity_spec(ctx, {'client_required_fields': []}, str.title)
+    kinds = {f['key']: f['kind'] for f in spec['fields']}
+    assert kinds['photo'] == 'text'
 
 
 def test_entity_select_field_is_eligible_and_drawn_as_labelled_enum_chips():
@@ -274,10 +282,18 @@ def test_a_child_the_parent_cannot_save_stays_ineligible(overrides):
 def test_a_row_field_without_a_native_control_names_the_child_and_the_field():
     child = _row_child(
         props_no_id=['description', 'photo'],
-        child_prop_defs={'description': {'type': 'string'}, 'photo': {'type': 'string', 'format': 'uri', 'x-uri-kind': 'image'}},
+        child_prop_defs={'description': {'type': 'string'}, 'photo': {'type': 'integer', 'x-relationship': {'type': 'one-to-many', 'target': 'asset'}}},
     )
     reason = mobile_ineligible_reason(_ctx(children_raw=[child], non_comment_ch=[child]))
     assert reason is not None and 'lines' in reason and 'photo' in reason
+
+
+def test_a_row_url_field_with_an_upload_kind_is_a_plain_text_cell():
+    child = _row_child(
+        props_no_id=['description', 'photo'],
+        child_prop_defs={'description': {'type': 'string'}, 'photo': {'type': 'string', 'format': 'uri', 'x-uri-kind': 'image'}},
+    )
+    assert mobile_ineligible_reason(_ctx(children_raw=[child], non_comment_ch=[child])) is None
 
 
 def test_a_row_relation_to_an_entity_without_rest_routes_is_ineligible():
@@ -856,8 +872,10 @@ def test_mention_lookup_is_wired_when_the_schema_has_a_mention_field():
     env = _make_env()
     http = _render(env, 'mobile/lib/comment-http.ts.jinja2', {'has_mention': True})
     thread = _render(env, 'mobile/components/native/CommentThread.tsx.jinja2', {'has_mention': True})
-    assert '/api/mention/users?q=${encodeURIComponent(q)}' in http
-    assert 'search: searchMentionUsers' in thread
+    assert '/api/mention/users?q=${encodeURIComponent(q)}&entity=${encodeURIComponent(record.entity)}' in http
+    assert '&id=${encodeURIComponent(record.id)}' in http
+    # The composer names the record the comment belongs to, so the server scopes the candidates by it.
+    assert 'search: (q) => searchMentionUsers(q, { entity, id: recordId })' in thread
     plain = _render(env, 'mobile/components/native/CommentThread.tsx.jinja2', {'has_mention': False})
     assert 'searchMentionUsers' not in plain
 

@@ -124,13 +124,17 @@ export async function authenticateApiKey(request: NextRequest): Promise<{ userId
  * routes (the browser session cookie is handled separately by
  * `requireSession()`).
  *
- * `Authorization: Bearer <token>` is ambiguous between a mobile access JWT
- * and a service API key, so the token shape decides: a JWT is always three
- * dot-separated segments (header.payload.signature), an API key never is.
- * `authenticateApiKey()` itself is untouched, so existing service callers
- * keep working exactly as before.
+ * Resolution order, shared by every helper in this file: an `X-API-Key`
+ * header always wins and is treated as an API key, even when an
+ * `Authorization` header is also present. Only without `X-API-Key` is
+ * `Authorization: Bearer <token>` considered; it is ambiguous between a mobile
+ * access JWT and a service API key, so the token shape decides: a JWT is
+ * always three dot-separated segments (header.payload.signature), an API key
+ * never is. `authenticateApiKey()` itself is untouched, so existing service
+ * callers keep working exactly as before.
  */
 export async function authenticate(request: NextRequest): Promise<{ userId: string }> {
+  if (request.headers.get('X-API-Key')) return authenticateApiKey(request);
   const bearer = request.headers.get('Authorization')?.replace('Bearer ', '');
   if (bearer && isMobileJwt(bearer)) {
     enterRequestScope();
@@ -187,11 +191,7 @@ export async function requireSession(): Promise<{ userId: string }> {
  * through the route's own permission and organization checks.
  */
 export async function resolveActorId(request: NextRequest): Promise<string | null> {
-  if (request.headers.get('X-API-Key')) {
-    const { userId } = await authenticateApiKey(request);
-    return userId;
-  }
-  if (request.headers.get('Authorization')?.replace('Bearer ', '')) {
+  if (request.headers.get('X-API-Key') || request.headers.get('Authorization')?.replace('Bearer ', '')) {
     const { userId } = await authenticate(request);
     return userId;
   }

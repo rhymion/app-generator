@@ -110,6 +110,10 @@ one.** `lib/rate-limit/index.ts` already implements bucket-scoped limiting
 with an in-memory and a Redis adapter, auto-selected by `getRateLimiter()`
 based on `REDIS_URL`.
 
+The Redis adapter writes its keys as `rl:<RATE_LIMIT_KEY_PREFIX><bucket>:<key>`. The prefix is empty unless
+`RATE_LIMIT_KEY_PREFIX` is set; the Vercel env injection (`scripts/vercel-env.sh`) sets `production:` and `preview:`,
+so two environments that ever share a Redis instance keep separate budgets.
+
 New buckets, added to `PRODUCTION_BUCKETS`:
 
 - `api:read` — 300/minute, covers `GET` list/detail.
@@ -122,6 +126,12 @@ New buckets, added to `PRODUCTION_BUCKETS`:
 - Both overridable via `RATE_LIMIT_API_READ_LIMIT` /
   `RATE_LIMIT_API_WRITE_LIMIT` env vars, following the exact
   `RATE_LIMIT_AUTH_CREDENTIALS_LIMIT` precedent already in the file.
+
+The upload route (`POST /api/upload`) spends a separate `upload:file` bucket
+— 30 uploads per user per 10 minutes, keyed by the authenticated user id,
+checked before the multipart body is read, overridable with
+`RATE_LIMIT_UPLOAD_LIMIT`. A caller over the ceiling gets HTTP 429 with
+`Retry-After` and `X-RateLimit-Bucket: upload:file`.
 - A limited request returns HTTP 429 with `{ error: 'rate_limited',
   retryAfter: <seconds> }`, a `Retry-After` header, and an
   `X-RateLimit-Bucket` header — the same response shape `proxy.ts` already

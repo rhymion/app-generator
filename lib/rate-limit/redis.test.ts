@@ -32,6 +32,21 @@ describe('createRedisRateLimiter', () => {
     vi.restoreAllMocks();
   });
 
+  it('namespaces keys with keyPrefix, and with RATE_LIMIT_KEY_PREFIX when no option is given', async () => {
+    const fake = makeFakeClient();
+    const limiter = createRedisRateLimiter(BUCKETS, { client: fake as never, keyPrefix: 'preview:' });
+    fake.enqueue([1, 2, 0, 9_999]);
+    await limiter.check('tight', '1.1.1.1');
+    expect(fake.calls[0].args[0]).toBe('rl:preview:tight:1.1.1.1');
+
+    vi.stubEnv('RATE_LIMIT_KEY_PREFIX', 'production:');
+    const envLimiter = createRedisRateLimiter(BUCKETS, { client: fake as never });
+    fake.enqueue([1, 2, 0, 9_999]);
+    await envLimiter.check('tight', '1.1.1.1');
+    expect(fake.calls[1].args[0]).toBe('rl:production:tight:1.1.1.1');
+    vi.unstubAllEnvs();
+  });
+
   it('passes bucket window/limit and the cache key to the Lua script', async () => {
     const fake = makeFakeClient();
     const limiter = createRedisRateLimiter(BUCKETS, { client: fake as never });
@@ -105,7 +120,7 @@ describe('createRedisRateLimiter', () => {
     expect(fake.eval).not.toHaveBeenCalled();
   });
 
-  it('fails open and logs when Redis is unreachable (Issue #587)', async () => {
+  it('does not reject and logs when Redis is unreachable (Issue #587)', async () => {
     const fake = makeFakeClient();
     const limiter = createRedisRateLimiter(BUCKETS, { client: fake as never });
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -114,17 +129,65 @@ describe('createRedisRateLimiter', () => {
 
     const decision = await limiter.check('tight', '1.1.1.1');
 
-    // Fail OPEN: the request is allowed through rather than 500ing the
-    // whole /api/auth/* surface (pre-fix behaviour: this threw uncaught).
+    // The Redis fault itself never rejects the request.
     expect(decision.allowed).toBe(true);
-    expect(decision.remaining).toBe(Number.POSITIVE_INFINITY);
-    expect(decision.retryAfterSeconds).toBe(0);
 
     // Never silent: the degraded window must be visible in server logs.
     expect(errorSpy).toHaveBeenCalledTimes(1);
     const [tag, payload] = errorSpy.mock.calls[0];
     expect(tag).toBe('[rate-limit:fail_open]');
     expect(JSON.parse(payload as string)).toMatchObject({ bucket: 'tight' });
+  });
+
+  it('enforces the bucket limit in memory while Redis is failing (Issue #1178)', async () => {
+    const fake = makeFakeClient();
+    const limiter = createRedisRateLimiter(BUCKETS, { client: fake as never });
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    // `tight` allows 3 per window; every Redis call errors (e.g. exhausted provider quota).
+    const decisions = [];
+    for (let i = 0; i < 5; i++) decisions.push(await limiter.check('tight', '9.9.9.9'));
+
+    expect(decisions.map((d) => d.allowed)).toEqual([true, true, true, false, false]);
+    expect(decisions[3].retryAfterSeconds).toBeGreaterThan(0);
+    // A different key is counted separately.
+    expect((await limiter.check('tight', '8.8.8.8')).allowed).toBe(true);
+  });
+
+  it('skips Redis during the cooldown after a failure, then retries it', async () => {
+    const fake = makeFakeClient();
+    const limiter = createRedisRateLimiter(BUCKETS, { client: fake as never, cooldownMs: 5_000 });
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const now = vi.spyOn(Date, 'now').mockReturnValue(1_700_000_000_000);
+
+    await limiter.check('loose', '1.1.1.1'); // eval throws -> cooldown starts
+    await limiter.check('loose', '1.1.1.1'); // inside cooldown -> no eval
+    expect(fake.eval).toHaveBeenCalledTimes(1);
+
+    now.mockReturnValue(1_700_000_006_000);
+    fake.enqueue([1, 4, 0, 1_700_000_066_000]);
+    const decision = await limiter.check('loose', '1.1.1.1');
+    expect(fake.eval).toHaveBeenCalledTimes(2);
+    expect(decision.remaining).toBe(4);
+  });
+
+  it('treats a hanging Redis as a failure after the timeout (Issue #1176)', async () => {
+    vi.useFakeTimers();
+    try {
+      const hang = { eval: vi.fn(() => new Promise(() => {})) };
+      const limiter = createRedisRateLimiter(BUCKETS, { client: hang as never, timeoutMs: 2_000 });
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      const pending = limiter.check('tight', '1.1.1.1');
+      await vi.advanceTimersByTimeAsync(2_000);
+      const decision = await pending;
+
+      expect(decision.allowed).toBe(true);
+      expect(errorSpy).toHaveBeenCalledTimes(1);
+      expect(String(errorSpy.mock.calls[0][1])).toContain('timed out after 2000ms');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('throws at construction when neither client nor REDIS_URL is provided', () => {

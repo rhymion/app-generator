@@ -1594,6 +1594,9 @@ def generate(schema_path: str, output_dir: str) -> None:
     # Pre-compute named_constants so entity templates (getters.ts) can use it
     named_constants = extract_named_constants(schema)
 
+    # Per-entity record lookups for the mention candidate search (lib/mention/record_org.ts).
+    mention_record_resolvers: list[str] = []
+
     doc_dir = out / 'docs' / 'generated'
     entity_doc_summaries: list[dict] = []
     # OpenAPI 3.1 build artifact (cmd_1154, ai-agent-integration-design.md
@@ -1675,6 +1678,8 @@ def generate(schema_path: str, output_dir: str) -> None:
 
         # Base context for all other generators
         ctx = build_context(entity, schema, has_reactions=bool(named_constants))
+        if ctx.get('mention_record_resolver'):
+            mention_record_resolvers.append(ctx['mention_record_resolver'])
         # List panel search box: the entity's search trigram columns (a search target)
         # adjusted by per-column `x-trigram-filter: true/false`; none -> no search box.
         _search_cols = _resolve_search_columns(
@@ -2203,6 +2208,13 @@ def generate(schema_path: str, output_dir: str) -> None:
                         )
             if not _df_entries:
                 _df_entries = ["{ field: 'id', headerName: 'id' }"]
+            # The child's own declared primary column (if any) is the link column;
+            # a child that declares none gets no link column (no implicit 'name').
+            _bg_primary = next(
+                (_fname for _col in _bg_cols for _fname, _fcfg in _col.items()
+                 if (_fcfg or {}).get('primary')),
+                '',
+            )
             _write(
                 components_dir / f'{parent_pascal}BridgeGrid.tsx',
                 _render(env, 'bridge_grid.tsx.jinja2', {
@@ -2210,6 +2222,7 @@ def generate(schema_path: str, output_dir: str) -> None:
                     'child_pascal': parent_pascal,
                     'bridge_fk': f"{_self_bridge['name']}_id",
                     'display_fields': ', '.join(_df_entries),
+                    'primary_field': _bg_primary,
                 }),
             )
 
@@ -2751,6 +2764,20 @@ def generate(schema_path: str, output_dir: str) -> None:
             _render(env, 'mention_search.ts.jinja2', {}),
         )
         print('  Mention candidate search → lib/mention/search.ts')
+        _write(
+            out / 'lib' / 'mention' / 'recipients.ts',
+            _render(env, 'mention_recipients.ts.jinja2', {}),
+        )
+        print('  Mention recipient scoping → lib/mention/recipients.ts')
+        _resolvers_ts = ''.join(mention_record_resolvers)
+        _write(
+            out / 'lib' / 'mention' / 'record_org.ts',
+            _render(env, 'mention_record_org.ts.jinja2', {
+                'resolvers': _resolvers_ts,
+                'needs_associated_orgs': 'getAssociatedOrganizations' in _resolvers_ts,
+            }),
+        )
+        print(f'  Mention record organization lookup → lib/mention/record_org.ts ({len(mention_record_resolvers)} entity/entities)')
         _write(
             out / 'app' / 'api' / 'mention' / 'users' / 'route.ts',
             _render(env, 'mention_users_api_route.ts.jinja2', {}),

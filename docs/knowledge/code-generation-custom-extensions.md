@@ -106,6 +106,15 @@ and api_key straight through `GET /api/user/{id}`. Confirmed by curl
 (subtask_810e, 2026-08-25) and fixed by switching both call sites from
 `filtered_props` to `model_def.get('properties', {})`.
 
+On the write side, an omitted or empty write-only value means "leave the
+stored value unchanged" on every path. The Server Action path and the service
+treat `''` as no new value (`password === '' ? undefined : password`, and
+Prisma omits an `undefined` column). The REST update routes
+(`PUT /api/<entity>/:id` and the bulk update) pass `''` for a write-only field
+the body leaves out, instead of the `?? null` used for other nullable fields,
+so a request that only changes `name` no longer clears `password` or
+`api_key`. Create still passes `null`.
+
 ### On a child array property: replacing the generated grid
 
 `x-custom-component` with an `upsert` target can also sit on an **array property that points at a child entity**

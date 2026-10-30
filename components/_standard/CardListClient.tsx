@@ -65,7 +65,7 @@ interface CardListClientProps<T extends BaseEntity> {
   /** Fields to display. Defaults to name + description. */
   displayFields?: DisplayFieldConfig<T>[];
   permissions?: ModelPermissions;
-  /** Which field to display prominently as the card title. Defaults to 'name'. */
+  /** Which field to display prominently as the card title. No default: when omitted the title is the record id. */
   primaryField?: keyof T;
   /** When false, the "+" create button is hidden even if the user has create permission.
    * Used for bridge-child entities, which cannot be created standalone (only via a parent),
@@ -102,7 +102,7 @@ export default function CardListClient<T extends BaseEntity>({
   entityLabel = 'Item',
   displayFields,
   permissions = { create: true, read: true, update: true, delete: true, import: true },
-  primaryField = 'name' as keyof T,
+  primaryField,
   allowCreate = true,
   allowEdit = true,
   listQuery,
@@ -220,7 +220,9 @@ export default function CardListClient<T extends BaseEntity>({
           items.map((item) => {
             const isSelected = selectedIds.has(item.id);
             const primaryFieldConfig = defaultDisplayFields.find(f => f.field === primaryField);
-            const primaryValue = formatValue(item, primaryField, primaryFieldConfig?.format, primaryFieldConfig?.showSeconds);
+            const primaryValue = primaryField
+              ? formatValue(item, primaryField, primaryFieldConfig?.format, primaryFieldConfig?.showSeconds)
+              : '';
 
             return (
               <Card

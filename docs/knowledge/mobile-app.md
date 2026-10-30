@@ -157,7 +157,7 @@ child that is neither a picker nor an [editable child collection](#child-rows) (
 or a row with a field the row editor cannot draw), a one-to-one bridge other than the ones to `approvable` (with `ApprovalSection`), `commentable` and `attachable` (with `AttachmentSection`), an `ApprovalSection` or `AttachmentSection` component without its bridge, virtual
 columns, `x-splittable` without the approval section, a state machine, edit/delete
 guards without an approval or `x-self-only`, relates to an entity that has no
-REST routes, or has a field with no native widget (image or file URI). Hand-written components
+REST routes. A URL column (`format: uri`, including `x-uri-kind: image` and `file`) is not a reason: the app draws it as a plain text input that takes a pasted URL and has no file upload path (a file that needs uploading is a `type: direct` attachment FK). Hand-written components
 (`x-custom-components`, `x-custom-component`) are not a reason: they get an [insertion point](#hand-written-components).
 In the default schema every entity qualifies except `setting` (no list screen). The fixture schema in `code_generator/tests/fixtures/mobile_entity_gate/` covers the rest.
 
@@ -588,7 +588,7 @@ without `x-outputType`) is drawn as a row editor, so the parent keeps its native
   by its label.
 - **Not covered.** A child that is independent (it has its own screens and writes itself), a many-to-many without
   `x-outputType: list`, a `list` child that is not a many-to-many (such as a self-referencing `children` list) and a row
-  field the editor cannot draw (image, file URI, entity select, custom upsert component) keep the entity on the placeholder
+  field the editor cannot draw (entity select, custom upsert component) keep the entity on the placeholder
   screen; the generation log names the property and, for a row field, the field.
 
 The fixture entity is `mobile_invoice` (`lines`: text, number, enum with a default, date and a required foreign key);
@@ -655,15 +655,19 @@ The mobile app signs in with email and password and holds an access/refresh toke
 The access token is a 15-minute HS256 JWT signed with `AUTH_SECRET` and carrying `type: "mobile_access"`;
 that claim is the only thing separating it from a web session JWT, so every verification path checks it.
 Refresh tokens last 30 days and are stored as a keyed HMAC, never in plaintext (`mobile_session` table).
-Access-token verification is stateless: a token issued just before sign-out or revocation stays valid for
-the rest of its 15 minutes.
+Access-token verification does not read the `mobile_session` row: a token issued just before sign-out or revocation stays valid for
+the rest of its 15 minutes. It does read the user row (one primary-key lookup), so a token of an anonymized user is
+rejected at once. `anonymizeUser()` also sets `revoked_at` on the user's sessions, and the refresh route answers 401
+for an anonymized user.
 
 The app keeps the refresh token in `expo-secure-store` (`lib/token-storage.ts`). On a device with biometrics or a
 PIN enrolled, a standalone or development build locks it behind that check (`requireAuthentication`), and the
 build's `Info.plist` carries `NSFaceIDUsageDescription` from the `expo-secure-store` config plugin. Expo Go has no
 such text in its own `Info.plist`, so the app stores and reads the token there without the lock
-(`Constants.executionEnvironment` is `storeClient`). The check runs in one function for both save and read, so the
-two always agree, and a locked save that fails outside Expo Go is not retried unlocked. Face ID therefore cannot
+(`Constants.executionEnvironment` is `storeClient`). The check runs only when the token is saved; the result is
+stored beside it (`app_refresh_token_locked`, unlocked) and every read reuses it, so enrolling or removing a device
+lock later does not log the user out. A failure of the device authentication API stores the token unlocked and logs a
+warning. A locked save that fails outside Expo Go is not retried unlocked. Face ID therefore cannot
 be verified in Expo Go; only a standalone or development build locks the token. Web uses `localStorage`.
 
 Generated REST routes call `authenticate()` (`lib/api-auth.ts`), which accepts either a mobile access JWT
@@ -903,8 +907,7 @@ The Playwright specs under `mobile/e2e/` already cover each of these on the web 
 - Entity screens for an entity that declares anything beyond plain fields, the relation pickers, direct attachment
   fields, the attachments of an `attachable` bridge, the approval section, the comment thread with its comment box and
   mentions, creating the referenced record in place, payment checkout and the insertion points for
-  [hand-written components](#hand-written-components): child grids. A plain URL
-  field with `x-uri-kind: file` or `image` is not drawn either.
+  [hand-written components](#hand-written-components): child grids.
 - Submitting a record for approval (the "(re)submit" button). Resubmitting is a Server Action
   (`submit_for_approval.ts`) with no REST route, so the app has nothing to call.
 - The one-to-one bridge grid (`x-bridge`).

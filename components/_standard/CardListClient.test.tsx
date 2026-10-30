@@ -25,36 +25,42 @@ const allPerms = { create: true, read: true, update: true, delete: true, import:
 describe('CardListClient', () => {
   describe('Read (display)', () => {
     it('shows empty state with 0 items', () => {
-      render(<CardListClient src={[]} basePath={basePath} />);
+      render(<CardListClient primaryField="name" src={[]} basePath={basePath} />);
       expect(screen.getByText('No items found.')).toBeInTheDocument();
     });
 
     it('shows a single item with name and description', () => {
-      render(<CardListClient src={[item1]} basePath={basePath} />);
+      render(<CardListClient primaryField="name" src={[item1]} basePath={basePath} />);
       expect(screen.getByText('Alpha')).toBeInTheDocument();
       expect(screen.getByText('First item')).toBeInTheDocument();
     });
 
     it('shows multiple items', () => {
-      render(<CardListClient src={[item1, item2]} basePath={basePath} />);
+      render(<CardListClient primaryField="name" src={[item1, item2]} basePath={basePath} />);
       expect(screen.getByText('Alpha')).toBeInTheDocument();
       expect(screen.getByText('Beta')).toBeInTheDocument();
     });
 
     it('links each item name to its view page', () => {
-      render(<CardListClient src={[item1]} basePath={basePath} />);
+      render(<CardListClient primaryField="name" src={[item1]} basePath={basePath} />);
       const link = screen.getByRole('link', { name: 'Alpha' });
       expect(link).toHaveAttribute('href', '/items/view/1');
     });
 
     it('uses item id as title when name is absent', () => {
-      const noName = { id: 'xyz' };
-      render(<CardListClient src={[noName]} basePath={basePath} />);
+      const noName: { id: string; name?: string } = { id: 'xyz' };
+      render(<CardListClient primaryField="name" src={[noName]} basePath={basePath} />);
       expect(screen.getByText('xyz')).toBeInTheDocument();
     });
 
+    it('does not fall back to a name field when primaryField is omitted', () => {
+      render(<CardListClient src={[item1]} basePath={basePath} />);
+      const link = screen.getByRole('link', { name: '1' });
+      expect(link).toHaveAttribute('href', '/items/view/1');
+    });
+
     it('uses entityLabel in the delete confirmation dialog title', () => {
-      render(<CardListClient src={[item1]} basePath={basePath} entityLabel="Book" permissions={allPerms} removeAction={noopRemove} />);
+      render(<CardListClient primaryField="name" src={[item1]} basePath={basePath} entityLabel="Book" permissions={allPerms} removeAction={noopRemove} />);
       fireEvent.click(screen.getByRole('checkbox', { name: 'Select Alpha' }));
       fireEvent.click(screen.getByRole('button', { name: 'Delete Selected' }));
       expect(screen.getByText('Delete Book(s)?')).toBeInTheDocument();
@@ -63,93 +69,93 @@ describe('CardListClient', () => {
 
   describe('Create', () => {
     it('shows create button when permissions.create=true', () => {
-      render(<CardListClient src={[]} basePath={basePath} permissions={allPerms} />);
+      render(<CardListClient primaryField="name" src={[]} basePath={basePath} permissions={allPerms} />);
       expect(screen.getByRole('button', { name: 'Create New Item' })).toBeInTheDocument();
     });
 
     it('hides create button when permissions.create=false', () => {
-      render(<CardListClient src={[]} basePath={basePath} permissions={{ ...allPerms, create: false }} />);
+      render(<CardListClient primaryField="name" src={[]} basePath={basePath} permissions={{ ...allPerms, create: false }} />);
       expect(screen.queryByRole('button', { name: 'Create New Item' })).not.toBeInTheDocument();
     });
 
     it('create button links to new page', () => {
-      render(<CardListClient src={[]} basePath={basePath} permissions={allPerms} />);
+      render(<CardListClient primaryField="name" src={[]} basePath={basePath} permissions={allPerms} />);
       const btn = screen.getByRole('button', { name: 'Create New Item' });
       expect(btn.closest('a')).toHaveAttribute('href', '/items/new');
     });
 
     it('shows create button with 0 items before any addition', () => {
-      render(<CardListClient src={[]} basePath={basePath} permissions={allPerms} />);
+      render(<CardListClient primaryField="name" src={[]} basePath={basePath} permissions={allPerms} />);
       expect(screen.getByRole('button', { name: 'Create New Item' })).toBeInTheDocument();
       expect(screen.getByText('No items found.')).toBeInTheDocument();
     });
 
     it('shows create button with 1 existing item', () => {
-      render(<CardListClient src={[item1]} basePath={basePath} permissions={allPerms} />);
+      render(<CardListClient primaryField="name" src={[item1]} basePath={basePath} permissions={allPerms} />);
       expect(screen.getByRole('button', { name: 'Create New Item' })).toBeInTheDocument();
       expect(screen.getByText('Alpha')).toBeInTheDocument();
     });
 
     it('hides create button when allowCreate=false even though permissions.create=true (x-generate.new: false means no /new page exists)', () => {
-      render(<CardListClient src={[]} basePath={basePath} permissions={allPerms} allowCreate={false} />);
+      render(<CardListClient primaryField="name" src={[]} basePath={basePath} permissions={allPerms} allowCreate={false} />);
       expect(screen.queryByRole('button', { name: 'Create New Item' })).not.toBeInTheDocument();
     });
   });
 
   describe('Update', () => {
     it('shows edit button per item when permissions.update=true', () => {
-      render(<CardListClient src={[item1, item2]} basePath={basePath} permissions={allPerms} />);
+      render(<CardListClient primaryField="name" src={[item1, item2]} basePath={basePath} permissions={allPerms} />);
       expect(screen.getAllByRole('button', { name: 'Edit' })).toHaveLength(2);
     });
 
     it('hides edit button when permissions.update=false', () => {
-      render(<CardListClient src={[item1]} basePath={basePath} permissions={{ ...allPerms, update: false }} />);
+      render(<CardListClient primaryField="name" src={[item1]} basePath={basePath} permissions={{ ...allPerms, update: false }} />);
       expect(screen.queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument();
     });
 
     it('edit button links to edit page', () => {
-      render(<CardListClient src={[item1]} basePath={basePath} permissions={allPerms} />);
+      render(<CardListClient primaryField="name" src={[item1]} basePath={basePath} permissions={allPerms} />);
       const editLink = screen.getByRole('button', { name: 'Edit' }).closest('a');
       expect(editLink).toHaveAttribute('href', '/items/edit/1');
     });
 
     it('hides edit button when allowEdit=false even though permissions.update=true (x-generate.edit: false means no /edit page exists)', () => {
-      render(<CardListClient src={[item1]} basePath={basePath} permissions={allPerms} allowEdit={false} />);
+      render(<CardListClient primaryField="name" src={[item1]} basePath={basePath} permissions={allPerms} allowEdit={false} />);
       expect(screen.queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument();
     });
   });
 
   describe('Delete', () => {
     it('shows delete button when permissions.delete=true', () => {
-      render(<CardListClient src={[item1]} basePath={basePath} permissions={allPerms} removeAction={noopRemove} />);
+      render(<CardListClient primaryField="name" src={[item1]} basePath={basePath} permissions={allPerms} removeAction={noopRemove} />);
       expect(screen.getByRole('button', { name: 'Delete Selected' })).toBeInTheDocument();
     });
 
     it('hides delete button and checkboxes when permissions.delete=false', () => {
-      render(<CardListClient src={[item1]} basePath={basePath} permissions={{ ...allPerms, delete: false }} removeAction={noopRemove} />);
+      render(<CardListClient primaryField="name" src={[item1]} basePath={basePath} permissions={{ ...allPerms, delete: false }} removeAction={noopRemove} />);
       expect(screen.queryByRole('button', { name: 'Delete Selected' })).not.toBeInTheDocument();
       expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
     });
 
     it('hides delete button and checkboxes when no removeAction is passed even though permissions.delete=true (x-generate.delete: false means no delete route or action exists)', () => {
-      render(<CardListClient src={[item1]} basePath={basePath} permissions={allPerms} />);
+      render(<CardListClient primaryField="name" src={[item1]} basePath={basePath} permissions={allPerms} />);
       expect(screen.queryByRole('button', { name: 'Delete Selected' })).not.toBeInTheDocument();
       expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
     });
 
     it('delete button is disabled when no items are selected', () => {
-      render(<CardListClient src={[item1]} basePath={basePath} permissions={allPerms} removeAction={noopRemove} />);
+      render(<CardListClient primaryField="name" src={[item1]} basePath={basePath} permissions={allPerms} removeAction={noopRemove} />);
       expect(screen.getByRole('button', { name: 'Delete Selected' })).toBeDisabled();
     });
 
     it('delete button is enabled after selecting an item', () => {
-      render(<CardListClient src={[item1]} basePath={basePath} permissions={allPerms} removeAction={noopRemove} />);
+      render(<CardListClient primaryField="name" src={[item1]} basePath={basePath} permissions={allPerms} removeAction={noopRemove} />);
       fireEvent.click(screen.getByRole('checkbox', { name: 'Select Alpha' }));
       expect(screen.getByRole('button', { name: 'Delete Selected' })).not.toBeDisabled();
     });
 
     it('opens confirmation dialog when delete button is clicked', () => {
-      render(<CardListClient src={[item1]} basePath={basePath} permissions={allPerms} removeAction={noopRemove} />);
+      render(<CardListClient primaryField="name" src={[item1]} basePath={basePath} permissions={allPerms} removeAction={noopRemove} />);
       fireEvent.click(screen.getByRole('checkbox', { name: 'Select Alpha' }));
       fireEvent.click(screen.getByRole('button', { name: 'Delete Selected' }));
       expect(screen.getByText('Delete Item(s)?')).toBeInTheDocument();
@@ -159,6 +165,7 @@ describe('CardListClient', () => {
       const removeAction = vi.fn().mockResolvedValue(undefined);
       render(
         <CardListClient
+          primaryField="name"
           src={[item1]}
           basePath={basePath}
           permissions={allPerms}
@@ -178,6 +185,7 @@ describe('CardListClient', () => {
       const removeAction = vi.fn().mockResolvedValue(undefined);
       render(
         <CardListClient
+          primaryField="name"
           src={[item1, item2]}
           basePath={basePath}
           permissions={allPerms}
@@ -198,6 +206,7 @@ describe('CardListClient', () => {
       const removeAction = vi.fn();
       render(
         <CardListClient
+          primaryField="name"
           src={[item1]}
           basePath={basePath}
           permissions={allPerms}
@@ -214,6 +223,7 @@ describe('CardListClient', () => {
       const removeAction = vi.fn().mockResolvedValue(undefined);
       render(
         <CardListClient
+          primaryField="name"
           src={[item1]}
           basePath={basePath}
           permissions={allPerms}
@@ -234,6 +244,7 @@ describe('CardListClient', () => {
       const removeAction = vi.fn().mockResolvedValue(undefined);
       render(
         <CardListClient
+          primaryField="name"
           src={[item1]}
           basePath={basePath}
           permissions={allPerms}

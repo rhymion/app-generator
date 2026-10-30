@@ -20,10 +20,18 @@ export type S3ObjectLockClient = {
     ObjectLockMode: 'COMPLIANCE';
     ObjectLockRetainUntilDate: Date;
     IfNoneMatch: '*';
+    ExpectedBucketOwner?: string;
   }): Promise<void>;
   /** Returns the object body, or null when the key does not exist. */
-  getObject(params: { Bucket: string; Key: string }): Promise<string | null>;
+  getObject(params: { Bucket: string; Key: string; ExpectedBucketOwner?: string }): Promise<string | null>;
 };
+
+/**
+ * Upper bound on the retention period, in days (10 years). Object Lock COMPLIANCE retention cannot be
+ * shortened or removed by anyone, including the account root, so a typo such as an extra zero would be an
+ * irreversible storage-cost commitment. A larger value is rejected instead of being accepted silently.
+ */
+export const MAX_S3_RETENTION_DAYS = 3650;
 
 export class S3ObjectLockStorage implements AuditLogStorage {
   constructor(
@@ -31,9 +39,18 @@ export class S3ObjectLockStorage implements AuditLogStorage {
     private readonly bucket: string,
     private readonly retentionDays: number,
     private readonly now: () => Date = () => new Date(),
+    /** AWS account id that must own the bucket; the request fails when another account owns a same-named bucket. */
+    private readonly expectedBucketOwner?: string,
   ) {
     if (!Number.isInteger(retentionDays) || retentionDays < 1) {
       throw new Error(`Retention must be a whole number of days, got: ${retentionDays}`);
+    }
+    if (retentionDays > MAX_S3_RETENTION_DAYS) {
+      throw new Error(
+        `Retention of ${retentionDays} days is above the maximum of ${MAX_S3_RETENTION_DAYS} days. ` +
+          'S3 Object Lock COMPLIANCE retention cannot be shortened or removed by anyone, including the account root; ' +
+          'check AUDIT_LOG_S3_RETENTION_DAYS for a typo.',
+      );
     }
   }
 
@@ -52,11 +69,16 @@ export class S3ObjectLockStorage implements AuditLogStorage {
       ObjectLockMode: 'COMPLIANCE',
       ObjectLockRetainUntilDate: retainUntil,
       IfNoneMatch: '*',
+      ...this.ownerParam(),
     });
   }
 
   get(key: string): Promise<string | null> {
-    return this.client.getObject({ Bucket: this.bucket, Key: key });
+    return this.client.getObject({ Bucket: this.bucket, Key: key, ...this.ownerParam() });
+  }
+
+  private ownerParam(): { ExpectedBucketOwner?: string } {
+    return this.expectedBucketOwner ? { ExpectedBucketOwner: this.expectedBucketOwner } : {};
   }
 }
 
@@ -66,6 +88,10 @@ export async function createS3ObjectLockStorageFromEnv(env: Record<string, strin
   const retentionDays = Number(env.AUDIT_LOG_S3_RETENTION_DAYS);
   if (!bucket || !region || !env.AUDIT_LOG_S3_RETENTION_DAYS) {
     throw new Error('AUDIT_LOG_S3_BUCKET, AUDIT_LOG_S3_REGION and AUDIT_LOG_S3_RETENTION_DAYS are all required.');
+  }
+  const owner = env.AUDIT_LOG_S3_EXPECTED_BUCKET_OWNER || undefined;
+  if (owner !== undefined && !/^\d{12}$/.test(owner)) {
+    throw new Error('AUDIT_LOG_S3_EXPECTED_BUCKET_OWNER must be a 12-digit AWS account id.');
   }
   const sdk = await import('@aws-sdk/client-s3');
   const s3 = new sdk.S3Client({ region });
@@ -83,5 +109,5 @@ export async function createS3ObjectLockStorageFromEnv(env: Record<string, strin
       }
     },
   };
-  return new S3ObjectLockStorage(client, bucket, retentionDays);
+  return new S3ObjectLockStorage(client, bucket, retentionDays, undefined, owner);
 }

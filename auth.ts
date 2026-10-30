@@ -6,13 +6,14 @@ import CredentialsProvider from "next-auth/providers/credentials";
 import GoogleProvider from "next-auth/providers/google";
 import { PrismaAdapter } from "@auth/prisma-adapter";
 import prisma from "@/lib/prisma";
-import bcrypt from "bcryptjs";
+import { verifyPassword } from "@/lib/auth/password-check";
 import { siteConfig } from "@/lib/site-config";
 import { recordAuditEvent } from "@/lib/audit-log";
 import { verifyMfaCode } from "@/lib/mfa/verify";
 import { MfaRateLimitedError } from "@/lib/mfa/errors";
 import { createTenantBoundUser } from "@/lib/auth/create-user";
 import { isMockGoogleOAuthTestEnabled } from "@/lib/auth/mock-oauth-gate";
+import { isDomainAllowed } from "@/lib/auth/domain-allow-list";
 
 // Custom CredentialsSignin subclasses so @auth/core re-throws them as-is
 // (plain Error gets wrapped in CallbackRouteError and the code is lost).
@@ -70,17 +71,15 @@ function buildProviders(): Provider[] {
 
         // SSO-provisioned users have password === null and must not be allowed
         // to sign in via the credentials form. Treat them the same as a missing
-        // account so we don't leak that the email is registered.
-        if (!user || !user.password) {
-          throw new Error("Invalid credentials");
-        }
-
-        const isCorrectPassword = await bcrypt.compare(
+        // account so we don't leak that the email is registered. verifyPassword()
+        // runs a comparison against a throwaway hash when there is none, so the
+        // response time does not reveal which case applied either.
+        const isCorrectPassword = await verifyPassword(
           credentials.password as string,
-          user.password,
+          user?.password,
         );
 
-        if (!isCorrectPassword) {
+        if (!user || !user.password || !isCorrectPassword) {
           throw new Error("Invalid credentials");
         }
 
@@ -266,12 +265,11 @@ export const authConfig: NextAuthConfig = {
       }
 
       // Optional per-deployment domain allow-list. Empty list = allow all.
-      // Match is case-insensitive on the `@domain` half of the email.
+      // Google is matched on its `hd` claim, other providers on the email
+      // domain (see lib/auth/domain-allow-list.ts).
       const allowed = siteConfig.auth?.allowedDomains ?? [];
       if (allowed.length > 0) {
-        const domain = email.split("@")[1]?.toLowerCase();
-        const normalised = allowed.map((d) => d.toLowerCase());
-        if (!domain || !normalised.includes(domain)) {
+        if (!isDomainAllowed(account.provider, email, profile as { hd?: unknown } | undefined, allowed)) {
           console.info(
             "[auth:signIn:reject]",
             JSON.stringify({
@@ -440,8 +438,11 @@ export const authConfig: NextAuthConfig = {
       if (token.id) {
         const dbUser = await prisma.user.findUnique({
           where: { id: token.id },
-          select: { mfa_enabled: true, mfa_token_version: true },
+          select: { mfa_enabled: true, mfa_token_version: true, anonymized_at: true },
         });
+        // An erased user's session ends here: returning null makes Auth.js
+        // treat the cookie as no session and clear it.
+        if (dbUser?.anonymized_at) return null;
         const dbVersion = dbUser?.mfa_token_version ?? 0;
         const tokenVersion = token.mfa_token_version ?? 0;
         if (dbUser?.mfa_enabled && dbVersion > tokenVersion) {

@@ -30,8 +30,11 @@ export type { ChildSpec };
 
 export type VersionHistoryPanelProps = {
   identityId: string;
-  /** Create screen of the version entity, prefilled from this identity's current version. */
-  newVersionHref: string;
+  /**
+   * Create screen of the version entity, prefilled from this identity's current version. Without it the
+   * section shows no New version button (an identity that starts versions from its own control).
+   */
+  newVersionHref?: string;
   numberField: string;
   fields: string[];
   childSpecs: ChildSpec[];
@@ -116,7 +119,7 @@ export default function VersionHistoryPanel({
     <Box sx={{ mt: 3 }} data-testid="version-history">
       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2 }}>
         <Typography variant="h6">{t('title')}</Typography>
-        {canCreate && currentId && (
+        {newVersionHref && canCreate && currentId && (
           <Button component={NextLink} href={newVersionHref} variant="outlined" size="small" data-testid="new-version-link">
             {t('newVersion')}
           </Button>

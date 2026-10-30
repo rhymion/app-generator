@@ -299,12 +299,30 @@ for b in json.load(sys.stdin).get('branches', []):
     if b.get('name') == 'staging': print('yes'); break
 ")
     if [[ "$_STAGING_EXISTS" != "yes" ]]; then
-      curl -sS -X POST -H "$_NEON_AUTH" -H "Content-Type: application/json" \
-        -d '{"branch":{"name":"staging"}}' \
-        "${_NEON_API}/projects/${NEON_PROJECT_ID}/branches" > /dev/null
-      echo "  Created Neon staging branch"
+      # Preview runs less-reviewed branch code, so it must not hold a copy of
+      # production data (user emails and password hashes, MFA secrets, API
+      # keys, the audit log). A branch created without `init_source` copies the
+      # parent's data; `schema-only` copies the schema and no rows. The schema
+      # is migrated and the baseline seeded afterwards, as for any new branch.
+      _PRODUCTION_ID=$(printf '%s' "$_BRANCHES" | python3 -c "
+import sys, json
+for b in json.load(sys.stdin).get('branches', []):
+    if b.get('name') == 'production': print(b.get('id', '')); break
+")
+      if [[ -z "$_PRODUCTION_ID" ]]; then
+        echo "ERROR: Neon branch 'production' not found; refusing to create 'staging' without a schema-only parent" >&2
+        exit 1
+      fi
+      _CREATE_STATUS=$(curl -sS -o /dev/null -w '%{http_code}' -X POST -H "$_NEON_AUTH" -H "Content-Type: application/json" \
+        -d "{\"branch\":{\"name\":\"staging\",\"parent_id\":\"${_PRODUCTION_ID}\",\"init_source\":\"schema-only\"}}" \
+        "${_NEON_API}/projects/${NEON_PROJECT_ID}/branches")
+      if [[ "$_CREATE_STATUS" != 2* ]]; then
+        echo "ERROR: creating the schema-only Neon staging branch failed (HTTP ${_CREATE_STATUS})" >&2
+        exit 1
+      fi
+      echo "  Created Neon staging branch (schema only, no production data)"
     else
-      echo "[SKIP] Neon staging branch already exists"
+      echo "[SKIP] Neon staging branch already exists (a branch created by an earlier version of this script may hold a copy of production data; check it in the Neon console)"
     fi
   fi
 

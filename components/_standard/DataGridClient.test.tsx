@@ -39,6 +39,7 @@ describe('DataGridClient', () => {
       const mockData = createMockData(10); // Default page size is 10
       renderWithIntl(
         <DataGridClient
+          primaryField="name"
           src={mockData}
           basePath="/test"
           removeAction={mockRemoveAction}
@@ -58,6 +59,7 @@ describe('DataGridClient', () => {
       const mockData = createMockData(5);
       renderWithIntl(
         <DataGridClient
+          primaryField="name"
           src={mockData}
           basePath="/test"
           removeAction={mockRemoveAction}
@@ -77,6 +79,7 @@ describe('DataGridClient', () => {
       const mockData = createMockData(15);
       renderWithIntl(
         <DataGridClient
+          primaryField="name"
           src={mockData}
           basePath="/test"
           removeAction={mockRemoveAction}
@@ -96,6 +99,7 @@ describe('DataGridClient', () => {
       const mockData = createMockData(15);
       renderWithIntl(
         <DataGridClient
+          primaryField="name"
           src={mockData}
           basePath="/test"
           removeAction={mockRemoveAction}
@@ -123,6 +127,7 @@ describe('DataGridClient', () => {
       const mockData = createMockData(25);
       renderWithIntl(
         <DataGridClient
+          primaryField="name"
           src={mockData}
           basePath="/test"
           removeAction={mockRemoveAction}
@@ -147,6 +152,7 @@ describe('DataGridClient', () => {
       const mockData = createMockData(5);
       renderWithIntl(
         <DataGridClient
+          primaryField="name"
           src={mockData}
           basePath="/test"
           removeAction={mockRemoveAction}
@@ -187,6 +193,7 @@ describe('DataGridClient', () => {
 
       renderWithIntl(
         <DataGridClient
+          primaryField="name"
           src={mockData}
           basePath="/test"
           removeAction={mockRemoveAction}
@@ -223,6 +230,7 @@ describe('DataGridClient', () => {
 
       renderWithIntl(
         <DataGridClient
+          primaryField="name"
           src={mockData}
           basePath="/test"
           removeAction={mockRemoveAction}
@@ -253,6 +261,7 @@ describe('DataGridClient', () => {
 
       renderWithIntl(
         <DataGridClient
+          primaryField="name"
           src={mockData}
           basePath="/test"
           removeAction={mockRemoveAction}
@@ -275,6 +284,7 @@ describe('DataGridClient', () => {
       const mockData = createMockData(2);
       renderWithIntl(
         <DataGridClient
+          primaryField="name"
           src={mockData}
           basePath="/test"
           removeAction={mockRemoveAction}
@@ -289,6 +299,7 @@ describe('DataGridClient', () => {
       const mockData = createMockData(2);
       renderWithIntl(
         <DataGridClient
+          primaryField="name"
           src={mockData}
           basePath="/books"
           removeAction={mockRemoveAction}
@@ -306,6 +317,7 @@ describe('DataGridClient', () => {
       const mockData = createMockData(2);
       renderWithIntl(
         <DataGridClient
+          primaryField="name"
           src={mockData}
           basePath="/test"
           removeAction={mockRemoveAction}
@@ -318,10 +330,27 @@ describe('DataGridClient', () => {
       expect(screen.queryByRole('button', { name: /create new book/i })).not.toBeInTheDocument();
     });
 
+    it('renders no link column when primaryField is omitted (no implicit name default)', async () => {
+      renderWithIntl(
+        <DataGridClient
+          src={createMockData(2)}
+          basePath="/test"
+          removeAction={mockRemoveAction}
+          entityLabel="Test"
+        />
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText('Item 1')).toBeInTheDocument();
+      });
+      expect(screen.queryByRole('link', { name: 'Item 1' })).not.toBeInTheDocument();
+    });
+
     it('hides the edit icon when allowEdit is false even though permissions.update is true (x-generate.edit: false means no /edit page exists)', async () => {
       const mockData = createMockData(2);
       renderWithIntl(
         <DataGridClient
+          primaryField="name"
           src={mockData}
           basePath="/test"
           removeAction={mockRemoveAction}
@@ -342,6 +371,7 @@ describe('DataGridClient', () => {
       const mockData = createMockData(2);
       renderWithIntl(
         <DataGridClient
+          primaryField="name"
           src={mockData}
           basePath="/test"
           removeAction={mockRemoveAction}
@@ -359,6 +389,7 @@ describe('DataGridClient', () => {
       const mockData = createMockData(2);
       renderWithIntl(
         <DataGridClient
+          primaryField="name"
           src={mockData}
           basePath="/test"
           removeAction={mockRemoveAction}
@@ -373,6 +404,7 @@ describe('DataGridClient', () => {
       const mockData = createMockData(3);
       renderWithIntl(
         <DataGridClient
+          primaryField="name"
           src={mockData}
           basePath="/test"
           removeAction={mockRemoveAction}
@@ -397,6 +429,7 @@ describe('DataGridClient', () => {
       const mockData = createMockData(3);
       renderWithIntl(
         <DataGridClient
+          primaryField="name"
           src={mockData}
           basePath="/test"
           removeAction={mockRemoveAction}
@@ -416,6 +449,7 @@ describe('DataGridClient', () => {
       const mockData = createMockData(5);
       renderWithIntl(
         <DataGridClient
+          primaryField="name"
           src={mockData}
           basePath="/test"
           removeAction={mockRemoveAction}

@@ -73,6 +73,9 @@ export async function anonymizeUser(userId: string): Promise<AnonymizeUserResult
       // (the rows stay so token revocation keeps working), the person's
       // notifications and the cached responses of their idempotent requests.
       await tx.mobile_session.updateMany({ where: { user_id: userId }, data: { device_name: null } });
+      // Revoke the person's mobile sessions so their refresh tokens stop working.
+      // Sessions revoked earlier keep their original revocation time.
+      await tx.mobile_session.updateMany({ where: { user_id: userId, revoked_at: null }, data: { revoked_at: anonymizedAt } });
       await tx.notification.deleteMany({ where: { user_id: userId } });
       await tx.idempotency_key.deleteMany({ where: { actor_user_id: userId } });
       if (current.image_id) {
@@ -94,8 +97,9 @@ export async function anonymizeUser(userId: string): Promise<AnonymizeUserResult
       }
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    errors.push(message);
+    // The detail stays in the server log; callers get a generic message.
+    console.error('[anonymizeUser] transaction failed', userId, err instanceof Error ? err.name : typeof err);
+    errors.push('Anonymization failed');
     return { success: false, userId, anonymizedAt, errors };
   }
 
@@ -105,7 +109,8 @@ export async function anonymizeUser(userId: string): Promise<AnonymizeUserResult
     try {
       await removeStoredFile(avatar.path);
     } catch (err) {
-      errors.push(`Stored avatar file was not removed: ${err instanceof Error ? err.message : String(err)}`);
+      console.error('[anonymizeUser] avatar file removal failed', userId, err instanceof Error ? err.name : typeof err);
+      errors.push('Stored avatar file was not removed');
     }
   }
 

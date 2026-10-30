@@ -378,3 +378,38 @@ def test_info_description_says_served_not_unserved():
     assert 'not served' not in description
     assert '/api/openapi.json' in description
     assert 'capabilities' in description
+
+
+# ---------------------------------------------------------------------------
+# Issue #1159: write-only fields are marked writeOnly
+# ---------------------------------------------------------------------------
+
+def _write_only_ctx() -> dict:
+    secret = {'type': ['string', 'null']}
+    return _base_ctx(
+        model_def={
+            'properties': {
+                'id': {'type': 'string', 'pattern': '^c[a-z0-9]{24,}$'},
+                'name': {'type': 'string'},
+                'password': dict(secret),
+                'api_key': dict(secret),
+            },
+            'required': ['id', 'name'],
+        },
+        filtered_props={'name': {'type': 'string'}, 'password': dict(secret), 'api_key': dict(secret)},
+        write_only_field_names=['password', 'api_key'],
+    )
+
+
+def test_write_only_fields_are_marked_in_record_and_request_schemas():
+    schemas = build_entity_openapi(_write_only_ctx())['schemas']
+    for schema_name in ('Widget', 'WidgetCreateRequest'):
+        props = schemas[schema_name]['properties']
+        assert props['password']['writeOnly'] is True
+        assert props['api_key']['writeOnly'] is True
+        assert 'writeOnly' not in props['name']
+
+
+def test_no_write_only_marking_without_write_only_fields():
+    schemas = build_entity_openapi(_base_ctx())['schemas']
+    assert 'writeOnly' not in str(schemas)

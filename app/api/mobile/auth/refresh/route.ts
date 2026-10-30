@@ -38,6 +38,13 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
       throw new ApiError(401, 'Invalid or expired refresh token');
     }
 
+    // An erased user's sessions are revoked by anonymizeUser(); this check also
+    // covers a session row that survived an erasure made before that revocation existed.
+    const owner = await prisma.user.findUnique({ where: { id: session.user_id }, select: { anonymized_at: true } });
+    if (!owner || owner.anonymized_at) {
+      throw new ApiError(401, 'Invalid or expired refresh token');
+    }
+
     const newRefreshTokenPlaintext = generateRefreshTokenPlaintext();
     const newHash = hashRefreshToken(newRefreshTokenPlaintext);
 

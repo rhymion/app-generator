@@ -40,6 +40,7 @@ from helpers.state_machine_parser import parse_state_machine_diagram, ParseError
 from pathlib import Path
 import copy
 import json
+import re
 import warnings
 
 # ---------------------------------------------------------------------------
@@ -1389,9 +1390,53 @@ def _comment_parent_access_block(parent: str, model: str, key_where: str, op: st
     )
 
 
+def _mention_record_org(comment_has_mention: bool, item_select: str, scope: dict) -> tuple[str, str]:
+    """Return (item_select, org_expr) for mention recipient scoping.
+
+    The mention scope axis is the organization of the record the comment belongs to
+    (``parentRow``). An entity without an organization column has no scope (``null``);
+    otherwise the parent row read selects ``organization_id`` so the recipient filter can
+    use it (an empty value means no scope, decided at run time by the filter).
+    """
+    if not (comment_has_mention and scope.get('should_filter_by_org')):
+        return item_select, 'null'
+    if 'organization_id' not in item_select:
+        item_select = item_select.rstrip()[:-1].rstrip() + ', organization_id: true }'
+    return item_select, 'parentRow.organization_id'
+
+
+def _build_mention_record_resolver(parent: str, model: str, item_select: str, scope: dict) -> str:
+    """One entity's entry of the mention candidate search's record lookup.
+
+    Runs the same read gates the entity's own detail page runs (organization scope,
+    x-self-only, x-filter-values, then requirePermission) on the record id the client sent, and
+    returns the record's organization. A missing or unreadable record resolves to ``null``
+    so the search can answer with no candidates instead of leaking any. An entity without an
+    organization column resolves to ``{ organizationId: null }``: its mentions are not scoped.
+    """
+    has_org_column = bool(scope.get('should_filter_by_org'))
+    if has_org_column and 'organization_id' not in item_select:
+        item_select = item_select.rstrip()[:-1].rstrip() + ', organization_id: true }'
+    access = _comment_parent_access_block(parent, model, "id: recordId", 'read', item_select, scope)
+    org_expr = 'parentRow.organization_id ?? null' if has_org_column else 'null'
+    body = ''.join(('    ' + line if line.strip() else line) for line in access.splitlines(keepends=True))
+    return (
+        f"  {parent}: async (recordId, userId) => {{\n"
+        f"    try {{\n"
+        f"{body}"
+        f"      return {{ organizationId: {org_expr} }};\n"
+        f"    }} catch (error) {{\n"
+        f"      if (error instanceof AppError) return null;\n"
+        f"      throw error;\n"
+        f"    }}\n"
+        f"  }},\n"
+    )
+
+
 def _build_comment_actions(comment_children: list[dict], parent: str, model: str, has_assignee_id: bool, comment_has_mention: bool = False,
                            item_select: str = '{ id: true, creator_id: true }', scope: dict | None = None) -> str:
     scope = scope or {}
+    item_select, org_expr = _mention_record_org(comment_has_mention, item_select, scope)
     parent_pascal = to_pascal_case(parent)
     recipient_list = (
         "[parentRow.creator_id, parentRow.assignee_id]"
@@ -1409,7 +1454,7 @@ def _build_comment_actions(comment_children: list[dict], parent: str, model: str
         # excluded; on update, only newly-added mentions (vs. the prior message)
         # are notified.
         mention_notify_add = (
-            f"\n  const mentionedIds = extractMentionedUserIds(message).filter((mid) => mid !== userId);"
+            f"\n  const mentionedIds = await filterMentionRecipientsToRecordOrg({org_expr}, extractMentionedUserIds(message).filter((mid) => mid !== userId));"
             f"\n  for (const mentionedId of new Set(mentionedIds)) {{"
             f"\n    notify(mentionedId, 'mentioned_in_comment', {{"
             f"\n      title: 'You were mentioned in a {parent_pascal} comment',"
@@ -1425,7 +1470,7 @@ def _build_comment_actions(comment_children: list[dict], parent: str, model: str
         mention_notify_update = (
             f"\n  const oldIds = new Set(extractMentionedUserIds(comment.message));"
             f"\n  const newIds = extractMentionedUserIds(message);"
-            f"\n  const freshMentions = newIds.filter((mid) => !oldIds.has(mid) && mid !== userId);"
+            f"\n  const freshMentions = await filterMentionRecipientsToRecordOrg({org_expr}, newIds.filter((mid) => !oldIds.has(mid) && mid !== userId));"
             f"\n  for (const mentionedId of freshMentions) {{"
             f"\n    notify(mentionedId, 'mentioned_in_comment', {{"
             f"\n      title: 'You were mentioned in a {parent_pascal} comment',"
@@ -1485,6 +1530,7 @@ def _build_comment_actions_bridge(parent: str, model: str, has_assignee_id: bool
                                   item_select: str = '{ id: true, creator_id: true }', scope: dict | None = None) -> str:
     """Generate comment actions using the shared commentable bridge (single comment table)."""
     scope = scope or {}
+    item_select, org_expr = _mention_record_org(comment_has_mention, item_select, scope)
     parent_pascal = to_pascal_case(parent)
     recipient_list = (
         "[parentRow.creator_id, parentRow.assignee_id]"
@@ -1495,7 +1541,7 @@ def _build_comment_actions_bridge(parent: str, model: str, has_assignee_id: bool
     # has no direct parent FK on the comment row (only commentable_id), so the
     # update path resolves the parent row (through the access check) for the href.
     mention_notify_add = (
-        f"\n  const mentionedIds = extractMentionedUserIds(message).filter((mid) => mid !== userId);"
+        f"\n  const mentionedIds = await filterMentionRecipientsToRecordOrg({org_expr}, extractMentionedUserIds(message).filter((mid) => mid !== userId));"
         f"\n  for (const mentionedId of new Set(mentionedIds)) {{"
         f"\n    notify(mentionedId, 'mentioned_in_comment', {{"
         f"\n      title: 'You were mentioned in a {parent_pascal} comment',"
@@ -1511,7 +1557,7 @@ def _build_comment_actions_bridge(parent: str, model: str, has_assignee_id: bool
     mention_notify_update = (
         f"\n  const oldIds = new Set(extractMentionedUserIds(comment.message));"
         f"\n  const newIds = extractMentionedUserIds(message);"
-        f"\n  const freshMentions = newIds.filter((mid) => !oldIds.has(mid) && mid !== userId);"
+        f"\n  const freshMentions = await filterMentionRecipientsToRecordOrg({org_expr}, newIds.filter((mid) => !oldIds.has(mid) && mid !== userId));"
         f"\n  for (const mentionedId of freshMentions) {{"
         f"\n    notify(mentionedId, 'mentioned_in_comment', {{"
         f"\n      title: 'You were mentioned in a {parent_pascal} comment',"
@@ -2437,6 +2483,17 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     else:
         bridge_pre_delete_select = None
         bridge_post_delete_cleanups = ''
+    # Deleting an owner deletes its `attachable` bridge row; the database then only unlinks the
+    # attachments (onDelete: SetNull). The delete service removes them first (rows in the same
+    # transaction, stored files after commit) -- see lib/attachment/owner_cleanup.ts.
+    bridge_attachment_cleanup_props = [r['prop_name'] for r in bridge_cleanup_rels if r['target'] == 'attachable']
+    bridge_attachment_cleanup = bool(bridge_attachment_cleanup_props)
+    if bridge_attachment_cleanup:
+        bridge_post_delete_cleanups = '\n'.join(
+            f'    _removedAttachmentKeys.push(...(await deleteBridgeAttachments(tx, _bridgeRows'
+            f'.map((r) => r.{prop}))));'
+            for prop in bridge_attachment_cleanup_props
+        ) + '\n' + bridge_post_delete_cleanups
 
     parent_rels_raw = [r for r in _all_parent_rels_raw if r['prop_name'] not in oto_prop_names]
     # relationship_targets: deduplicated by target for import / type purposes
@@ -3639,6 +3696,14 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         'is_self_only': is_self_only,
         'filter_values': filter_values,
     }
+    # Mention candidate search: the picker is told which record the mention is for and the
+    # server derives that record's organization (lib/mention/record_org.ts). An entity hosts a
+    # mention picker through its comment thread or its own x-mention text fields.
+    mention_record_resolver = ''
+    if comment_has_mention or mention_fields:
+        mention_record_resolver = _build_mention_record_resolver(
+            parent, model, item_context_select, _comment_scope)
+
     if commentable_rel:
         comment_actions_code = _build_comment_actions_bridge(
             parent, model, has_assignee_id, comment_has_mention, item_context_select, _comment_scope)
@@ -4076,6 +4141,16 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     # plain readonly field is no longer a parameter of those functions at all.
     parent_service_args = ', '.join(
         f"{p['var_name']} ?? null" if _is_nullable(p['def']) else p['var_name']
+        for p in client_prop_infos
+    )
+    # Update-side counterpart for write-only fields (password, api_key, ...):
+    # an omitted field must leave the stored value unchanged, as it does on the
+    # Server Action path. `?? null` would reach the service as an explicit
+    # clear; '' is the service's "no new value" sentinel (see
+    # _normalized_value_expr), so an omitted field is passed as ''.
+    parent_service_args_update = ', '.join(
+        f"{p['var_name']} ?? ''" if is_write_only_prop(p['def'])
+        else (f"{p['var_name']} ?? null" if _is_nullable(p['def']) else p['var_name'])
         for p in client_prop_infos
     )
     child_service_args = ', '.join(
@@ -4687,9 +4762,38 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     service_args_for_create = f"actorId, {parent_service_args}" + (
         f", {child_service_args}" if child_service_args else ""
     ) + (f", {_flatten_null_args}" if _flatten_null_args else "")
-    service_args_for_update = f"actorId, id, {parent_service_args}" + (
+    service_args_for_update = f"actorId, id, {parent_service_args_update}" + (
         f", {child_service_args_update}" if child_service_args_update else ""
     ) + (f", {_flatten_null_args}" if _flatten_null_args else "")
+
+    # Credential confirmation (Issue #1188): a self-only view of the `user`
+    # model that exposes both `password` and `mfa_enabled` (the `setting`
+    # view) must not let a REST write change either field on an API key or
+    # mobile token alone. The account settings page asks for the current
+    # password (to change the password) and a TOTP/recovery code (to turn
+    # MFA off); the REST update routes ask for the same proof through
+    # confirmCredentialChange() (lib/auth/credential-confirmation.ts), and the
+    # service receives the confirmed values instead of the raw request ones.
+    _cred_vars = {p['prop']: p['var_name'] for p in client_prop_infos}
+    credential_confirmation = (
+        is_self_only
+        and model == 'user'
+        and 'password' in _cred_vars
+        and 'mfa_enabled' in _cred_vars
+    )
+    credential_password_var = _cred_vars.get('password', 'password')
+    credential_mfa_var = _cred_vars.get('mfa_enabled', 'mfaEnabled')
+    if credential_confirmation:
+        service_args_for_update = re.sub(
+            rf"\b{re.escape(credential_password_var)} \?\? ''",
+            '_credential.password',
+            service_args_for_update,
+        )
+        service_args_for_update = re.sub(
+            rf"(?<![\w.]){re.escape(credential_mfa_var)}(?!\w)",
+            '_credential.mfaEnabled',
+            service_args_for_update,
+        )
 
     # CSV import -> service.ts convergence (cmd_996, Issue #93; widened by
     # cmd_1124 to also cover embedded DataGrid children -- a JSON Schema
@@ -4889,6 +4993,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         bridge_cleanup_rels=bridge_cleanup_rels,
         bridge_pre_delete_select=bridge_pre_delete_select,
         bridge_post_delete_cleanups=bridge_post_delete_cleanups,
+        bridge_attachment_cleanup=bridge_attachment_cleanup,
         has_commentable=bool(commentable_rel),
         comment_has_mention=comment_has_mention,
         commentable_rel_name=commentable_rel['relation_name'] if commentable_rel else None,
@@ -4917,6 +5022,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         child_assignee_notify_create_code=child_assignee_notify_create_code,
         child_assignee_notify_update_code=child_assignee_notify_update_code,
         comment_actions_code=comment_actions_code,
+        mention_record_resolver=mention_record_resolver,
         # FormData
         form_data_gets=form_data_gets,
         # Service / snapshots
@@ -4938,6 +5044,9 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         all_body_fields_create=all_body_fields_create,
         service_args_for_create=service_args_for_create,
         service_args_for_update=service_args_for_update,
+        credential_confirmation=credential_confirmation,
+        credential_password_var=credential_password_var,
+        credential_mfa_var=credential_mfa_var,
         # CSV import -> service.ts convergence (cmd_996, Issue #93; cmd_1124)
         import_service_parent_args=import_service_parent_args,
         import_service_child_args=import_service_child_args,

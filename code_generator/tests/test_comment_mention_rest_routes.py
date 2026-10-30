@@ -112,7 +112,11 @@ def test_mention_search_route_runs_the_picker_search_as_the_authenticated_caller
     assert "import { searchMentionUserOptions } from '@/lib/mention/search';" in route
     assert 'const { userId: actorId } = await authenticate(request);' in route
     assert 'resolveActorId' not in route
-    assert 'withActor(actorId, () => searchMentionUserOptions(query))' in route
+    assert 'withActor(actorId, () => searchMentionUserOptions(query, record))' in route
+    # The record the mention is for is named by the client (entity + id) and read again server-side.
+    assert "searchParams.get('entity')" in route
+    assert "searchParams.get('id')" in route
+    assert 'entity and id must be given together' in route
     assert 'prisma' not in route
     assert "getRateLimiter().check('api:read', actorId)" in route
 
@@ -188,7 +192,7 @@ def test_openapi_document_describes_the_mention_search_only_when_mentions_exist(
     assert '/api/mention/users' not in assemble_openapi_document([])['paths']
     document = assemble_openapi_document([], mention_search=True)
     get = document['paths']['/api/mention/users']['get']
-    assert {p['name'] for p in get['parameters']} == {'q'}
+    assert {p['name'] for p in get['parameters']} == {'q', 'entity', 'id'}
     assert set(get['responses']) >= {'200', '400', '401', '429'}
     assert 'MentionUserOption' in document['components']['schemas']
     assert {'name': 'mention'} in document['tags']

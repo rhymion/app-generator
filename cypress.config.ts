@@ -212,7 +212,7 @@ export default defineConfig({
               password: await bcrypt.hash(password, 10),
             },
           });
-          return JSON.parse(JSON.stringify({ email: user.email, password }));
+          return JSON.parse(JSON.stringify({ id: user.id, email: user.email, password }));
         },
         async 'db:createAnonymizedMobileUser'() {
           // GDPR-anonymized user that still carries a valid password hash, so

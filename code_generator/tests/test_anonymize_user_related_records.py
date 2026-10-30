@@ -27,6 +27,7 @@ def test_related_records_are_erased_in_the_same_transaction() -> None:
     start = text.index('prisma.$transaction')
     tx_body = text[start:text.index('} catch (err)', start)]
     assert 'tx.mobile_session.updateMany' in tx_body and 'device_name: null' in tx_body
+    assert 'where: { user_id: userId, revoked_at: null }, data: { revoked_at: anonymizedAt }' in tx_body
     assert 'tx.notification.deleteMany' in tx_body
     assert 'tx.idempotency_key.deleteMany' in tx_body
     assert 'tx.attachment.deleteMany' in tx_body

@@ -57,6 +57,17 @@ describe('anonymizeUser related records', () => {
     expect(mocks.deleteStoredObject).toHaveBeenCalledWith(STORED_KEY);
   });
 
+  it('revokes the mobile sessions that are not yet revoked', async () => {
+    const first = new Date('2026-01-02T03:04:05Z');
+    mocks.userFindUnique.mockResolvedValue({ anonymized_at: first, invalidated_at: first, image_id: null });
+    const res = await anonymizeUser('u1');
+    expect(res.success).toBe(true);
+    expect(mocks.mobileSessionUpdateMany).toHaveBeenCalledWith({
+      where: { user_id: 'u1', revoked_at: null },
+      data: { revoked_at: first },
+    });
+  });
+
   it('keeps the first erasure time on a repeated call', async () => {
     const first = new Date('2026-01-02T03:04:05Z');
     mocks.userFindUnique.mockResolvedValue({ anonymized_at: first, invalidated_at: first, image_id: null });
@@ -74,6 +85,15 @@ describe('anonymizeUser related records', () => {
     const res = await anonymizeUser('u1');
     expect(res.success).toBe(true);
     expect(res.errors?.[0]).toContain('Stored avatar file was not removed');
+  });
+
+  it('keeps storage SDK error text out of the reported errors', async () => {
+    mocks.deleteStoredObject.mockRejectedValue(new Error('AccessDenied: bucket=secret-bucket key=avatars/u1.png'));
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const res = await anonymizeUser('u1');
+    expect(JSON.stringify(res.errors)).not.toContain('secret-bucket');
+    expect(JSON.stringify(errorSpy.mock.calls)).not.toContain('secret-bucket');
+    errorSpy.mockRestore();
   });
 
   it('rolls back and reports when the user does not exist', async () => {

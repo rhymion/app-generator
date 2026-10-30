@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtemp, readFile, rm, readdir } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { Readable } from 'node:stream';
 
 const blob = vi.hoisted(() => ({
   put: vi.fn(),
@@ -16,6 +17,7 @@ const gcs = vi.hoisted(() => ({
   del: vi.fn(),
   exists: vi.fn(),
   getSignedUrl: vi.fn(),
+  createReadStream: vi.fn(),
   files: [] as string[],
 }));
 vi.mock('@google-cloud/storage', () => ({
@@ -24,7 +26,7 @@ vi.mock('@google-cloud/storage', () => ({
       return {
         file: (key: string) => {
           gcs.files.push(key);
-          return { save: gcs.save, delete: gcs.del, exists: gcs.exists, getSignedUrl: gcs.getSignedUrl };
+          return { save: gcs.save, delete: gcs.del, exists: gcs.exists, getSignedUrl: gcs.getSignedUrl, createReadStream: gcs.createReadStream };
         },
       };
     }
@@ -33,6 +35,7 @@ vi.mock('@google-cloud/storage', () => ({
 
 import {
   deleteStoredObject,
+  blobTarget,
   isStorageKey,
   localStorageRoot,
   newStorageKey,
@@ -41,7 +44,7 @@ import {
   storageBackend,
 } from './storage';
 
-const ENV_KEYS = ['GCS_BUCKET_NAME', 'BLOB_READ_WRITE_TOKEN', 'ATTACHMENT_LOCAL_DIR'] as const;
+const ENV_KEYS = ['GCS_BUCKET_NAME', 'BLOB_READ_WRITE_TOKEN', 'BLOB_STORE_ID', 'ATTACHMENT_BLOB_READ_WRITE_TOKEN', 'ATTACHMENT_LOCAL_DIR'] as const;
 const saved: Record<string, string | undefined> = {};
 
 beforeEach(() => {
@@ -79,11 +82,39 @@ describe('storage keys', () => {
   });
 });
 
+describe('blobTarget', () => {
+  it('prefers ATTACHMENT_BLOB_READ_WRITE_TOKEN, then BLOB_STORE_ID, then BLOB_READ_WRITE_TOKEN', () => {
+    const all = { ATTACHMENT_BLOB_READ_WRITE_TOKEN: 'a', BLOB_STORE_ID: 's', BLOB_READ_WRITE_TOKEN: 'b' };
+    expect(blobTarget(all)).toEqual({ token: 'a' });
+    expect(blobTarget({ BLOB_STORE_ID: 's', BLOB_READ_WRITE_TOKEN: 'b' })).toEqual({ storeId: 's' });
+    expect(blobTarget({ BLOB_READ_WRITE_TOKEN: 'b' })).toEqual({ token: 'b' });
+    expect(blobTarget({})).toEqual({});
+  });
+
+  it('selects Vercel Blob when only the attachment token is set', () => {
+    expect(storageBackend({ ATTACHMENT_BLOB_READ_WRITE_TOKEN: 'a' })).toBe('vercel');
+  });
+});
+
 describe('backend selection', () => {
   it('uses GCS, then Vercel Blob, then local disk', () => {
     expect(storageBackend({})).toBe('local');
     expect(storageBackend({ BLOB_READ_WRITE_TOKEN: 't' })).toBe('vercel');
     expect(storageBackend({ BLOB_READ_WRITE_TOKEN: 't', GCS_BUCKET_NAME: 'b' })).toBe('gcs');
+  });
+
+  it('uses Vercel Blob when only BLOB_STORE_ID (OIDC) is set', () => {
+    expect(storageBackend({ BLOB_STORE_ID: 'store_abc' })).toBe('vercel');
+  });
+
+  it('throws instead of using local disk on Cloud Run or Vercel when nothing is configured', () => {
+    expect(() => storageBackend({ K_SERVICE: 'svc', NODE_ENV: 'production' })).toThrow(/No attachment storage backend/);
+    expect(() => storageBackend({ VERCEL: '1', NODE_ENV: 'production' })).toThrow(/BLOB_STORE_ID/);
+  });
+
+  it('allows local disk on those platforms only with an explicit ATTACHMENT_LOCAL_DIR or in development', () => {
+    expect(storageBackend({ K_SERVICE: 'svc', NODE_ENV: 'production', ATTACHMENT_LOCAL_DIR: '/data' })).toBe('local');
+    expect(storageBackend({ VERCEL: '1', NODE_ENV: 'development' })).toBe('local');
   });
 });
 
@@ -140,14 +171,26 @@ describe('Vercel Blob backend', () => {
     expect(blob.put).toHaveBeenCalledTimes(1);
     const [pathname, , options] = blob.put.mock.calls[0];
     expect(pathname).toBe(key);
-    expect(options).toMatchObject({ access: 'private', addRandomSuffix: false, contentType: 'image/png' });
+    expect(options).toMatchObject({ access: 'private', addRandomSuffix: false, contentType: 'image/png', token: 'token' });
+  });
+
+  it('addresses the store explicitly on put, get and del', async () => {
+    const key = newStorageKey();
+    blob.put.mockResolvedValue({});
+    blob.get.mockResolvedValue(null);
+    await putStoredObject(key, Buffer.from('x'), 'image/png');
+    await serveStoredObject(key, SERVE);
+    await deleteStoredObject(key);
+    expect(blob.put.mock.calls[0][2]).toMatchObject({ token: 'token' });
+    expect(blob.get).toHaveBeenCalledWith(key, { access: 'private', token: 'token' });
+    expect(blob.del).toHaveBeenCalledWith(key, { token: 'token' });
   });
 
   it('delivers the bytes through the route with the decrypted name as the disposition', async () => {
     const key = newStorageKey();
     blob.get.mockResolvedValue({ statusCode: 200, stream: new Response('bytes').body, headers: new Headers() });
     const res = await serveStoredObject(key, SERVE);
-    expect(blob.get).toHaveBeenCalledWith(key, { access: 'private' });
+    expect(blob.get).toHaveBeenCalledWith(key, { access: 'private', token: 'token' });
     expect(res?.status).toBe(200);
     expect(res?.headers.get('content-disposition')).toBe(SERVE.disposition);
     expect(await res!.text()).toBe('bytes');
@@ -164,27 +207,26 @@ describe('GCS backend', () => {
     process.env.GCS_BUCKET_NAME = 'bucket';
   });
 
-  it('saves without an ACL and signs a short-lived URL that carries the decrypted file name', async () => {
+  it('saves without an ACL and streams the object with the decrypted file name only in a header', async () => {
     const key = newStorageKey();
     await putStoredObject(key, Buffer.from('x'), 'application/pdf');
     expect(gcs.save).toHaveBeenCalledWith(expect.any(Buffer), { metadata: { contentType: 'application/pdf' } });
 
     gcs.exists.mockResolvedValue([true]);
-    gcs.getSignedUrl.mockResolvedValue(['https://storage.googleapis.com/bucket/' + key + '?X-Goog-Signature=sig']);
+    gcs.createReadStream.mockReturnValue(Readable.from([Buffer.from('gcs-bytes')]));
     const res = await serveStoredObject(key, SERVE);
-    expect(res?.status).toBe(302);
-    expect(res?.headers.get('location')).toContain('X-Goog-Signature');
-    const config = gcs.getSignedUrl.mock.calls[0][0];
-    expect(config).toMatchObject({
-      version: 'v4',
-      action: 'read',
-      responseType: 'application/pdf',
-      responseDisposition: SERVE.disposition,
-    });
-    expect(config.expires - Date.now()).toBeLessThanOrEqual(5 * 60 * 1000);
+    expect(res?.status).toBe(200);
+    expect(res?.headers.get('location')).toBeNull();
+    expect(res?.headers.get('content-disposition')).toBe(SERVE.disposition);
+    expect(res?.headers.get('content-type')).toBe('application/pdf');
+    expect(res?.headers.get('x-content-type-options')).toBe('nosniff');
+    expect(res?.headers.get('cache-control')).toBe('private, no-store');
+    expect(Buffer.from(await res!.arrayBuffer()).toString()).toBe('gcs-bytes');
+    // No signed URL (and so no file name in a query string) is ever built.
+    expect(gcs.getSignedUrl).not.toHaveBeenCalled();
   });
 
-  it('does not sign a URL for an object that does not exist', async () => {
+  it('answers null for an object that does not exist', async () => {
     gcs.exists.mockResolvedValue([false]);
     expect(await serveStoredObject(newStorageKey(), SERVE)).toBeNull();
     expect(gcs.getSignedUrl).not.toHaveBeenCalled();
