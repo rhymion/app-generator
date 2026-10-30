@@ -81,8 +81,8 @@ def test_invalidate_org_scoped_entity_is_filtered_by_associated_organizations():
         assert 'getAssociatedOrganizations' in src
         assert 'organization_id: { in: _assocOrgIds }' in src
         assert 'findFirst' in src
-    assert "import { getAssociatedOrganizations } from '@/lib/organization/getters_associated';" in out['route']
-    assert "import { getAssociatedOrganizations } from '@/lib/organization/getters_associated';" in out['action']
+    assert "import { getAssociatedOrganizations } from '@/lib/organization/associated_internal';" in out['route']
+    assert "import { getAssociatedOrganizations } from '@/lib/organization/associated_internal';" in out['action']
 
 
 def test_invalidate_org_optional_entity_also_allows_null_organization():

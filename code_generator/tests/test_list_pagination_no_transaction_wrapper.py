@@ -60,7 +60,7 @@ def test_no_batch_transaction_wrapper_in_list_page_getter():
     with tempfile.TemporaryDirectory() as tmp:
         out = _run_pipeline(Path(tmp))
         for entity in ('widget', 'gadget', 'sprocket'):
-            getters = (out / 'lib' / entity / 'getters.ts').read_text()
+            getters = (out / 'lib' / entity / 'getters_internal.ts').read_text()
             assert 'await prisma.$transaction([' not in getters, (
                 f'lib/{entity}/getters.ts still wraps findMany+count in '
                 'prisma.$transaction([...]) (batch form) -- this is exactly '
@@ -73,7 +73,7 @@ def test_no_batch_transaction_wrapper_in_list_page_getter():
 def test_find_many_and_count_run_independently_via_promise_all():
     with tempfile.TemporaryDirectory() as tmp:
         out = _run_pipeline(Path(tmp))
-        getters = (out / 'lib' / 'widget' / 'getters.ts').read_text()
+        getters = (out / 'lib' / 'widget' / 'getters_internal.ts').read_text()
         assert 'const [rowsRaw, total] = await Promise.all([' in getters, getters
         assert 'prisma.widget.findMany({' in getters
         assert 'prisma.widget.count({ where }),' in getters

@@ -87,7 +87,7 @@ def _render_bulk_unscoped() -> str:
 
 def test_bulk_put_and_delete_scope_the_lookup_to_the_actors_organizations():
     out = _render_bulk()
-    assert "import { getAssociatedOrganizations } from '@/lib/organization/getters_associated';" in out
+    assert "import { getAssociatedOrganizations } from '@/lib/organization/associated_internal';" in out
     scoped = "where: { id: { in: requestedIds }, organization_id: { in: _assocOrgIds } },"
     # One scoped lookup each for PUT and DELETE, and no unscoped one left.
     assert out.count(scoped) == 2

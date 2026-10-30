@@ -124,7 +124,7 @@ def test_approvable_id_is_not_offered_to_sort_or_filter_on_either_list(out):
     page = _read(out, 'app/[locale]/mobile_request/page.tsx')
     assert 'approvable_id' not in page.split('listQuery=')[1].split('searchKey')[0]
     # The REST list keeps accepting it.
-    assert "'approvable_id'" in _read(out, 'lib/mobile_request/getters.ts')
+    assert "'approvable_id'" in _read(out, 'lib/mobile_request/getters_internal.ts')
 
 
 def test_shared_approval_module_and_predicates_are_the_web_ones(out):

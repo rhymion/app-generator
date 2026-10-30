@@ -5,7 +5,7 @@ const { getOrgs, canAccess } = vi.hoisted(() => ({
   canAccess: vi.fn(),
 }));
 
-vi.mock('@/lib/organization/getters_associated', () => ({ getAssociatedOrganizations: getOrgs }));
+vi.mock('@/lib/organization/associated_internal', () => ({ getAssociatedOrganizations: getOrgs }));
 vi.mock('@/lib/authz', () => ({ canAccess }));
 
 import { assertFkReferencesUsable } from './_fk_reference';

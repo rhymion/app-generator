@@ -23,7 +23,7 @@
       "@/lib/authz": ["./lib/authz.ts"],
       "@/lib/api-auth": ["./lib/api-auth.ts"],
       "@/lib/_notifier": ["./lib/_notifier.ts"],
-      "@/lib/organization/getters_associated": ["./lib/organization/getters_associated.ts"],
+      "@/lib/organization/associated_internal": ["./lib/organization/associated_internal.ts"],
       "@/app/generated/prisma/client": ["./prisma/.generated-client/client"],
       "@/*": ["../*"]
     }

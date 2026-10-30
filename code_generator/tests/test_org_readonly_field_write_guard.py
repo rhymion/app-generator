@@ -145,7 +145,7 @@ def test_writable_org_id_keeps_existing_write_guard():
         assert 'if (organizationId) {' in body
         assert f'{org_ids_var} = (await getAssociatedOrganizations(actorId)).map((o) => o.id);' in body
         assert f'{org_ids_var}.includes(organizationId)' in body
-    assert "import { getAssociatedOrganizations } from '@/lib/organization/getters_associated';" in rendered
+    assert "import { getAssociatedOrganizations } from '@/lib/organization/associated_internal';" in rendered
 
 
 def test_readonly_org_id_deviation_injection():

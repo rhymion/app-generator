@@ -34,7 +34,7 @@ the organization boundary as the active one.
 - [ ] Every list and detail query of an org-scoped entity filters on `organization_id` in `associatedOrganizationIds` (`getters.ts.jinja2`, `buildEntityAccessWhere()`); detail reads use `findFirst`, not a bare `findUnique` by id
 - [ ] Entities that should be org-scoped actually are — each has an `organization_id` FK to `organization` and the `@@index([organization_id])` that `validate.py` requires
 - [ ] Where `organization_id` is optional, the `OR: [..., { organization_id: null }]` branch (`org_relationship_optional`) is intended, and rows with a null organization are acceptable to expose to every user
-- [ ] `getAssociatedOrganizations(userId)` returns only organizations the user is a member of (`lib/organization/getters_associated.ts`)
+- [ ] `getAssociatedOrganizations(userId)` returns only organizations the user is a member of (`lib/organization/associated_internal.ts`)
 
 ### Data leak paths
 
