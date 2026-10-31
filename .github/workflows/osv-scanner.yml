@@ -1,0 +1,59 @@
+name: OSV-Scanner
+
+# Cross-ecosystem second opinion next to `npm audit` and `pip-audit`.
+# Report-only for now: neither job fails the run on findings (see
+# docs/knowledge/ci-security-workflows.md for the criteria to make it blocking).
+# The generated mobile app's dependencies are out of scope here.
+on:
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - package-lock.json
+      - requirements.txt
+      - .github/workflows/osv-scanner.yml
+  schedule:
+    - cron: '41 5 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: osv-scanner-${{ github.head_ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # Full scan of the default lockfiles; findings go to code scanning.
+  scheduled-scan:
+    name: Scheduled lockfile scan
+    if: github.event_name != 'pull_request'
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    uses: google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml@b1d267aea5211fa648d9d442fa64b90dbdcbdd36 # v2.7.0
+    with:
+      scan-args: |-
+        --lockfile=package-lock.json
+        --lockfile=requirements.txt
+      fail-on-vuln: false
+
+  # Compares the PR's lockfiles with its base and lists newly introduced
+  # vulnerabilities in the job log. It does not upload SARIF: a token from a
+  # fork or Dependabot PR cannot write code-scanning results.
+  pull-request-scan:
+    name: Pull request lockfile scan
+    if: github.event_name == 'pull_request'
+    # The reusable workflow's job declares security-events: write itself, so the
+    # caller must grant it or the run fails at startup, even with upload-sarif off.
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    uses: google/osv-scanner-action/.github/workflows/osv-scanner-reusable-pr.yml@b1d267aea5211fa648d9d442fa64b90dbdcbdd36 # v2.7.0
+    with:
+      scan-args: |-
+        --lockfile=package-lock.json
+        --lockfile=requirements.txt
+      upload-sarif: false
+      fail-on-vuln: false
