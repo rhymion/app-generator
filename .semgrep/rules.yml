@@ -1,0 +1,34 @@
+# Project-owned Semgrep rules. These are BLOCKING from the start: the tree has no
+# findings today, so any finding is new. Registry rule packs live in
+# .github/workflows/security-scan.yml and are report-only.
+#
+# Run locally: bash scripts/semgrep_scan.sh
+rules:
+  - id: prisma-unsafe-raw-query
+    languages: [typescript]
+    severity: ERROR
+    message: >-
+      $queryRawUnsafe / $executeRawUnsafe take a plain string, so a value that
+      reaches it is a SQL injection. Use the tagged template forms
+      ($queryRaw`...` / $executeRaw`...`), which parameterize interpolations.
+    pattern-either:
+      - pattern: $DB.$queryRawUnsafe(...)
+      - pattern: $DB.$executeRawUnsafe(...)
+
+  - id: react-dangerously-set-inner-html
+    languages: [typescript]
+    severity: ERROR
+    message: >-
+      dangerouslySetInnerHTML bypasses React's escaping. Render the value as
+      text, or sanitize it and document why raw HTML is required.
+    pattern: <$EL dangerouslySetInnerHTML={...} />
+
+  - id: dynamic-code-evaluation
+    languages: [typescript]
+    severity: ERROR
+    message: >-
+      eval() and new Function() run strings as code. Use a data format (JSON)
+      or a dedicated parser instead.
+    pattern-either:
+      - pattern: eval(...)
+      - pattern: new Function(...)

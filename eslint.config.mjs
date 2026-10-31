@@ -95,6 +95,8 @@ const eslintConfig = defineConfig([
     "next-env.d.ts",
     // Generated coverage report — never lint:
     "coverage/**",
+    // Semgrep rule test cases: deliberately contain the patterns the rules flag.
+    ".semgrep/**",
     // Mention-gate fixture check (cmd_535) scratch output — rebuilt from
     // code_generator/tests/fixtures/mention_gate/ on every
     // scripts/check_mention_gate_fixture.sh run, gitignored, never part of
