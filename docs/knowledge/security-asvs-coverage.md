@@ -121,8 +121,8 @@ Chapter V17 (WebRTC) does not apply: the generated app has no real-time media, T
 | ID | Level | Status | Covered by | Verified by | Gap Issue | Source and version |
 |----|-------|--------|------------|-------------|-----------|--------------------|
 | V5.1.1 | 2 | gap | docs/knowledge/upload-format-allowlist-deferral.md lists types and extensions; per-feature size, unpacked size and malicious-file handling are not documented | none | #1279 | - |
-| V5.2.1 | 1 | generator | upload_route.ts.jinja2 enforces UPLOAD_MAX_BYTES (default 10MB) after the body is parsed; per-user upload rate limit | none | #1278 | - |
-| V5.2.2 | 1 | gap | lib/_upload_validation.ts compares the declared MIME type and extension only; no content check | lib/_upload_validation.test.ts (allow-lists only) | #1278 | - |
+| V5.2.1 | 1 | generator | upload_route.ts.jinja2 refuses an upload over UPLOAD_MAX_BYTES (default 10MB) before the body is parsed: a declared Content-Length over the limit is refused unread and a body without one is counted while it streams (lib/_upload_validation.ts readBodyWithLimit); per-user upload rate limit | lib/_upload_validation.test.ts, cypress/e2e/api/upload_path_safety.cy.ts, code_generator/tests/test_upload_route_content_type.py | - | - |
+| V5.2.2 | 1 | generator | lib/_upload_validation.ts checks the declared MIME type, the extension and the leading bytes against the format the extension names (images, PDF, Office and archive formats; text formats must hold no NUL byte); an extension added through UPLOAD_ALLOWED_EXTENSIONS that has no signature is accepted on the allow-lists alone; images are not re-encoded | lib/_upload_validation.test.ts, cypress/e2e/api/upload_path_safety.cy.ts, code_generator/tests/test_upload_route_content_type.py | - | - |
 | V5.2.3 | 2 | n/a | Uploaded archives are stored and served untouched; the app never decompresses them | none | - | - |
 | V5.3.1 | 1 | generator | lib/attachment/storage.ts opaque random key, storage root outside public/ | cypress/e2e/api/upload_path_safety.cy.ts, lib/attachment/storage.test.ts | - | - |
 | V5.3.2 | 1 | generator | lib/attachment/upload_core.ts newStorageKey; the original name is stored encrypted for display only | cypress/e2e/api/upload_path_safety.cy.ts, lib/attachment/storage.test.ts | - | - |
@@ -157,7 +157,7 @@ Chapter V17 (WebRTC) does not apply: the generated app has no real-time media, T
 | V6.4.2 | 1 | generator | No password hints or knowledge-based questions exist | none | - | - |
 | V6.4.3 | 2 | gap | No forgot-password flow | none | #1282 | - |
 | V6.4.4 | 2 | gap | No MFA factor reset procedure | none | #1282 | - |
-| V6.5.1 | 2 | gap | Recovery codes are single-use; TOTP verification keeps no last-used step, so a code can be replayed in its window | none | #1283 | - |
+| V6.5.1 | 2 | generator | lib/mfa/verify.ts records the last accepted TOTP time step per user (user.mfa_last_totp_step) with a conditional write and refuses a code from that step or an earlier one; a recovery code is stamped used with a conditional write, so it works once | lib/mfa/verify.test.ts, lib/mfa/totp.test.ts | - | - |
 | V6.5.2 | 2 | generator | Recovery codes are stored as bcrypt hashes; the TOTP secret is encrypted with AES-256-GCM (lib/mfa/crypto.ts) | lib/mfa/recovery.test.ts, lib/mfa/crypto.test.ts | - | - |
 | V6.5.3 | 2 | generator | lib/mfa/recovery.ts uses crypto.randomInt; the otplib random source was not verified | lib/mfa/recovery.test.ts, lib/mfa/totp.test.ts | - | - |
 | V6.5.4 | 2 | generator | Recovery codes have 8 characters from 31 symbols; TOTP has 6 digits | lib/mfa/recovery.test.ts | #1292 | - |
@@ -297,7 +297,7 @@ Chapter V17 (WebRTC) does not apply: the generated app has no real-time media, T
 | V13.1.1 | 2 | gap | No list of external services in one place | none | #1294, #1241 | - |
 | V13.2.1 | 2 | gap | Backend dependencies use static credentials (database password, Redis URL, CRON_SECRET); audit-log GCS can use workload identity | lib/audit-log-integrity/storage-gcs.test.ts | #1295, #1157, #1124 | - |
 | V13.2.2 | 2 | generator | Restricted database role on Vercel; narrow GCS bucket role; GCP database role was not verified | scripts/vercel-env.test.ts, scripts/gcp-storage-config.test.ts | - | - |
-| V13.2.3 | 2 | generator | Production seeding requires explicit admin credentials; docker-compose.prod.yml defaults the database password | scripts/seed-baseline-credentials.test.ts | #1296 | - |
+| V13.2.3 | 2 | generator | Production seeding requires explicit admin credentials; docker-compose.prod.yml requires POSTGRES_PASSWORD from the environment and has no default | scripts/seed-baseline-credentials.test.ts, scripts/docker-compose-prod-password.test.ts | - | - |
 | V13.2.4 | 2 | gap | No outbound allow-list; server fetch targets fixed SDK endpoints only | none | #1294 | - |
 | V13.2.5 | 2 | environment | Egress restriction is a platform setting and is not configured by the deploy scripts | none | #1294 | - |
 | V13.3.1 | 2 | generator | Secrets go to Secret Manager (scripts/gcp-setup.sh) or sensitive Vercel variables (scripts/vercel-env.sh) | scripts/vercel-env.test.ts, scripts/env-file-permissions.test.ts | #1248 | - |

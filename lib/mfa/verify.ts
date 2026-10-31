@@ -23,17 +23,21 @@ import { getRateLimiter } from '@/lib/rate-limit';
 import { decryptSecret } from './crypto';
 import { MfaRateLimitedError } from './errors';
 import { verifyRecoveryCode } from './recovery';
-import { verifyTotp } from './totp';
+import { verifyTotpStep } from './totp';
 
-type MfaUser = { id: string; mfa_secret: string | null; mfa_enabled: boolean };
+type MfaUser = { id: string; mfa_secret: string | null; mfa_enabled: boolean; mfa_last_totp_step: number | null };
 type MfaRecoveryRow = { id: string; code_hash: string };
 type MfaPrismaClient = {
   user: {
-    findUnique: (args: { where: { id: string }; select: { id: true; mfa_secret: true; mfa_enabled: true } }) => Promise<MfaUser | null>;
+    findUnique: (args: { where: { id: string }; select: { id: true; mfa_secret: true; mfa_enabled: true; mfa_last_totp_step: true } }) => Promise<MfaUser | null>;
+    updateMany: (args: {
+      where: { id: string; OR: Array<{ mfa_last_totp_step: null } | { mfa_last_totp_step: { lt: number } }> };
+      data: { mfa_last_totp_step: number };
+    }) => Promise<{ count: number }>;
   };
   mfa_recovery_code: {
     findMany: (args: { where: { user_id: string; used_at: null }; select: { id: true; code_hash: true } }) => Promise<MfaRecoveryRow[]>;
-    update: (args: { where: { id: string }; data: { used_at: Date } }) => Promise<unknown>;
+    updateMany: (args: { where: { id: string; used_at: null }; data: { used_at: Date } }) => Promise<{ count: number }>;
   };
 };
 
@@ -55,27 +59,36 @@ export async function verifyMfaCode(userId: string, code: string): Promise<boole
 
   const user = await client().user.findUnique({
     where: { id: userId },
-    select: { id: true, mfa_secret: true, mfa_enabled: true },
+    select: { id: true, mfa_secret: true, mfa_enabled: true, mfa_last_totp_step: true },
   });
   if (!user || !user.mfa_enabled || !user.mfa_secret) return false;
 
   const secret = decryptSecret(user.mfa_secret);
-  if (await verifyTotp(secret, code)) return true;
+  // A code from a step at or before the last accepted one is refused, and the step is claimed with a
+  // conditional write so two concurrent requests presenting the same code cannot both succeed.
+  const step = await verifyTotpStep(secret, code, user.mfa_last_totp_step);
+  if (step !== null) {
+    const claimed = await client().user.updateMany({
+      where: { id: userId, OR: [{ mfa_last_totp_step: null }, { mfa_last_totp_step: { lt: step } }] },
+      data: { mfa_last_totp_step: step },
+    });
+    return claimed.count === 1;
+  }
 
-  // Recovery code fallback. Single-use: the first matching row gets
-  // `used_at` stamped before we return true, so a winning code can't
-  // replay even within a millisecond.
+  // Recovery code fallback. Single-use: the first matching row gets `used_at` stamped
+  // by a conditional write (only while it is still null) before we return true, so a
+  // winning code can't replay, even from a concurrent request.
   const candidates = await client().mfa_recovery_code.findMany({
     where: { user_id: userId, used_at: null },
     select: { id: true, code_hash: true },
   });
   for (const row of candidates) {
     if (await verifyRecoveryCode(code, row.code_hash)) {
-      await client().mfa_recovery_code.update({
-        where: { id: row.id },
+      const used = await client().mfa_recovery_code.updateMany({
+        where: { id: row.id, used_at: null },
         data: { used_at: new Date() },
       });
-      return true;
+      return used.count === 1;
     }
   }
   return false;

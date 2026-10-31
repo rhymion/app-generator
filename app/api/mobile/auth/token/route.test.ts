@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
-const { userFindUnique, recoveryFindMany, verifyTotp } = vi.hoisted(() => ({
+const { userFindUnique, recoveryFindMany, verifyTotpStep } = vi.hoisted(() => ({
   userFindUnique: vi.fn(),
   recoveryFindMany: vi.fn(),
-  verifyTotp: vi.fn(),
+  verifyTotpStep: vi.fn(),
 }));
 
 vi.mock('@/lib/prisma', () => ({
@@ -17,7 +17,7 @@ vi.mock('bcryptjs', () => ({
   default: { compare: bcryptCompare, hash: vi.fn().mockResolvedValue('dummy-hash') },
 }));
 vi.mock('@/lib/mfa/crypto', () => ({ decryptSecret: (s: string) => s }));
-vi.mock('@/lib/mfa/totp', () => ({ verifyTotp }));
+vi.mock('@/lib/mfa/totp', () => ({ verifyTotpStep }));
 vi.mock('@/lib/mfa/recovery', () => ({ verifyRecoveryCode: vi.fn().mockResolvedValue(false) }));
 
 vi.mock('@/lib/rate-limit', async () => (await import('@/test/helpers/real-rate-limiter')).realRateLimiterModule());
@@ -50,7 +50,7 @@ beforeEach(() => {
   _resetForTests();
   bcryptCompare.mockReset();
   bcryptCompare.mockResolvedValue(true);
-  verifyTotp.mockResolvedValue(false);
+  verifyTotpStep.mockResolvedValue(null);
   recoveryFindMany.mockResolvedValue([]);
   userFindUnique.mockResolvedValue({
     id: 'user-1',

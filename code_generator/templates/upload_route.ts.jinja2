@@ -2,7 +2,15 @@ import { logger } from '@/lib/logger';
 import { NextRequest, NextResponse } from 'next/server';
 import { getRateLimiter } from '@/lib/rate-limit';
 import { requireCaller, ApiError } from '@/lib/api-auth';
-import { checkUpload, loadUploadPolicy } from '@/lib/_upload_validation';
+import {
+  UPLOAD_MULTIPART_OVERHEAD_BYTES,
+  UPLOAD_SIGNATURE_BYTES,
+  checkUpload,
+  loadUploadPolicy,
+  matchesFileSignature,
+  readBodyWithLimit,
+  uploadMaxBytes,
+} from '@/lib/_upload_validation';
 import { storeUploadedFile } from '@/lib/attachment/upload_core';
 
 // POST /api/upload
@@ -34,7 +42,22 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const formData = await request.formData();
+    // The size limit applies before the body is parsed: a declared Content-Length over the limit is refused
+    // without reading it, and a body without one is counted while it streams, so an oversized upload is never
+    // buffered whole.
+    const maxSize = uploadMaxBytes();
+    const body = await readBodyWithLimit(request, maxSize + UPLOAD_MULTIPART_OVERHEAD_BYTES);
+    if (body === null) {
+      return NextResponse.json({ error: `File size exceeds ${maxSize} byte limit` }, { status: 413 });
+    }
+    let formData: FormData;
+    try {
+      formData = await new Response(body as BodyInit, {
+        headers: { 'content-type': request.headers.get('content-type') ?? '' },
+      }).formData();
+    } catch {
+      return NextResponse.json({ error: 'No file uploaded' }, { status: 400 });
+    }
     const file = formData.get('file') as File;
 
     if (!file) {
@@ -49,9 +72,15 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid file type.' }, { status: 400 });
     }
 
-    const maxSize = Number(process.env.UPLOAD_MAX_BYTES ?? String(10 * 1024 * 1024)); // 10MB
     if (file.size > maxSize) {
-      return NextResponse.json({ error: `File size exceeds ${maxSize} byte limit` }, { status: 400 });
+      return NextResponse.json({ error: `File size exceeds ${maxSize} byte limit` }, { status: 413 });
+    }
+
+    // The leading bytes must be those of the format the extension names (the declared type and the extension
+    // are both caller-chosen).
+    const head = new Uint8Array(await file.slice(0, UPLOAD_SIGNATURE_BYTES).arrayBuffer());
+    if (!matchesFileSignature(head, uploadCheck.extension)) {
+      return NextResponse.json({ error: 'Invalid file type.' }, { status: 400 });
     }
 
     const stored = await storeUploadedFile(file, uploadCheck.contentType, userId);

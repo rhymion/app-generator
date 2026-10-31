@@ -130,4 +130,4 @@ def test_upload_route_rate_limits_per_user_before_parsing_the_body():
     assert "getRateLimiter().check('upload:file', userId)" in out
     assert "status: 429" in out and "'Retry-After'" in out
     # Checked after authentication and before the multipart body is read.
-    assert out.index('requireCaller(request)') < out.index("check('upload:file'") < out.index('request.formData()')
+    assert out.index('requireCaller(request)') < out.index("check('upload:file'") < out.index('readBodyWithLimit(request')

@@ -291,6 +291,13 @@ to close) if it shows up in profiling for a specific deployment.
 `crypto.randomInt`, which rejection-samples internally, so every character is
 equally likely. Codes are shown as `abcd-efgh` and stored bcrypt-hashed.
 
+**One-time use of codes:** `verifyMfaCode()` keeps the last accepted TOTP time step in
+`user.mfa_last_totp_step` and refuses a code from that step or an earlier one, so a code cannot be replayed
+inside its validity window. The step is claimed with a conditional `updateMany`, so two concurrent requests
+presenting the same code cannot both succeed. A recovery code is stamped used with a conditional `updateMany`
+(only while `used_at` is still null), so it also works once. Tests: `lib/mfa/verify.test.ts`,
+`lib/mfa/totp.test.ts`.
+
 **Confirming a password change or an MFA disable over REST (Issue #1188):**
 the account settings page asks for the current password before it accepts a new
 one and for a TOTP or recovery code before it turns MFA off. The REST update
