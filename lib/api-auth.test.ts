@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 const { userFindFirst, roleCount, getSessionUserId, verifyMobileAccessToken } = vi.hoisted(() => ({
   userFindFirst: vi.fn(),
@@ -24,7 +24,7 @@ vi.mock('@/lib/authz', () => ({
 
 vi.mock('@/lib/rate-limit', async () => (await import('@/test/helpers/real-rate-limiter')).realRateLimiterModule());
 import { _resetForTests as resetRateLimiter } from './rate-limit';
-import { ApiError, authenticate, authenticateApiKey, handleApiError, requireCaller, requireDualAuth, requireScheduledTaskRole, resolveActorId } from './api-auth';
+import { ApiError, assertSameSiteCookieWrite, authenticate, authenticateApiKey, handleApiError, requireCaller, requireDualAuth, requireScheduledTaskRole, resolveActorId } from './api-auth';
 import { SCHEDULED_TASK_ROLE_NAME } from './scheduled-tasks/system-actor';
 import { hashApiKey } from './api-key';
 
@@ -330,5 +330,65 @@ describe('handleApiError with an unexpected error', () => {
     const res = handleApiError(new AppError('VALIDATION', 'Start date must be before end date'));
     expect(res.status).toBe(422);
     expect((await res.json()).error).toBe('Start date must be before end date');
+  });
+});
+
+describe('cookie-authenticated writes from another site', () => {
+  function write(headers: Record<string, string> = {}, method = 'POST') {
+    const lower: Record<string, string> = {};
+    for (const [k, v] of Object.entries(headers)) lower[k.toLowerCase()] = v;
+    return { method, headers: { get: (name: string) => lower[name.toLowerCase()] ?? null } } as unknown as Parameters<typeof requireCaller>[0];
+  }
+
+  const prevAuthUrl = process.env.AUTH_URL;
+  beforeEach(() => { process.env.AUTH_URL = 'https://app.example.com'; });
+  afterEach(() => {
+    if (prevAuthUrl === undefined) delete process.env.AUTH_URL;
+    else process.env.AUTH_URL = prevAuthUrl;
+  });
+
+  it('refuses Sec-Fetch-Site cross-site and same-site (a sibling subdomain)', () => {
+    for (const site of ['cross-site', 'same-site']) {
+      expect(() => assertSameSiteCookieWrite(write({ 'Sec-Fetch-Site': site }))).toThrowError(
+        expect.objectContaining({ statusCode: 403 }),
+      );
+    }
+  });
+
+  it('lets same-origin and user-initiated requests through', () => {
+    for (const site of ['same-origin', 'none']) {
+      expect(() => assertSameSiteCookieWrite(write({ 'Sec-Fetch-Site': site }))).not.toThrow();
+    }
+  });
+
+  it('falls back to Origin: a foreign origin is refused, the app and the request host pass', () => {
+    expect(() => assertSameSiteCookieWrite(write({ Origin: 'https://evil.example.net', Host: 'app.example.com' }))).toThrowError(
+      expect.objectContaining({ statusCode: 403 }),
+    );
+    expect(() => assertSameSiteCookieWrite(write({ Origin: 'https://app.example.com', Host: 'app.example.com:8080' }))).not.toThrow();
+    expect(() => assertSameSiteCookieWrite(write({ Origin: 'https://other.example.org', Host: 'other.example.org' }))).not.toThrow();
+    expect(() => assertSameSiteCookieWrite(write({ Origin: 'null' }))).toThrowError(expect.objectContaining({ statusCode: 403 }));
+  });
+
+  it('does not constrain safe methods or a request with neither header', () => {
+    expect(() => assertSameSiteCookieWrite(write({ 'Sec-Fetch-Site': 'cross-site' }, 'GET'))).not.toThrow();
+    expect(() => assertSameSiteCookieWrite(write())).not.toThrow();
+  });
+
+  it('is applied before the session cookie is read by requireCaller and resolveActorId', async () => {
+    getSessionUserId.mockResolvedValue('user-1');
+    const crossSite = write({ 'Sec-Fetch-Site': 'cross-site' });
+    await expect(requireCaller(crossSite)).rejects.toMatchObject({ statusCode: 403 });
+    await expect(resolveActorId(crossSite)).rejects.toMatchObject({ statusCode: 403 });
+    await expect(requireDualAuth(crossSite)).rejects.toMatchObject({ statusCode: 403 });
+    expect(getSessionUserId).not.toHaveBeenCalled();
+    await expect(requireCaller(write({ 'Sec-Fetch-Site': 'same-origin' }))).resolves.toEqual({ userId: 'user-1' });
+  });
+
+  it('does not apply to an API key, which the browser never attaches by itself', async () => {
+    userFindFirst.mockResolvedValue({ id: 'key-user', api_key_expires_at: null });
+    await expect(
+      requireCaller(write({ 'X-API-Key': 'k1', 'Sec-Fetch-Site': 'cross-site' })),
+    ).resolves.toEqual({ userId: 'key-user' });
   });
 });

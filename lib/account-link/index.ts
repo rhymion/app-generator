@@ -22,8 +22,9 @@
  * settings page kicks off Auth.js's normal `signIn(provider, …)` flow;
  * `auth.ts`'s signIn callback recognises the request as a link operation
  * because there is already an authenticated session for the same email,
- * and PrismaAdapter writes the new Account row via
- * `allowDangerousEmailAccountLinking`. See `auth.ts` for the rationale.
+ * and @auth/core writes the new Account row for the session's user. The
+ * Google provider does not set `allowDangerousEmailAccountLinking`, so a
+ * sign-in without a session is never linked by email. See `auth.ts`.
  */
 import prisma from '@/lib/prisma';
 import { siteConfig } from '@/lib/site-config';

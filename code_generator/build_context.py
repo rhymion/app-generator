@@ -4806,6 +4806,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     # MFA off); the REST update routes ask for the same proof through
     # confirmCredentialChange() (lib/auth/credential-confirmation.ts), and the
     # service receives the confirmed values instead of the raw request ones.
+    # Changing the email address (Issue #1285) needs the current password too.
     _cred_vars = {p['prop']: p['var_name'] for p in client_prop_infos}
     credential_confirmation = (
         is_self_only
@@ -4815,6 +4816,9 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     )
     credential_password_var = _cred_vars.get('password', 'password')
     credential_mfa_var = _cred_vars.get('mfa_enabled', 'mfaEnabled')
+    # The email address is an authentication attribute too (Issue #1285): the
+    # view exposes it, and changing it needs the current password as well.
+    credential_email_var = _cred_vars.get('email')
     if credential_confirmation:
         service_args_for_update = re.sub(
             rf"\b{re.escape(credential_password_var)} \?\? ''",
@@ -5079,6 +5083,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         credential_confirmation=credential_confirmation,
         credential_password_var=credential_password_var,
         credential_mfa_var=credential_mfa_var,
+        credential_email_var=credential_email_var,
         # CSV import -> service.ts convergence (cmd_996, Issue #93; cmd_1124)
         import_service_parent_args=import_service_parent_args,
         import_service_child_args=import_service_child_args,

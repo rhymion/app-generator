@@ -58,4 +58,8 @@ at entity level). `test_security_matrix.py` checks that every route template `ge
 either an operation in the matrix or listed under `unmodelled_templates` with a reason, so a new kind of route cannot
 skip the matrix.
 
+`test_cookie_write_cross_site_enumeration.py` adds a third check over the same route sources: a state-changing handler
+that reads the session cookie itself must call `assertSameSiteCookieWrite()`, and the cookie-resolving helpers in
+`lib/api-auth.ts` must call it before they read the cookie (see [authentication.md](authentication.md)).
+
 See also [security-asvs-coverage.md](security-asvs-coverage.md), which maps each OWASP ASVS 5.0 requirement to the code, test or Issue that covers it.

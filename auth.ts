@@ -124,19 +124,16 @@ function buildProviders(): Provider[] {
       GoogleProvider({
         clientId: process.env.GOOGLE_CLIENT_ID!,
         clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
-        // Account-linking flow (S7): when an OAuth sign-in arrives whose
-        // email matches an existing user row, the adapter links the new
-        // Account row to that user instead of throwing
-        // OAuthAccountNotLinked. The risk this normally carries — an
-        // attacker creating a Google account with the victim's email and
-        // taking over the credentials account — is mitigated by the
-        // signIn() callback below, which (a) keeps the explicit
-        // email_verified gate and (b) rejects an OAuth sign-in for a
-        // credentials-holding email unless the request comes from an
-        // active session for that same user. So `dangerous` here means
-        // "linkable to existing user once the signIn callback authorises";
-        // the unauthenticated take-over path stays blocked.
-        allowDangerousEmailAccountLinking: true,
+        // No `allowDangerousEmailAccountLinking`: a Google account is
+        // identified by its `sub` (the Account row) and never by its email
+        // address. A sign-in whose `sub` is not linked yet, from a browser
+        // with no session, is refused with OAuthAccountNotLinked when a user
+        // row with the same email exists, so a person who re-created a
+        // Google account under an old address cannot take over that row's
+        // roles and data. Linking happens only from a signed-in session
+        // (/setting/accounts); the signIn() callback below checks that the
+        // emails match, and @auth/core links to the session's user without
+        // needing the flag.
         authorization: {
           params: { prompt: "select_account" },
         },
@@ -321,9 +318,9 @@ export const authConfig: NextAuthConfig = {
         }
         // Same-email linking. Skip the credentials/OAuth collision
         // rejection below — the signed-in user is provably the owner of
-        // the credentials account. PrismaAdapter then writes the new
-        // Account row via allowDangerousEmailAccountLinking + email
-        // match.
+        // the credentials account. @auth/core then writes the new Account
+        // row for the session's user (handle-login.js links to the signed-in
+        // user when the provider account is not yet linked to anyone).
         await recordAuditEvent({
           action: "auth:account.link",
           actor_user_id: currentUserId,

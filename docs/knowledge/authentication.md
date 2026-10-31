@@ -184,6 +184,19 @@ On the first Google sign-in for a given email:
      `@unique(email)` constraint — same outcome, less explicit. Admin
      reconciliation step: pre-populate a matching `Account` row to link
      the existing user to the OAuth identity.
+   - **Google is identified by `sub`, not by email.** The Google provider
+     does not set `allowDangerousEmailAccountLinking`. A sign-in whose
+     `sub` has no `Account` row yet, from a browser with no session, is
+     refused with `OAuthAccountNotLinked` when a `user` row with the same
+     email exists (for example a user created by an admin or an import
+     who never signed in with Google), so a person who re-created a
+     Google account under an old address cannot inherit that row's roles
+     and data. The login page then tells the person to sign in with the
+     existing account and connect Google from `/setting/accounts`.
+     Linking from a signed-in session still works: @auth/core links the
+     new `Account` row to the session's user, and the `signIn()` callback
+     requires the Google email to equal that user's email
+     (`lib/auth/google-account-linking.test.ts`).
 2. If `signIn()` returns true, `buildAdapter().createUser()` (our
    wrapper around `PrismaAdapter`) inserts the `user` row with:
    pre-generated cuid, `email`, `name = profile.name ?? email`,
@@ -312,6 +325,11 @@ key or a mobile token alone cannot change either:
   plain text and stored as a bcrypt hash. Wrong attempts spend the
   `auth:password:confirm` bucket (10 per user per 5 minutes, keyed by user id
   like `auth:mfa:challenge`); a spent budget answers `429` with `Retry-After`.
+- An `email` that differs from the stored address (compared without case or
+  surrounding spaces) needs `current_password` too, with the same status codes
+  and the same budget. Sending the stored address back unchanged asks for
+  nothing. The settings page does not ask for the current password when the
+  email changes: that path is not covered yet.
 - `mfa_enabled: false` on an account that has MFA on needs `mfa_code`, a current
   TOTP or recovery code (HTTP 400 when missing, 403 when invalid). It runs
   `disableMfa()`, so the secret and the recovery codes are cleared exactly as on
@@ -607,13 +625,49 @@ Cypress API specs.
 
 ---
 
+## Cross-site requests, forwarded headers and cached responses
+
+Four small controls sit around the session cookie:
+
+- **Cross-site writes.** `assertSameSiteCookieWrite()` in `lib/api-auth.ts` refuses
+  a `POST`, `PUT`, `PATCH` or `DELETE` that a browser sent from another site when
+  the caller is identified only by the session cookie (HTTP 403). `Sec-Fetch-Site`
+  decides when the browser sends it: only `same-origin` and `none` pass (so a
+  request from a sibling subdomain, `same-site`, is refused). Without it, `Origin`
+  must name a host this deployment serves or the request's own `Host`. A request
+  with neither header is not a browser that can be driven cross-site and passes.
+  `requireCaller`, `resolveActorId` (hence `requireDualAuth`) and the
+  notifications mark-read route call it before they read the cookie; a route that
+  reads the cookie some other way has to call it itself
+  (`code_generator/tests/test_cookie_write_cross_site_enumeration.py` enumerates
+  the routes). The generated CRUD routes accept only an API key or a mobile token
+  and are not affected. Server Actions are checked by Next.js.
+- **Forwarded headers.** `proxy.ts` builds its redirect URLs through
+  `resolveExternalUrl()` (`lib/auth/external-url.ts`). `x-forwarded-host`, `Host`
+  and `x-forwarded-proto` are believed only when the host is the one in
+  `AUTH_URL` / `NEXTAUTH_URL`, a Vercel deployment host (`VERCEL_URL`,
+  `VERCEL_BRANCH_URL`, `VERCEL_PROJECT_PRODUCTION_URL`) or an entry of
+  `AUTH_ALLOWED_HOSTS` (comma-separated host names, for extra custom domains).
+  Any other host is ignored and the redirect goes to the configured application
+  URL; with none configured the request's own URL is used. The scheme is
+  `http` or `https` only, and an https URL never carries a port.
+- **Caching.** Every `/api/` response carries `Cache-Control: no-store`
+  (`next.config.ts`, from `lib/security-headers.ts`); the attachment route keeps its
+  own `private, no-store`. `proxy.ts` sets `no-store` on signed-in page responses.
+- **Sign-out.** The Auth.js sign-out response (`POST /api/auth/signout`) carries
+  `Clear-Site-Data: "cache", "cookies", "storage"`, so the browser drops cached
+  pages and local storage for the origin.
+
+The session cookie keeps the Auth.js name (`__Secure-authjs.session-token` over
+https); a `__Host-` prefix is not applied.
+
 ## Out of scope
 
 The following are explicitly out of scope for the current implementation:
 
 - **Server-side revocation for credentials users**: Not implemented for sign-in itself — a stolen JWT cookie is self-contained and rotating `AUTH_SECRET` is the only global invalidation. Custom `adapter.createSession()` shim deferred. See `auth.ts` `authorize()`. (MFA-state revocation is handled separately — see "MFA on the OAuth path" below.)
 - **MFA / TOTP**: Shipped in v1 (S5 phase 5a) for the credentials provider, opt-in per user. Shipped for the OAuth path too as of S8 — see "MFA on the OAuth path" below. Admin-mandated MFA is still deferred.
-- **Account linking UI**: Shipped in v1 (S7). `/setting/accounts` lists and connects/detaches OAuth providers; cross-email linking deferred. See `lib/account-link/`, `auth.ts`.
+- **Account linking UI**: Shipped in v1 (S7). `/setting/accounts` lists and connects/detaches OAuth providers; linking needs a signed-in session and the same email, cross-email linking deferred. See `lib/account-link/`, `auth.ts`.
 - **Audit-log table**: Not implemented. Auth events log to `console.info` only. Prisma model with role/permission hooks deferred.
 - **Per-tenant SSO (SAML)**: Not implemented. Would use SAML Jackson / WorkOS with per-tenant domain binding.
 

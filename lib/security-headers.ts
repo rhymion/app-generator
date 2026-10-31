@@ -21,3 +21,12 @@ export const SECURITY_HEADERS: SecurityHeader[] = [
   { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
   { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=()' },
 ];
+
+/**
+ * Every API response is for an authenticated caller, so none may be stored by
+ * a browser or a shared cache (ASVS V14.3.2). The attachment route sets its
+ * own `private, no-store` and is left out so its header is not doubled.
+ * Signed-in page responses get the same header from proxy.ts.
+ */
+export const API_NO_STORE_SOURCE = '/api/:path((?!attachments/).*)';
+export const API_NO_STORE_HEADERS: SecurityHeader[] = [{ key: 'Cache-Control', value: 'no-store' }];

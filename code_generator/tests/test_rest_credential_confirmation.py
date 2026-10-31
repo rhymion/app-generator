@@ -9,6 +9,7 @@ TOTP/recovery code (to turn MFA off); the routes now ask for the same proof
 through confirmCredentialChange() and give the service the confirmed values.
 """
 import pathlib
+import re
 
 import pytest
 from jinja2 import Environment, FileSystemLoader
@@ -28,6 +29,7 @@ def _schema(*, self_only: bool = True, model: str = 'user', mfa: bool = True) ->
     props = {
         "id": {"type": "string", "pattern": "^c[a-z0-9]{24,}$"},
         "name": {"type": "string"},
+        "email": {"type": "string"},
         "password": dict(_SECRET),
         "api_key": dict(_SECRET),
     }
@@ -105,6 +107,9 @@ class TestRoutes:
         assert "import { confirmCredentialChange } from '@/lib/auth/credential-confirmation';" in out
         assert 'currentPassword: body.current_password' in out
         assert 'mfaCode: body.mfa_code' in out
+        # Changing the email address needs the current password as well (Issue #1285).
+        call = out[out.index('confirmCredentialChange(id'):out.index('await updateSetting(')]
+        assert re.search(r'\bemail: email,', call), call
         assert out.index('confirmCredentialChange(id') < out.index('await updateSetting(')
         assert '_credential.password' in out
 
@@ -113,6 +118,8 @@ class TestRoutes:
         assert "import { confirmCredentialChange } from '@/lib/auth/credential-confirmation';" in out
         assert '.current_password' in out and '.mfa_code' in out
         assert out.index('confirmCredentialChange(id') < out.index('await updateSetting(')
+        call = out[out.index('confirmCredentialChange(id'):out.index('await updateSetting(')]
+        assert re.search(r'\bemail: email,', call), call
 
     def test_other_entities_get_no_confirmation(self):
         ctx = _ctx(self_only=False)
