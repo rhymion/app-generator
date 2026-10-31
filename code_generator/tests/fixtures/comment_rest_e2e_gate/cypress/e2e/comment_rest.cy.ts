@@ -25,10 +25,8 @@ function addComment(ticketId: string, message: string, key = TEST_API_KEY) {
 function notificationsOnceSettled(userId: string, atLeast: number, attemptsLeft = 40): Cypress.Chainable<unknown[]> {
   return cy.task<unknown[]>('db:getNotificationsForUser', userId).then((rows) => {
     if (rows.length >= atLeast || attemptsLeft <= 1) {
-      // eslint-disable-next-line cypress/no-unnecessary-waiting
       return cy.wait(1000).then(() => cy.task<unknown[]>('db:getNotificationsForUser', userId));
     }
-    // eslint-disable-next-line cypress/no-unnecessary-waiting
     return cy.wait(250).then(() => notificationsOnceSettled(userId, atLeast, attemptsLeft - 1));
   });
 }
