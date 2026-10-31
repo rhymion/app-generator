@@ -29,7 +29,6 @@ model sx_account {
   sx_profile      sx_profile?
   sx_tickets      sx_ticket[]       @relation("SxTicketAccount")
   sx_backup_tickets sx_ticket[]     @relation("SxTicketBackupAccount")
-  watched_tickets sx_ticket[]       @relation("SxTicketWatchers")
   sx_ticket_lines sx_ticket_line[]  @relation("SxLineAccount")
   sx_backup_ticket_lines sx_ticket_line[] @relation("SxLineBackupAccount")
   invalidated_at  DateTime?    @db.Timestamptz(0)
@@ -124,7 +123,7 @@ model sx_ticket {
   sx_account           sx_account       @relation("SxTicketAccount", fields: [sx_account_id], references: [id])
   sx_backup_account_id String?
   sx_backup_account    sx_account?      @relation("SxTicketBackupAccount", fields: [sx_backup_account_id], references: [id])
-  watchers             sx_account[]     @relation("SxTicketWatchers")
+  tags                 sx_tag[]         @relation("SxTicketTags")
   sx_notes             sx_note[]
   sx_ticket_lines      sx_ticket_line[]
   created_at           DateTime         @default(now()) @db.Timestamptz(0)
@@ -168,7 +167,7 @@ model sx_ticket_line {
 
 model sx_note {
   id              String       @id @default(cuid())
-  title           String
+  name            String
   organization_id String
   organization    organization @relation(fields: [organization_id], references: [id])
   sx_ticket_id    String?
@@ -180,9 +179,28 @@ model sx_note {
   updater_id      String
   updater         user         @relation("SxNoteUpdater", fields: [updater_id], references: [id])
 
-  @@index([title])
+  @@index([name])
   @@index([organization_id])
   @@index([sx_ticket_id])
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
+model sx_tag {
+  id              String       @id @default(cuid())
+  name            String
+  organization_id String
+  organization    organization @relation(fields: [organization_id], references: [id])
+  sx_tickets      sx_ticket[]  @relation("SxTicketTags")
+  created_at      DateTime     @default(now()) @db.Timestamptz(0)
+  updated_at      DateTime     @updatedAt @db.Timestamptz(0)
+  creator_id      String
+  creator         user         @relation("SxTagCreator", fields: [creator_id], references: [id])
+  updater_id      String
+  updater         user         @relation("SxTagUpdater", fields: [updater_id], references: [id])
+
+  @@index([name])
+  @@index([organization_id])
   @@index([creator_id])
   @@index([updater_id])
 }

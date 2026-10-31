@@ -15,7 +15,9 @@
     "created_sx_ticket_lines sx_ticket_line[] @relation(\"SxLineCreator\")",
     "updated_sx_ticket_lines sx_ticket_line[] @relation(\"SxLineUpdater\")",
     "created_sx_notes sx_note[] @relation(\"SxNoteCreator\")",
-    "updated_sx_notes sx_note[] @relation(\"SxNoteUpdater\")"
+    "updated_sx_notes sx_note[] @relation(\"SxNoteUpdater\")",
+    "created_sx_tags sx_tag[] @relation(\"SxTagCreator\")",
+    "updated_sx_tags sx_tag[] @relation(\"SxTagUpdater\")"
   ],
   "organization": [
     "sx_accounts sx_account[]",
@@ -23,7 +25,8 @@
     "sx_splits sx_split[]",
     "sx_profiles sx_profile[]",
     "sx_tickets sx_ticket[]",
-    "sx_notes sx_note[]"
+    "sx_notes sx_note[]",
+    "sx_tags sx_tag[]"
   ],
   "commentable": [
     "sx_account sx_account?"
