@@ -577,6 +577,7 @@ app-generator/
 | [scheduled-task-operations.md](docs/knowledge/scheduled-task-operations.md) | 定期タスク：`depends_on` による順序、実行ガードと業務日付、管理画面、`task:run-all`、GCP での実行 |
 | [audit-log-append-only.md](docs/knowledge/audit-log-append-only.md) | 追記専用の `audit_log`：クライアントガード、行トリガー、月次パーティション、連鎖ダイジェスト、書き込み一回限りのストレージ、制限付きデータベースロールへの切り替え |
 | [list-panel-trigram-filter.md](docs/knowledge/list-panel-trigram-filter.md) | トライグラム列に対する一覧の検索ボックスと、列単位の `x-trigram-filter` |
+| [api-key-hashing.md](docs/knowledge/api-key-hashing.md) | API キーは SHA-256 ハッシュ (`user.api_key_hash`) のみを保存し、アカウント設定画面で発行した時に一度だけ表示。移行 SQL の雛形と消費者側の手順 |
 | [api-key-expiry.md](docs/knowledge/api-key-expiry.md) | `authenticateApiKey()` でチェックする任意設定の `user.api_key_expires_at`。`null` は無期限、期限切れは `401 API key expired.` で拒否 |
 
 ---

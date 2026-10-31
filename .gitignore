@@ -248,6 +248,8 @@ lib/dashboard/use_entity_approval_actions.ts
 !lib/approval_request/submit_predicate.ts
 !lib/approval_request/submit_predicate.test.ts
 !lib/setting/password-actions.ts
+!lib/setting/api-key-actions.ts
+!lib/setting/api-key-actions.test.ts
 !lib/audit_log/getters.ts
 !lib/audit_log/getters_internal.ts
 !lib/audit_log/types.ts

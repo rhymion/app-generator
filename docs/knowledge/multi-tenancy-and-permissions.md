@@ -312,7 +312,7 @@ and in routes that accept both a token and a session (`/api/notifications`):
 `X-API-Key` first, then `Authorization: Bearer` (a mobile access token if it
 has three dot-separated segments, otherwise an API key), then the session cookie.
 
-The API key is looked up against `user.api_key` in the DB. A TTL LRU cache (5 min, 1000 entries) reduces DB load. The cache is gated to production (`process.env.NODE_ENV === 'production'`) so Cypress test resets do not encounter stale entries.
+The SHA-256 of the presented key is looked up against `user.api_key_hash` in the DB (see `api-key-hashing.md`). A TTL LRU cache keyed by that hash (5 min, 1000 entries) reduces DB load. The cache is gated to production (`process.env.NODE_ENV === 'production'`) so Cypress test resets do not encounter stale entries.
 
 ### Dual authentication (session OR API key)
 
@@ -470,7 +470,7 @@ When an admin modifies a user's roles, the permission cache entry for that user 
 
 ### API key cache has a 5-minute lag
 
-Rotating a user's `api_key` does not immediately invalidate the old key in the cache. The old key remains valid for up to 5 minutes in production. `invalidateApiKeyCache(oldKey)` from `lib/api-auth.ts` should be called in account-update endpoints.
+Issuing a new key through the settings page (`issueApiKey()` in `lib/setting/api-key-actions.ts`) calls `invalidateApiKeyCache(oldHash)` in the same process, so the old key stops working there at once. Another server process keeps accepting the old key until its own cache entry ages out, up to 5 minutes in production. Any other code that replaces or clears `user.api_key_hash` must call `invalidateApiKeyCache()` with the old hash.
 
 ### No approval-flow permission integration
 

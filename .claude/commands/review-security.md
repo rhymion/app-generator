@@ -63,7 +63,7 @@ Minimum docs to read before starting:
 - [ ] `AUTH_SECRET` required — `authConfig.secret = process.env.AUTH_SECRET`; missing at runtime causes JWT signing to fail
 - [ ] Google OAuth secrets gated — `isGoogleEnabled()` requires both `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`; provider not registered if absent
 - [ ] `REDIS_URL` optional but required for production rate limiting — in-memory limiter is per-process and NOT a security boundary in multi-replica prod deployments (`lib/rate-limit/index.ts:~36`)
-- [ ] `api_key` stored in plaintext — `user.api_key` column holds the raw key; no hashing; full DB read exposure reveals all keys; consider HMAC-SHA256 storage with prefix-based lookup
+- [ ] `api_key_hash` is a SHA-256 hash — `user.api_key_hash` holds the digest, never the key; the key is shown once at issue time (`lib/setting/api-key-actions.ts`); no read, export or log path may return the hash either
 - [ ] `.env` files not committed — verify `.gitignore` covers `.env`, `.env.local`, `.env.production`
 
 ## Current implementation (proj_a specific)
@@ -82,7 +82,6 @@ Minimum docs to read before starting:
 
 - **No server-side session revocation** — JWT strategy means tokens remain valid until expiry even after password reset or account suspension. Mitigation requires either SSO-only (no credentials) or a custom session-revocation shim writing a `Session` row from `authorize()`.
 - **Isolation is app-level** — organization filtering is enforced by Prisma `where` clauses, not database row-level security; a hand-written query that omits the filter would expose cross-organization data. Deployment-level `tenant_id` is not used for isolation.
-- **`api_key` stored in plaintext** — exposure of the `user` table reveals all API keys. Consider HMAC prefix storage.
 - **`/api/*` routes not covered by middleware** — each API route file must remember to call `authenticateApiKey()`. Missing it on a new route is a silent auth bypass. A shared route handler wrapper or a test that enumerates `/api/` routes and asserts auth headers required would close this.
 - **In-memory rate limiter in prod without REDIS_URL** — no visible error at startup; only discovered under attack. Add a startup check that logs a warning when `NODE_ENV=production` and `REDIS_URL` is absent.
 - **Raw `<img>` in display/upload components** — not a direct XSS vector (React escapes `src`), but bypasses `next/image`'s domain restriction and optimization pipeline.

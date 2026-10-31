@@ -597,6 +597,7 @@ All architectural documentation lives in `docs/knowledge/`:
 | [scheduled-task-operations.md](docs/knowledge/scheduled-task-operations.md) | Scheduled tasks: ordering with `depends_on`, the run guard and business date, the admin page, `task:run-all`, and running them on GCP |
 | [audit-log-append-only.md](docs/knowledge/audit-log-append-only.md) | Append-only `audit_log`: client guard, row trigger, monthly partitions, chained digests, write-once storage, switching to the restricted database role |
 | [list-panel-trigram-filter.md](docs/knowledge/list-panel-trigram-filter.md) | The list search box over trigram columns and the column-level `x-trigram-filter` |
+| [api-key-hashing.md](docs/knowledge/api-key-hashing.md) | API keys stored only as a SHA-256 hash (`user.api_key_hash`), shown once when issued from the account settings page; migration template and consumer steps |
 | [api-key-expiry.md](docs/knowledge/api-key-expiry.md) | Optional `user.api_key_expires_at` checked in `authenticateApiKey()`; `null` never expires, an expired key is rejected with `401 API key expired.` |
 
 ---

@@ -169,6 +169,23 @@ export default defineConfig({
           const { getCredentialState } = require('./cypress/support/settings-save-helpers');
           return await getCredentialState(email);
         },
+        // API key storage coverage (cypress/e2e/api/api_key_storage.cy.ts)
+        async 'db:getApiKeyStorage'(email: string) {
+          const { getApiKeyStorage } = require('./cypress/support/settings-save-helpers');
+          return await getApiKeyStorage(email);
+        },
+        async 'db:sqlSha256'(value: string) {
+          const { sqlSha256 } = require('./cypress/support/settings-save-helpers');
+          return await sqlSha256(value);
+        },
+        async 'apiKey:hash'(value: string) {
+          const { hashForSpec } = require('./cypress/support/settings-save-helpers');
+          return hashForSpec(value);
+        },
+        async 'db:countAuditLogRowsMentioning'(needle: string) {
+          const { countAuditLogRowsMentioning } = require('./cypress/support/settings-save-helpers');
+          return await countAuditLogRowsMentioning(needle);
+        },
         async 'generateTotp'(secret: string) {
           const otplib = require('otplib');
           return otplib.generateSync({ secret });
@@ -375,6 +392,7 @@ export default defineConfig({
           const { prisma } = require('./cypress/support/db-helpers');
           const { createId } = require('@paralleldrive/cuid2');
           const user2Id = createId();
+          const { hashApiKey } = require('./lib/api-key');
           const user2ApiKey = 'test_mk_user2_00000000000000000000000000000000000000000000000000000000000';
           await prisma.user.create({
             data: {
@@ -384,7 +402,7 @@ export default defineConfig({
               email: 'testuser2_reaction@example.com',
               name: 'Test User 2',
               password: 'not_needed',
-              api_key: user2ApiKey,
+              api_key_hash: hashApiKey(user2ApiKey),
             },
           });
           return user2ApiKey;
@@ -440,6 +458,7 @@ export default defineConfig({
           const testUser = await prisma.user.findUnique({ where: { email: TEST_CREDENTIALS.email } });
           if (!testUser) throw new Error('Test user not found. Make sure db:seed has run first.');
           const creatorUserId = createId();
+          const { hashApiKey } = require('./lib/api-key');
           const creatorApiKey = 'test_mk_creator_only_role_000000000000000000000000000000000000000';
           // Create the 'Creator' special role (role name must be exactly 'Creator')
           const creatorRole = await prisma.role.create({
@@ -471,7 +490,7 @@ export default defineConfig({
               email: 'creator_only_role_search@example.com',
               name: 'Creator Only User (Search Test)',
               password: 'not_needed',
-              api_key: creatorApiKey,
+              api_key_hash: hashApiKey(creatorApiKey),
               roles: { connect: [{ id: creatorRole.id }] },
             },
           });

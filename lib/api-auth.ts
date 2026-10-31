@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createHash } from 'node:crypto';
+import { hashApiKey } from '@/lib/api-key';
 import prisma from '@/lib/prisma';
 import { getRateLimiter } from '@/lib/rate-limit';
 import { requireEntityPermission, requireRecordPermission, getSessionUserId, type RichPermissions, type Operation, type RecordContext } from '@/lib/authz';
@@ -20,7 +20,7 @@ export class ApiError extends Error {
   }
 }
 
-// Per-process cache of api_key → userId | null (Phase 2 #4 from
+// Per-process cache of SHA-256(api key) → userId | null (Phase 2 #4 from
 // performance-plan-session.md). The negative-result cache (`null`) lets
 // repeated bad-key probes short-circuit without hammering the DB; the
 // LRU cap keeps unknown-key probing bounded. Rotations invalidate via
@@ -46,8 +46,10 @@ const apiKeyCacheEnabled = process.env.NODE_ENV === 'production';
 type ApiKeyCacheEntry = { userId: string; expiresAt: Date | null } | null;
 const apiKeyCache = new TtlLruCache<string, ApiKeyCacheEntry>(API_KEY_MAX_ENTRIES, API_KEY_TTL_MS);
 
-export function invalidateApiKeyCache(apiKey: string | null | undefined): void {
-  if (apiKey) apiKeyCache.delete(apiKey);
+// The cache is keyed by the key's hash, never by the key itself, so a memory
+// dump or a heap snapshot holds no usable credential.
+export function invalidateApiKeyCache(apiKeyHash: string | null | undefined): void {
+  if (apiKeyHash) apiKeyCache.delete(apiKeyHash);
 }
 
 /**
@@ -67,11 +69,8 @@ export function clearApiKeyCache(): void {
  * instead of 401. Only failures are counted: a valid key is never throttled
  * here, and `api:read` / `api:write` still bound authenticated traffic.
  */
-async function rejectUnknownApiKey(apiKey: string): Promise<never> {
-  const decision = await getRateLimiter().check(
-    'auth:apikey',
-    createHash('sha256').update(apiKey).digest('hex'),
-  );
+async function rejectUnknownApiKey(apiKeyHash: string): Promise<never> {
+  const decision = await getRateLimiter().check('auth:apikey', apiKeyHash);
   if (!decision.allowed) {
     throw new ApiError(429, 'Too many API key attempts.', decision.retryAfterSeconds);
   }
@@ -88,10 +87,12 @@ export async function authenticateApiKey(request: NextRequest): Promise<{ userId
     throw new ApiError(401, 'Missing API key. Provide X-API-Key header or Authorization: Bearer <key>.');
   }
 
+  const apiKeyHash = hashApiKey(apiKey);
+
   if (apiKeyCacheEnabled) {
-    const cached = apiKeyCache.get(apiKey);
+    const cached = apiKeyCache.get(apiKeyHash);
     if (cached !== undefined) {
-      if (cached === null) return rejectUnknownApiKey(apiKey);
+      if (cached === null) return rejectUnknownApiKey(apiKeyHash);
       if (cached.expiresAt && cached.expiresAt <= new Date()) {
         throw new ApiError(401, 'API key expired.');
       }
@@ -100,16 +101,16 @@ export async function authenticateApiKey(request: NextRequest): Promise<{ userId
   }
 
   const user = await prisma.user.findFirst({
-    where: { api_key: apiKey },
+    where: { api_key_hash: apiKeyHash },
     select: { id: true, api_key_expires_at: true },
   });
 
   if (apiKeyCacheEnabled) {
-    apiKeyCache.set(apiKey, user ? { userId: user.id, expiresAt: user.api_key_expires_at } : null);
+    apiKeyCache.set(apiKeyHash, user ? { userId: user.id, expiresAt: user.api_key_expires_at } : null);
   }
 
   if (!user) {
-    return rejectUnknownApiKey(apiKey);
+    return rejectUnknownApiKey(apiKeyHash);
   }
 
   if (user.api_key_expires_at && user.api_key_expires_at <= new Date()) {

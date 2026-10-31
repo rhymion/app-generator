@@ -224,6 +224,8 @@ ALLOWLIST: list[tuple[str, str, str]] = [
      'Every action derives the subject from the session and touches only that user\'s own MFA / account rows.'),
     (r'lib/setting/password-actions\.ts', r'verifyAndHashPassword',
      'Hashes the session user\'s own password input; reads no one else\'s data.'),
+    (r'lib/setting/api-key-actions\.ts', r'(?:getApiKeyStatus|issueApiKey)',
+     'Subject is the session user; reads or replaces only that user\'s own API key hash and returns the new key once.'),
     (r'lib/attachment/direct_actions\.ts', r'createDirectAttachment',
      'Actor comes from the session and the update is scoped to rows that actor uploaded and not yet linked.'),
     # --- delegating wrappers: the check lives in the delegate ---

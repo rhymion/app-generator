@@ -1922,8 +1922,8 @@ def build_anonymize_user_context(schema: dict) -> dict:
     Extracts x-pii annotated fields from the user entity definition and computes
     the pii_data_block string (pre-formatted TypeScript lines for the data: {} block).
 
-    Fields not in json_schema but present in schema.prisma (emailVerified, mfa_secret)
-    are hardcoded after 'image_id' to match the canonical scrub order.
+    Fields not in json_schema but present in schema.prisma (emailVerified, mfa_secret,
+    api_key_hash, api_key_issued_at) are hardcoded after 'image_id' to match the canonical scrub order.
 
     Returns:
         has_pii_user: bool — True when the user entity has at least one x-pii field.
@@ -1968,18 +1968,24 @@ def build_anonymize_user_context(schema: dict) -> dict:
     # FK, or this insertion point silently falls through to the
     # end-of-loop fallback below instead).
     INDENT = '          '
+    # The API key columns are server-managed (Prisma only, not in json_schema), so
+    # no x-pii annotation can reach them; they are always cleared with the account.
+    _ANONYMIZE_PRISMA_ONLY_SCRUBS = [
+        f"{INDENT}emailVerified: null,",
+        f"{INDENT}mfa_secret: null,",
+        f"{INDENT}api_key_hash: null,",
+        f"{INDENT}api_key_issued_at: null,",
+    ]
     lines = []
     prisma_only_inserted = False
     for f in pii_fields:
         lines.append(f"{INDENT}{f['name']}: {f['scrub_value']},")
         if f['name'] == 'image_id' and not prisma_only_inserted:
-            lines.append(f"{INDENT}emailVerified: null,")
-            lines.append(f"{INDENT}mfa_secret: null,")
+            lines.extend(_ANONYMIZE_PRISMA_ONLY_SCRUBS)
             prisma_only_inserted = True
 
     if not prisma_only_inserted:
-        lines.append(f"{INDENT}emailVerified: null,")
-        lines.append(f"{INDENT}mfa_secret: null,")
+        lines.extend(_ANONYMIZE_PRISMA_ONLY_SCRUBS)
 
     lines.append(f"{INDENT}anonymized_at: anonymizedAt,")
     lines.append(f"{INDENT}invalidated_at: invalidatedAt,")

@@ -3,8 +3,8 @@
 ## What this is
 
 Stage 2 of `ai-agent-integration-design.md` (Issue #717): an optional
-expiry on `user.api_key` — the same key column every account already has,
-human or agent. No new principal type: an agent is an ordinary `user`
+expiry on the account's API key (stored as `user.api_key_hash`, see
+`api-key-hashing.md`) — every account, human or agent, has the same key columns. No new principal type: an agent is an ordinary `user`
 account, exactly like a human's, per the project owner's ruling recorded in
 that design doc.
 
@@ -18,12 +18,13 @@ that design doc.
   the design doc). A key whose `api_key_expires_at` is set and is at or
   before the current time is rejected with `401 API key expired.`, the same
   status code and error shape as an unrecognized key.
-- **Cache-safe.** `authenticateApiKey()` caches `api_key → {userId,
+- **Cache-safe.** `authenticateApiKey()` caches `SHA-256(key) → {userId,
   expiresAt}` per-process (production builds only) with a 5-minute TTL. The
   expiry comparison happens against the *current* time on every lookup,
   cache hit or not — so a key that expires partway through its cache TTL is
   still caught on the very next request, rather than staying valid until
   the cache entry ages out.
+- **Issuing a key keeps the expiry.** Issuing a new key (`api-key-hashing.md`) does not change `api_key_expires_at`.
 - **No setter yet.** This stage adds the column and the enforcement check
   only — there is no UI or API surface to set/change `api_key_expires_at`
   today (out of this stage's scope per the design doc; the field can still

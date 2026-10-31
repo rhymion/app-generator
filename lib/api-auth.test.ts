@@ -26,6 +26,7 @@ vi.mock('@/lib/rate-limit', async () => (await import('@/test/helpers/real-rate-
 import { _resetForTests as resetRateLimiter } from './rate-limit';
 import { ApiError, authenticate, authenticateApiKey, handleApiError, requireCaller, requireDualAuth, requireScheduledTaskRole, resolveActorId } from './api-auth';
 import { SCHEDULED_TASK_ROLE_NAME } from './scheduled-tasks/system-actor';
+import { hashApiKey } from './api-key';
 
 function makeRequest(headers: Record<string, string> = {}) {
   return { headers: { get: (name: string) => headers[name] ?? null } } as unknown as Parameters<typeof requireScheduledTaskRole>[0];
@@ -84,6 +85,16 @@ describe('requireScheduledTaskRole', () => {
 });
 
 describe('authenticateApiKey', () => {
+  it('looks the user up by the SHA-256 of the presented key, never by the key', async () => {
+    userFindFirst.mockResolvedValueOnce({ id: 'user-h', api_key_expires_at: null });
+
+    await authenticateApiKey(makeRequest({ 'X-API-Key': 'mk_lookup_probe' }));
+
+    const query = userFindFirst.mock.calls[0][0];
+    expect(query.where).toEqual({ api_key_hash: hashApiKey('mk_lookup_probe') });
+    expect(JSON.stringify(query)).not.toContain('mk_lookup_probe');
+  });
+
   it('resolves a key with no expiry (null = never expires)', async () => {
     userFindFirst.mockResolvedValueOnce({ id: 'user-4', api_key_expires_at: null });
 

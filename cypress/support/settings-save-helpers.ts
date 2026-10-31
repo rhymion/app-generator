@@ -4,6 +4,7 @@
 // avatar change -- must not throw a false CONFLICT and must never wipe a
 // write-only field (password/api_key) the user did not touch).
 import 'dotenv/config';
+import { hashApiKey } from '@/lib/api-key';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient } from '@/app/generated/prisma/client';
 import { createId } from '@paralleldrive/cuid2';
@@ -62,6 +63,7 @@ async function seedStartingAvatar(userId: string): Promise<string> {
 }
 
 export type SettingsSaveUserSeed = {
+  apiKey: string;
   email: string;
   password: string;
   userId: string;
@@ -79,6 +81,7 @@ export type SettingsSaveUserSeed = {
 export async function seedSettingsSaveTestUser(): Promise<SettingsSaveUserSeed> {
   const hashedPassword = await bcrypt.hash(SETTINGS_SAVE_TEST_CREDENTIALS.password, 10);
   const userId = createId();
+  const apiKey = `mk_${createId()}`;
   await prisma.user.create({
     data: {
       id: userId,
@@ -87,12 +90,14 @@ export async function seedSettingsSaveTestUser(): Promise<SettingsSaveUserSeed> 
       email: SETTINGS_SAVE_TEST_CREDENTIALS.email,
       name: SETTINGS_SAVE_TEST_CREDENTIALS.name,
       password: hashedPassword,
-      api_key: `mk_${createId()}`,
+      api_key_hash: hashApiKey(apiKey),
+      api_key_issued_at: new Date(),
     },
   });
   const startingImageId = await seedStartingAvatar(userId);
   await grantOwnSettingAccess(userId);
   return {
+    apiKey,
     email: SETTINGS_SAVE_TEST_CREDENTIALS.email,
     password: SETTINGS_SAVE_TEST_CREDENTIALS.password,
     userId,
@@ -122,7 +127,7 @@ export async function seedSsoSettingsSaveTestUser(): Promise<SsoSettingsSaveUser
       email: SSO_SETTINGS_SAVE_TEST.email,
       name: SSO_SETTINGS_SAVE_TEST.name,
       password: null,
-      api_key: null,
+      api_key_hash: null,
     },
   });
   const startingImageId = await seedStartingAvatar(userId);
@@ -144,12 +149,56 @@ export type CredentialState = {
 export async function getCredentialState(email: string): Promise<CredentialState> {
   const user = await prisma.user.findUniqueOrThrow({
     where: { email },
-    select: { password: true, api_key: true, mfa_enabled: true },
+    select: { password: true, api_key_hash: true, mfa_enabled: true },
   });
   return {
     passwordIsNull: user.password === null,
-    apiKeyIsNull: user.api_key === null,
+    apiKeyIsNull: user.api_key_hash === null,
     passwordHash: user.password,
     mfaEnabled: user.mfa_enabled,
   };
+}
+
+export type ApiKeyStorage = {
+  hash: string | null;
+  issuedAt: string | null;
+  /** True while the old plaintext column still exists on the user table. */
+  hasPlaintextColumn: boolean;
+};
+
+/** What the database holds for a user's API key: the hash, when it was issued, and whether a
+ * plaintext `api_key` column still exists. */
+export async function getApiKeyStorage(email: string): Promise<ApiKeyStorage> {
+  const user = await prisma.user.findUniqueOrThrow({
+    where: { email },
+    select: { api_key_hash: true, api_key_issued_at: true },
+  });
+  const columns = await prisma.$queryRaw<{ column_name: string }[]>`
+    SELECT column_name FROM information_schema.columns
+    WHERE table_name = 'user' AND column_name = 'api_key'`;
+  return {
+    hash: user.api_key_hash,
+    issuedAt: user.api_key_issued_at ? user.api_key_issued_at.toISOString() : null,
+    hasPlaintextColumn: columns.length > 0,
+  };
+}
+
+/** SHA-256 hex of `value` computed by PostgreSQL itself -- the function the migration template
+ * prisma/sql/api_key_hash_migration.sql uses -- so a spec can compare it with hashApiKey(). */
+export async function sqlSha256(value: string): Promise<string> {
+  const rows = await prisma.$queryRaw<{ h: string }[]>`
+    SELECT encode(sha256(convert_to(${value}, 'UTF8')), 'hex') AS h`;
+  return rows[0].h;
+}
+
+/** hashApiKey() of `value`, for specs that run in the browser bundle and cannot import it. */
+export function hashForSpec(value: string): string {
+  return hashApiKey(value);
+}
+
+/** How many audit_log rows mention `needle` anywhere in the row. */
+export async function countAuditLogRowsMentioning(needle: string): Promise<number> {
+  const rows = await prisma.$queryRaw<{ n: bigint }[]>`
+    SELECT count(*) AS n FROM audit_log WHERE audit_log::text LIKE ${'%' + needle + '%'}`;
+  return Number(rows[0].n);
 }

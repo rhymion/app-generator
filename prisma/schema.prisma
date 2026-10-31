@@ -53,7 +53,12 @@ model user {
   name                      String
   email                     String              @unique
   password                  String?
-  api_key                   String?
+  // SHA-256 (lowercase hex) of the account's API key. The key itself is never
+  // stored: it is shown once when issued (lib/setting/api-key-actions.ts) and
+  // authenticateApiKey() looks the row up by the hash of the presented key.
+  api_key_hash              String?
+  // When the current key was issued; null while no key is set.
+  api_key_issued_at         DateTime?
   // Stage 2 of the AI-agent-integration design (app-generator-project-docs
   // planning/ai-agent-integration-design.md): optional expiry for any
   // account's API key, human or agent -- no separate agent principal type.
@@ -137,7 +142,7 @@ model user {
   anonymized_at             DateTime?            // Timestamp when PII was scrubbed (GDPR anonymization)
   invalidated_at            DateTime?            // Generic invalidate mechanism (cmd_564); set alongside anonymized_at by anonymizeUser()
 
-  @@index([api_key])
+  @@index([api_key_hash])
   @@index([creator_id])
   @@index([tenant_id])
   @@index([updater_id])
