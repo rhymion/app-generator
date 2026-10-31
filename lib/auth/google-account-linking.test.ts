@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Issue #1183: a Google account is identified by its `sub`, never by its email address.
 // The first block reads the real provider configuration out of auth.ts. The second runs
@@ -26,9 +26,14 @@ vi.mock('@/lib/auth/mock-oauth-gate', () => ({ isMockGoogleOAuthTestEnabled: () 
 vi.mock('@/lib/site-config', () => ({ siteConfig: { auth: { providers: ['credentials', 'google'] } } }));
 
 import { authConfig } from '../../auth';
-// @auth/core does not export this module; the relative path reads the shipped file itself.
-import { handleLoginOrRegister } from '../../node_modules/@auth/core/lib/actions/callback/handle-login.js';
-import { OAuthAccountNotLinked } from '../../node_modules/@auth/core/errors.js';
+import { OAuthAccountNotLinked } from '@auth/core/errors';
+
+// @auth/core does not export this module, so the shipped file is loaded by path at run time.
+const HANDLE_LOGIN_PATH = '../../node_modules/@auth/core/lib/actions/callback/handle-login.js';
+let handleLoginOrRegister: (...args: unknown[]) => Promise<any>; // eslint-disable-line @typescript-eslint/no-explicit-any
+beforeAll(async () => {
+  handleLoginOrRegister = (await import(/* @vite-ignore */ HANDLE_LOGIN_PATH)).handleLoginOrRegister;
+});
 
 type GoogleProvider = { id: string; allowDangerousEmailAccountLinking?: boolean };
 const google = (authConfig.providers as unknown as GoogleProvider[]).find((p) => p.id === 'google');
