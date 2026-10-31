@@ -140,9 +140,11 @@ skipping it.
 
 ## Permanent Rules
 
-### Don't use Prisma.raw (to prevent SQL injection)
-Raw SQLs such as `Prisma.raw` / `$queryRaw` / `$executeRaw` are prohibited.
-Abolished in cmd_088. Also prohibited in new code.
+### Raw SQL
+Use Prisma's query builder or the service layer. `$queryRawUnsafe` / `$executeRawUnsafe` / `Prisma.raw`
+are always forbidden; a tagged-template `$queryRaw` / `$executeRaw` is allowed only where the query builder
+cannot express the query, with every value bound through `${}` and an entry in
+`code_generator/check_generated_allowlist.yaml` stating why. See `docs/knowledge/raw-sql-policy.md`.
 
 ### Starting test server with different ports
 Start server for test execution using ports that are different from existing ones. Don't kill or restart existing ones. 
