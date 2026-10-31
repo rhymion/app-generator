@@ -95,6 +95,14 @@ describe('redact', () => {
     expect(redact(new Map([['token', 'x'], ['k', 'v']]))).toEqual({ token: '[REDACTED]', k: 'v' });
     expect(redact(new Set(['a@b.com']))).toEqual(['[REDACTED:email]']);
   });
+
+  it('keeps a hostile "__proto__" key as a plain data key', () => {
+    const hostile = JSON.parse('{"__proto__": {"polluted": true}, "id": 1}');
+    const out = redact(hostile) as Record<string, unknown>;
+    expect(Object.getPrototypeOf(out)).toBe(Object.prototype);
+    expect(Object.keys(out)).toEqual(['__proto__', 'id']);
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+  });
 });
 
 describe('logger', () => {

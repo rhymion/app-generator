@@ -46,17 +46,18 @@ function redactInner(value: unknown, depth: number, seen: WeakSet<object>): unkn
     if (value instanceof Map) return redactInner(Object.fromEntries(value), depth, seen);
     if (value instanceof Set) return redactInner([...value], depth, seen);
     if (ArrayBuffer.isView(value) || value instanceof ArrayBuffer) return '[Binary]';
-    const out: Record<string, unknown> = {};
+    // Build entries and create the object with Object.fromEntries: it defines own properties, so a
+    // hostile key such as "__proto__" becomes a plain data key instead of re-pointing the prototype.
+    const entries: [string, unknown][] = [];
     if (value instanceof Error) {
-      out.name = value.name;
-      out.message = redactString(value.message);
-      if (value.stack) out.stack = redactString(value.stack);
-      if ('cause' in value && value.cause !== undefined) out.cause = redactInner(value.cause, depth + 1, seen);
+      entries.push(['name', value.name], ['message', redactString(value.message)]);
+      if (value.stack) entries.push(['stack', redactString(value.stack)]);
+      if ('cause' in value && value.cause !== undefined) entries.push(['cause', redactInner(value.cause, depth + 1, seen)]);
     }
     for (const [k, v] of Object.entries(value)) {
-      out[k] = isRedactedKey(k) ? REDACTED_PLACEHOLDER : redactInner(v, depth + 1, seen);
+      entries.push([k, isRedactedKey(k) ? REDACTED_PLACEHOLDER : redactInner(v, depth + 1, seen)]);
     }
-    return out;
+    return Object.fromEntries(entries);
   } finally {
     // Only a true cycle (an ancestor) is "Circular"; a shared reference seen twice is not.
     seen.delete(value);
