@@ -135,7 +135,7 @@ describe("Registration Backend Integration Tests", () => {
       name: credentials.name,
       email: credentials.email,
       password: hashedPassword,
-      api_key: null,
+      api_key_hash: null,
     };
 
     // Mock the database calls
@@ -183,7 +183,7 @@ describe("Registration Backend Integration Tests", () => {
       name: firstCredentials.name,
       email: firstCredentials.email,
       password: await bcrypt.hash(firstCredentials.password, 10),
-      api_key: null,
+      api_key_hash: null,
     };
 
     // Mock the database - user exists with different password
@@ -215,7 +215,7 @@ describe("Registration Backend Integration Tests", () => {
       name: credentials.name,
       email: credentials.email,
       password: hashedPassword,
-      api_key: null,
+      api_key_hash: null,
     };
 
     // Mock the database - user exists with correct password

@@ -54,7 +54,7 @@ Exclude a specific string field from search text regardless of type:
 ```yaml
 user:
   properties:
-    api_key:
+    password:
       type: string
       x-search: false    # never included in search text_fields
 ```

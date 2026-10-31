@@ -6,6 +6,8 @@ import { PrismaClient } from '@/app/generated/prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg'
 import * as bcrypt from 'bcryptjs';
 import { createId } from "@paralleldrive/cuid2";
+import { hashApiKey } from '../lib/api-key';
+import { secretsEqual } from '../lib/_secret_compare';
 import { resolveAdminCredentials, requiresExplicitCredentials } from './seed-baseline-credentials';
 import { pinSslModeVerifyFull } from '../lib/db-url';
 import { SCHEDULED_TASK_ACTOR_EMAIL, SCHEDULED_TASK_ROLE_NAME } from '../lib/scheduled-tasks/system-actor';
@@ -74,7 +76,8 @@ async function main() {
       id: adminId,
       creator_id: adminId,
       updater_id: adminId,
-      api_key: credentials.apiKey,
+      api_key_hash: hashApiKey(credentials.apiKey),
+      api_key_issued_at: new Date(),
       email: credentials.email,
       name: 'Test Admin',
       password: hashedPassword,
@@ -82,11 +85,16 @@ async function main() {
   });
 
   // The upsert's `update: {}` means an existing admin row is never touched —
-  // on a second run the freshly-generated api_key above was never written,
-  // so print exactly what `admin` (the actual post-upsert row) holds. Stdout
-  // only, once, never written to a log file/collector — see requirement 1.
+  // on a second run the freshly-generated api_key above was never written.
+  // The database holds only the key's hash, so the key is printed only when
+  // the post-upsert row carries the hash of the key generated in this run.
+  // Stdout only, once, never written to a log file/collector — see requirement 1.
   if (requiresExplicitCredentials(process.env.NODE_ENV)) {
-    console.log(`Admin api_key (store this now — it is not shown again): ${admin.api_key}`);
+    if (secretsEqual(admin.api_key_hash, hashApiKey(credentials.apiKey))) {
+      console.log(`Admin api_key (store this now — it is not shown again): ${credentials.apiKey}`);
+    } else {
+      console.log('Admin account already exists; its api_key is unchanged and cannot be shown again.');
+    }
   }
 
   // ── Scheduled-task system actor (cmd_781) ─────────────────────────────────

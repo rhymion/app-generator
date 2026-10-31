@@ -37,8 +37,9 @@ X-API-Key: <your-api-key>
 Authorization: Bearer <your-api-key>
 ```
 
-API keys are stored in `user.api_key` and prefixed with `mk_`.
-Obtain or regenerate a key from the User edit page.
+API keys are prefixed with `mk_`. Only the SHA-256 hash of a key is stored
+(`user.api_key_hash`). Issue a key from the account settings page; it is shown once and
+cannot be shown again. Issuing a new key stops the previous one from working.
 
 An API key may optionally expire (`user.api_key_expires_at`). A key with
 no expiry set (`null`) never expires. A request made with an expired key

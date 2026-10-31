@@ -25,7 +25,7 @@ def canaries(manifest):
 def test_shipped_manifest_is_valid_and_covers_the_listed_field_types(manifest):
     assert lc.validate_manifest(manifest) == []
     tables = {(c["table"], c["column"]) for c in manifest["canaries"].values() if c["kind"] == "db"}
-    for needed in [("user", "password"), ("user", "api_key"), ("user", "mfa_secret"),
+    for needed in [("user", "password"), ("user", "api_key_hash"), ("user", "mfa_secret"),
                    ("mfa_recovery_code", "code_hash"), ("mobile_session", "refresh_token_hash"),
                    ("attachment", "encrypted_original_name")]:
         assert needed in tables
@@ -48,10 +48,10 @@ def test_a_new_canary_and_a_new_actor_need_only_data(manifest):
 
 
 @pytest.mark.parametrize("breakage,expect", [
-    (lambda m: m["canaries"]["user_api_key"].update(kind="x"), "kind must be one of"),
-    (lambda m: m["canaries"]["user_api_key"].pop("column"), "needs `column`"),
+    (lambda m: m["canaries"]["user_api_key_hash"].update(kind="x"), "kind must be one of"),
+    (lambda m: m["canaries"]["user_api_key_hash"].pop("column"), "needs `column`"),
     (lambda m: m["canaries"]["env_auth_secret"].pop("name"), "needs `name`"),
-    (lambda m: m["canaries"]["user_api_key"].update(allowed_actors=["nobody"]), "not declared"),
+    (lambda m: m["canaries"]["user_api_key_hash"].update(allowed_actors=["nobody"]), "not declared"),
     (lambda m: m["surfaces"]["server_log"].update(recorder="x"), "recorder must be"),
 ])
 def test_manifest_problems_are_reported(manifest, breakage, expect):
@@ -69,13 +69,13 @@ def test_markers_are_alphanumeric_and_unique(canaries):
 @pytest.mark.parametrize("prefix", [b"", b"a", b"ab", b"abc"])
 @pytest.mark.parametrize("suffix", [b"", b"z", b"zy", b"zyx"])
 def test_base64_forms_are_found_whatever_surrounds_the_value(canaries, prefix, suffix):
-    canary = canaries["user_api_key"]
+    canary = canaries["user_api_key_hash"]
     blob = base64.b64encode(prefix + canary.value.encode() + suffix)
     assert lc.find(blob, [canary]), (prefix, suffix)
 
 
 def test_hex_form_is_found(canaries):
-    canary = canaries["user_api_key"]
+    canary = canaries["user_api_key_hash"]
     assert lc.find(canary.value.encode().hex().encode(), [canary])
 
 
@@ -97,7 +97,7 @@ def test_the_surface_is_named(canaries, manifest):
 
 
 def test_status_line_is_scanned_too(canaries, manifest):
-    c = canaries["user_api_key"]
+    c = canaries["user_api_key_hash"]
     hits = lc.scan_response(canaries, manifest, route="GET /x", actor="admin",
                             status_line=f"HTTP/1.1 200 {c.value}", headers=[], body=b"")
     assert [h.surface for h in hits] == ["response_headers"]

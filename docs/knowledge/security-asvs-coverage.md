@@ -178,7 +178,7 @@ Chapter V17 (WebRTC) does not apply: the generated app has no real-time media, T
 | V7.1.2 | 2 | gap | No concurrent-session policy | none | #1284, #1127 | - |
 | V7.1.3 | 2 | n/a | The app is the only session creator; no federated session coordination | none | - | - |
 | V7.2.1 | 1 | generator | proxy.ts and auth.ts verify sessions server-side; lib/api-auth.ts for mobile JWT and API key | code_generator/tests/test_api_route_authentication_enumeration.py, auth.jwt-erased.test.ts, lib/api-auth.test.ts | - | - |
-| V7.2.2 | 1 | generator | Auth.js JWT for the web, lib/mobile-auth.ts signed access tokens (15 minutes); API keys are machine auth | cypress/e2e/api/mobile_auth.cy.ts | #1157, #1124 | - |
+| V7.2.2 | 1 | generator | Auth.js JWT for the web, lib/mobile-auth.ts signed access tokens (15 minutes); API keys are machine auth, stored only as a SHA-256 hash and shown once when issued (docs/knowledge/api-key-hashing.md) | cypress/e2e/api/mobile_auth.cy.ts, cypress/e2e/api/api_key_storage.cy.ts, lib/api-key.test.ts, lib/api-auth.test.ts | #1124 | - |
 | V7.2.3 | 1 | generator | lib/mobile-auth.ts refresh token is randomBytes(32) stored as HMAC-SHA256; web sessions are self-contained JWTs | cypress/e2e/api/mobile_auth.cy.ts | - | - |
 | V7.2.4 | 1 | gap | A new web JWT is minted at sign-in but the old one stays valid (stateless); mobile refresh rotation is covered | cypress/e2e/api/mobile_auth.cy.ts (rotation) | #1127 | - |
 | V7.3.1 | 2 | gap | No web inactivity timeout | none | #1284 | - |
@@ -295,7 +295,7 @@ Chapter V17 (WebRTC) does not apply: the generated app has no real-time media, T
 | ID | Level | Status | Covered by | Verified by | Gap Issue | Source and version |
 |----|-------|--------|------------|-------------|-----------|--------------------|
 | V13.1.1 | 2 | gap | No list of external services in one place | none | #1294, #1241 | - |
-| V13.2.1 | 2 | gap | Backend dependencies use static credentials (database password, Redis URL, CRON_SECRET); audit-log GCS can use workload identity | lib/audit-log-integrity/storage-gcs.test.ts | #1295, #1157, #1124 | - |
+| V13.2.1 | 2 | gap | Backend dependencies use static credentials (database password, Redis URL, CRON_SECRET); audit-log GCS can use workload identity | lib/audit-log-integrity/storage-gcs.test.ts | #1295, #1124, #1143 | - |
 | V13.2.2 | 2 | generator | Restricted database role on Vercel; narrow GCS bucket role; GCP database role was not verified | scripts/vercel-env.test.ts, scripts/gcp-storage-config.test.ts | - | - |
 | V13.2.3 | 2 | generator | Production seeding requires explicit admin credentials; docker-compose.prod.yml requires POSTGRES_PASSWORD from the environment and has no default | scripts/seed-baseline-credentials.test.ts, scripts/docker-compose-prod-password.test.ts | - | - |
 | V13.2.4 | 2 | gap | No outbound allow-list; server fetch targets fixed SDK endpoints only | none | #1294 | - |

@@ -76,6 +76,14 @@ export const siteConfig = {
   auth: {
     providers: ['credentials', 'google'] as AuthProviderId[],
     allowedDomains: [] as string[],
+    /**
+     * Days until a newly issued API key expires, counted from the moment it is
+     * issued. `null` makes new keys never expire. Removing this property applies
+     * the generator default (90 days). The key's owner can pick another expiry,
+     * or none, when issuing; keys issued before this setting existed keep the
+     * expiry they have.
+     */
+    apiKeyDefaultExpiryDays: 90 as number | null,
   },
 
   /** Links listed in the sidebar navigation */
