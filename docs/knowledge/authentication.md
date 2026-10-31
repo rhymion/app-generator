@@ -328,8 +328,14 @@ key or a mobile token alone cannot change either:
 - An `email` that differs from the stored address (compared without case or
   surrounding spaces) needs `current_password` too, with the same status codes
   and the same budget. Sending the stored address back unchanged asks for
-  nothing. The settings page does not ask for the current password when the
-  email changes: that path is not covered yet.
+  nothing. The settings screen asks for it as well (Issue #1285): its edit form
+  has a "Current password" field posted as `current_password`, and the
+  generated Server Action (`upsertSetting`) calls the same
+  `confirmCredentialChange()` after the permission check and before the write.
+  A refusal comes back as a `VALIDATION` failure on the `current_password`
+  field with the message keys `Errors.currentPasswordRequired`,
+  `Errors.currentPasswordIncorrect` or `Errors.currentPasswordRateLimited`, not
+  as a thrown error.
 - `mfa_enabled: false` on an account that has MFA on needs `mfa_code`, a current
   TOTP or recovery code (HTTP 400 when missing, 403 when invalid). It runs
   `disableMfa()`, so the secret and the recovery codes are cleared exactly as on

@@ -238,7 +238,9 @@ import { redirect } from 'next/navigation';
 {% endif %}{% if can_create or can_update or can_invalidate or has_commentable or can_delete or comment_actions_code %}import { {{ _authz_names | join(', ') }} } from '@/lib/authz';
 {% endif %}
 {% if can_create or can_update or can_delete %}import { AppError, type ActionFailure } from '@/lib/_errors';
-{% elif has_commentable or comment_actions_code or can_invalidate %}import { AppError } from '@/lib/_errors';
+{% if credential_confirmation %}import { ApiError } from '@/lib/api-auth';
+import { confirmCredentialChange } from '@/lib/auth/credential-confirmation';
+{% endif %}{% elif has_commentable or comment_actions_code or can_invalidate %}import { AppError } from '@/lib/_errors';
 {% endif %}
 {% if can_invalidate %}
 {% if invalidate_module %}
