@@ -15,6 +15,11 @@ function openOwnSettingsView() {
   cy.contains('button', 'API key').click();
 }
 
+// cy.contains() yields only the first match, so pick the second checkbox label (the key's current expiry) explicitly.
+function changeNeverExpiresLabel() {
+  return cy.get('label').filter((_, el) => (el.textContent ?? '').includes('Never expires')).last();
+}
+
 describe('Settings: issue an API key', () => {
   beforeEach(() => {
     Cypress.session.clearAllSavedSessions();
@@ -120,7 +125,7 @@ describe('Settings: issue an API key', () => {
 
       // Change the expiry of the current key to a chosen future date.
       cy.get('[data-testid="api-key-change-expiry"]').should('not.exist');
-      cy.contains('label', 'Never expires').last().click();
+      changeNeverExpiresLabel().click();
       cy.get('[data-testid="api-key-change-expiry"]').clear().type('2031-02-03T04:05');
       cy.contains('button', 'Save expiry').click();
       cy.contains(/Expires /).should('be.visible');
@@ -129,7 +134,7 @@ describe('Settings: issue an API key', () => {
       });
 
       // Clear it again.
-      cy.contains('label', 'Never expires').last().click();
+      changeNeverExpiresLabel().click();
       cy.contains('button', 'Save expiry').click();
       cy.contains('Never expires.').should('be.visible');
       storage(seed.email).its('expiresAt').should('eq', null);

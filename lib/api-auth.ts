@@ -4,6 +4,7 @@ import prisma from '@/lib/prisma';
 import { getRateLimiter } from '@/lib/rate-limit';
 import { requireEntityPermission, requireRecordPermission, getSessionUserId, type RichPermissions, type Operation, type RecordContext } from '@/lib/authz';
 import { TtlLruCache } from '@/lib/_ttl_lru';
+import { cacheOnGlobal } from '@/lib/global-singleton';
 import { AppError, type ErrorCode } from '@/lib/_errors';
 import { SCHEDULED_TASK_ROLE_NAME } from '@/lib/scheduled-tasks/system-actor';
 import { enterRequestScope, runAsActor } from '@/lib/_request_scope';
@@ -44,7 +45,15 @@ const apiKeyCacheEnabled = process.env.NODE_ENV === 'production';
 // against the current time on every lookup, not just when the entry was
 // cached.
 type ApiKeyCacheEntry = { userId: string; expiresAt: Date | null } | null;
-const apiKeyCache = new TtlLruCache<string, ApiKeyCacheEntry>(API_KEY_MAX_ENTRIES, API_KEY_TTL_MS);
+// Held on globalThis so the route handlers and the Server Actions that
+// invalidate it share one instance even when the build bundles this module
+// separately for each of them; otherwise a reissued key's old hash would stay
+// accepted by the route bundle's copy until the TTL ran out.
+const apiKeyCache = cacheOnGlobal(
+  globalThis as unknown as Record<string, unknown>,
+  '__apiKeyAuthCache',
+  () => new TtlLruCache<string, ApiKeyCacheEntry>(API_KEY_MAX_ENTRIES, API_KEY_TTL_MS),
+);
 
 // The cache is keyed by the key's hash, never by the key itself, so a memory
 // dump or a heap snapshot holds no usable credential.
