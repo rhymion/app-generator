@@ -1,3 +1,4 @@
+import { logger } from '@/lib/logger';
 import { NextRequest, NextResponse } from 'next/server';
 import { createHash } from 'node:crypto';
 import prisma from '@/lib/prisma';
@@ -321,6 +322,6 @@ export function handleApiError(error: unknown): NextResponse {
   // and the original goes to the server log only. A message meant for the
   // user is raised as an AppError (or ApiError) instead, which is handled
   // above.
-  console.error('API error:', error);
+  logger.error('API error:', error);
   return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
 }

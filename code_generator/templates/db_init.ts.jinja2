@@ -1,5 +1,6 @@
 // AUTO-GENERATED - DO NOT EDIT
 import prisma from '@/lib/prisma';
+import { logger } from '@/lib/logger';
 
 /**
  * Ensures pg_trgm extension and GIN indexes exist for search.
@@ -102,13 +103,13 @@ export async function ensureSearchIndexes(): Promise<void> {
       if (isInsufficientPrivilege(err)) {
         denied.push(index.name);
       } else {
-        console.error(`ensureSearchIndexes(): creating ${index.name} failed:`, err);
+        logger.error(`ensureSearchIndexes(): creating ${index.name} failed:`, err);
         firstError ??= err;
       }
     }
   }
   if (denied.length > 0) {
-    console.warn(
+    logger.warn(
       `ensureSearchIndexes(): the database role lacks the privilege to create ${denied.length} missing search index(es): ` +
         `${denied.join(', ')}. Run scripts/create-gin-indexes.sql as the table owner (DIRECT_URL) to create them.`,
     );

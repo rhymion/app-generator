@@ -1,4 +1,5 @@
 // AUTO-GENERATED - DO NOT EDIT
+import { logger } from '@/lib/logger';
 import { NextRequest, NextResponse } from 'next/server';
 import { authenticate, requireApiPermission, handleApiError, ApiError } from '@/lib/api-auth';
 import { AppError } from '@/lib/_errors';
@@ -31,7 +32,7 @@ interface BulkResponse<T> {
 // with a generic message so internal wording never reaches the client.
 function bulkErrorText(err: unknown): string {
   if (err instanceof AppError || err instanceof ApiError) return err.message;
-  console.error('[bulk] item failed', err instanceof Error ? err.name : typeof err);
+  logger.error('[bulk] item failed', err instanceof Error ? err.name : typeof err);
   return 'Internal error';
 }
 

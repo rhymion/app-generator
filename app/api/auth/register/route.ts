@@ -1,3 +1,4 @@
+import { logger } from '@/lib/logger';
 import { NextResponse } from "next/server";
 import { createId } from "@paralleldrive/cuid2";
 import bcrypt from "bcryptjs";
@@ -43,7 +44,7 @@ export async function POST(request: Request) {
   } catch (err) {
     // Log only the error class and Prisma code: a database validation error's
     // message embeds the call arguments, including the submitted password hash.
-    console.error("[register] failed", {
+    logger.error("[register] failed", {
       name: err instanceof Error ? err.name : typeof err,
       code: (err as { code?: unknown } | null)?.code,
     });
