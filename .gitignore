@@ -372,6 +372,7 @@ cypress/e2e/api/*.cy.ts
 !cypress/e2e/api/round_trip.cy.ts
 !cypress/e2e/api/mobile_auth.cy.ts
 !cypress/e2e/api/mobile_nav.cy.ts
+!cypress/e2e/api/framework_guarantees.cy.ts
 !cypress/e2e/api/mobile_permissions.cy.ts
 !cypress/e2e/api/mobile_token_dual_auth.cy.ts
 !cypress/e2e/api/fk_autocomplete_options.cy.ts

@@ -36,6 +36,36 @@ default setup must be switched off (`state: not-configured` on the
 `code-scanning/default-setup` endpoint) when the workflow lands. Alerts are
 reviewed by maintainers before anyone discusses their content publicly.
 
+## OSV-Scanner
+
+`.github/workflows/osv-scanner.yml` gives a second opinion next to `npm audit`
+and `pip-audit`. It scans `package-lock.json` and `requirements.txt` only; the
+generated mobile app's dependencies are covered by the mobile dependency audit
+and are out of scope.
+
+| Trigger | Behaviour |
+|---|---|
+| weekly (Monday) and manual | full scan, SARIF uploaded to code scanning |
+| pull request touching a scanned file | compares head with base and lists newly introduced vulnerabilities in the job log; no SARIF upload, because a fork or Dependabot token cannot write code-scanning results |
+
+Both jobs run with `fail-on-vuln: false`, so they report and never block. They
+are not a required check. Criteria for making the pull-request scan blocking
+(flip `fail-on-vuln` to `true` and add it to the required checks): at least
+four consecutive weekly runs with no finding that the existing gates
+(`npm audit --audit-level=high`, `pip-audit`) did not also report, and a
+written rule for advisories OSV reports but the other sources do not
+(accept with a dated reason, or fix).
+
+## OpenSSF Scorecard
+
+`.github/workflows/scorecard.yml` runs the Scorecard action weekly (and on
+branch-protection changes and manually) and uploads SARIF to code scanning
+under the `scorecard` category; it also publishes the score to the public
+Scorecard API. It is report-only. Its job holds `security-events: write` and
+`id-token: write` (the latter for result publishing); the workflow default
+stays `contents: read`. A check that scores below 5 is either opened as a
+follow-up Issue or recorded as accepted, with a reason, on the tracking Issue.
+
 ## Security Checks workflow
 
 `.github/workflows/security-checks.yml` runs on pull requests and on pushes to
@@ -128,3 +158,5 @@ Two checks that used to run only by hand are CI steps:
 
 A new violation reported by either is a finding to fix, not something to add
 to an allowlist to turn the run green.
+
+See also [security-asvs-coverage.md](security-asvs-coverage.md), which maps each OWASP ASVS 5.0 requirement to the code, test or Issue that covers it.
