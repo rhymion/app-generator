@@ -14,7 +14,8 @@ import { UPLOAD_CONTENT_TYPE_BY_EXTENSION, extensionOf } from '@/lib/_upload_val
 // The only way a stored file is read. The caller is the signed-in user (browser session) or a mobile
 // access token / API key. Access follows the record the file is attached to: the same read permission
 // and organization scope as the record's own detail page, and a file that is not attached yet can only
-// be read by the user who uploaded it. A record outside the caller's organizations answers 404.
+// be read by the user who uploaded it. Every refusal answers 404, whether the id is unknown, unlinked,
+// in another organization or linked to a record the caller may not read, so the status does not reveal which.
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -52,7 +53,6 @@ export async function GET(request: NextRequest, { params }: Params) {
   if (!isStorageKey(attachment.path)) return new NextResponse(null, { status: 404 });
 
   const decision = await authorizeAttachmentRead(actorId, attachment);
-  if (decision === 'forbidden') return new NextResponse(null, { status: 403 });
   if (decision !== 'allow') return new NextResponse(null, { status: 404 });
 
   let filename = 'file';
