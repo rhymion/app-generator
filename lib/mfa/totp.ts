@@ -36,19 +36,37 @@ export async function otpauthQrDataUrl(secret: string, accountLabel: string): Pr
   return QRCode.toDataURL(url, { width: 240, margin: 1 });
 }
 
-export async function verifyTotp(secret: string, token: string): Promise<boolean> {
+/**
+ * Returns the time step the code matched, or null when it does not verify.
+ * `afterTimeStep` is the last step already accepted for this user: a code from that step or an
+ * earlier one is refused, so a code cannot be replayed inside its validity window.
+ */
+export async function verifyTotpStep(
+  secret: string,
+  token: string,
+  afterTimeStep?: number | null,
+): Promise<number | null> {
   // Strip whitespace because authenticator apps sometimes show "123 456".
   const normalized = token.replace(/\s+/g, '');
-  if (!/^\d{6}$/.test(normalized)) return false;
+  if (!/^\d{6}$/.test(normalized)) return null;
   try {
     const result = await otplibVerify({
       secret,
       token: normalized,
       epochTolerance: EPOCH_TOLERANCE_SECONDS,
+      ...(afterTimeStep == null ? {} : { afterTimeStep }),
     });
-    return Boolean(result?.valid);
+    if (!result?.valid) return null;
+    // The otplib result type is a union whose TOTP member carries `timeStep`; without it the code
+    // cannot be recorded, so it is not accepted.
+    const { timeStep } = result as { timeStep?: number };
+    return typeof timeStep === 'number' ? timeStep : null;
   } catch {
     // `otplib` throws on malformed secrets; treat as a hard fail.
-    return false;
+    return null;
   }
+}
+
+export async function verifyTotp(secret: string, token: string): Promise<boolean> {
+  return (await verifyTotpStep(secret, token)) !== null;
 }

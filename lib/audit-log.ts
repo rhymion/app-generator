@@ -14,7 +14,7 @@
  *     primary action. Callers from inside a Prisma `$transaction` pass the
  *     transaction client so the row enrolls in that transaction; everyone
  *     else uses the top-level prisma client and we swallow errors with a
- *     `console.warn` so the request continues. The trade-off: a DB hiccup
+ *     `logger.warn` so the request continues. The trade-off: a DB hiccup
  *     can drop audit rows. That's the right call for auth events (we'd
  *     rather let the user in than 500), and for service-layer events the
  *     transactional path keeps audit + primary action consistent.
@@ -32,6 +32,7 @@
  *     references. `actor_user_id` is also nullable — some auth-side events
  *     (rejected sign-in with an unknown email) have no resolved actor.
  */
+import { logger } from '@/lib/logger';
 import prisma from '@/lib/prisma';
 
 /**
@@ -89,7 +90,7 @@ export async function recordAuditEvent(event: AuditEvent): Promise<void> {
     // and we still want the error visible — rethrow so the transaction
     // rolls back.
     if (event.tx) throw err;
-    console.warn(
+    logger.warn(
       '[audit_log:write_failed]',
       JSON.stringify({
         at: new Date().toISOString(),

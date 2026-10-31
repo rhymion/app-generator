@@ -312,7 +312,7 @@ and in routes that accept both a token and a session (`/api/notifications`):
 `X-API-Key` first, then `Authorization: Bearer` (a mobile access token if it
 has three dot-separated segments, otherwise an API key), then the session cookie.
 
-The API key is looked up against `user.api_key` in the DB. A TTL LRU cache (5 min, 1000 entries) reduces DB load. The cache is gated to production (`process.env.NODE_ENV === 'production'`) so Cypress test resets do not encounter stale entries.
+The SHA-256 of the presented key is looked up against `user.api_key_hash` in the DB (see `api-key-hashing.md`). A TTL LRU cache keyed by that hash (5 min, 1000 entries) reduces DB load. The cache is gated to production (`process.env.NODE_ENV === 'production'`) so Cypress test resets do not encounter stale entries.
 
 ### Dual authentication (session OR API key)
 
@@ -404,7 +404,7 @@ The project does **not** have a `middleware.ts` at the project root. Route-level
 - **Limits**: it is a per-file text match and does not follow imports. A route that delegates both guards to a shared wrapper in another file must call the helper itself or be listed in the allowlist. A match shows the call is present, not that it guards the right operation or checks the right organization; review still decides that.
 - **Exemptions**: `code_generator/check_handwritten_routes_allowlist.yaml` (or a file passed with `--allowlist`). An entry names the route `path`, the guards it skips (`permission`, `rate-limit`) and a required `reason`. An entry that no longer matches a flagged route is reported as stale. The shipped list covers the routes this repository writes by hand; a consumer keeps its own list.
 
-Run it from the project root after `npm run generate-code` (the manifest is written then). Exit status: 0 clean, 1 violations or stale entries, 2 configuration error. The generator's own pytest (`test_check_handwritten_routes.py`) runs it against this repository's routes with the shipped allowlist. It is not part of the CI workflow or the generator's completion gate.
+Run it from the project root after `npm run generate-code` (the manifest is written then). Exit status: 0 clean, 1 violations or stale entries, 2 configuration error. The generator's own pytest (`test_check_handwritten_routes.py`) runs it against this repository's routes with the shipped allowlist. It runs in CI as the `Hand-written Route Guards` job; it is not part of the generator's completion gate.
 
 ---
 
@@ -470,7 +470,7 @@ When an admin modifies a user's roles, the permission cache entry for that user 
 
 ### API key cache has a 5-minute lag
 
-Rotating a user's `api_key` does not immediately invalidate the old key in the cache. The old key remains valid for up to 5 minutes in production. `invalidateApiKeyCache(oldKey)` from `lib/api-auth.ts` should be called in account-update endpoints.
+Issuing a new key through the settings page (`issueApiKey()` in `lib/setting/api-key-actions.ts`) calls `invalidateApiKeyCache(oldHash)` in the same process, so the old key stops working there at once. Another server process keeps accepting the old key until its own cache entry ages out, up to 5 minutes in production. Any other code that replaces or clears `user.api_key_hash` must call `invalidateApiKeyCache()` with the old hash.
 
 ### No approval-flow permission integration
 

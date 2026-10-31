@@ -22,7 +22,7 @@ YAML スキーマ定義から本番対応の Web アプリケーションを生�
 - **ガントチャートビュー** — エンティティ単位でオプトインできるガントチャートページ
 - **REST API** — エンティティごとに API キー認証付き JSON エンドポイントを生成。加えて、その行について現在許される操作・書き込み・遷移を返す行単位の `GET /api/{entity}/[id]/capabilities` エンドポイントを生成。リレーション項目で選択できるレコードを検索・ID 参照する `GET /api/{entity}/options` エンドポイントも生成（Web のピッカーの REST 版で、権限と組織の範囲は同一）。コメントスレッドを持つエンティティには、コメントの追加・編集・削除の `POST` / `PATCH` / `DELETE` ルートと、`@` メンション候補を検索する `GET /api/mention/users` も生成（コメント欄の REST 版で、同じアクションを実行）— 詳細は [`docs/knowledge/comment-and-mention-rest-routes.md`](docs/knowledge/comment-and-mention-rest-routes.md) を参照
 - **API 冪等性キー + API キー単位の流量制限** — 単一レコード作成エンドポイントで任意の `Idempotency-Key` ヘッダーを送ると、`POST` の再送が安全になる（同じキー＋同じ本文なら元の結果を再送、同じキー＋異なる本文なら競合として拒否）。保持期間1日のDBテーブルに、対象レコードと同一トランザクションで書き込む。加えて `authenticateApiKey()` のみで認証する REST route はすべて、呼び出し元ごとの `api:read`/`api:write` 流量制限（いずれも環境変数で上書き可）を強制する — 詳細は [`docs/knowledge/api-idempotency-and-rate-limiting.md`](docs/knowledge/api-idempotency-and-rate-limiting.md) を参照
-- **API キーの有効期限** — 任意設定のnullable列 `user.api_key_expires_at`（`null` は無期限、既存の全キーの挙動を変えない）を、唯一の共通検証点 `authenticateApiKey()` でチェックする。期限切れのキーによるリクエストは `401 API key expired.` で拒否される — 詳細は [`docs/knowledge/api-key-expiry.md`](docs/knowledge/api-key-expiry.md) を参照
+- **API キーの有効期限** — 任意設定のnullable列 `user.api_key_expires_at`（`null` は無期限、既存の全キーの挙動を変えない。キーの持ち主がアカウント設定画面で選び、新規キーの既定は90日で `siteConfig.auth.apiKeyDefaultExpiryDays` で変更できる）を、唯一の共通検証点 `authenticateApiKey()` でチェックする。期限切れのキーによるリクエストは `401 API key expired.` で拒否される — 詳細は [`docs/knowledge/api-key-expiry.md`](docs/knowledge/api-key-expiry.md) を参照
 - **生成ドキュメント + OpenAPI 3.1 仕様** — エンティティごとの人間可読ドキュメント（`docs/generated/{entity}.md`、`/en/docs` 配下にも反映）。承認フロー・書き込みロックを持つエンティティには「Constraints」節を含む。加えて機械可読な統合仕様 `docs/generated/openapi.json` をビルド成果物として生成し、`GET /api/openapi.json`（APIキーまたはセッション必須、全環境）で配信。`SWAGGER_UI_ENABLED` で有効化する対話的な `/swagger` 画面も用意（開発・ステージング限定、本番では有効化しない）— 詳細は [`docs/knowledge/generated-documentation-and-openapi-spec.md`](docs/knowledge/generated-documentation-and-openapi-spec.md) を参照
 - **エンティティごとに `properties:` 一つ** — スカラー列とリレーションオブジェクトを JSON Schema 標準の `properties:` にまとめて書きます。ビルダーが各エントリを、Prisma上でその名前が何であるかで振り分けます。モデル上のプロキシビューは `allOf` ラッパーではなく `x-view-of: <model>` で書きます。エンティティ直下の `fields:` キーが残る旧スキーマは `code_generator/migrate_fields_into_properties.py` で書き換えます — [`docs/knowledge/schema-yaml-configuration.md`](docs/knowledge/schema-yaml-configuration.md) を参照
 - **Cypress テスト生成** — アプリケーションコードと並行して UI および API テストスイートを生成
@@ -576,7 +576,9 @@ app-generator/
 | [mobile-executable.md](docs/knowledge/mobile-executable.md) | 生成される Expo アプリのリリース `.apk` のビルド、iOS の経路、実機からサーバーへ接続する設定 |
 | [scheduled-task-operations.md](docs/knowledge/scheduled-task-operations.md) | 定期タスク：`depends_on` による順序、実行ガードと業務日付、管理画面、`task:run-all`、GCP での実行 |
 | [audit-log-append-only.md](docs/knowledge/audit-log-append-only.md) | 追記専用の `audit_log`：クライアントガード、行トリガー、月次パーティション、連鎖ダイジェスト、書き込み一回限りのストレージ、制限付きデータベースロールへの切り替え |
+| [logging.md](docs/knowledge/logging.md) | `lib/logger.ts`：値を伏せて出力するロガー（認証情報らしいキー、メールアドレス、Error オブジェクト）、ルールの拡張、`no-console` lint ルールとその許可リスト |
 | [list-panel-trigram-filter.md](docs/knowledge/list-panel-trigram-filter.md) | トライグラム列に対する一覧の検索ボックスと、列単位の `x-trigram-filter` |
+| [api-key-hashing.md](docs/knowledge/api-key-hashing.md) | API キーは SHA-256 ハッシュ (`user.api_key_hash`) のみを保存し、アカウント設定画面で発行した時に一度だけ表示。移行 SQL の雛形と消費者側の手順 |
 | [api-key-expiry.md](docs/knowledge/api-key-expiry.md) | `authenticateApiKey()` でチェックする任意設定の `user.api_key_expires_at`。`null` は無期限、期限切れは `401 API key expired.` で拒否 |
 
 ---

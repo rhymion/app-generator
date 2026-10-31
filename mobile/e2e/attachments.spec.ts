@@ -15,11 +15,15 @@ async function openNew(page: Page) {
   await expect(page.getByTestId('form-new-mobile_document')).toBeVisible();
 }
 
+const PNG_BYTES = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00]);
+
 /** Taps a field's pick button and answers the system file chooser with one file. */
-async function attach(page: Page, field: string, name: string, mimeType: string, content = 'hello') {
+async function attach(page: Page, field: string, name: string, mimeType: string, content?: string | Buffer) {
+  // The upload route checks the leading bytes against the extension, so the default content carries them.
+  const body = content ?? (name.endsWith('.png') ? PNG_BYTES : Buffer.from('%PDF-1.4 hello'));
   const chooser = page.waitForEvent('filechooser');
   await page.getByTestId(`attachment-pick-${field}`).click();
-  await (await chooser).setFiles({ name, mimeType, buffer: Buffer.from(content) });
+  await (await chooser).setFiles({ name, mimeType, buffer: Buffer.isBuffer(body) ? body : Buffer.from(body) });
 }
 
 /** Records the JSON body of the next write to the entity's REST route. */

@@ -30,6 +30,7 @@
  * script below is short enough that a vanilla `ioredis` client keeps the
  * dependency surface smaller and works against any Redis without a proxy.
  */
+import { logger } from '@/lib/logger';
 import Redis, { type RedisOptions } from 'ioredis';
 
 import type { RateLimitBucketConfig, RateLimitDecision, RateLimiter } from './index';
@@ -203,7 +204,7 @@ export function createRedisRateLimiter(
         // handling: a broken Redis must never take auth down with it, but
         // the degraded window must be visible in server logs, not silent.
         redisDownUntil = Date.now() + cooldownMs;
-        console.error(
+        logger.error(
           '[rate-limit:fail_open]',
           JSON.stringify({
             at: new Date().toISOString(),

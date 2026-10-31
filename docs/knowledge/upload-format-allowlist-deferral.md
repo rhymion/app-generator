@@ -43,11 +43,20 @@ list that has no entry in `UPLOAD_CONTENT_TYPE_BY_EXTENSION` is stored with its 
 
 ## Limits
 
-The file's bytes are not inspected (no magic-byte check). The extension and declared type
-must agree with the allow-lists, and the served type comes from the extension, but a file's
-content is not verified to match its extension.
+The file's leading bytes are checked against the format its extension names
+(`matchesFileSignature` in `lib/_upload_validation.ts`): JPEG, PNG, GIF, WebP, PDF, the legacy
+Office (OLE2) header for `doc` and `xls`, and the ZIP header for `zip`, `docx` and `xlsx`. A `csv` or
+`txt` file must hold no NUL byte. A file that fails answers `400 Invalid file type.`. An extension
+added to the extension list that has no signature here cannot be verified and is accepted on the
+allow-lists alone. Images are not re-encoded.
+
+The size limit is `UPLOAD_MAX_BYTES` (default 10 MiB) and is applied before the body is parsed:
+`POST /api/upload` refuses a declared `Content-Length` over the limit (plus 64 KiB of multipart
+framing) without reading the body, and counts the bytes of a body that has no `Content-Length` while it
+streams. The answer is `413`.
 
 Tests: `lib/_upload_validation.test.ts` (every allow-listed extension and MIME type, the
-rejection cases, the environment variables) and
-`code_generator/tests/test_upload_route_content_type.py` (both routes use the shared check
-and store the derived type).
+rejection cases, the environment variables, the content signatures, the bounded body read) and
+`code_generator/tests/test_upload_route_content_type.py` (the route uses the shared check, stores the
+derived type, reads the body with a limit and checks the signature) and
+`cypress/e2e/api/upload_path_safety.cy.ts` (a mismatched file and an oversized upload are refused).

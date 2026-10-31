@@ -4072,7 +4072,7 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
         # as service_validation.ts's validateCustomRules import above.
         + (f"\nimport {{ afterCreate }} from '@/lib/{model}/service_after_create';" if can_create else '')
         # x-payment (Issue #775): add{Parent}() opens the Checkout Session.
-        + ("\nimport { startPaymentCheckout } from '@/lib/payment/checkout';" if (is_payment and can_create) else '')
+        + ("\nimport { startPaymentCheckout } from '@/lib/payment/checkout';\nimport { logger } from '@/lib/logger';" if (is_payment and can_create) else '')
         # Idempotency-key support (ai-agent-integration-design.md) -- every
         # create-capable entity's add{{Entity}}() can be called with an
         # idempotency key from the route template; the check/record calls
