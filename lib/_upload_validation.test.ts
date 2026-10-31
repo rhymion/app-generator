@@ -51,8 +51,8 @@ describe('default policy keeps legitimate business documents working', () => {
 
 describe('the Content-Type comes from the file name, not the request', () => {
   it('stores the canonical type for the extension', () => {
-    expect(checkUpload({ name: 'a.jpg', type: 'image/jpg' }, defaults)).toEqual({ ok: true, contentType: 'image/jpeg' });
-    expect(checkUpload({ name: 'a.csv', type: 'application/vnd.ms-excel' }, defaults)).toEqual({ ok: true, contentType: 'text/csv' });
+    expect(checkUpload({ name: 'a.jpg', type: 'image/jpg' }, defaults)).toEqual({ ok: true, contentType: 'image/jpeg', extension: 'jpg' });
+    expect(checkUpload({ name: 'a.csv', type: 'application/vnd.ms-excel' }, defaults)).toEqual({ ok: true, contentType: 'text/csv', extension: 'csv' });
   });
 });
 

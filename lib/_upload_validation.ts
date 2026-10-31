@@ -52,7 +52,7 @@ export interface UploadPolicy {
   extensions: readonly string[];
 }
 
-export type UploadCheck = { ok: true; contentType: string } | { ok: false };
+export type UploadCheck = { ok: true; contentType: string; extension: string } | { ok: false };
 
 function parseList(raw: string | undefined, fallback: readonly string[], normalize: (v: string) => string): readonly string[] {
   if (raw === undefined) return fallback;
@@ -82,7 +82,7 @@ export function checkUpload(file: { name: string; type: string }, policy: Upload
   if (!policy.mimeTypes.includes(declared) || extension === '' || !policy.extensions.includes(extension)) {
     return { ok: false };
   }
-  return { ok: true, contentType: UPLOAD_CONTENT_TYPE_BY_EXTENSION[extension] ?? declared };
+  return { ok: true, contentType: UPLOAD_CONTENT_TYPE_BY_EXTENSION[extension] ?? declared, extension };
 }
 
 // --- Content signature -------------------------------------------------------

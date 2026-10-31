@@ -5,7 +5,6 @@ import {
   UPLOAD_MULTIPART_OVERHEAD_BYTES,
   UPLOAD_SIGNATURE_BYTES,
   checkUpload,
-  extensionOf,
   loadUploadPolicy,
   matchesFileSignature,
   readBodyWithLimit,
@@ -79,7 +78,7 @@ export async function POST(request: NextRequest) {
     // The leading bytes must be those of the format the extension names (the declared type and the extension
     // are both caller-chosen).
     const head = new Uint8Array(await file.slice(0, UPLOAD_SIGNATURE_BYTES).arrayBuffer());
-    if (!matchesFileSignature(head, extensionOf(file.name))) {
+    if (!matchesFileSignature(head, uploadCheck.extension)) {
       return NextResponse.json({ error: 'Invalid file type.' }, { status: 400 });
     }
 

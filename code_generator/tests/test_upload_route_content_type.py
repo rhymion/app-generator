@@ -40,6 +40,6 @@ def test_upload_route_checks_the_size_before_the_body_is_parsed():
 
 def test_upload_route_checks_the_content_signature_after_the_allow_lists():
     src = (TEMPLATES / 'upload_route.ts.jinja2').read_text()
-    assert 'matchesFileSignature(head, extensionOf(file.name))' in src
+    assert 'matchesFileSignature(head, uploadCheck.extension)' in src
     assert src.index('checkUpload(file, loadUploadPolicy())') < src.index('matchesFileSignature(')
     assert src.index('matchesFileSignature(') < src.index('storeUploadedFile(')
