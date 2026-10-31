@@ -187,6 +187,7 @@
     "haveAccount": "既にアカウントをお持ちの方はこちら",
     "invalidCredentials": "認証情報が正しくありません",
     "loginError": "ログイン中にエラーが発生しました",
+    "oauthAccountNotLinked": "このGoogleアカウントは、同じメールアドレスの既存アカウントと連携されていません。まず既存のアカウントでサインインし、アカウント設定からGoogleを連携してください。",
     "confirmPasswordPlaceholder": "パスワード（確認）",
     "passwordMismatch": "パスワードが一致しません",
     "emailInUse": "このメールアドレスは既に使用されています",

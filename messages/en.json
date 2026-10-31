@@ -187,6 +187,7 @@
     "haveAccount": "Already have an account? Sign in",
     "invalidCredentials": "Invalid credentials",
     "loginError": "An error occurred during login",
+    "oauthAccountNotLinked": "This Google account is not linked to an existing account that uses the same email address. Sign in with your existing account first, then connect Google from your account settings.",
     "confirmPasswordPlaceholder": "Confirm password",
     "passwordMismatch": "Passwords do not match",
     "emailInUse": "Email address is already in use",

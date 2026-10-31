@@ -152,7 +152,7 @@ Chapter V17 (WebRTC) does not apply: the generated app has no real-time media, T
 | V6.3.1 | 1 | generator | proxy.ts sign-in bucket (10 per minute per IP); register, mobile-token, MFA and API-key buckets in lib/rate-limit/index.ts | app/api/auth/register/route.test.ts, lib/mfa/verify.test.ts, lib/rate-limit/redis.test.ts, app/api/mobile/auth/token/route.test.ts | #1245, #1125 | - |
 | V6.3.2 | 1 | generator | scripts/seed-baseline-credentials.ts requires explicit admin credentials in production; outside production a documented default is seeded | scripts/seed-baseline-credentials.test.ts | - | - |
 | V6.3.3 | 2 | gap | MFA is opt-in per user | none | #1281 | - |
-| V6.3.4 | 2 | generator | MFA is enforced on credentials, OAuth and the mobile token route; API keys are machine access without MFA by design | cypress/e2e/auth/mfa.cy.ts, cypress/e2e/api/mobile_auth.cy.ts | #1183 | - |
+| V6.3.4 | 2 | generator | MFA is enforced on credentials, OAuth and the mobile token route; API keys are machine access without MFA by design | cypress/e2e/auth/mfa.cy.ts, cypress/e2e/api/mobile_auth.cy.ts | - | - |
 | V6.4.1 | 1 | n/a | The app issues no initial passwords or activation codes | none | - | - |
 | V6.4.2 | 1 | generator | No password hints or knowledge-based questions exist | none | - | - |
 | V6.4.3 | 2 | gap | No forgot-password flow | none | #1282 | - |
@@ -165,7 +165,7 @@ Chapter V17 (WebRTC) does not apply: the generated app has no real-time media, T
 | V6.6.1 | 2 | n/a | No SMS or PSTN OTP delivery | none | - | - |
 | V6.6.2 | 2 | n/a | No out-of-band codes or requests | none | - | - |
 | V6.6.3 | 2 | n/a | No out-of-band code mechanism; TOTP and recovery codes are rate limited by auth:mfa:challenge | none | - | - |
-| V6.8.1 | 2 | generator | auth.ts signIn callback: verified-email check, domain allow-list, credentials-account collision guard | lib/auth/domain-allow-list.test.ts, cypress/e2e/auth/mfa.cy.ts | #1183 | - |
+| V6.8.1 | 2 | generator | auth.ts signIn callback: verified-email check, domain allow-list, credentials-account collision guard | lib/auth/domain-allow-list.test.ts, cypress/e2e/auth/mfa.cy.ts | - | - |
 | V6.8.2 | 2 | framework | Auth.js validates the Google ID token and callback state; the mobile JWT is verified with jose and algorithms HS256 | cypress/e2e/api/mobile_auth.cy.ts (mobile); none for the OAuth signature | #1234 | next-auth 5.0.0-beta.32, @auth/core 0.41.3 (package-lock.json); oauth4webapi 3.8.6, jose 6.2.13 |
 | V6.8.3 | 2 | n/a | No SAML | none | - | - |
 | V6.8.4 | 2 | n/a | The app never requires a specific authentication strength or recentness from the identity provider | none | - | - |
@@ -247,7 +247,7 @@ Chapter V17 (WebRTC) does not apply: the generated app has no real-time media, T
 | V10.4.10 | 2 | n/a | The app is not an OAuth authorization server | none | - | - |
 | V10.4.11 | 2 | n/a | The app is not an OAuth authorization server | none | - | - |
 | V10.5.1 | 2 | framework | Auth.js checks the ID token nonce, state and PKCE | none | #1234 | next-auth 5.0.0-beta.32, @auth/core 0.41.3 (package-lock.json); oauth4webapi 3.8.6 |
-| V10.5.2 | 2 | gap | allowDangerousEmailAccountLinking is true, so users are matched by email | none | #1183 | - |
+| V10.5.2 | 2 | generator | auth.ts sets no `allowDangerousEmailAccountLinking` on the Google provider, so a Google account is identified by its `sub` (the Account row) and never by its email address; a signed-out sign-in with a new `sub` and the email of an existing user is refused with OAuthAccountNotLinked, and a Google account is linked only from a signed-in session (`/setting/accounts`) | lib/auth/google-account-linking.test.ts (provider has no flag; @auth/core refuses the signed-out case, links for the signed-in user, signs in a linked `sub`), app/[locale]/login/page.test.tsx | - | - |
 | V10.5.3 | 2 | framework | Auth.js validates the ID token issuer for the fixed Google provider | none | #1234 | next-auth 5.0.0-beta.32, @auth/core 0.41.3 (package-lock.json); oauth4webapi 3.8.6 |
 | V10.5.4 | 2 | framework | Auth.js validates the ID token audience against GOOGLE_CLIENT_ID | none | #1234 | next-auth 5.0.0-beta.32, @auth/core 0.41.3 (package-lock.json); oauth4webapi 3.8.6 |
 | V10.5.5 | 2 | n/a | OIDC back-channel logout is not used | none | - | - |

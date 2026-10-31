@@ -184,6 +184,19 @@ On the first Google sign-in for a given email:
      `@unique(email)` constraint — same outcome, less explicit. Admin
      reconciliation step: pre-populate a matching `Account` row to link
      the existing user to the OAuth identity.
+   - **Google is identified by `sub`, not by email.** The Google provider
+     does not set `allowDangerousEmailAccountLinking`. A sign-in whose
+     `sub` has no `Account` row yet, from a browser with no session, is
+     refused with `OAuthAccountNotLinked` when a `user` row with the same
+     email exists (for example a user created by an admin or an import
+     who never signed in with Google), so a person who re-created a
+     Google account under an old address cannot inherit that row's roles
+     and data. The login page then tells the person to sign in with the
+     existing account and connect Google from `/setting/accounts`.
+     Linking from a signed-in session still works: @auth/core links the
+     new `Account` row to the session's user, and the `signIn()` callback
+     requires the Google email to equal that user's email
+     (`lib/auth/google-account-linking.test.ts`).
 2. If `signIn()` returns true, `buildAdapter().createUser()` (our
    wrapper around `PrismaAdapter`) inserts the `user` row with:
    pre-generated cuid, `email`, `name = profile.name ?? email`,
@@ -647,7 +660,7 @@ The following are explicitly out of scope for the current implementation:
 
 - **Server-side revocation for credentials users**: Not implemented for sign-in itself — a stolen JWT cookie is self-contained and rotating `AUTH_SECRET` is the only global invalidation. Custom `adapter.createSession()` shim deferred. See `auth.ts` `authorize()`. (MFA-state revocation is handled separately — see "MFA on the OAuth path" below.)
 - **MFA / TOTP**: Shipped in v1 (S5 phase 5a) for the credentials provider, opt-in per user. Shipped for the OAuth path too as of S8 — see "MFA on the OAuth path" below. Admin-mandated MFA is still deferred.
-- **Account linking UI**: Shipped in v1 (S7). `/setting/accounts` lists and connects/detaches OAuth providers; cross-email linking deferred. See `lib/account-link/`, `auth.ts`.
+- **Account linking UI**: Shipped in v1 (S7). `/setting/accounts` lists and connects/detaches OAuth providers; linking needs a signed-in session and the same email, cross-email linking deferred. See `lib/account-link/`, `auth.ts`.
 - **Audit-log table**: Not implemented. Auth events log to `console.info` only. Prisma model with role/permission hooks deferred.
 - **Per-tenant SSO (SAML)**: Not implemented. Would use SAML Jackson / WorkOS with per-tenant domain binding.
 
