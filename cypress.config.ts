@@ -84,6 +84,19 @@ export default defineConfig({
           });
           return null;
         },
+        // Security test helpers (cypress/support/security_helpers.ts): check the claimed matrix cell and
+        // status against .security-manifest.json, and re-read rows from the database.
+        async 'security:checkCell'(params: { cell: Record<string, string>; status: number }) {
+          const { assertCellAndStatus } = require('./test/helpers/security_core');
+          const { loadManifest } = require('./test/helpers/security_manifest');
+          assertCellAndStatus(params.cell, params.status, loadManifest());
+          return null;
+        },
+        async 'security:snapshot'(params: { model: string; where?: Record<string, unknown> }) {
+          const { prisma } = require('./cypress/support/db-helpers');
+          const rows = await (prisma as Record<string, any>)[params.model].findMany({ where: params.where ?? {}, orderBy: { id: 'asc' } });
+          return JSON.parse(JSON.stringify(rows));
+        },
         async 'db:createLimitedApiUser'(modelName: string) {
           const { createLimitedApiUser } = require('./cypress/support/db-helpers');
           return await createLimitedApiUser(modelName);
@@ -169,9 +182,37 @@ export default defineConfig({
           const { getCredentialState } = require('./cypress/support/settings-save-helpers');
           return await getCredentialState(email);
         },
+        // API key storage coverage (cypress/e2e/api/api_key_storage.cy.ts)
+        async 'db:getApiKeyStorage'(email: string) {
+          const { getApiKeyStorage } = require('./cypress/support/settings-save-helpers');
+          return await getApiKeyStorage(email);
+        },
+        async 'db:setApiKeyExpiry'({ email, expiresAt }: { email: string; expiresAt: string | null }) {
+          const { setApiKeyExpiryInDb } = require('./cypress/support/settings-save-helpers');
+          return await setApiKeyExpiryInDb(email, expiresAt);
+        },
+        async 'db:sqlSha256'(value: string) {
+          const { sqlSha256 } = require('./cypress/support/settings-save-helpers');
+          return await sqlSha256(value);
+        },
+        async 'apiKey:hash'(value: string) {
+          const { hashForSpec } = require('./cypress/support/settings-save-helpers');
+          return hashForSpec(value);
+        },
+        async 'db:countAuditLogRowsMentioning'(needle: string) {
+          const { countAuditLogRowsMentioning } = require('./cypress/support/settings-save-helpers');
+          return await countAuditLogRowsMentioning(needle);
+        },
         async 'generateTotp'(secret: string) {
           const otplib = require('otplib');
           return otplib.generateSync({ secret });
+        },
+        // Code for the following 30 s step. A TOTP code is single-use, so a
+        // test that signs in and then confirms a second action in the same
+        // window must use the next step (accepted via the verify tolerance).
+        async 'generateNextTotp'(secret: string) {
+          const otplib = require('otplib');
+          return otplib.generateSync({ secret, epoch: Math.floor(Date.now() / 1000) + 30 });
         },
         // Hand-written fixtures for the mobile token-auth tests (not part of
         // the generated entity-driven task set above).
@@ -375,6 +416,7 @@ export default defineConfig({
           const { prisma } = require('./cypress/support/db-helpers');
           const { createId } = require('@paralleldrive/cuid2');
           const user2Id = createId();
+          const { hashApiKey } = require('./lib/api-key');
           const user2ApiKey = 'test_mk_user2_00000000000000000000000000000000000000000000000000000000000';
           await prisma.user.create({
             data: {
@@ -384,7 +426,7 @@ export default defineConfig({
               email: 'testuser2_reaction@example.com',
               name: 'Test User 2',
               password: 'not_needed',
-              api_key: user2ApiKey,
+              api_key_hash: hashApiKey(user2ApiKey),
             },
           });
           return user2ApiKey;
@@ -440,6 +482,7 @@ export default defineConfig({
           const testUser = await prisma.user.findUnique({ where: { email: TEST_CREDENTIALS.email } });
           if (!testUser) throw new Error('Test user not found. Make sure db:seed has run first.');
           const creatorUserId = createId();
+          const { hashApiKey } = require('./lib/api-key');
           const creatorApiKey = 'test_mk_creator_only_role_000000000000000000000000000000000000000';
           // Create the 'Creator' special role (role name must be exactly 'Creator')
           const creatorRole = await prisma.role.create({
@@ -471,7 +514,7 @@ export default defineConfig({
               email: 'creator_only_role_search@example.com',
               name: 'Creator Only User (Search Test)',
               password: 'not_needed',
-              api_key: creatorApiKey,
+              api_key_hash: hashApiKey(creatorApiKey),
               roles: { connect: [{ id: creatorRole.id }] },
             },
           });

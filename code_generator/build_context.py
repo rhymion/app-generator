@@ -1922,8 +1922,8 @@ def build_anonymize_user_context(schema: dict) -> dict:
     Extracts x-pii annotated fields from the user entity definition and computes
     the pii_data_block string (pre-formatted TypeScript lines for the data: {} block).
 
-    Fields not in json_schema but present in schema.prisma (emailVerified, mfa_secret)
-    are hardcoded after 'image_id' to match the canonical scrub order.
+    Fields not in json_schema but present in schema.prisma (emailVerified, mfa_secret,
+    api_key_hash, api_key_issued_at) are hardcoded after 'image_id' to match the canonical scrub order.
 
     Returns:
         has_pii_user: bool — True when the user entity has at least one x-pii field.
@@ -1968,18 +1968,24 @@ def build_anonymize_user_context(schema: dict) -> dict:
     # FK, or this insertion point silently falls through to the
     # end-of-loop fallback below instead).
     INDENT = '          '
+    # The API key columns are server-managed (Prisma only, not in json_schema), so
+    # no x-pii annotation can reach them; they are always cleared with the account.
+    _ANONYMIZE_PRISMA_ONLY_SCRUBS = [
+        f"{INDENT}emailVerified: null,",
+        f"{INDENT}mfa_secret: null,",
+        f"{INDENT}api_key_hash: null,",
+        f"{INDENT}api_key_issued_at: null,",
+    ]
     lines = []
     prisma_only_inserted = False
     for f in pii_fields:
         lines.append(f"{INDENT}{f['name']}: {f['scrub_value']},")
         if f['name'] == 'image_id' and not prisma_only_inserted:
-            lines.append(f"{INDENT}emailVerified: null,")
-            lines.append(f"{INDENT}mfa_secret: null,")
+            lines.extend(_ANONYMIZE_PRISMA_ONLY_SCRUBS)
             prisma_only_inserted = True
 
     if not prisma_only_inserted:
-        lines.append(f"{INDENT}emailVerified: null,")
-        lines.append(f"{INDENT}mfa_secret: null,")
+        lines.extend(_ANONYMIZE_PRISMA_ONLY_SCRUBS)
 
     lines.append(f"{INDENT}anonymized_at: anonymizedAt,")
     lines.append(f"{INDENT}invalidated_at: invalidatedAt,")
@@ -4800,6 +4806,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     # MFA off); the REST update routes ask for the same proof through
     # confirmCredentialChange() (lib/auth/credential-confirmation.ts), and the
     # service receives the confirmed values instead of the raw request ones.
+    # Changing the email address (Issue #1285) needs the current password too.
     _cred_vars = {p['prop']: p['var_name'] for p in client_prop_infos}
     credential_confirmation = (
         is_self_only
@@ -4809,6 +4816,9 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     )
     credential_password_var = _cred_vars.get('password', 'password')
     credential_mfa_var = _cred_vars.get('mfa_enabled', 'mfaEnabled')
+    # The email address is an authentication attribute too (Issue #1285): the
+    # view exposes it, and changing it needs the current password as well.
+    credential_email_var = _cred_vars.get('email')
     if credential_confirmation:
         service_args_for_update = re.sub(
             rf"\b{re.escape(credential_password_var)} \?\? ''",
@@ -5073,6 +5083,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         credential_confirmation=credential_confirmation,
         credential_password_var=credential_password_var,
         credential_mfa_var=credential_mfa_var,
+        credential_email_var=credential_email_var,
         # CSV import -> service.ts convergence (cmd_996, Issue #93; cmd_1124)
         import_service_parent_args=import_service_parent_args,
         import_service_child_args=import_service_child_args,

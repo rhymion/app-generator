@@ -11,7 +11,7 @@ import { TEST_API_KEY } from '../../support/test-credentials';
 type Asset = { id: string; organization_id: string };
 
 const BOUNDARY = '----attachmentsserveboundary';
-const CONTENT = 'bridge attachment content';
+const CONTENT = '%PDF-1.4 bridge attachment content';
 const asKey = (key = TEST_API_KEY) => ({ 'X-API-Key': key });
 
 function multipart(filename: string): string {

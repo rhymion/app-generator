@@ -367,7 +367,7 @@ def build_entity_openapi(ctx: dict) -> dict:
         create_properties['current_password'] = {
             'type': 'string',
             'writeOnly': True,
-            'description': 'The current password. Required on update when `password` is sent.',
+            'description': 'The current password. Required on update when `password` is sent or `email` differs from the stored address.',
         }
         create_properties['mfa_code'] = {
             'type': 'string',

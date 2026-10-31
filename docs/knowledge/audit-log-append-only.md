@@ -193,6 +193,12 @@ password or connection string is ever passed on a command line or recorded in a 
    as `DATABASE_URL` for that target and says so; `DIRECT_URL` stays the owner's unpooled URL, because migrations need
    the owner. When it is not set, every run prints a warning that `DATABASE_URL` is being set to the owner's URL. The
    script never creates the role or handles its password beyond reading that file.
+7. **Create the search indexes as the owner.** The generated `ensureSearchIndexes()` (`lib/db-init.ts`, run from
+   `instrumentation.ts` on every cold start) reads `pg_indexes` and runs `CREATE INDEX CONCURRENTLY` only for indexes that
+   are missing. A role that does not own the tables cannot create them (`42501`, `must be owner of table`), so it logs one
+   warning naming the missing indexes and skips them. After the switch, and after any deploy that adds a searchable field
+   or an `x-trigram-filter` column, run `scripts/create-gin-indexes.sql` as the owner (`DIRECT_URL`). With every index
+   present the function does nothing and logs nothing.
 
 The scheduled task `audit_log_ensure_partitions` writes a completion record to `scheduled_task_run`. If that table is
 missing from the database, the run fails with `The table public.scheduled_task_run does not exist in the current

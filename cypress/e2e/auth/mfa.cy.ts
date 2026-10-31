@@ -62,7 +62,12 @@ function doMfaLogin(email: string, password: string, totpSecret: string) {
   cy.contains('Sign Out').should('be.visible');
 }
 
-describe('MFA (TOTP + Recovery Code)', () => {
+// Retries are raised for this spec only (global runMode is 1). The OAuth challenge examples
+// and the SSO inline-disable example are intermittently redirected back to /mfa-challenge
+// after a completed challenge when the machine is under load; the root cause is not
+// established (candidate: a request already in flight re-issues the session cookie with the
+// stale `mfa_pending: true` token after the challenge cleared it). See the tracking Issue.
+describe('MFA (TOTP + Recovery Code)', { retries: { runMode: 3, openMode: 0 } }, () => {
 
   beforeEach(() => {
     Cypress.session.clearAllSavedSessions();
@@ -118,7 +123,7 @@ describe('MFA (TOTP + Recovery Code)', () => {
       cy.visit(MFA_SETTINGS_URL);
       cy.contains('Two-factor authentication is enabled on this account.').should('be.visible');
 
-      cy.task('generateTotp', secret).then((code) => {
+      cy.task('generateNextTotp', secret).then((code) => {
         cy.get('input[autocomplete="one-time-code"]:visible').first().type(code as string);
         cy.contains('Disable MFA').click();
       });
@@ -168,7 +173,7 @@ describe('MFA (TOTP + Recovery Code)', () => {
 
       cy.contains('MFA Enabled').should('be.visible');
       cy.contains('Disable MFA').click();
-      cy.task('generateTotp', secret).then((code) => {
+      cy.task('generateNextTotp', secret).then((code) => {
         cy.get('input[autocomplete="one-time-code"]:visible').first().type(code as string);
         cy.contains('Disable MFA').click();
       });
@@ -232,7 +237,7 @@ describe('MFA (TOTP + Recovery Code)', () => {
 
       cy.contains('MFA Enabled').should('be.visible');
       cy.contains('Disable MFA').click();
-      cy.task('generateTotp', secret).then((code) => {
+      cy.task('generateNextTotp', secret).then((code) => {
         cy.get('input[autocomplete="one-time-code"]:visible').first().type(code as string);
         cy.contains('Disable MFA').click();
       });

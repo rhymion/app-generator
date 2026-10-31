@@ -57,13 +57,19 @@ describe('x-self-only access control (setting)', () => {
           expect(res.status).to.eq(404);
         });
 
+        // The email address is sent back unchanged: changing it needs the current password.
         cy.request({
-          method: 'PUT',
           url: `/api/setting/${ownerId}`,
           headers: { 'X-API-Key': ownerKey },
-          body: { name: 'Updated Own Name', email: `owner_${ownerId}@example.com` },
-        }).then((res) => {
-          expect(res.status).to.eq(200);
+        }).then((current) => {
+          cy.request({
+            method: 'PUT',
+            url: `/api/setting/${ownerId}`,
+            headers: { 'X-API-Key': ownerKey },
+            body: { name: 'Updated Own Name', email: current.body.email },
+          }).then((res) => {
+            expect(res.status).to.eq(200);
+          });
         });
 
         cy.request({

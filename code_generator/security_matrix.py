@@ -29,6 +29,9 @@ MANIFEST_FILENAME = '.security-manifest.json'
 MARKER = re.compile(r'security-cell:\s*(?P<body>[^\n*]*)')
 TEST_SUFFIXES = ('.cy.ts', '.test.ts', '.test.tsx', '.spec.ts', '.cy.ts.jinja2')
 WILDCARD = '*'
+DENIAL_STATUSES = (401, 403, 404)
+# A test file that calls the helper must claim at least one cell, so the call is visible to the check.
+HELPER_CALL = re.compile(r'\bexpectDeniedFor\s*\(')
 
 
 def load_matrix(path: Path = MATRIX_PATH) -> dict:
@@ -49,6 +52,11 @@ def load_matrix(path: Path = MATRIX_PATH) -> dict:
                 unknown = set(allowed) - set(axes[other]['values'])
                 if unknown:
                     raise ValueError(f'{path}: {axis}.{value} combines with unknown {other} values {sorted(unknown)}')
+    for axis, spec in axes.items():
+        for value, vspec in spec['values'].items():
+            status = (vspec or {}).get('denied_status')
+            if status is not None and status not in DENIAL_STATUSES:
+                raise ValueError(f'{path}: {axis}.{value} denied_status {status!r} must be one of {DENIAL_STATUSES}')
     return matrix
 
 
@@ -95,9 +103,16 @@ def cell_id(entity: str, cell: dict, axes) -> str:
 
 def build_manifest(matrix: dict, entity_flags: dict[str, dict]) -> dict:
     axes = list(matrix['axes'])
+    denied_status = {
+        axis: {v: spec['denied_status'] for v, spec in (matrix['axes'][axis]['values'] or {}).items()
+               if spec and 'denied_status' in spec}
+        for axis in axes
+    }
     return {
         'version': matrix.get('version', 1),
         'axes': axes,
+        # Read by the test helpers (test/helpers/security_core.ts); see security_matrix.yaml.
+        'denied_status': {a: v for a, v in denied_status.items() if v},
         'entities': {
             entity: {'cells': applicable_cells(matrix, flags)}
             for entity, flags in sorted(entity_flags.items())
@@ -135,7 +150,10 @@ def scan_markers(roots: list[Path], matrix: dict) -> tuple[dict[str, list[str]],
         for path in files:
             if not path.name.endswith(TEST_SUFFIXES) or 'node_modules' in path.parts:
                 continue
-            for m in MARKER.finditer(path.read_text(encoding='utf-8', errors='replace')):
+            text = path.read_text(encoding='utf-8', errors='replace')
+            if HELPER_CALL.search(text) and not MARKER.search(text) and not path.name.endswith('.jinja2'):
+                errors.append(f'{path}: calls expectDeniedFor but carries no security-cell marker')
+            for m in MARKER.finditer(text):
                 parsed = parse_marker(m.group('body'), matrix)
                 if isinstance(parsed, str):
                     errors.append(f'{path}: {parsed}')

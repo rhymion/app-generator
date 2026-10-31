@@ -30,6 +30,7 @@ vi.mock("next-intl", () => ({
       noAccount: "No account? Register.",
       invalidCredentials: "Invalid credentials",
       loginError: "An error occurred during login",
+      oauthAccountNotLinked: "Sign in with your existing account first, then connect Google from your settings.",
     };
     return messages[key] ?? key;
   },
@@ -196,5 +197,15 @@ describe("LoginPage", () => {
 
     // Should not navigate
     expect(window.location.href).toBe("");
+  });
+  it("explains how to link Google when Auth.js returns OAuthAccountNotLinked", () => {
+    mockSearchParamsGet.mockImplementation((key: string) => (key === "error" ? "OAuthAccountNotLinked" : null));
+    render(<LoginPage />);
+    expect(screen.getByText(/connect Google from your settings/)).toBeTruthy();
+  });
+
+  it("shows no linking hint without that error", () => {
+    render(<LoginPage />);
+    expect(screen.queryByText(/connect Google from your settings/)).toBeNull();
   });
 });

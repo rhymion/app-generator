@@ -148,3 +148,15 @@ def test_getter_falls_back_to_contains_beyond_the_id_limit(linked):
     # the id lookup is one tagged query through the shared helper, never an inline raw call
     assert 'selectTrigramIds(' in getters
     assert '$queryRaw' not in getters
+
+
+def test_db_init_reads_pg_indexes_before_creating(linked):
+    """Issue #1213: a restricted (non-owner) role must not run CREATE INDEX for an index that exists."""
+    src = (linked / 'lib' / 'db-init.ts').read_text()
+    assert 'FROM pg_indexes WHERE schemaname = current_schema()' in src
+    assert 'if (missing.length === 0) return;' in src
+    assert '42501' in src and 'scripts/create-gin-indexes.sql' in src
+    # every index in the creation script is registered by name for the existence check
+    names = set(re.findall(r"name: '(idx_\w+)'", src))
+    sql_names = set(re.findall(r'"(idx_\w+)"', (linked / 'scripts' / 'create-gin-indexes.sql').read_text()))
+    assert sql_names and sql_names <= names

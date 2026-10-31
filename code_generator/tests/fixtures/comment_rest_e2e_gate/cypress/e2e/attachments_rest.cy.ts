@@ -29,7 +29,8 @@ function multipart(filename: string): string {
     `--${BOUNDARY}\r\n` +
     `Content-Disposition: form-data; name="file"; filename="${filename}"\r\n` +
     `Content-Type: application/pdf\r\n\r\n` +
-    `contents of ${filename}\r\n` +
+    // The route checks the leading bytes against the file's extension (a string body can only carry ASCII signatures).
+    `${filename.endsWith('.gif') ? 'GIF89a' : '%PDF-1.4 '}contents of ${filename}\r\n` +
     `--${BOUNDARY}--\r\n`
   );
 }
@@ -116,7 +117,7 @@ describe('API: attachment writes', () => {
 
     it('replaces only the type it was sent: images and files are separate sets', () => {
       cy.task<Asset[]>('db:populateCrAsset', 1).then(([asset]) => {
-        uploadAll(['p.png', 'd.pdf']).then(([image, doc]) => {
+        uploadAll(['p.gif', 'd.pdf']).then(([image, doc]) => {
           put(asset.id, { type: 'image', items: items(image) }).its('status').should('eq', 200);
           put(asset.id, { type: 'file', items: items(doc) }).its('status').should('eq', 200);
           put(asset.id, { type: 'file', items: [] }).its('status').should('eq', 200);

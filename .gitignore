@@ -248,6 +248,8 @@ lib/dashboard/use_entity_approval_actions.ts
 !lib/approval_request/submit_predicate.ts
 !lib/approval_request/submit_predicate.test.ts
 !lib/setting/password-actions.ts
+!lib/setting/api-key-actions.ts
+!lib/setting/api-key-actions.test.ts
 !lib/audit_log/getters.ts
 !lib/audit_log/getters_internal.ts
 !lib/audit_log/types.ts
@@ -372,6 +374,7 @@ cypress/e2e/api/*.cy.ts
 !cypress/e2e/api/round_trip.cy.ts
 !cypress/e2e/api/mobile_auth.cy.ts
 !cypress/e2e/api/mobile_nav.cy.ts
+!cypress/e2e/api/framework_guarantees.cy.ts
 !cypress/e2e/api/mobile_permissions.cy.ts
 !cypress/e2e/api/mobile_token_dual_auth.cy.ts
 !cypress/e2e/api/fk_autocomplete_options.cy.ts
@@ -392,6 +395,7 @@ cypress/e2e/api/*.cy.ts
 !cypress/e2e/api/user_invalidate_record_scope.cy.ts
 !cypress/e2e/api/setting_write_only_omitted.cy.ts
 !cypress/e2e/api/setting_credential_confirmation.cy.ts
+!cypress/e2e/api/api_key_storage.cy.ts
 
 # ── cypress/support/ ──
 cypress/support/*/

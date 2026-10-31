@@ -4,6 +4,7 @@
 // already derived those from the session or an authenticated API key. Keep
 // them out of the server-function module in ./getters.ts.
 
+import { logger } from '@/lib/logger';
 import prisma from '@/lib/prisma';
 import type { {{ parent_pascal }}, {{ parent_pascal }}Detail } from '@/lib/{{ parent }}/types';
 {% if can_list %}
@@ -222,7 +223,7 @@ export async function get{{ parent_pascal }}Detail(id: string{% if should_filter
         } catch (e) {
           // Legacy/rotated-key records: fall back to the stored (UUID) name
           // rather than throwing and breaking the whole detail page.
-          console.warn('attachment name decrypt failed:', e instanceof Error ? e.message : e);
+          logger.warn('attachment name decrypt failed:', e instanceof Error ? e.message : e);
         }
       }
       return { ...rest, name: displayName, path: attachmentUrl(rest.id) };
@@ -253,7 +254,7 @@ export async function get{{ parent_pascal }}Detail(id: string{% if should_filter
       } catch (e) {
         // Legacy/rotated-key records: fall back to the stored (UUID) name
         // rather than throwing and breaking the whole detail page.
-        console.warn('attachment name decrypt failed:', e instanceof Error ? e.message : e);
+        logger.warn('attachment name decrypt failed:', e instanceof Error ? e.message : e);
       }
     }
     return { ...rest, name: displayName, path: attachmentUrl(rest.id) };
@@ -442,7 +443,7 @@ export async function get{{ parent_pascal }}Page(
   try {
     virtualData = await resolveVirtualColumns(rowsRaw as unknown as ReadonlyArray<Record<string, unknown>>);
   } catch (e) {
-    console.warn('virtual resolver error:', e);
+    logger.warn('virtual resolver error:', e);
     virtualData = new Map();
   }
 {% endif %}

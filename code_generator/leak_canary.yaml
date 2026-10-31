@@ -31,12 +31,12 @@ canaries:
     column: password
     row: victim
     description: password hash of a user
-  user_api_key:
+  user_api_key_hash:
     kind: db
     table: user
-    column: api_key
+    column: api_key_hash
     row: victim
-    description: API key of a user
+    description: SHA-256 hash of the API key of a user
   user_mfa_secret:
     kind: db
     table: user

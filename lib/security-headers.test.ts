@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { SECURITY_HEADERS } from './security-headers';
+import { API_NO_STORE_HEADERS, API_NO_STORE_SOURCE, SECURITY_HEADERS } from './security-headers';
 
 const byKey = Object.fromEntries(SECURITY_HEADERS.map((h) => [h.key, h.value]));
 
@@ -17,5 +17,11 @@ describe('SECURITY_HEADERS', () => {
 
   it('lists each header once', () => {
     expect(new Set(SECURITY_HEADERS.map((h) => h.key)).size).toBe(SECURITY_HEADERS.length);
+  });
+
+  it('keeps API responses out of caches, except the attachment route that sets its own header', () => {
+    expect(API_NO_STORE_HEADERS).toEqual([{ key: 'Cache-Control', value: 'no-store' }]);
+    expect(API_NO_STORE_SOURCE.startsWith('/api/')).toBe(true);
+    expect(API_NO_STORE_SOURCE).toContain('attachments/');
   });
 });

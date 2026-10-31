@@ -10,6 +10,8 @@
 #               entity) that must all be true for the value to apply to the entity.
 # - `combine`   on an axis value: restricts which values of OTHER axes it can be
 #               combined with (`{axis: [values]}`); omitted = combines with all.
+# - `denied_status` on an axis value: the HTTP status a denial in this value must return. The
+#               security test helpers (`expectDeniedFor`) assert the status a test passes against it.
 # - `default`   on an axis: the value an existing test marker means when it does
 #               not name that axis yet, so adding an axis does not force every
 #               marker to be rewritten.
@@ -47,11 +49,13 @@ axes:
       # An authenticated actor whose role lacks the permission.
       permission_denied:
         combine: {fk_shape: [none]}
+        denied_status: 403
       # An actor who holds the permission in their own organization and reaches
       # into another one. Dropped for an entity with no organization column.
       cross_org:
         requires: [should_filter_by_org]
         combine: {fk_shape: [none]}
+        denied_status: 404
       # Foreign-key references to a row the actor cannot reach (another organization, no read
       # permission, outside a creator/assignee scope, someone else's x-self-only row). The shape
       # of the reference is the `fk_shape` axis; the cases below only combine with a shape.

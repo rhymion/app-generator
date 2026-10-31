@@ -1,12 +1,15 @@
+import { logger } from '@/lib/logger';
 import { NextRequest, NextResponse } from 'next/server';
-import { createHash } from 'node:crypto';
+import { hashApiKey } from '@/lib/api-key';
 import prisma from '@/lib/prisma';
 import { getRateLimiter } from '@/lib/rate-limit';
 import { requireEntityPermission, requireRecordPermission, getSessionUserId, type RichPermissions, type Operation, type RecordContext } from '@/lib/authz';
 import { TtlLruCache } from '@/lib/_ttl_lru';
+import { cacheOnGlobal } from '@/lib/global-singleton';
 import { AppError, type ErrorCode } from '@/lib/_errors';
 import { SCHEDULED_TASK_ROLE_NAME } from '@/lib/scheduled-tasks/system-actor';
 import { enterRequestScope, runAsActor } from '@/lib/_request_scope';
+import { isAllowedHost } from '@/lib/auth/external-url';
 import { isMobileJwt, verifyMobileAccessToken, MobileAuthError } from '@/lib/mobile-auth';
 
 export class ApiError extends Error {
@@ -20,7 +23,7 @@ export class ApiError extends Error {
   }
 }
 
-// Per-process cache of api_key → userId | null (Phase 2 #4 from
+// Per-process cache of SHA-256(api key) → userId | null (Phase 2 #4 from
 // performance-plan-session.md). The negative-result cache (`null`) lets
 // repeated bad-key probes short-circuit without hammering the DB; the
 // LRU cap keeps unknown-key probing bounded. Rotations invalidate via
@@ -44,10 +47,20 @@ const apiKeyCacheEnabled = process.env.NODE_ENV === 'production';
 // against the current time on every lookup, not just when the entry was
 // cached.
 type ApiKeyCacheEntry = { userId: string; expiresAt: Date | null } | null;
-const apiKeyCache = new TtlLruCache<string, ApiKeyCacheEntry>(API_KEY_MAX_ENTRIES, API_KEY_TTL_MS);
+// Held on globalThis so the route handlers and the Server Actions that
+// invalidate it share one instance even when the build bundles this module
+// separately for each of them; otherwise a reissued key's old hash would stay
+// accepted by the route bundle's copy until the TTL ran out.
+const apiKeyCache = cacheOnGlobal(
+  globalThis as unknown as Record<string, unknown>,
+  '__apiKeyAuthCache',
+  () => new TtlLruCache<string, ApiKeyCacheEntry>(API_KEY_MAX_ENTRIES, API_KEY_TTL_MS),
+);
 
-export function invalidateApiKeyCache(apiKey: string | null | undefined): void {
-  if (apiKey) apiKeyCache.delete(apiKey);
+// The cache is keyed by the key's hash, never by the key itself, so a memory
+// dump or a heap snapshot holds no usable credential.
+export function invalidateApiKeyCache(apiKeyHash: string | null | undefined): void {
+  if (apiKeyHash) apiKeyCache.delete(apiKeyHash);
 }
 
 /**
@@ -67,11 +80,8 @@ export function clearApiKeyCache(): void {
  * instead of 401. Only failures are counted: a valid key is never throttled
  * here, and `api:read` / `api:write` still bound authenticated traffic.
  */
-async function rejectUnknownApiKey(apiKey: string): Promise<never> {
-  const decision = await getRateLimiter().check(
-    'auth:apikey',
-    createHash('sha256').update(apiKey).digest('hex'),
-  );
+async function rejectUnknownApiKey(apiKeyHash: string): Promise<never> {
+  const decision = await getRateLimiter().check('auth:apikey', apiKeyHash);
   if (!decision.allowed) {
     throw new ApiError(429, 'Too many API key attempts.', decision.retryAfterSeconds);
   }
@@ -88,10 +98,12 @@ export async function authenticateApiKey(request: NextRequest): Promise<{ userId
     throw new ApiError(401, 'Missing API key. Provide X-API-Key header or Authorization: Bearer <key>.');
   }
 
+  const apiKeyHash = hashApiKey(apiKey);
+
   if (apiKeyCacheEnabled) {
-    const cached = apiKeyCache.get(apiKey);
+    const cached = apiKeyCache.get(apiKeyHash);
     if (cached !== undefined) {
-      if (cached === null) return rejectUnknownApiKey(apiKey);
+      if (cached === null) return rejectUnknownApiKey(apiKeyHash);
       if (cached.expiresAt && cached.expiresAt <= new Date()) {
         throw new ApiError(401, 'API key expired.');
       }
@@ -100,16 +112,16 @@ export async function authenticateApiKey(request: NextRequest): Promise<{ userId
   }
 
   const user = await prisma.user.findFirst({
-    where: { api_key: apiKey },
+    where: { api_key_hash: apiKeyHash },
     select: { id: true, api_key_expires_at: true },
   });
 
   if (apiKeyCacheEnabled) {
-    apiKeyCache.set(apiKey, user ? { userId: user.id, expiresAt: user.api_key_expires_at } : null);
+    apiKeyCache.set(apiKeyHash, user ? { userId: user.id, expiresAt: user.api_key_expires_at } : null);
   }
 
   if (!user) {
-    return rejectUnknownApiKey(apiKey);
+    return rejectUnknownApiKey(apiKeyHash);
   }
 
   if (user.api_key_expires_at && user.api_key_expires_at <= new Date()) {
@@ -172,6 +184,41 @@ export async function requireMobileAuth(
   }
 }
 
+const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+
+/**
+ * Refuses a state-changing request that a browser sent from another site while
+ * the caller is identified only by the session cookie (ASVS V3.5.1, V3.5.2).
+ * `Sec-Fetch-Site` is decisive when present: only `same-origin` and `none`
+ * (a user-initiated navigation) pass. Without it, `Origin` must name a host
+ * this deployment serves. A request carrying neither header does not come from
+ * a browser that can be driven cross-site, so it passes. Requests that
+ * authenticate with an API key or a mobile access token never reach this check:
+ * those credentials are not attached by the browser on its own.
+ */
+export function assertSameSiteCookieWrite(request: NextRequest): void {
+  if (SAFE_METHODS.has(request.method)) return;
+  const fetchSite = request.headers.get('sec-fetch-site');
+  if (fetchSite) {
+    if (fetchSite === 'same-origin' || fetchSite === 'none') return;
+    throw new ApiError(403, 'Cross-site request refused.');
+  }
+  const origin = request.headers.get('origin');
+  if (!origin) return;
+  try {
+    if (isAllowedHost(new URL(origin).host)) return;
+    const own = request.headers.get('host');
+    if (own && hostnameOnly(own) === hostnameOnly(new URL(origin).host)) return;
+  } catch {
+    // An unparseable Origin is refused below.
+  }
+  throw new ApiError(403, 'Cross-site request refused.');
+}
+
+function hostnameOnly(host: string): string {
+  return host.replace(/:\d+$/, '').toLowerCase();
+}
+
 export async function requireSession(): Promise<{ userId: string }> {
   const userId = await getSessionUserId();
   if (!userId) throw new ApiError(401, 'Login required.');
@@ -195,6 +242,7 @@ export async function resolveActorId(request: NextRequest): Promise<string | nul
     const { userId } = await authenticate(request);
     return userId;
   }
+  assertSameSiteCookieWrite(request);
   return getSessionUserId();
 }
 
@@ -231,6 +279,7 @@ export async function requireCaller(request: NextRequest): Promise<{ userId: str
   if (request.headers.get('Authorization') || request.headers.get('X-API-Key')) {
     return authenticate(request);
   }
+  assertSameSiteCookieWrite(request);
   const userId = await getSessionUserId();
   if (!userId) throw new ApiError(401, 'Authentication required. Sign in, or send a mobile access token or API key.');
   return { userId };
@@ -321,6 +370,6 @@ export function handleApiError(error: unknown): NextResponse {
   // and the original goes to the server log only. A message meant for the
   // user is raised as an AppError (or ApiError) instead, which is handled
   // above.
-  console.error('API error:', error);
+  logger.error('API error:', error);
   return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
 }
