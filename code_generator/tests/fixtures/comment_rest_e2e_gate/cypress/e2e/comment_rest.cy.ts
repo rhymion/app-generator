@@ -19,6 +19,20 @@ function addComment(ticketId: string, message: string, key = TEST_API_KEY) {
   return cy.request({ method: 'POST', url: base(ticketId), headers: asKey(key), body: { message }, failOnStatusCode: false });
 }
 
+// notify() writes a notification after the request has returned, so a read straight after a
+// write can run before the row exists. Wait until at least `atLeast` rows exist, then give a
+// late duplicate time to land and read again: the caller still asserts the exact count.
+function notificationsOnceSettled(userId: string, atLeast: number, attemptsLeft = 40): Cypress.Chainable<unknown[]> {
+  return cy.task<unknown[]>('db:getNotificationsForUser', userId).then((rows) => {
+    if (rows.length >= atLeast || attemptsLeft <= 1) {
+      // eslint-disable-next-line cypress/no-unnecessary-waiting
+      return cy.wait(1000).then(() => cy.task<unknown[]>('db:getNotificationsForUser', userId));
+    }
+    // eslint-disable-next-line cypress/no-unnecessary-waiting
+    return cy.wait(250).then(() => notificationsOnceSettled(userId, atLeast, attemptsLeft - 1));
+  });
+}
+
 describe('API: comment writes', () => {
   beforeEach(() => {
     cy.task('db:reset');
@@ -91,7 +105,7 @@ describe('API: comment writes', () => {
       cy.task<{ record: Ticket; mentionedUserId: string }>('db:populateCrTicketWithMentionUser').then(({ record, mentionedUserId }) => {
         cy.task<unknown[]>('db:getNotificationsForUser', mentionedUserId).then((before) => {
           addComment(record.id, `hello @[user_id:${mentionedUserId}]`).its('status').should('eq', 201);
-          cy.task<unknown[]>('db:getNotificationsForUser', mentionedUserId).then((after) => {
+          notificationsOnceSettled(mentionedUserId, before.length + 1).then((after) => {
             expect(after.length).to.eq(before.length + 1);
           });
         });
@@ -319,7 +333,7 @@ describe('API: comment writes', () => {
             cy.request({ method: 'PATCH', url: `${base(record.id)}/${id}`, headers: asKey(), body: { message: `again @[user_id:${mentionedUserId}]` } })
               .its('status')
               .should('eq', 200);
-            cy.task<unknown[]>('db:getNotificationsForUser', mentionedUserId).then((after) => {
+            notificationsOnceSettled(mentionedUserId, before.length + 1).then((after) => {
               expect(after.length).to.eq(before.length + 1);
             });
           });
