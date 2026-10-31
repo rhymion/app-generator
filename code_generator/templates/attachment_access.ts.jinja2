@@ -22,24 +22,26 @@ export const UNLINKED_ATTACHMENT_WHERE = {
 {% endfor %}
 };
 
-export type AttachmentReadDecision = 'allow' | 'forbidden' | 'not_found';
+// A caller who may not read the attachment gets the same `not_found` as for an id that does not exist
+// or sits in another organization, so the answer does not reveal whether the id is linked to a record.
+export type AttachmentReadDecision = 'allow' | 'not_found';
 
 type AttachmentRef = { id: string; attachable_id: string | null; uploader_id: string | null };
 
-/** Read decision for one owner record, mirroring the owner's REST detail route. */
+/** Read decision for one owner record: the owner's own read check, with every refusal answered as `not_found`. */
 async function readOwner(
   actorId: string,
   model: string,
   load: () => Promise<(Record<string, unknown> & { id: string }) | null>,
 ): Promise<AttachmentReadDecision> {
   const base = (await getModelPermissions(model, actorId)).permissions;
-  if (!base.read) return 'forbidden';
+  if (!base.read) return 'not_found';
   const item = await load();
   // A record outside the caller's organizations (or, for a self-only entity, not the caller's own)
   // is not found, exactly as on the record's own detail route.
   if (!item) return 'not_found';
   const resolved = await resolveRecordPermissions(base, item as RecordContext, actorId);
-  return resolved.read ? 'allow' : 'forbidden';
+  return resolved.read ? 'allow' : 'not_found';
 }
 
 export async function authorizeAttachmentRead(actorId: string, attachment: AttachmentRef): Promise<AttachmentReadDecision> {
