@@ -10,7 +10,7 @@ const NAME = 'Settings Save Test User';
 function openOwnSettingsView() {
   cy.visit('/en/setting');
   cy.contains(NAME).click();
-  cy.url().should('match', /\/setting\/[^/]+$/);
+  cy.url().should('match', /\/setting\/view\/[^/]+$/);
   cy.contains('button', 'API key').click();
 }
 
