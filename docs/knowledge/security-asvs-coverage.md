@@ -93,8 +93,8 @@ Chapter V17 (WebRTC) does not apply: the generated app has no real-time media, T
 | V3.4.4 | 2 | generator | lib/security-headers.ts X-Content-Type-Options nosniff | lib/security-headers.test.ts | - | - |
 | V3.4.5 | 2 | generator | lib/security-headers.ts Referrer-Policy strict-origin-when-cross-origin | lib/security-headers.test.ts | - | - |
 | V3.4.6 | 2 | generator | lib/security-headers.ts CSP frame-ancestors 'none' and X-Frame-Options DENY | lib/security-headers.test.ts | - | - |
-| V3.5.1 | 1 | gap | Server Actions are checked by Next.js (Origin versus Host; test: cypress/e2e/api/framework_guarantees.cy.ts); generated REST routes do not check Origin or Sec-Fetch-Site | none | #1275 | - |
-| V3.5.2 | 1 | gap | Generated write routes parse a text/plain body with request.json(); only the import route enforces application/json | none | #1275 | - |
+| V3.5.1 | 1 | generator | `assertSameSiteCookieWrite()` in lib/api-auth.ts refuses a state-changing request whose `Sec-Fetch-Site` is not `same-origin` or `none` (or, without it, whose `Origin` is not a served host) when the caller is identified only by the session cookie; `requireCaller`, `resolveActorId` (so `requireDualAuth`) and the notifications mark-read route call it. The generated CRUD routes accept only an API key or a mobile token, which a browser never attaches by itself. Server Actions are checked by Next.js | cypress/e2e/api/framework_guarantees.cy.ts (cookie-authenticated REST writes, Server Action Origin), lib/api-auth.test.ts, code_generator/tests/test_cookie_write_cross_site_enumeration.py | - | - |
+| V3.5.2 | 1 | generator | A cross-site request cannot reach a cookie-authenticated handler with a `text/plain` body, because the origin check runs before the body is read (see V3.5.1). Routes that take an API key or mobile token are not driven by the browser's cookie jar | cypress/e2e/api/framework_guarantees.cy.ts (text/plain write and import refused), lib/api-auth.test.ts | - | - |
 | V3.5.3 | 1 | generator | Mutating handlers are POST, PUT, PATCH and DELETE; GET handlers only read | none | #1228 | - |
 | V3.5.4 | 2 | environment | One generated app per deployment; hostnames are chosen by the deploy scripts (scripts/gcp-deploy.sh, scripts/vercel-setup.sh) | none | - | - |
 | V3.5.5 | 2 | n/a | No postMessage usage | none | - | - |
@@ -107,7 +107,7 @@ Chapter V17 (WebRTC) does not apply: the generated app has no real-time media, T
 |----|-------|--------|------------|-------------|-----------|--------------------|
 | V4.1.1 | 1 | framework | NextResponse.json sets application/json; CSV export sets text/csv; charset=utf-8 | none | #1234 | next 16.4.2 (package-lock.json); Route Handlers docs |
 | V4.1.2 | 2 | environment | TLS is terminated by Cloud Run or Vercel; no application redirect code | none | - | - |
-| V4.1.3 | 2 | gap | proxy.ts builds redirect URLs from client-sendable x-forwarded-host and x-forwarded-proto without an allow-list | none | #1276 | - |
+| V4.1.3 | 2 | generator | lib/auth/external-url.ts `resolveExternalUrl()` builds the redirect host and scheme in proxy.ts; `x-forwarded-host`, `Host` and `x-forwarded-proto` count only when the host is the one in `AUTH_URL` / `NEXTAUTH_URL`, a Vercel deployment host or an `AUTH_ALLOWED_HOSTS` entry; anything else redirects to the configured application URL | lib/auth/external-url.test.ts, lib/proxy-forwarded-headers.test.ts | - | - |
 | V4.2.1 | 2 | environment | Request-smuggling defense belongs to the platform edge and the Next.js server | none | #1244 | - |
 | V4.3.1 | 2 | generator | lib/_pagination.ts MAX_PAGE_SIZE=200; sort and filter column allow-lists; import row and byte limits; no GraphQL | none | #1277 | - |
 | V4.3.2 | 2 | n/a | No GraphQL endpoint | none | - | - |
@@ -188,7 +188,7 @@ Chapter V17 (WebRTC) does not apply: the generated app has no real-time media, T
 | V7.4.3 | 2 | gap | Password change and MFA changes do not revoke other sessions | none | #1127 | - |
 | V7.4.4 | 2 | generator | signOut() is reachable from the header and sidebar slots on every authenticated page | none | - | - |
 | V7.4.5 | 2 | gap | No administrator session termination for web users | none | #1127 | - |
-| V7.5.1 | 2 | gap | Password change and MFA disable require the current credential; email change does not | lib/auth/credential-confirmation.test.ts | #1285 | - |
+| V7.5.1 | 2 | generator | Password change and MFA disable require the current credential, and so does an email change: `confirmCredentialChange()` in lib/auth/credential-confirmation.ts asks for `current_password` on PUT /api/setting/:id and PUT /api/setting/bulk. The settings page Server Action path does not ask for the current password when the email changes | lib/auth/credential-confirmation.test.ts, cypress/e2e/api/setting_credential_confirmation.cy.ts | #1285 | - |
 | V7.5.2 | 2 | gap | Only mobile sessions are listable and revocable, by their owner | cypress/e2e/api/mobile_auth.cy.ts | #1127 | - |
 | V7.6.1 | 2 | gap | Identity-provider and relying-party session behavior is not documented | none | #1284 | - |
 | V7.6.2 | 2 | generator | Sessions are created only by an explicit login submit, OAuth button or mobile token request | cypress/e2e/auth.cy.ts, cypress/e2e/api/mobile_auth.cy.ts | - | - |
@@ -318,8 +318,8 @@ Chapter V17 (WebRTC) does not apply: the generated app has no real-time media, T
 | V14.2.2 | 2 | gap | idempotency_key.response_body persists responses without a purge; attachment responses are no-store | lib/attachment/storage.test.ts | #1299 | - |
 | V14.2.3 | 2 | generator | No analytics, tracker or third-party script | none | - | - |
 | V14.2.4 | 2 | gap | Controls exist piecemeal; no documented protection requirements to trace them to | lib/prisma-slow-query.test.ts (parameter redaction) | #1298 | - |
-| V14.3.1 | 1 | gap | No Clear-Site-Data on sign-out | none | #1300 | - |
-| V14.3.2 | 2 | gap | Only the attachment route sets Cache-Control | lib/attachment/storage.test.ts | #1300 | - |
+| V14.3.1 | 1 | generator | proxy.ts sends `Clear-Site-Data: "cache", "cookies", "storage"` on the Auth.js sign-out response (POST /api/auth/signout) | cypress/e2e/api/framework_guarantees.cy.ts (cache and client-data headers), lib/proxy-forwarded-headers.test.ts | - | - |
+| V14.3.2 | 2 | generator | next.config.ts sends `Cache-Control: no-store` on every `/api/` response except the attachment route, which sets `private, no-store` itself; proxy.ts sets `no-store` on signed-in page responses | cypress/e2e/api/framework_guarantees.cy.ts (cache and client-data headers), lib/security-headers.test.ts, lib/attachment/storage.test.ts | - | - |
 | V14.3.3 | 2 | gap | Mobile web build keeps the refresh token in localStorage; native uses SecureStore | none | #1301 | - |
 
 ## V15 Secure Coding and Architecture

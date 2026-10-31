@@ -178,9 +178,13 @@ export async function PUT(request: NextRequest, { params }: Params) {
 {% endif %}
 {% if credential_confirmation %}
     // Issue #1188: the same proof the settings page asks for -- the current
-    // password to change the password, a TOTP/recovery code to turn MFA off.
+    // password to change the password or the email address, a TOTP/recovery code
+    // to turn MFA off.
     const _credential = await confirmCredentialChange(id, {
       password: {{ credential_password_var }},
+{% if credential_email_var %}
+      email: {{ credential_email_var }},
+{% endif %}
       currentPassword: body.current_password,
       mfaEnabled: {{ credential_mfa_var }},
       mfaCode: body.mfa_code,

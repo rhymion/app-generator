@@ -7,6 +7,7 @@ import { TtlLruCache } from '@/lib/_ttl_lru';
 import { AppError, type ErrorCode } from '@/lib/_errors';
 import { SCHEDULED_TASK_ROLE_NAME } from '@/lib/scheduled-tasks/system-actor';
 import { enterRequestScope, runAsActor } from '@/lib/_request_scope';
+import { isAllowedHost } from '@/lib/auth/external-url';
 import { isMobileJwt, verifyMobileAccessToken, MobileAuthError } from '@/lib/mobile-auth';
 
 export class ApiError extends Error {
@@ -172,6 +173,41 @@ export async function requireMobileAuth(
   }
 }
 
+const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+
+/**
+ * Refuses a state-changing request that a browser sent from another site while
+ * the caller is identified only by the session cookie (ASVS V3.5.1, V3.5.2).
+ * `Sec-Fetch-Site` is decisive when present: only `same-origin` and `none`
+ * (a user-initiated navigation) pass. Without it, `Origin` must name a host
+ * this deployment serves. A request carrying neither header does not come from
+ * a browser that can be driven cross-site, so it passes. Requests that
+ * authenticate with an API key or a mobile access token never reach this check:
+ * those credentials are not attached by the browser on its own.
+ */
+export function assertSameSiteCookieWrite(request: NextRequest): void {
+  if (SAFE_METHODS.has(request.method)) return;
+  const fetchSite = request.headers.get('sec-fetch-site');
+  if (fetchSite) {
+    if (fetchSite === 'same-origin' || fetchSite === 'none') return;
+    throw new ApiError(403, 'Cross-site request refused.');
+  }
+  const origin = request.headers.get('origin');
+  if (!origin) return;
+  try {
+    if (isAllowedHost(new URL(origin).host)) return;
+    const own = request.headers.get('host');
+    if (own && hostnameOnly(own) === hostnameOnly(new URL(origin).host)) return;
+  } catch {
+    // An unparseable Origin is refused below.
+  }
+  throw new ApiError(403, 'Cross-site request refused.');
+}
+
+function hostnameOnly(host: string): string {
+  return host.replace(/:\d+$/, '').toLowerCase();
+}
+
 export async function requireSession(): Promise<{ userId: string }> {
   const userId = await getSessionUserId();
   if (!userId) throw new ApiError(401, 'Login required.');
@@ -195,6 +231,7 @@ export async function resolveActorId(request: NextRequest): Promise<string | nul
     const { userId } = await authenticate(request);
     return userId;
   }
+  assertSameSiteCookieWrite(request);
   return getSessionUserId();
 }
 
@@ -231,6 +268,7 @@ export async function requireCaller(request: NextRequest): Promise<{ userId: str
   if (request.headers.get('Authorization') || request.headers.get('X-API-Key')) {
     return authenticate(request);
   }
+  assertSameSiteCookieWrite(request);
   const userId = await getSessionUserId();
   if (!userId) throw new ApiError(401, 'Authentication required. Sign in, or send a mobile access token or API key.');
   return { userId };

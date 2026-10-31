@@ -1,7 +1,7 @@
 import type { NextConfig } from "next";
 import createNextIntlPlugin from 'next-intl/plugin';
 import createMDX from '@next/mdx'
-import { SECURITY_HEADERS } from './lib/security-headers';
+import { SECURITY_HEADERS, API_NO_STORE_SOURCE, API_NO_STORE_HEADERS } from './lib/security-headers';
 
 const withNextIntl = createNextIntlPlugin('./i18n/request.ts');
 
@@ -11,7 +11,10 @@ const nextConfig: NextConfig = {
   poweredByHeader: false,
   pageExtensions: ['js', 'jsx', 'md', 'mdx', 'ts', 'tsx'],
   async headers() {
-    return [{ source: '/:path*', headers: SECURITY_HEADERS }];
+    return [
+      { source: '/:path*', headers: SECURITY_HEADERS },
+      { source: API_NO_STORE_SOURCE, headers: API_NO_STORE_HEADERS },
+    ];
   },
   // Terms of Service / Privacy Policy pages (app/[locale]/legal/*) read
   // content/legal/*.md at request time via fs.readFileSync with a

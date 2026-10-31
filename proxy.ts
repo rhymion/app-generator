@@ -5,8 +5,12 @@ import { routing } from './i18n/routing';
 import { getRateLimiter } from '@/lib/rate-limit';
 import { clientIp } from '@/lib/rate-limit/client-ip';
 import { safeRedirectPath } from '@/lib/auth/safe-redirect';
+import { resolveExternalUrl } from '@/lib/auth/external-url';
 
 const intlMiddleware = createIntlMiddleware(routing);
+
+const NO_STORE = 'no-store';
+const CLEAR_SITE_DATA_ON_SIGN_OUT = '"cache", "cookies", "storage"';
 
 // Paths that do not require authentication (matched after stripping locale prefix)
 const PUBLIC_PATHS = ['/login', '/register', '/docs', '/legal'];
@@ -31,34 +35,26 @@ function bucketForAuthRequest(pathname: string, method: string): string | null {
 }
 
 /**
- * Strip a port from a Host-style string when the connection is HTTPS.
- *
- * Confirmed by curling a live Cloud Run deployment (cmd_1114): an
- * unauthenticated `GET /` 307s to a Location carrying `:8080` — the
- * container's internal listening port — even though the public connection
- * terminated TLS on 443 with no port in the URL. Cloud Run's front end
- * forwards that internal port in the Host header it hands to the container,
- * and Next.js mirrors Host into x-forwarded-host when no upstream proxy sets
- * x-forwarded-host itself, so both headers end up carrying it. An https
- * external URL must never carry a port, so this strips whatever the proxy
- * tacked on. http is left untouched — local dev relies on an explicit port
- * (e.g. :3000), and there the forwarded host string is trustworthy as-is.
+ * Reconstruct an external URL when running behind a reverse proxy (e.g. Cloud
+ * Run). Without this, req.nextUrl reflects the internal :8080 address, leaking
+ * it into Location headers on redirect. The forwarded and Host headers are
+ * client-sendable, so resolveExternalUrl() only believes a host the deployment
+ * is configured to serve (see lib/auth/external-url.ts).
  */
-function stripPortForHttps(host: string, proto: string): string {
-  return proto === 'https' ? host.replace(/:\d+$/, '') : host;
+function externalOrigin(req: NextRequest) {
+  return resolveExternalUrl({
+    forwardedHost: req.headers.get('x-forwarded-host'),
+    forwardedProto: req.headers.get('x-forwarded-proto'),
+    hostHeader: req.headers.get('host'),
+    nextUrl: req.nextUrl,
+  });
 }
 
-/**
- * Reconstruct an external URL using X-Forwarded-* headers when running behind
- * a reverse proxy (e.g. Cloud Run). Without this, req.nextUrl reflects the
- * internal :8080 address, leaking it into Location headers on redirect.
- */
 function buildExternalUrl(req: NextRequest, targetPath: string): URL {
-  const proto = req.headers.get('x-forwarded-proto') ?? req.nextUrl.protocol.replace(':', '');
-  const rawHost = req.headers.get('x-forwarded-host') ?? req.headers.get('host') ?? req.nextUrl.host;
+  const { protocol, host } = externalOrigin(req);
   const url = new URL(req.nextUrl.href);
-  url.protocol = proto + ':';
-  url.host = stripPortForHttps(rawHost, proto);
+  url.protocol = protocol + ':';
+  url.host = host;
   url.pathname = targetPath;
   return url;
 }
@@ -68,17 +64,16 @@ function buildExternalUrl(req: NextRequest, targetPath: string): URL {
  * the internal port (:8080) has leaked into the URL.
  */
 function normalizeIntlRedirect(req: NextRequest, response: NextResponse): NextResponse {
-  const forwardedHost = req.headers.get('x-forwarded-host');
-  if (!forwardedHost) return response;
+  if (!req.headers.get('x-forwarded-host')) return response;
   const { status } = response;
   if (status < 300 || status >= 400) return response;
   const location = response.headers.get('location');
   if (!location) return response;
   try {
-    const proto = req.headers.get('x-forwarded-proto') ?? req.nextUrl.protocol.replace(':', '');
+    const { protocol, host } = externalOrigin(req);
     const loc = new URL(location);
-    loc.protocol = proto + ':';
-    loc.host = stripPortForHttps(forwardedHost, proto);
+    loc.protocol = protocol + ':';
+    loc.host = host;
     return NextResponse.redirect(loc.toString(), { status });
   } catch {
     return response;
@@ -127,7 +122,13 @@ export const proxy = auth(async (req) => {
   // or fetch a CSRF token. Auth.js owns the entire /api/auth/* surface, so
   // hand the request straight to the underlying handler.
   if (pathname.startsWith('/api/auth/')) {
-    return NextResponse.next();
+    const response = NextResponse.next();
+    // Sign-out: tell the browser to drop what it cached or stored for this
+    // origin (ASVS V14.3.1). Auth.js clears the session cookie itself.
+    if (pathname === '/api/auth/signout' && req.method === 'POST') {
+      response.headers.set('Clear-Site-Data', CLEAR_SITE_DATA_ON_SIGN_OUT);
+    }
+    return response;
   }
 
   // Strip any locale prefix to normalise the path for public-path checks
@@ -210,7 +211,11 @@ export const proxy = auth(async (req) => {
     return NextResponse.redirect(url);
   }
 
-  return normalizeIntlRedirect(req, intlResponse);
+  // Everything past this point is for a signed-in user: keep it out of
+  // browser and shared caches (ASVS V14.3.2).
+  const response = normalizeIntlRedirect(req, intlResponse);
+  response.headers.set('Cache-Control', NO_STORE);
+  return response;
 });
 
 export const config = {

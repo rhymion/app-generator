@@ -305,6 +305,11 @@ key or a mobile token alone cannot change either:
   plain text and stored as a bcrypt hash. Wrong attempts spend the
   `auth:password:confirm` bucket (10 per user per 5 minutes, keyed by user id
   like `auth:mfa:challenge`); a spent budget answers `429` with `Retry-After`.
+- An `email` that differs from the stored address (compared without case or
+  surrounding spaces) needs `current_password` too, with the same status codes
+  and the same budget. Sending the stored address back unchanged asks for
+  nothing. The settings page does not ask for the current password when the
+  email changes: that path is not covered yet.
 - `mfa_enabled: false` on an account that has MFA on needs `mfa_code`, a current
   TOTP or recovery code (HTTP 400 when missing, 403 when invalid). It runs
   `disableMfa()`, so the secret and the recovery codes are cleared exactly as on
@@ -599,6 +604,42 @@ that every code path uses its result. Route-specific behaviour stays covered by 
 Cypress API specs.
 
 ---
+
+## Cross-site requests, forwarded headers and cached responses
+
+Four small controls sit around the session cookie:
+
+- **Cross-site writes.** `assertSameSiteCookieWrite()` in `lib/api-auth.ts` refuses
+  a `POST`, `PUT`, `PATCH` or `DELETE` that a browser sent from another site when
+  the caller is identified only by the session cookie (HTTP 403). `Sec-Fetch-Site`
+  decides when the browser sends it: only `same-origin` and `none` pass (so a
+  request from a sibling subdomain, `same-site`, is refused). Without it, `Origin`
+  must name a host this deployment serves or the request's own `Host`. A request
+  with neither header is not a browser that can be driven cross-site and passes.
+  `requireCaller`, `resolveActorId` (hence `requireDualAuth`) and the
+  notifications mark-read route call it before they read the cookie; a route that
+  reads the cookie some other way has to call it itself
+  (`code_generator/tests/test_cookie_write_cross_site_enumeration.py` enumerates
+  the routes). The generated CRUD routes accept only an API key or a mobile token
+  and are not affected. Server Actions are checked by Next.js.
+- **Forwarded headers.** `proxy.ts` builds its redirect URLs through
+  `resolveExternalUrl()` (`lib/auth/external-url.ts`). `x-forwarded-host`, `Host`
+  and `x-forwarded-proto` are believed only when the host is the one in
+  `AUTH_URL` / `NEXTAUTH_URL`, a Vercel deployment host (`VERCEL_URL`,
+  `VERCEL_BRANCH_URL`, `VERCEL_PROJECT_PRODUCTION_URL`) or an entry of
+  `AUTH_ALLOWED_HOSTS` (comma-separated host names, for extra custom domains).
+  Any other host is ignored and the redirect goes to the configured application
+  URL; with none configured the request's own URL is used. The scheme is
+  `http` or `https` only, and an https URL never carries a port.
+- **Caching.** Every `/api/` response carries `Cache-Control: no-store`
+  (`next.config.ts`, from `lib/security-headers.ts`); the attachment route keeps its
+  own `private, no-store`. `proxy.ts` sets `no-store` on signed-in page responses.
+- **Sign-out.** The Auth.js sign-out response (`POST /api/auth/signout`) carries
+  `Clear-Site-Data: "cache", "cookies", "storage"`, so the browser drops cached
+  pages and local storage for the origin.
+
+The session cookie keeps the Auth.js name (`__Secure-authjs.session-token` over
+https); a `__Host-` prefix is not applied.
 
 ## Out of scope
 
