@@ -109,6 +109,14 @@ is reported by zizmor's `dangerous-triggers` audit and is not used. Every
 
 Run both locally with `zizmor --no-online-audits .github` and `actionlint`.
 
+`actionlint` runs `shellcheck` on every `run:` script only when `shellcheck` is on
+`PATH`, and it skips that check silently otherwise. A local `actionlint` that exits 0
+on a machine without `shellcheck` is therefore not equivalent to the CI run, which has
+it. Install `shellcheck` first (for example `pip install shellcheck-py` into a venv)
+and confirm it is found with `which shellcheck` before trusting a clean result. A
+`shellcheck` directive must be on its own comment line; text after the code on the
+same line is a parse error.
+
 ## Static checks run by CI
 
 Two checks that used to run only by hand are CI steps:

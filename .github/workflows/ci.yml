@@ -210,6 +210,8 @@ jobs:
       - name: Summarize audit result (severity breakdown, step summary)
         if: always()
         run: |
+          # The ${...} below are JavaScript template literals for node, not shell expansions.
+          # shellcheck disable=SC2016
           node -e '
             const fs = require("fs");
             let data = {};
