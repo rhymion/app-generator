@@ -326,9 +326,9 @@ Chapter V17 (WebRTC) does not apply: the generated app has no real-time media, T
 
 | ID | Level | Status | Covered by | Verified by | Gap Issue | Source and version |
 |----|-------|--------|------------|-------------|-----------|--------------------|
-| V15.1.1 | 1 | gap | CI audit job gates high and critical advisories; no remediation time frames | none | #1302 | - |
-| V15.1.2 | 2 | gap | package-lock.json and npm ci; no SBOM or trusted-source policy | none | #1302 | - |
-| V15.1.3 | 2 | gap | Limits are scattered across documents | none | #1302 | - |
+| V15.1.1 | 1 | gap | CI audit job gates high and critical advisories; no remediation time frames (docs/knowledge/dependency-and-resource-controls.md) | none | #1320 | - |
+| V15.1.2 | 2 | gap | package-lock.json and npm ci; trusted sources documented in docs/knowledge/dependency-and-resource-controls.md; no SBOM | none | #1320 | - |
+| V15.1.3 | 2 | generator | Resource-demanding functions and their limits are listed in docs/knowledge/dependency-and-resource-controls.md | none | - | - |
 | V15.2.1 | 1 | generator | CI audit job (npm audit, pip-audit) blocks on high and critical | CI job audit (.github/workflows/ci.yml); gate steps 19 and 20 | #1074 | - |
 | V15.2.2 | 2 | generator | Rate-limit buckets, MAX_PAGE_SIZE, import limits, upload quota | lib/rate-limit/redis.test.ts, lib/rate-limit/in-memory.test.ts, lib/_pagination.test.ts | #1245 | - |
 | V15.2.3 | 2 | generator | reset-caches route is token-gated; mock OAuth is gated by a filesystem sentinel | lib/auth/mock-oauth-gate.test.ts, lib/_secret_compare.test.ts | - | - |
@@ -344,10 +344,10 @@ Chapter V17 (WebRTC) does not apply: the generated app has no real-time media, T
 
 | ID | Level | Status | Covered by | Verified by | Gap Issue | Source and version |
 |----|-------|--------|------------|-------------|-----------|--------------------|
-| V16.1.1 | 2 | gap | Only audit_log is documented | none | #1305 | - |
+| V16.1.1 | 2 | generator | Logging layers, events, destinations, access and retention: docs/knowledge/logging-inventory.md | none | - | - |
 | V16.2.1 | 2 | gap | audit_log has no source IP, user agent or request id | lib/audit-log.test.ts | #1306 | - |
 | V16.2.2 | 2 | generator | audit_log.created_at is Timestamptz and written in UTC | lib/audit-log.test.ts, lib/audit-log-integrity/digest.test.ts | - | - |
-| V16.2.3 | 2 | gap | No inventory of permitted log sinks | none | #1305 | - |
+| V16.2.3 | 2 | generator | Permitted log sinks are listed in docs/knowledge/logging-inventory.md; application code has no other sink (lint, check:generated) | none | - | - |
 | V16.2.4 | 2 | gap | Console output formats are mixed | none | #1237 | - |
 | V16.2.5 | 2 | generator | Emails are kept out of audit_log metadata and auth logs; slow-query parameters are redacted | lib/auth/audit-no-pii.test.ts, lib/prisma-slow-query.test.ts | #1237 | - |
 | V16.3.1 | 2 | gap | Sign-in, sign-out, rejects and MFA events are audited; failed credentials, invalid API keys and failed mobile tokens are not | cypress/e2e/audit_log.cy.ts (sign-in only) | #1307 | - |
