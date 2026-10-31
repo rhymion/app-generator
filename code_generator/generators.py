@@ -1305,6 +1305,39 @@ def actions_context(ctx: dict) -> dict:
         else f'await {_create_call_expr};'
     )
 
+    # Issue #1285: changing the email address of the self-only account view
+    # needs the current password, on the settings screen exactly as on the
+    # REST routes. The form posts it as `current_password`; the same
+    # confirmCredentialChange() the routes use decides. The password itself
+    # still goes through the client-side verify step (components/setting/
+    # password.tsx), so only the email change is confirmed here. It runs
+    # after the permission check and before any write.
+    credential_email_var = ctx.get('credential_email_var')
+    credential_confirmation = bool(ctx.get('credential_confirmation') and credential_email_var)
+
+    def _credential_block(indent: str) -> str:
+        if not credential_confirmation:
+            return ''
+        return (
+            f"{indent}try {{\n"
+            f"{indent}  await confirmCredentialChange(id, {{\n"
+            f"{indent}    email: {credential_email_var},\n"
+            f"{indent}    currentPassword: data.get('current_password'),\n"
+            f"{indent}  }});\n"
+            f"{indent}}} catch (e) {{\n"
+            f"{indent}  if (e instanceof ApiError) {{\n"
+            f"{indent}    return {{\n"
+            f"{indent}      ok: false,\n"
+            f"{indent}      errorCode: 'VALIDATION',\n"
+            f"{indent}      field: 'current_password',\n"
+            f"{indent}      reason: e.statusCode === 400 ? 'missing' : 'invalid',\n"
+            f"{indent}      messageKey: e.statusCode === 400 ? 'Errors.currentPasswordRequired' : e.statusCode === 429 ? 'Errors.currentPasswordRateLimited' : 'Errors.currentPasswordIncorrect',\n"
+            f"{indent}    }} satisfies ActionFailure;\n"
+            f"{indent}  }}\n"
+            f"{indent}  throw e;\n"
+            f"{indent}}}\n"
+        )
+
     def _upsert_body(has_ch: bool) -> str:
         _flatten_block = (f"{flatten_extractions_code}\n" if flatten_extractions_code else "")
         if can_create and can_update:
@@ -1330,7 +1363,7 @@ def actions_context(ctx: dict) -> dict:
                         + _flatten_block
                         + _ro_reject_guarded +
                         f"\n  if (id) {{\n"
-                        + _wrap_call_with_catch(update_call, "    ") + "\n"
+                        + _credential_block("    ") + _wrap_call_with_catch(update_call, "    ") + "\n"
                         f"  }} else {{\n"
                         + _wrap_call_with_catch(create_call, "    ") + "\n"
                         f"  }}"
@@ -1354,7 +1387,7 @@ def actions_context(ctx: dict) -> dict:
                     + _ro_reject_guarded +
                     f"  const actorId = await getSessionUserIdOrThrow();\n\n"
                     f"  if (id) {{\n"
-                    + _wrap_call_with_catch(update_call, "    ") + "\n"
+                    + _credential_block("    ") + _wrap_call_with_catch(update_call, "    ") + "\n"
                     f"  }} else {{\n"
                     + _wrap_call_with_catch(create_call, "    ") + "\n"
                     f"  }}"
@@ -1378,7 +1411,7 @@ def actions_context(ctx: dict) -> dict:
                     + _flatten_block
                     + _ro_reject_guarded +
                     f"\n  if (id) {{\n"
-                    + _wrap_call_with_catch(update_call, "    ") + "\n"
+                    + _credential_block("    ") + _wrap_call_with_catch(update_call, "    ") + "\n"
                     f"  }} else {{\n"
                     + _wrap_call_with_catch(create_call, "    ") + "\n"
                     f"  }}"
@@ -1402,7 +1435,7 @@ def actions_context(ctx: dict) -> dict:
                 + _ro_reject_guarded +
                 f"  const actorId = await getSessionUserIdOrThrow();\n\n"
                 f"  if (id) {{\n"
-                + _wrap_call_with_catch(update_call, "    ") + "\n"
+                + _credential_block("    ") + _wrap_call_with_catch(update_call, "    ") + "\n"
                 f"  }} else {{\n"
                 + _wrap_call_with_catch(create_call, "    ") + "\n"
                 f"  }}"
@@ -1422,7 +1455,7 @@ def actions_context(ctx: dict) -> dict:
                     + f"{form_data_gets}\n"
                     + (f"{child_form_data_extractions}\n" if has_ch else "")
                     + _flatten_block +
-                    "\n" + _wrap_call_with_catch(
+                    "\n" + _credential_block("  ") + _wrap_call_with_catch(
                         f'await update{parent_pascal}(actorId, id, {parent_params}{full_child_args}{flatten_args_str}, srcSnapshotRaw);',
                         "  ",
                     )
@@ -1441,6 +1474,7 @@ def actions_context(ctx: dict) -> dict:
                 + (f"{child_form_data_extractions}\n" if has_ch else "")
                 + _flatten_block +
                 f"\n  const actorId = await getSessionUserIdOrThrow();\n"
+                + _credential_block("  ")
                 + _wrap_call_with_catch(
                     f'await update{parent_pascal}(actorId, id, {parent_params}{full_child_args}{flatten_args_str}, srcSnapshotRaw);',
                     "  ",
@@ -1482,6 +1516,7 @@ def actions_context(ctx: dict) -> dict:
 
     return {
         'service_imports': service_imports,
+        'credential_confirmation': credential_confirmation and can_update,
         'can_continue': can_continue,
         'inline_create_target': inline_create_target,
         'upsert_body': (
@@ -7463,6 +7498,36 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     _flatten_validation_code = '\n\n'.join(flatten_validation_parts)
     _child_validation_code_merged = '\n\n'.join(filter(None, [child_validation_code, _flatten_validation_code]))
 
+    # Issue #1285: the self-only account view asks for the current password
+    # next to the editable email address. It is posted as `current_password`
+    # and checked by the Server Action through confirmCredentialChange().
+    credential_confirmation = bool(
+        ctx.get('credential_confirmation') and ctx.get('credential_email_var') and ctx.get('can_update')
+    )
+    if credential_confirmation:
+        all_states_merged = '\n'.join(filter(None, [
+            all_states_merged,
+            "  const [currentPassword, setCurrentPassword] = useState('');",
+        ]))
+        parent_form_data_sets_merged = '\n'.join(filter(None, [
+            parent_form_data_sets_merged,
+            "    formData.set('current_password', currentPassword);",
+        ]))
+        all_parent_fields_jsx = '\n'.join(filter(None, [
+            all_parent_fields_jsx,
+            "      <AppFieldInput\n"
+            "        label={tcred('currentPassword')}\n"
+            "        type=\"password\"\n"
+            "        name=\"current_password\"\n"
+            "        autoComplete=\"current-password\"\n"
+            "        helperText={tcred('currentPasswordHelp')}\n"
+            "        value={currentPassword}\n"
+            "        onChange={setCurrentPassword}\n"
+            "        fullWidth\n"
+            "        margin=\"normal\"\n"
+            "      />",
+        ]))
+
     # AppFieldText / AppFieldBoolean / useCallback / useRef are imported unconditionally
     # by the template but rendered into the JSX/hook body from many independent code
     # paths above (editable field, readonly display, bridge parent display, flatten
@@ -7499,6 +7564,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
 
     _upsert_ctx = {
         'has_mention_fields':       bool(mention_props),
+        'credential_confirmation':  credential_confirmation,
         'parent_refs':              parent_refs,
         'all_states':               all_states_merged,
         'all_parent_fields_jsx':    all_parent_fields_jsx,

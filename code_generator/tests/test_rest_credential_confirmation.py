@@ -15,6 +15,7 @@ import pytest
 from jinja2 import Environment, FileSystemLoader
 
 from build_context import build_context
+from generators import actions_context, form_upsert_context
 from generators_openapi import build_entity_openapi
 
 TEMPLATES_DIR = pathlib.Path(__file__).resolve().parents[1] / 'templates'
@@ -137,3 +138,72 @@ class TestOpenApi:
     def test_no_confirmation_inputs_without_the_guard(self):
         props = build_entity_openapi(_ctx(self_only=False))['schemas']['SettingCreateRequest']['properties']
         assert 'current_password' not in props
+
+
+def _render_actions(ctx: dict) -> str:
+    return _render('actions.ts.jinja2', {**ctx, **actions_context(ctx)})
+
+
+def _upsert_body(out: str) -> str:
+    start = out.index('export async function upsertSetting')
+    return out[start:out.index('\n}\n', start)]
+
+
+class TestServerAction:
+    """Issue #1285: the settings screen saves through the Server Action, which
+    must ask for the current password to change the email address, with the
+    same confirmCredentialChange() as the REST routes."""
+
+    def test_update_confirms_the_email_change_before_writing(self):
+        out = _render_actions(_ctx())
+        assert "import { confirmCredentialChange } from '@/lib/auth/credential-confirmation';" in out
+        assert "import { ApiError } from '@/lib/api-auth';" in out
+        body = _upsert_body(out)
+        assert 'confirmCredentialChange(id' in body
+        call = body[body.index('confirmCredentialChange(id'):body.index('await updateSetting(')]
+        assert re.search(r'\bemail: email,', call), call
+        assert "currentPassword: data.get('current_password')" in call
+        # Permission is decided first, the write comes last.
+        assert body.index('requireRecordPermission') < body.index('confirmCredentialChange(id')
+        assert body.index('confirmCredentialChange(id') < body.index('await updateSetting(')
+
+    def test_a_refusal_comes_back_as_a_field_error_not_a_throw(self):
+        body = _upsert_body(_render_actions(_ctx()))
+        assert 'e instanceof ApiError' in body
+        assert "field: 'current_password'" in body
+        assert 'Errors.currentPasswordRequired' in body
+        assert 'Errors.currentPasswordIncorrect' in body
+        assert 'Errors.currentPasswordRateLimited' in body
+        # Anything that is not an ApiError is unexpected and propagates.
+        assert 'throw e;' in body
+
+    def test_other_entities_get_no_confirmation(self):
+        out = _render_actions(_ctx(self_only=False))
+        assert 'confirmCredentialChange' not in out
+        assert 'ApiError' not in out
+
+
+class TestSettingsForm:
+    def _form(self, **kw) -> dict:
+        ctx = _ctx(**kw)
+        return form_upsert_context(ctx, _schema(**kw))
+
+    def test_form_posts_the_current_password(self):
+        f = self._form()
+        assert f['credential_confirmation'] is True
+        assert "formData.set('current_password', currentPassword);" in f['parent_form_data_sets']
+        assert 'setCurrentPassword' in f['all_states']
+        assert 'type="password"' in f['all_parent_fields_jsx']
+        assert 'name="current_password"' in f['all_parent_fields_jsx']
+
+    def test_form_template_imports_the_input_and_translator(self):
+        ctx = _ctx()
+        out = _render('form_upsert.tsx.jinja2', {**ctx, **form_upsert_context(ctx, _schema())})
+        assert "import AppFieldInput from '@/components/ui/forms/AppFieldInput';" in out
+        assert "const tcred = useTranslations('Setting');" in out
+
+    def test_other_entities_get_no_field(self):
+        f = self._form(self_only=False)
+        assert f['credential_confirmation'] is False
+        assert 'current_password' not in f['parent_form_data_sets']
+        assert 'current_password' not in f['all_parent_fields_jsx']

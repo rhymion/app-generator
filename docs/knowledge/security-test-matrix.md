@@ -62,4 +62,9 @@ skip the matrix.
 that reads the session cookie itself must call `assertSameSiteCookieWrite()`, and the cookie-resolving helpers in
 `lib/api-auth.ts` must call it before they read the cookie (see [authentication.md](authentication.md)).
 
+`test_rest_credential_confirmation.py` covers the credential-confirmation guard of the self-only account view on both write
+paths: the REST update routes and the settings screen's Server Action must call `confirmCredentialChange()` after the
+permission check and before the write, and the edit form must post `current_password` (see
+[authentication.md](authentication.md)).
+
 See also [security-asvs-coverage.md](security-asvs-coverage.md), which maps each OWASP ASVS 5.0 requirement to the code, test or Issue that covers it.

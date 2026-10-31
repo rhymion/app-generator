@@ -188,7 +188,7 @@ Chapter V17 (WebRTC) does not apply: the generated app has no real-time media, T
 | V7.4.3 | 2 | gap | Password change and MFA changes do not revoke other sessions | none | #1127 | - |
 | V7.4.4 | 2 | generator | signOut() is reachable from the header and sidebar slots on every authenticated page | none | - | - |
 | V7.4.5 | 2 | gap | No administrator session termination for web users | none | #1127 | - |
-| V7.5.1 | 2 | generator | Password change and MFA disable require the current credential, and so does an email change: `confirmCredentialChange()` in lib/auth/credential-confirmation.ts asks for `current_password` on PUT /api/setting/:id and PUT /api/setting/bulk. The settings page Server Action path does not ask for the current password when the email changes | lib/auth/credential-confirmation.test.ts, cypress/e2e/api/setting_credential_confirmation.cy.ts | #1285 | - |
+| V7.5.1 | 2 | generator | Password change and MFA disable require the current credential, and so does an email change: `confirmCredentialChange()` in lib/auth/credential-confirmation.ts asks for `current_password` on PUT /api/setting/:id and PUT /api/setting/bulk, and the settings screen's Server Action asks for it through the same function when the email changes | lib/auth/credential-confirmation.test.ts, cypress/e2e/api/setting_credential_confirmation.cy.ts, cypress/e2e/auth/settings_email_change_requires_password.cy.ts, code_generator/tests/test_rest_credential_confirmation.py | #1285 | - |
 | V7.5.2 | 2 | gap | Only mobile sessions are listable and revocable, by their owner | cypress/e2e/api/mobile_auth.cy.ts | #1127 | - |
 | V7.6.1 | 2 | gap | Identity-provider and relying-party session behavior is not documented | none | #1284 | - |
 | V7.6.2 | 2 | generator | Sessions are created only by an explicit login submit, OAuth button or mobile token request | cypress/e2e/auth.cy.ts, cypress/e2e/api/mobile_auth.cy.ts | - | - |
@@ -348,13 +348,13 @@ Chapter V17 (WebRTC) does not apply: the generated app has no real-time media, T
 | V16.2.1 | 2 | gap | audit_log has no source IP, user agent or request id | lib/audit-log.test.ts | #1306 | - |
 | V16.2.2 | 2 | generator | audit_log.created_at is Timestamptz and written in UTC | lib/audit-log.test.ts, lib/audit-log-integrity/digest.test.ts | - | - |
 | V16.2.3 | 2 | gap | No inventory of permitted log sinks | none | #1305 | - |
-| V16.2.4 | 2 | gap | Console output formats are mixed | none | #1237 | - |
-| V16.2.5 | 2 | generator | Emails are kept out of audit_log metadata and auth logs; slow-query parameters are redacted | lib/auth/audit-no-pii.test.ts, lib/prisma-slow-query.test.ts | #1237 | - |
+| V16.2.4 | 2 | gap | Console output formats are mixed | none | #1323 | - |
+| V16.2.5 | 2 | generator | Emails are kept out of audit_log metadata and auth logs; slow-query parameters are redacted; lib/logger.ts redacts credential-like keys and masks email addresses | lib/auth/audit-no-pii.test.ts, lib/prisma-slow-query.test.ts, lib/logger.test.ts | - | - |
 | V16.3.1 | 2 | gap | Sign-in, sign-out, rejects and MFA events are audited; failed credentials, invalid API keys and failed mobile tokens are not | cypress/e2e/audit_log.cy.ts (sign-in only) | #1307 | - |
 | V16.3.2 | 2 | gap | Authorization denials are not logged | none | #1307 | - |
 | V16.3.3 | 2 | gap | No security-event list; rate-limit hits and control bypass attempts are not logged | none | #1307 | - |
 | V16.3.4 | 2 | generator | handleApiError logs unexpected errors; Redis rate-limit failures and startup failures are logged | lib/api-auth.test.ts, lib/rate-limit/redis.test.ts | - | - |
-| V16.4.1 | 2 | gap | Only some log lines are JSON-encoded; others pass raw values | none | #1237 | - |
+| V16.4.1 | 2 | gap | Only some log lines are JSON-encoded; others pass raw values | none | #1323 | - |
 | V16.4.2 | 2 | generator | audit_log is append-only (Prisma guard, database trigger, restricted role, digest chain) | lib/audit-log-integrity/guard.test.ts, digest.test.ts, code_generator/tests/test_audit_log_append_only_templates.py | #990, #1193 | - |
 | V16.4.3 | 2 | environment | Audit digests are stored outside the database (S3 Object Lock, GCS); stdout log forwarding is a platform setting | lib/audit-log-integrity/storage-gcs.test.ts | #991 | - |
 | V16.5.1 | 2 | generator | handleApiError returns a generic body for unknown errors; some ApiError(403) paths still pass an exception message | lib/api-auth.test.ts, code_generator/tests/test_error_text_not_forwarded.py | #1095 | - |
