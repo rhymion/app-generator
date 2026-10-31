@@ -44,6 +44,8 @@ jobs:
   pull-request-scan:
     name: Pull request lockfile scan
     if: github.event_name == 'pull_request'
+    # The reusable workflow's job declares security-events: write itself, so the
+    # caller must grant it or the run fails at startup, even with upload-sarif off.
     permissions:
       actions: read
       contents: read
