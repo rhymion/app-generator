@@ -1,0 +1,23 @@
+# Reviewed full-history findings; each entry is commit:file:rule:line.
+# Reasons are given per line. Fingerprints are exact, so a new secret of the same
+# shape in the same file is still reported.
+# unit-test fixture string, not a credential
+b47234bfb594223321fcc75e6e5877ebfa4e8e75:scripts/vercel-env.test.ts:generic-api-key:48
+# unit-test constant (random UUID), not a credential
+3f622599ffb69bc660264d4764759bdad8f34e16:lib/compliance/anonymize_user.test.ts:generic-api-key:38
+# template file name in a test, matched by entropy only
+6a410b76899ea97baede455d9e99b7d3808207bf:code_generator/tests/test_update_omitted_child_list_unchanged.py:generic-api-key:68
+# empty placeholder in an example env file
+06da73b664eddf18b99e98ee290fc473bfd2c874:.env.vercel.production.local.example:generic-api-key:54
+# fixed local demo/seed API key for the development database
+48b400fd02b3c99e3a7cfb299fa36c0772d5d7d9:scripts/seed-tenant-credentials.ts:generic-api-key:13
+# fixed local demo/seed API key for the development database
+a2b6173bb402cb757a56b79dee654103518f960b:scripts/seed-tenant.ts:generic-api-key:53
+# key-derivation context label, not a secret
+ea61e72dbc59117a6ea8e7f6d675dddb86fd22c7:lib/mfa/crypto.ts:generic-api-key:20
+# fixed local demo/seed API key for the development database
+cebfd47bce04dec0846eba6955d46ad463883308:scripts/seed-its.ts:generic-api-key:28
+# throwaway test-environment value; removed from the tree, history only
+acae5a7a0acafe2ae0c1ba032499d23867b62513:.env.test:generic-api-key:12
+# throwaway test-environment value; removed from the tree, history only
+496a98d363485bc8d30363c516f80c073ff329b8:.env.test:generic-api-key:12
