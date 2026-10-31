@@ -1,0 +1,103 @@
+# Leak canary manifest: the data that drives `code_generator/leak_canary.py` and
+# `npm run test:leak-canary-gate`.
+#
+# The gate puts a unique marker value into every secret-bearing field and every secret
+# environment variable, runs the end-to-end suite behind a recording proxy, and fails when a marker
+# shows up in an output it must never reach. Everything the checker knows is declared here as data:
+#
+# - `canaries`  one entry per marker. `kind: db` is written into a column by the seed task;
+#               `kind: env` is exported to the app under that variable name.
+#               `allowed_actors` (default: none) lists the actors whose responses may contain it.
+# - `surfaces`  the outputs that are scanned. Add an output by adding an entry here and a recorder for
+#               its `kind` in leak_canary.py; the canaries do not change.
+# - `crawl`     what the crawl spec requests (read from the generated OpenAPI document).
+# - `actors`    the values of the X-Leak-Canary-Actor request header the crawl spec sends.
+#
+# A marker looks like `CNRY<id-digest><run-random>`; it is a letter/digit string, so its URL- and
+# JSON-encoded forms equal the raw form, and base64 and hex forms are scanned too.
+version: 1
+
+actors:
+  # Holds every permission, in organization A only.
+  admin: {}
+  # An actor of the foreign organization B (the crawl spec does not sign in as it; the entry exists so a
+  # canary can name it in `allowed_actors`).
+  org_b_member: {}
+
+canaries:
+  user_password_hash:
+    kind: db
+    table: user
+    column: password
+    row: victim
+    description: password hash of a user
+  user_api_key:
+    kind: db
+    table: user
+    column: api_key
+    row: victim
+    description: API key of a user
+  user_mfa_secret:
+    kind: db
+    table: user
+    column: mfa_secret
+    row: victim
+    description: encrypted TOTP secret
+  mfa_recovery_code_hash:
+    kind: db
+    table: mfa_recovery_code
+    column: code_hash
+    row: victim
+    description: recovery code hash
+  mobile_refresh_token_hash:
+    kind: db
+    table: mobile_session
+    column: refresh_token_hash
+    row: victim
+    description: refresh token hash of a mobile session
+  attachment_encrypted_original_name:
+    kind: db
+    table: attachment
+    column: encrypted_original_name
+    row: victim
+    description: encrypted original file name of an attachment
+  # Fixture entity (code_generator/tests/fixtures/leak_canary_gate): a write-only field, and a record of
+  # the foreign organization that no actor in this run may see.
+  vault_write_only_field:
+    kind: db
+    table: lk_vault
+    column: secret_note
+    row: vault_org_a
+    description: write-only field of an organization-scoped record
+  vault_foreign_org_title:
+    kind: db
+    table: lk_vault
+    column: title
+    row: vault_org_b
+    allowed_actors: [org_b_member]
+    description: a record of another organization
+  env_auth_secret:
+    kind: env
+    name: AUTH_SECRET
+    description: session signing secret
+  env_test_reset_token:
+    kind: env
+    name: TEST_RESET_TOKEN
+    description: token of the test-only reset endpoint
+
+surfaces:
+  response_body: {recorder: proxy}
+  response_headers: {recorder: proxy}
+  # Content-Disposition names and Location targets are headers; listed apart so a report names the surface.
+  download_name: {recorder: proxy, header: content-disposition}
+  redirect_target: {recorder: proxy, header: location}
+  export: {recorder: proxy, path_contains: export}
+  # Issue 1236: not HTTP responses. The scan is part of the same gate.
+  server_log: {recorder: file}
+  client_bundle: {recorder: file, applies_to: [env]}
+  source_map: {recorder: file, applies_to: [env]}
+
+crawl:
+  # GET operations of the generated OpenAPI document are requested (the export routes among them); an operation with a path parameter
+  # is requested for up to `detail_limit` ids taken from the matching list response.
+  detail_limit: 3

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { clearApiKeyCache } from '@/lib/api-auth';
 import { invalidatePermissionCache } from '@/lib/authz';
+import { secretsEqual } from '@/lib/_secret_compare';
 
 /**
  * POST /api/test-utils/reset-caches
@@ -24,7 +25,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Not found' }, { status: 404 });
   }
   const provided = request.headers.get('X-Test-Reset-Token');
-  if (provided !== expected) {
+  if (!secretsEqual(provided, expected)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
   clearApiKeyCache();

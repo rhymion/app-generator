@@ -32,7 +32,7 @@ exemptions:
     targets:
       - lib/dashboard/catalog.ts
     reason: Dashboard component source reads the generated catalog, which exists only in generated apps.
-  - path: lib/approval_request/actions.ts
+  - path: lib/approval_request/actions_internal.ts
     targets:
       - lib/approval_request/on_approved_dispatch
       - lib/approval_request/on_before_approve_dispatch
@@ -70,6 +70,10 @@ exemptions:
     targets:
       - lib/organization/types
     reason: Hand-written getter uses a generated types module that exists only in generated apps.
+  - path: lib/organization/associated_internal.ts
+    targets:
+      - lib/organization/types
+    reason: Hand-written internal getter uses a generated types module that exists only in generated apps.
   - path: lib/scheduled-tasks/run-all.test.ts
     targets:
       - lib/scheduled-tasks/run-guard

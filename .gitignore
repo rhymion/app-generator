@@ -153,6 +153,8 @@ code_generator/.generated/
 # (pre-existing gap alongside its seven siblings above, noticed while
 # running the update-generator gate for cmd_781 — unrelated to that task.)
 .generated-approval-lockdown-gate/
+.generated-leak-canary-gate/
+.generated-leak-canary-gate.lock
 
 # uri-kind-gate fixture check (cmd_792) scratch output —
 # scripts/check_uri_kind_gate_fixture.sh regenerates this from
@@ -218,12 +220,14 @@ lib/dashboard/actions.ts
 lib/dashboard/catalog.ts
 lib/dashboard/access-scope.ts
 lib/dashboard/getters.ts
+lib/dashboard/getters_internal.ts
 lib/dashboard/service.ts
 lib/dashboard/types.ts
 lib/dashboard/use_entity_form.ts
 lib/dashboard/use_entity_capabilities.ts
 lib/dashboard/use_entity_approval_actions.ts
 !lib/organization/getters_associated.ts
+!lib/organization/associated_internal.ts
 !lib/attachment/storage.ts
 !lib/attachment/upload_core.ts
 !lib/attachment/link.ts
@@ -235,6 +239,7 @@ lib/dashboard/use_entity_approval_actions.ts
 !lib/approval_flow/service_validation_custom.ts
 !lib/app_setting/service_validation_custom.ts
 !lib/approval_request/actions.ts
+!lib/approval_request/actions_internal.ts
 !lib/approval_request/actions.test.ts
 !lib/approval_request/actions_core.ts
 !lib/approval_request/order-check.ts
@@ -244,6 +249,7 @@ lib/dashboard/use_entity_approval_actions.ts
 !lib/approval_request/submit_predicate.test.ts
 !lib/setting/password-actions.ts
 !lib/audit_log/getters.ts
+!lib/audit_log/getters_internal.ts
 !lib/audit_log/types.ts
 !lib/audit_log/virtual_resolvers.ts
 !lib/compliance/**

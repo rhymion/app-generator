@@ -372,7 +372,7 @@ export async function assertNoDuplicateReservation(
     excludeId
   );
   if (overlaps) {
-    throw new Error('Reservation overlaps with an existing booking');
+    throw new AppError('CONFLICT', 'Reservation overlaps with an existing booking');
   }
 }
 {% endif %}

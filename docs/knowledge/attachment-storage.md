@@ -11,7 +11,7 @@ orphan cleanup.
 |------|--------------|--------|
 | Store a file | `POST /api/upload` (multipart, field `file`) | `200 { id, name }`: the id of the `attachment` record that was created, and the file name for display |
 | Attach it to a record | `PUT /api/<entity>/<id>/attachments` (bridge) or the entity's own create / update (direct field) | The record references the attachment by id |
-| Read it | `GET /api/attachments/<id>` | The file, or `401` / `403` / `404` |
+| Read it | `GET /api/attachments/<id>` | The file, or `401` / `404` |
 
 - **Opaque keys.** The object is stored under `crypto.randomUUID()`: no extension, no original file name, no
   timestamp. The original name is kept only in `attachment.encrypted_original_name` (AES-256-GCM, see
@@ -58,7 +58,7 @@ orphan cleanup.
 
 | Attachment state | Decision |
 |------------------|----------|
-| Owned by a record (bridge or direct field) | The record's own read check: read permission on the owner model, the owner's organization scope (a record of another organization is `404`), Creator / Assignee item-level resolution. No read permission is `403`. |
+| Owned by a record (bridge or direct field) | The record's own read check: read permission on the owner model, the owner's organization scope (a record of another organization is `404`), Creator / Assignee item-level resolution. A caller who may not read the owner also gets `404`, so the status never reveals whether an id is linked to a record. |
 | Not owned by any record yet | Only the user who uploaded it; anyone else gets `404` |
 | Unknown id | `404` |
 | No credential | `401` |

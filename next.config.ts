@@ -1,12 +1,18 @@
 import type { NextConfig } from "next";
 import createNextIntlPlugin from 'next-intl/plugin';
 import createMDX from '@next/mdx'
+import { SECURITY_HEADERS } from './lib/security-headers';
 
 const withNextIntl = createNextIntlPlugin('./i18n/request.ts');
 
 /** @type {import('next').NextConfig} */
 const nextConfig: NextConfig = {
+  // Do not advertise the framework in an `X-Powered-By` response header.
+  poweredByHeader: false,
   pageExtensions: ['js', 'jsx', 'md', 'mdx', 'ts', 'tsx'],
+  async headers() {
+    return [{ source: '/:path*', headers: SECURITY_HEADERS }];
+  },
   // Terms of Service / Privacy Policy pages (app/[locale]/legal/*) read
   // content/legal/*.md at request time via fs.readFileSync with a
   // runtime-built path, so Vercel's build-time file tracer can't discover

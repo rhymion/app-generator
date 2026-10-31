@@ -266,6 +266,6 @@ import { createReaction, deleteReaction } from '@/lib/reaction/service';
 import { {{ service_imports }} } from './service';
 {% endif %}
 {% if should_filter_by_org and (can_update or can_delete or comment_actions_code or can_invalidate) %}
-import { getAssociatedOrganizations } from '@/lib/organization/getters_associated';
+import { getAssociatedOrganizations } from '@/lib/organization/associated_internal';
 {% endif %}
 {{ _actions_body }}

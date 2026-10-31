@@ -2,7 +2,7 @@
 Generated attachment storage and delivery: the access module, the serve route, the reserved
 orphan-cleanup task handler and the attachment provenance schema check.
 
-The runtime behavior (a stranger gets 404, a member without read gets 403, only the uploader attaches an
+The runtime behavior (a stranger gets 404, a member without read gets 404 too, only the uploader attaches an
 upload) is covered end to end by the comment-rest-e2e-gate fixture specs and by cypress/e2e/api; these
 tests pin the generated shape.
 """
@@ -49,7 +49,7 @@ def test_unlinked_filter_names_the_bridge_and_every_direct_back_relation():
 
 def test_each_owner_detail_getter_is_imported_once():
     out = _access(direct=[_direct('doc', 'file_id', 'doc_file'), _direct('doc', 'scan_id', 'doc_scan')])
-    assert out.count("import { getDocDetail } from '@/lib/doc/getters';") == 1
+    assert out.count("import { getDocDetail } from '@/lib/doc/getters_internal';") == 1
     # ... and a lookup is generated per foreign key.
     assert "prisma.doc.findFirst({ where: { file_id: attachment.id }" in out
     assert "prisma.doc.findFirst({ where: { scan_id: attachment.id }" in out
@@ -67,10 +67,11 @@ def test_owner_read_goes_through_the_owners_own_permission_and_scope():
     out = _access(bridge=[_bridge('resource', True), _bridge('product', False)])
     assert "readOwner(actorId, 'resource', () => getResourceDetail(ownerId, actorId) as never)" in out
     assert "readOwner(actorId, 'product', () => getProductDetail(ownerId) as never)" in out
-    # Read permission first (403), then the organization-scoped getter (404), then item-level resolution.
+    # Read permission first, then the organization-scoped getter, then item-level resolution; every refusal is not_found.
     body = out.split('async function readOwner(')[1].split('export async function')[0]
     assert body.index('if (!base.read) return') < body.index('await load()') < body.index('resolveRecordPermissions(')
-    assert "return 'forbidden';" in body and "return 'not_found';" in body
+    assert "'forbidden'" not in body and "return 'not_found';" in body
+    assert body.count("not_found") >= 3
 
 
 def test_an_unreferenced_upload_is_readable_only_by_its_uploader():
@@ -84,7 +85,9 @@ def test_serve_route_authorizes_before_it_touches_storage():
     out = _render('attachment_serve_route.ts.jinja2')
     assert out.index('authorizeAttachmentRead(') < out.index('serveStoredObject(')
     assert out.index('isStorageKey(attachment.path)') < out.index('authorizeAttachmentRead(')
-    assert "decision === 'forbidden'" in out and 'status: 403' in out
+    # A refused read never answers 403: that would reveal an id is linked to a record the caller cannot read.
+    assert "'forbidden'" not in out and 'status: 403' not in out
+    assert "decision !== 'allow'" in out and 'status: 404' in out
     assert 'status: 401' in out
     # The stored key is never part of a response body or header.
     assert 'NextResponse.json' not in out

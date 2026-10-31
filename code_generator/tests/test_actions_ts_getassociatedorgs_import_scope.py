@@ -120,7 +120,7 @@ def test_updateonly_org_scoped_entity_imports_getassociatedorgs():
         'call site at all -- fixture no longer reproduces the regression '
         'shape, update the fixture.'
     )
-    assert "import { getAssociatedOrganizations } from '@/lib/organization/getters_associated';" in rendered, (
+    assert "import { getAssociatedOrganizations } from '@/lib/organization/associated_internal';" in rendered, (
         'getAssociatedOrganizations is called in the rendered output with '
         'no import -- this is the TS2304 regression (commit 98391aa2 '
         'narrowed the import condition to should_filter_by_org and '

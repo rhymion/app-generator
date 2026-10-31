@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getModelPermissions, assertPermission } from '@/lib/authz';
 import { handleApiError, resolveActorId } from '@/lib/api-auth';
 import { escapeCSV } from '@/lib/_csv';
-import { get{{ parent_pascal }}ChunkForExport } from '@/lib/{{ parent }}/getters';
+import { get{{ parent_pascal }}ChunkForExport } from '@/lib/{{ parent }}/getters_internal';
 
 const EXPORT_CHUNK_SIZE = Number(process.env.EXPORT_CHUNK_SIZE ?? '200');
 

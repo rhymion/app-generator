@@ -3,7 +3,7 @@
 // the `attachable` bridge of cr_asset (scoped by organization). Access follows the owning record, the same
 // as its own detail route:
 //   owner organization member with read permission      200
-//   same organization, no read permission                403
+//   same organization, no read permission                404
 //   user of another organization, even with read         404
 // An upload that is not attached yet can only be read by the user who uploaded it.
 import { TEST_API_KEY } from '../../support/test-credentials';
@@ -90,7 +90,7 @@ describe('API: attachments of a bridge owner are delivered through the authorize
     });
   });
 
-  it('answers 403 to a member of the same organization who has no read permission on the record', () => {
+  it('answers 404 to a member of the same organization who has no read permission on the record', () => {
     cy.task<Asset[]>('db:populateCrAsset', 1).then(([asset]) => {
       attached(asset).then((id) => {
         cy.task<string>('db:createApiUserWithPermission', {
@@ -98,7 +98,7 @@ describe('API: attachments of a bridge owner are delivered through the authorize
           flags: { read: false },
           label: 'memberdenied',
           organizationId: asset.organization_id,
-        }).then((key) => read(id, asKey(key)).its('status').should('eq', 403));
+        }).then((key) => read(id, asKey(key)).its('status').should('eq', 404));
       });
     });
   });

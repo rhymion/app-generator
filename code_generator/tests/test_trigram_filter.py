@@ -142,7 +142,7 @@ def test_fields_annotation_reaches_the_internal_schema_and_survives_reverse_conv
 
 
 def test_getter_falls_back_to_contains_beyond_the_id_limit(linked):
-    getters = (linked / 'lib' / 'mobile_group' / 'getters.ts').read_text()
+    getters = (linked / 'lib' / 'mobile_group' / 'getters_internal.ts').read_text()
     assert 'TRIGRAM_ID_LIMIT' in getters
     assert "mode: 'insensitive'" in getters
     # the id lookup is one tagged query through the shared helper, never an inline raw call
