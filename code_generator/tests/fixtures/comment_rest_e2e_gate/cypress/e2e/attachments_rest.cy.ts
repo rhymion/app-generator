@@ -29,7 +29,8 @@ function multipart(filename: string): string {
     `--${BOUNDARY}\r\n` +
     `Content-Disposition: form-data; name="file"; filename="${filename}"\r\n` +
     `Content-Type: application/pdf\r\n\r\n` +
-    `contents of ${filename}\r\n` +
+    // The route checks the leading bytes against the file's extension.
+    `${filename.endsWith('.png') ? '\x89PNG\r\n\x1a\n' : '%PDF-1.4 '}contents of ${filename}\r\n` +
     `--${BOUNDARY}--\r\n`
   );
 }

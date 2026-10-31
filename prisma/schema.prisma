@@ -102,6 +102,8 @@ model user {
   // mfa_pending so an already-active session can't outlive a later MFA
   // enable for up to JWT_MAX_AGE (cmd_527, docs/knowledge/authentication.md).
   mfa_token_version          Int                 @default(0)
+  // Last TOTP time step accepted for this user; a code from that step or an earlier one is refused (replay).
+  mfa_last_totp_step         Int?
   accounts                  Account[]
   sessions                  Session[]
   created_at                DateTime            @default(now()) @db.Timestamptz(0)
