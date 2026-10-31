@@ -84,6 +84,19 @@ export default defineConfig({
           });
           return null;
         },
+        // Security test helpers (cypress/support/security_helpers.ts): check the claimed matrix cell and
+        // status against .security-manifest.json, and re-read rows from the database.
+        async 'security:checkCell'(params: { cell: Record<string, string>; status: number }) {
+          const { assertCellAndStatus } = require('./test/helpers/security_core');
+          const { loadManifest } = require('./test/helpers/security_manifest');
+          assertCellAndStatus(params.cell, params.status, loadManifest());
+          return null;
+        },
+        async 'security:snapshot'(params: { model: string; where?: Record<string, unknown> }) {
+          const { prisma } = require('./cypress/support/db-helpers');
+          const rows = await (prisma as Record<string, any>)[params.model].findMany({ where: params.where ?? {}, orderBy: { id: 'asc' } });
+          return JSON.parse(JSON.stringify(rows));
+        },
         async 'db:createLimitedApiUser'(modelName: string) {
           const { createLimitedApiUser } = require('./cypress/support/db-helpers');
           return await createLimitedApiUser(modelName);

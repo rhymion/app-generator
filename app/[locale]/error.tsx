@@ -1,6 +1,7 @@
 // app/dashboard/error.tsx
 'use client'; // Required for error components
 
+import { logger } from '@/lib/logger';
 import { useEffect } from 'react';
 import { useTranslations } from 'next-intl';
 
@@ -15,7 +16,7 @@ export default function Error({
 
   useEffect(() => {
     // Log the error to an error reporting service (e.g., Sentry)
-    console.error(error);
+    logger.error(error);
   }, [error]);
 
   return (

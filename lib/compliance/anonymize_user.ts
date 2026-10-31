@@ -9,6 +9,7 @@
 // Auto-generated from x-pii annotations on the user entity.
 // Does NOT physically delete the user row to preserve referential integrity.
 
+import { logger } from '@/lib/logger';
 import prisma from '@/lib/prisma';
 import { deleteStoredObject, isStorageKey } from '@/lib/attachment/storage';
 
@@ -104,7 +105,7 @@ export async function anonymizeUser(userId: string): Promise<AnonymizeUserResult
     });
   } catch (err) {
     // The detail stays in the server log; callers get a generic message.
-    console.error('[anonymizeUser] transaction failed', JSON.stringify(userId), err instanceof Error ? err.name : typeof err);
+    logger.error('[anonymizeUser] transaction failed', JSON.stringify(userId), err instanceof Error ? err.name : typeof err);
     errors.push('Anonymization failed');
     return { success: false, userId, anonymizedAt, errors };
   }
@@ -115,7 +116,7 @@ export async function anonymizeUser(userId: string): Promise<AnonymizeUserResult
     try {
       await removeStoredFile(avatar.path);
     } catch (err) {
-      console.error('[anonymizeUser] avatar file removal failed', JSON.stringify(userId), err instanceof Error ? err.name : typeof err);
+      logger.error('[anonymizeUser] avatar file removal failed', JSON.stringify(userId), err instanceof Error ? err.name : typeof err);
       errors.push('Stored avatar file was not removed');
     }
   }

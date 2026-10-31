@@ -318,7 +318,10 @@ describe('handleApiError with an unexpected error', () => {
     for (const fragment of ['P2022', 'SELECT', 'secret_col', '/srv/app', 'prisma.ts']) {
       expect(text).not.toContain(fragment);
     }
-    expect(logged).toHaveBeenCalledWith('API error:', leaky);
+    expect(logged).toHaveBeenCalledWith(
+      'API error:',
+      expect.objectContaining({ name: 'Error', message: leaky.message, stack: leaky.stack }),
+    );
     logged.mockRestore();
   });
 

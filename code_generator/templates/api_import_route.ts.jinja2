@@ -1,4 +1,5 @@
 // AUTO-GENERATED - DO NOT EDIT
+import { logger } from '@/lib/logger';
 import { NextRequest, NextResponse } from 'next/server';
 import Papa from 'papaparse';
 import prisma from '@/lib/prisma';
@@ -566,7 +567,7 @@ export async function POST(request: NextRequest) {
           });
         } else {
           // Not one of the app's own typed errors: keep the detail in the server log only.
-          console.error('[import] row write failed', action.row, err instanceof Error ? err.name : typeof err);
+          logger.error('[import] row write failed', action.row, err instanceof Error ? err.name : typeof err);
           commitErrors.push({ row: action.row, code: 'WRITE_FAILED', message: 'The row could not be written' });
         }
       }

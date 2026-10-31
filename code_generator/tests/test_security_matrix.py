@@ -167,3 +167,27 @@ def test_markers_in_the_api_spec_template_name_real_operations(matrix):
 def test_repository_allowlist_entries_all_have_reasons(matrix):
     entries = sm.load_allowlist(sm.ALLOWLIST_PATH, matrix)
     assert entries and all(e['reason'].strip() for e in entries)
+
+
+def test_manifest_carries_the_denied_status_the_helpers_assert(matrix):
+    manifest = sm.build_manifest(matrix, {'widget': ALL_FLAGS})
+    assert manifest['denied_status'] == {'case': {'permission_denied': 403, 'cross_org': 404}}
+
+
+def test_denied_status_must_be_an_explicit_denial_status(tmp_path, matrix):
+    bad = copy.deepcopy(matrix)
+    bad['axes']['case']['values']['permission_denied']['denied_status'] = 400
+    path = tmp_path / 'matrix.yaml'
+    path.write_text(yaml.safe_dump(bad))
+    with pytest.raises(ValueError, match='denied_status'):
+        sm.load_matrix(path)
+
+
+def test_a_file_calling_expect_denied_for_must_carry_a_marker(tmp_path, matrix, capsys):
+    tests = _spec_with_all_cells(tmp_path, matrix)
+    (tests / 'hand_written.cy.ts').write_text("expectDeniedFor({ status: 403 });\n")
+    assert sm.run_check(_write_manifest(tmp_path, matrix), [tests], tmp_path / 'none.yaml') == 1
+    assert 'calls expectDeniedFor but carries no security-cell marker' in capsys.readouterr().err
+    (tests / 'hand_written.cy.ts').write_text(
+        "// security-cell: entity=widget operation=update case=permission_denied\nexpectDeniedFor({ status: 403 });\n")
+    assert sm.run_check(_write_manifest(tmp_path, matrix), [tests], tmp_path / 'none.yaml') == 0

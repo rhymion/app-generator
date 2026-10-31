@@ -8,6 +8,8 @@
 # these, so the generated security tests (permission denied, cross-organization) otherwise never
 # ran against such an entity in the mandatory gate.
 #
+# A hand-written route and a spec using the shipped security helpers (expectDeniedFor) run too.
+#
 # After the build it checks that
 #   * the security manifest lists the fixture entities with the operations that prove each feature
 #     is generated (so the fixture cannot silently stop exercising a feature), then
@@ -102,6 +104,11 @@ ln -s "$REPO_ROOT/node_modules" "$BUILD_DIR/node_modules"
 
 echo "-- merging the fixture schema into the copy --"
 python3 scripts/compose_child_datagrid_e2e_fixture.py "$FIXTURE_DIR" "$BUILD_DIR"
+# A hand-written route and its spec, which uses the shipped security helpers (cypress/support/security_helpers.ts).
+mkdir -p "$BUILD_DIR/cypress/e2e/security_matrix_e2e_gate"
+cp -r "$FIXTURE_DIR/cypress/e2e/." "$BUILD_DIR/cypress/e2e/security_matrix_e2e_gate/"
+mkdir -p "$BUILD_DIR/app/api/sx_account/[id]/rename_probe"
+cp "$FIXTURE_DIR/probe_routes/rename_probe_route.ts" "$BUILD_DIR/app/api/sx_account/[id]/rename_probe/route.ts"
 
 echo "-- writing the copy's own environment --"
 python3 - "$BUILD_DIR/.env.test" "$PROJECT" "$APP_PORT" "$POSTGRES_PORT" "$REDIS_PORT" <<'PY'
@@ -169,7 +176,7 @@ echo "-- check:security-matrix on the merged schema (default allowlist plus the 
 python3 code_generator/security_matrix.py check --manifest .security-manifest.json --tests cypress \
   --allowlist code_generator/security_matrix_allowlist.yaml "code_generator/tests/fixtures/security_matrix_e2e_gate/allowlist.yaml"
 
-DEFAULT_SPEC="cypress/e2e/api/sx_*.cy.ts"
+DEFAULT_SPEC="cypress/e2e/api/sx_*.cy.ts,cypress/e2e/security_matrix_e2e_gate/**/*.cy.ts"
 
 echo "-- cypress: fixture specs --"
 set +e
