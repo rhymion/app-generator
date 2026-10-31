@@ -24,7 +24,7 @@ A `generator`, `framework` or `environment` row can also list a Gap Issue when t
 - `code_generator/tests/test_asvs_coverage_table.py` checks this file: every in-scope requirement appears exactly once, every `gap` row links an Issue, every `framework` row names a source and a version, and no cell is empty.
 - Tests that prove the framework-guaranteed rows live in `cypress/e2e/api/framework_guarantees.cy.ts` and run in the mandatory API gate (`npm run test:e2e:cy:api`). The Auth.js OAuth `state` and PKCE checks cannot be exercised there, because the end-to-end stack replaces the Google provider with a mock (`lib/auth/mock-oauth-gate.ts`); #1234 tracks them.
 
-Related documents: [security-test-matrix.md](security-test-matrix.md), [authentication.md](authentication.md), [authorization-default-deny.md](authorization-default-deny.md), [api-idempotency-and-rate-limiting.md](api-idempotency-and-rate-limiting.md), [ci-security-workflows.md](ci-security-workflows.md), [input-validation-rules-and-limits.md](input-validation-rules-and-limits.md), [upload-limits-and-malicious-file-handling.md](upload-limits-and-malicious-file-handling.md), [field-level-authorization-rules.md](field-level-authorization-rules.md), [cryptographic-inventory-and-key-management.md](cryptographic-inventory-and-key-management.md).
+Related documents: [security-test-matrix.md](security-test-matrix.md), [authentication.md](authentication.md), [authorization-default-deny.md](authorization-default-deny.md), [api-idempotency-and-rate-limiting.md](api-idempotency-and-rate-limiting.md), [ci-security-workflows.md](ci-security-workflows.md), [input-validation-rules-and-limits.md](input-validation-rules-and-limits.md), [upload-limits-and-malicious-file-handling.md](upload-limits-and-malicious-file-handling.md), [field-level-authorization-rules.md](field-level-authorization-rules.md), [cryptographic-inventory-and-key-management.md](cryptographic-inventory-and-key-management.md), [outbound-communications.md](outbound-communications.md), [data-classification.md](data-classification.md).
 
 Chapter V17 (WebRTC) does not apply: the generated app has no real-time media, TURN, signaling or DTLS/SRTP code or dependency.
 
@@ -294,12 +294,12 @@ Chapter V17 (WebRTC) does not apply: the generated app has no real-time media, T
 
 | ID | Level | Status | Covered by | Verified by | Gap Issue | Source and version |
 |----|-------|--------|------------|-------------|-----------|--------------------|
-| V13.1.1 | 2 | gap | No list of external services in one place | none | #1294, #1241 | - |
+| V13.1.1 | 2 | generator | Every external service and endpoint is listed in docs/knowledge/outbound-communications.md | none (document read against the code) | #1241 | - |
 | V13.2.1 | 2 | gap | Backend dependencies use static credentials (database password, Redis URL, CRON_SECRET); audit-log GCS can use workload identity | lib/audit-log-integrity/storage-gcs.test.ts | #1295, #1124, #1143 | - |
 | V13.2.2 | 2 | generator | Restricted database role on Vercel; narrow GCS bucket role; GCP database role was not verified | scripts/vercel-env.test.ts, scripts/gcp-storage-config.test.ts | - | - |
 | V13.2.3 | 2 | generator | Production seeding requires explicit admin credentials; docker-compose.prod.yml requires POSTGRES_PASSWORD from the environment and has no default | scripts/seed-baseline-credentials.test.ts, scripts/docker-compose-prod-password.test.ts | - | - |
-| V13.2.4 | 2 | gap | No outbound allow-list; server fetch targets fixed SDK endpoints only | none | #1294 | - |
-| V13.2.5 | 2 | environment | Egress restriction is a platform setting and is not configured by the deploy scripts | none | #1294 | - |
+| V13.2.4 | 2 | environment | The application fetches no user-supplied URL; the fixed destinations are listed in docs/knowledge/outbound-communications.md and an allow-list is applied on the platform, which the deploy scripts do not configure | none | - | - |
+| V13.2.5 | 2 | environment | Egress restriction is a platform setting; docs/knowledge/outbound-communications.md says what to allow and that the deploy scripts configure none | none | - | - |
 | V13.3.1 | 2 | generator | Secrets go to Secret Manager (scripts/gcp-setup.sh) or sensitive Vercel variables (scripts/vercel-env.sh) | scripts/vercel-env.test.ts, scripts/env-file-permissions.test.ts | #1248 | - |
 | V13.3.2 | 2 | generator | Least-privilege roles for GCS and Vercel previews; per-secret scope of the GCP accessor binding was not verified | scripts/gcp-storage-config.test.ts, scripts/vercel-env.test.ts | - | - |
 | V13.4.1 | 1 | environment | The runner image copies only build output; there is no .dockerignore for the build context | none | #1297 | - |
@@ -312,12 +312,12 @@ Chapter V17 (WebRTC) does not apply: the generated app has no real-time media, T
 
 | ID | Level | Status | Covered by | Verified by | Gap Issue | Source and version |
 |----|-------|--------|------------|-------------|-----------|--------------------|
-| V14.1.1 | 2 | gap | Only user columns are classified (x-pii); x-pii is not consulted for logs, exports, REST or OpenAPI | none | #1298 | - |
-| V14.1.2 | 2 | gap | No protection requirements per classification level | none | #1298 | - |
+| V14.1.1 | 2 | generator | Data classes and the controls each gets are defined in docs/knowledge/data-classification.md; x-pii classifies the user entity only and is not consulted for logs, exports, REST or OpenAPI | none (document read against the code) | - | - |
+| V14.1.2 | 2 | generator | Protection per class (at rest, logs, responses, erasure) is stated in docs/knowledge/data-classification.md, including where no control exists | none (document read against the code) | - | - |
 | V14.2.1 | 1 | generator | API keys and tokens are read from headers; credentials are posted in bodies; GCS URLs carry no filename | cypress/e2e/api/upload_path_safety.cy.ts, lib/api-auth.test.ts | - | - |
 | V14.2.2 | 2 | gap | idempotency_key.response_body persists responses without a purge; attachment responses are no-store | lib/attachment/storage.test.ts | #1299 | - |
 | V14.2.3 | 2 | generator | No analytics, tracker or third-party script | none | - | - |
-| V14.2.4 | 2 | gap | Controls exist piecemeal; no documented protection requirements to trace them to | lib/prisma-slow-query.test.ts (parameter redaction) | #1298 | - |
+| V14.2.4 | 2 | generator | Controls are traced to the classes in docs/knowledge/data-classification.md | lib/prisma-slow-query.test.ts (parameter redaction), lib/logger.test.ts | - | - |
 | V14.3.1 | 1 | generator | proxy.ts sends `Clear-Site-Data: "cache", "cookies", "storage"` on the Auth.js sign-out response (POST /api/auth/signout) | cypress/e2e/api/framework_guarantees.cy.ts (cache and client-data headers), lib/proxy-forwarded-headers.test.ts | - | - |
 | V14.3.2 | 2 | generator | next.config.ts sends `Cache-Control: no-store` on every `/api/` response except the attachment route, which sets `private, no-store` itself; proxy.ts sets `no-store` on signed-in page responses | cypress/e2e/api/framework_guarantees.cy.ts (cache and client-data headers), lib/security-headers.test.ts, lib/attachment/storage.test.ts | - | - |
 | V14.3.3 | 2 | gap | Mobile web build keeps the refresh token in localStorage; native uses SecureStore | none | #1301 | - |
