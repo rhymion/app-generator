@@ -162,6 +162,7 @@ export async function getCredentialState(email: string): Promise<CredentialState
 export type ApiKeyStorage = {
   hash: string | null;
   issuedAt: string | null;
+  expiresAt: string | null;
   /** True while the old plaintext column still exists on the user table. */
   hasPlaintextColumn: boolean;
 };
@@ -171,7 +172,7 @@ export type ApiKeyStorage = {
 export async function getApiKeyStorage(email: string): Promise<ApiKeyStorage> {
   const user = await prisma.user.findUniqueOrThrow({
     where: { email },
-    select: { api_key_hash: true, api_key_issued_at: true },
+    select: { api_key_hash: true, api_key_issued_at: true, api_key_expires_at: true },
   });
   const columns = await prisma.$queryRaw<{ column_name: string }[]>`
     SELECT column_name FROM information_schema.columns
@@ -179,8 +180,18 @@ export async function getApiKeyStorage(email: string): Promise<ApiKeyStorage> {
   return {
     hash: user.api_key_hash,
     issuedAt: user.api_key_issued_at ? user.api_key_issued_at.toISOString() : null,
+    expiresAt: user.api_key_expires_at ? user.api_key_expires_at.toISOString() : null,
     hasPlaintextColumn: columns.length > 0,
   };
+}
+
+/** Sets (ISO string) or clears (null) api_key_expires_at directly in the database, as a pre-existing key would have it. */
+export async function setApiKeyExpiryInDb(email: string, expiresAt: string | null): Promise<null> {
+  await prisma.user.update({
+    where: { email },
+    data: { api_key_expires_at: expiresAt === null ? null : new Date(expiresAt) },
+  });
+  return null;
 }
 
 /** SHA-256 hex of `value` computed by PostgreSQL itself -- the function the migration template

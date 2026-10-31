@@ -76,24 +76,24 @@ export const siteConfig = {
   auth: {
     providers: ['credentials', 'google'] as AuthProviderId[],
     allowedDomains: [] as string[],
+    /**
+     * Days until a newly issued API key expires, counted from the moment it is
+     * issued. `null` makes new keys never expire. Removing this property applies
+     * the generator default (90 days). The key's owner can pick another expiry,
+     * or none, when issuing; keys issued before this setting existed keep the
+     * expiry they have.
+     */
+    apiKeyDefaultExpiryDays: 90 as number | null,
   },
 
   /** Links listed in the sidebar navigation */
   navLinks: [
     { label: "Home", href: "/", external: false },
     { label: "Audit Log", href: "/audit_log", group: "administration", order: 80 },
-      { label: "User", href: "/user", group: "administration", order: 10 },
-    { label: "Role", href: "/role", group: "administration", order: 20 },
-    { label: "Organization", href: "/organization", group: "administration", order: 40 },
-    { label: "Permission", href: "/permission", group: "administration", order: 30 },
-    { label: "Approval Flow", href: "/approval_flow", group: "administration", order: 50 },
-    { label: "Dashboard", href: "/dashboard", group: "administration", order: 60 },
-    { label: "App Setting", href: "/app_setting", group: "administration", order: 70 },
   ] satisfies NavLink[],
 
   /** Sidebar navigation groups (nested menu headers). Filled by generate-code from x-nav-groups (the default schema declares "administration") — see NavGroup above. */
   navGroups: [
-      { slug: "administration", labelKey: "groups.administration", order: 900, icon: "Settings" },
   ] satisfies NavGroup[],
 
   /**

@@ -39,14 +39,14 @@ The account settings page has an API key section (`components/setting/ApiKeyPane
 `issueApiKey()` (`lib/setting/api-key-actions.ts`), a Server Action that acts on the session user only. It
 
 1. generates the key,
-2. stores its hash and the issue time,
+2. stores its hash, the issue time and the expiry chosen by the owner (the site default when none is given),
 3. drops the previous hash from the authentication cache of the current server process,
 4. writes the audit event `auth:apikey.issue` (without the key),
 5. returns the key in its response, which the panel shows once.
 
 Leaving the page discards the key. Issuing a new key stops the previous one from working at once in the current process;
 another process stops accepting it when its cache entry ages out (at most 5 minutes in production, see
-[multi-tenancy-and-permissions.md](multi-tenancy-and-permissions.md)). `api_key_expires_at` is not changed by issuing.
+[multi-tenancy-and-permissions.md](multi-tenancy-and-permissions.md)). The expiry of the new key is chosen when issuing ([api-key-expiry.md](api-key-expiry.md)).
 
 An edit form cannot store a key: the property is not part of any form, so there is no way to bring a chosen value in.
 

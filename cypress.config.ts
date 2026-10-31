@@ -174,6 +174,10 @@ export default defineConfig({
           const { getApiKeyStorage } = require('./cypress/support/settings-save-helpers');
           return await getApiKeyStorage(email);
         },
+        async 'db:setApiKeyExpiry'({ email, expiresAt }: { email: string; expiresAt: string | null }) {
+          const { setApiKeyExpiryInDb } = require('./cypress/support/settings-save-helpers');
+          return await setApiKeyExpiryInDb(email, expiresAt);
+        },
         async 'db:sqlSha256'(value: string) {
           const { sqlSha256 } = require('./cypress/support/settings-save-helpers');
           return await sqlSha256(value);

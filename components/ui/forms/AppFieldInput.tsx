@@ -5,7 +5,7 @@ interface AppFieldInputProps {
   label: ReactNode;
   id?: string;
   name?: string;
-  type?: 'text' | 'password' | 'email' | 'number' | 'tel' | 'url';
+  type?: 'text' | 'password' | 'email' | 'number' | 'tel' | 'url' | 'datetime-local';
   value?: string;
   onChange?: (value: string) => void;
   autoComplete?: string;
@@ -67,6 +67,10 @@ export default function AppFieldInput({
   if (readOnly) input.readOnly = readOnly;
   if (endAction !== undefined) input.endAdornment = endAction;
 
+  // A native date-time input always shows a value, so its label must stay lifted.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const inputLabel: Record<string, any> | undefined = type === 'datetime-local' ? { shrink: true } : undefined;
+
   const hasHtmlInput = Object.keys(htmlInput).length > 0;
   const hasInput = Object.keys(input).length > 0;
 
@@ -87,7 +91,7 @@ export default function AppFieldInput({
       margin={margin}
       className={className}
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      slotProps={(hasHtmlInput || hasInput) ? { ...(hasHtmlInput ? { htmlInput } : {}), ...(hasInput ? { input } : {}) } as any : undefined}
+      slotProps={(hasHtmlInput || hasInput || inputLabel) ? { ...(hasHtmlInput ? { htmlInput } : {}), ...(hasInput ? { input } : {}), ...(inputLabel ? { inputLabel } : {}) } as any : undefined}
       sx={(mb !== undefined || width !== undefined || flex !== undefined) ? { mb, width, flex } : undefined}
     />
   );

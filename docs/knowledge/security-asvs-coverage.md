@@ -295,7 +295,7 @@ Chapter V17 (WebRTC) does not apply: the generated app has no real-time media, T
 | ID | Level | Status | Covered by | Verified by | Gap Issue | Source and version |
 |----|-------|--------|------------|-------------|-----------|--------------------|
 | V13.1.1 | 2 | gap | No list of external services in one place | none | #1294, #1241 | - |
-| V13.2.1 | 2 | gap | Backend dependencies use static credentials (database password, Redis URL, CRON_SECRET); audit-log GCS can use workload identity | lib/audit-log-integrity/storage-gcs.test.ts | #1295, #1124 | - |
+| V13.2.1 | 2 | gap | Backend dependencies use static credentials (database password, Redis URL, CRON_SECRET); audit-log GCS can use workload identity | lib/audit-log-integrity/storage-gcs.test.ts | #1295, #1124, #1143 | - |
 | V13.2.2 | 2 | generator | Restricted database role on Vercel; narrow GCS bucket role; GCP database role was not verified | scripts/vercel-env.test.ts, scripts/gcp-storage-config.test.ts | - | - |
 | V13.2.3 | 2 | generator | Production seeding requires explicit admin credentials; docker-compose.prod.yml defaults the database password | scripts/seed-baseline-credentials.test.ts | #1296 | - |
 | V13.2.4 | 2 | gap | No outbound allow-list; server fetch targets fixed SDK endpoints only | none | #1294 | - |

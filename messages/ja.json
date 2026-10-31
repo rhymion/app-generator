@@ -248,7 +248,15 @@
     "copy": "クリップボードにコピー",
     "shownOnce": "このキーは今だけ表示されます。今すぐコピーしてください。再表示はできません。",
     "loadFailed": "APIキーの状態を読み込めませんでした。",
-    "issueFailed": "APIキーを発行できませんでした。"
+    "issueFailed": "APIキーを発行できませんでした。",
+    "neverExpires": "有効期限はありません。",
+    "expired": "{expiresAt} に期限切れになりました。",
+    "newKeyExpiryLabel": "新しいキーの有効期限",
+    "currentKeyExpiryLabel": "現在のキーの有効期限",
+    "neverExpiresOption": "無期限",
+    "saveExpiry": "有効期限を保存",
+    "expiryInvalid": "未来の日時を選ぶか、「無期限」を選択してください。",
+    "expiryFailed": "有効期限を保存できませんでした。"
   },
   "Setting": {
     "title": "アカウント設定",
