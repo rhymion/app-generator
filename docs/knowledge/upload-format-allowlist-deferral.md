@@ -60,3 +60,5 @@ rejection cases, the environment variables, the content signatures, the bounded 
 `code_generator/tests/test_upload_route_content_type.py` (the route uses the shared check, stores the
 derived type, reads the body with a limit and checks the signature) and
 `cypress/e2e/api/upload_path_safety.cy.ts` (a mismatched file and an oversized upload are refused).
+
+Size limits for archives, malicious-file handling and download file names: [upload-limits-and-malicious-file-handling.md](upload-limits-and-malicious-file-handling.md).

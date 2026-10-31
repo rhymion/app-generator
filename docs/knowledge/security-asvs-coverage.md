@@ -24,7 +24,7 @@ A `generator`, `framework` or `environment` row can also list a Gap Issue when t
 - `code_generator/tests/test_asvs_coverage_table.py` checks this file: every in-scope requirement appears exactly once, every `gap` row links an Issue, every `framework` row names a source and a version, and no cell is empty.
 - Tests that prove the framework-guaranteed rows live in `cypress/e2e/api/framework_guarantees.cy.ts` and run in the mandatory API gate (`npm run test:e2e:cy:api`). The Auth.js OAuth `state` and PKCE checks cannot be exercised there, because the end-to-end stack replaces the Google provider with a mock (`lib/auth/mock-oauth-gate.ts`); #1234 tracks them.
 
-Related documents: [security-test-matrix.md](security-test-matrix.md), [authentication.md](authentication.md), [authorization-default-deny.md](authorization-default-deny.md), [api-idempotency-and-rate-limiting.md](api-idempotency-and-rate-limiting.md), [ci-security-workflows.md](ci-security-workflows.md).
+Related documents: [security-test-matrix.md](security-test-matrix.md), [authentication.md](authentication.md), [authorization-default-deny.md](authorization-default-deny.md), [api-idempotency-and-rate-limiting.md](api-idempotency-and-rate-limiting.md), [ci-security-workflows.md](ci-security-workflows.md), [input-validation-rules-and-limits.md](input-validation-rules-and-limits.md), [upload-limits-and-malicious-file-handling.md](upload-limits-and-malicious-file-handling.md), [field-level-authorization-rules.md](field-level-authorization-rules.md), [cryptographic-inventory-and-key-management.md](cryptographic-inventory-and-key-management.md).
 
 Chapter V17 (WebRTC) does not apply: the generated app has no real-time media, TURN, signaling or DTLS/SRTP code or dependency.
 
@@ -65,14 +65,14 @@ Chapter V17 (WebRTC) does not apply: the generated app has no real-time media, T
 
 | ID | Level | Status | Covered by | Verified by | Gap Issue | Source and version |
 |----|-------|--------|------------|-------------|-----------|--------------------|
-| V2.1.1 | 1 | gap | No validation-rules document | none | #1270 | - |
-| V2.1.2 | 2 | gap | validateOnAdd/validateOnUpdate hooks exist; their consistency rules are undocumented | none | #1270 | - |
-| V2.1.3 | 2 | gap | Rate limits are documented in docs/knowledge/api-idempotency-and-rate-limiting.md; business limits are not | none | #1270 | - |
+| V2.1.1 | 1 | generator | Validation rules per layer and the generated rules are in docs/knowledge/input-validation-rules-and-limits.md; schema keywords such as maxLength are form-only | none | - | - |
+| V2.1.2 | 2 | generator | Generated cross-field rules and the validateCustomRules hook contract are in docs/knowledge/input-validation-rules-and-limits.md; application rules live in the hand-written hook | none | - | - |
+| V2.1.3 | 2 | gap | Rate limits and the global size limits are listed in docs/knowledge/input-validation-rules-and-limits.md; the app defines no per-user or per-organization business limits | none | #1270 | - |
 | V2.2.1 | 1 | generator | Prisma column types, nativeEnum mapping, read-only field rejection (api_route.ts.jinja2), service_validation hooks; no runtime schema validator | none | #1271 | - |
 | V2.2.2 | 1 | generator | service.ts.jinja2 runs validateOn* hooks server-side inside the transaction | none | #1230 | - |
 | V2.2.3 | 2 | generator | docs/knowledge/same-entity-validation-socket.md (hand-written per relation, not generic) | none | #1271 | - |
 | V2.3.1 | 1 | generator | state_transitions.ts.jinja2 (assertTransitionAllowed); lib/approval_request/order-check.ts | code_generator/tests/test_state_transition_gatekeeper.py, lib/approval_request/actions.test.ts, cypress/e2e/api/multi_stage_approval_order_reached.cy.ts | #1230 | - |
-| V2.3.2 | 2 | gap | Rate limits exist; documented business limits do not, so none are enforced | none | #1270 | - |
+| V2.3.2 | 2 | gap | Global limits are documented (docs/knowledge/input-validation-rules-and-limits.md); no per-user business limit exists to enforce | none | #1270 | - |
 | V2.3.3 | 2 | generator | Serializable $transaction in service.ts.jinja2 and submit_for_approval.ts.jinja2 | none | #1272, #735 | - |
 | V2.3.4 | 2 | generator | x-reservation templates with Serializable isolation | none | #1272 | - |
 | V2.4.1 | 2 | generator | lib/rate-limit/{index,redis,in-memory,client-ip}.ts; generated REST routes return 429 | lib/rate-limit/redis.test.ts, in-memory.test.ts, client-ip.test.ts | #1245, #1092, #1125 | - |
@@ -120,15 +120,15 @@ Chapter V17 (WebRTC) does not apply: the generated app has no real-time media, T
 
 | ID | Level | Status | Covered by | Verified by | Gap Issue | Source and version |
 |----|-------|--------|------------|-------------|-----------|--------------------|
-| V5.1.1 | 2 | gap | docs/knowledge/upload-format-allowlist-deferral.md lists types and extensions; per-feature size, unpacked size and malicious-file handling are not documented | none | #1279 | - |
+| V5.1.1 | 2 | generator | docs/knowledge/upload-limits-and-malicious-file-handling.md states the one global size limit, that archives are never unpacked and the handling of a hostile file; docs/knowledge/upload-format-allowlist-deferral.md lists types and extensions | none | - | - |
 | V5.2.1 | 1 | generator | upload_route.ts.jinja2 refuses an upload over UPLOAD_MAX_BYTES (default 10MB) before the body is parsed: a declared Content-Length over the limit is refused unread and a body without one is counted while it streams (lib/_upload_validation.ts readBodyWithLimit); per-user upload rate limit | lib/_upload_validation.test.ts, cypress/e2e/api/upload_path_safety.cy.ts, code_generator/tests/test_upload_route_content_type.py | - | - |
 | V5.2.2 | 1 | generator | lib/_upload_validation.ts checks the declared MIME type, the extension and the leading bytes against the format the extension names (images, PDF, Office and archive formats; text formats must hold no NUL byte); an extension added through UPLOAD_ALLOWED_EXTENSIONS that has no signature is accepted on the allow-lists alone; images are not re-encoded | lib/_upload_validation.test.ts, cypress/e2e/api/upload_path_safety.cy.ts, code_generator/tests/test_upload_route_content_type.py | - | - |
 | V5.2.3 | 2 | n/a | Uploaded archives are stored and served untouched; the app never decompresses them | none | - | - |
 | V5.3.1 | 1 | generator | lib/attachment/storage.ts opaque random key, storage root outside public/ | cypress/e2e/api/upload_path_safety.cy.ts, lib/attachment/storage.test.ts | - | - |
 | V5.3.2 | 1 | generator | lib/attachment/upload_core.ts newStorageKey; the original name is stored encrypted for display only | cypress/e2e/api/upload_path_safety.cy.ts, lib/attachment/storage.test.ts | - | - |
 | V5.4.1 | 2 | generator | attachment_serve_route.ts.jinja2 contentDisposition(); the name comes from the stored record, not the URL | cypress/e2e/api/upload_path_safety.cy.ts | - | - |
-| V5.4.2 | 2 | generator | contentDisposition() sends an ASCII fallback plus filename*=UTF-8'' | none | #1279 | - |
-| V5.4.3 | 2 | gap | No antivirus scan or hook | none | #1279 | - |
+| V5.4.2 | 2 | generator | contentDisposition() sends an ASCII fallback plus filename*=UTF-8''; the function is local to the generated route and its output is not unit-tested | none | #1321 | - |
+| V5.4.3 | 2 | gap | No antivirus scan or hook; docs/knowledge/upload-limits-and-malicious-file-handling.md states that scanning is the deployer's responsibility | none | #1279 | - |
 
 ## V6 Authentication
 
@@ -198,9 +198,9 @@ Chapter V17 (WebRTC) does not apply: the generated app has no real-time media, T
 | ID | Level | Status | Covered by | Verified by | Gap Issue | Source and version |
 |----|-------|--------|------------|-------------|-----------|--------------------|
 | V8.1.1 | 1 | generator | docs/knowledge/authorization-default-deny.md and multi-tenancy-and-permissions.md | none | - | - |
-| V8.1.2 | 2 | gap | Partial notes only (x-write-locked-values, x-pii, write-only fields); no single rule document | none | #1286 | - |
-| V8.1.3 | 3 | gap | No document states which contextual attributes drive decisions (the only IP use is rate-limit keying) | none | #1286 | - |
-| V8.1.4 | 3 | gap | No document on contextual factors in authentication and authorization decisions | none | #1286 | - |
+| V8.1.2 | 2 | generator | Field rules (write-only, readonly, x-write-locked-values, state-dependent) are in docs/knowledge/field-level-authorization-rules.md; DataGrid child fields are not protected by x-readonly | none | - | - |
+| V8.1.3 | 3 | generator | docs/knowledge/field-level-authorization-rules.md states that the only environmental attribute used is the client IP, for rate-limit keys; no decision depends on device or time of day | none | - | - |
+| V8.1.4 | 3 | generator | docs/knowledge/field-level-authorization-rules.md lists the contextual attributes and what each is used for; none drives an access decision | none | - | - |
 | V8.2.1 | 1 | generator | lib/authz.ts requireEntityPermission (default deny), lib/api-auth.ts requireApiPermission, actions.ts.jinja2 | code_generator/tests/test_api_route_authentication_enumeration.py, test_authz_call_site_enumeration.py, security matrix permission_denied cell (check:security-matrix) | - | - |
 | V8.2.2 | 1 | generator | lib/authz.ts record scope (Creator, Assignee) and organization row filtering | lib/authz_record_scope.test.ts, security matrix cross_org cell, code_generator/tests/test_bulk_route_self_only_richperms.py | #1121, #1257 | - |
 | V8.2.3 | 2 | gap | Write-only fields are stripped from reads and x-write-locked-values locks values after approval; no per-role field permission model | code_generator/tests/test_rest_update_write_only_omitted_unchanged.py, cypress/e2e/api/setting_write_only_omitted.cy.ts | #1287, #1230, #1235 | - |
@@ -261,8 +261,8 @@ Chapter V17 (WebRTC) does not apply: the generated app has no real-time media, T
 
 | ID | Level | Status | Covered by | Verified by | Gap Issue | Source and version |
 |----|-------|--------|------------|-------------|-----------|--------------------|
-| V11.1.1 | 2 | gap | AUTH_SECRET derives the MFA, attachment-name, import-token and refresh-token keys; no key lifecycle document | none | #1290 | - |
-| V11.1.2 | 2 | gap | No cryptographic inventory | none | #1290 | - |
+| V11.1.1 | 2 | generator | docs/knowledge/cryptographic-inventory-and-key-management.md covers the AUTH_SECRET lifecycle; in-place rotation is not supported and changing it breaks MFA secrets and attachment names | none | #1291 | - |
+| V11.1.2 | 2 | generator | docs/knowledge/cryptographic-inventory-and-key-management.md lists every key, algorithm and use | none | - | - |
 | V11.2.1 | 2 | generator | node:crypto and bcryptjs in lib/mfa, lib/auth; session crypto from Auth.js; no hand-rolled primitives found | lib/mfa/crypto.test.ts, lib/auth/password-check.test.ts | - | - |
 | V11.2.2 | 2 | gap | Algorithms and the bcrypt cost are hard-coded; the encryption format has a v1 prefix but no key id | lib/mfa/crypto.test.ts (format prefix) | #1291 | - |
 | V11.2.3 | 2 | generator | AES-256-GCM, HMAC-SHA256, SHA-256, bcrypt; the strength of AUTH_SECRET itself is not enforced | lib/mfa/crypto.test.ts | - | - |
