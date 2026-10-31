@@ -45,11 +45,54 @@ axes:
   case:
     values:
       # An authenticated actor whose role lacks the permission.
-      permission_denied: {}
+      permission_denied:
+        combine: {fk_shape: [none]}
       # An actor who holds the permission in their own organization and reaches
       # into another one. Dropped for an entity with no organization column.
       cross_org:
         requires: [should_filter_by_org]
+        combine: {fk_shape: [none]}
+      # Foreign-key references to a row the actor cannot reach (another organization, no read
+      # permission, outside a creator/assignee scope, someone else's x-self-only row). The shape
+      # of the reference is the `fk_shape` axis; the cases below only combine with a shape.
+      #   fk_to_unreachable        write a reference to an unreachable row
+      #   fk_away_unreachable      re-point a reference that already holds an unreachable row
+      #   fk_null_unreachable      clear an optional reference that holds an unreachable row
+      #   fk_delete_unreachable    delete a record whose reference holds an unreachable row
+      fk_to_unreachable:
+        requires: [should_filter_by_org]
+        combine:
+          operation: [create, bulk_create, update, bulk_update, import, action_add, action_update]
+          fk_shape: &fk_shapes [many_to_one_required, many_to_one_optional, one_to_one_required, one_to_one_optional, inline_child_required, inline_child_optional]
+      fk_away_unreachable:
+        requires: [should_filter_by_org]
+        combine:
+          operation: [update, bulk_update, action_update]
+          fk_shape: *fk_shapes
+      fk_null_unreachable:
+        requires: [should_filter_by_org]
+        combine:
+          operation: [update, bulk_update, action_update]
+          fk_shape: [many_to_one_optional, one_to_one_optional, inline_child_optional]
+      fk_delete_unreachable:
+        requires: [should_filter_by_org]
+        combine:
+          operation: [delete, bulk_delete, action_delete]
+          fk_shape: *fk_shapes
+  # The kind of foreign-key reference an entity holds to an organization-scoped entity
+  # (directly, or in a row of an inline child grid). `none` is the cell of every test that
+  # is not about a reference, so existing markers keep their meaning.
+  fk_shape:
+    default: none
+    values:
+      none:
+        combine: {case: [permission_denied, cross_org]}
+      many_to_one_required:  {requires: [fk_many_to_one_required]}
+      many_to_one_optional:  {requires: [fk_many_to_one_optional]}
+      one_to_one_required:   {requires: [fk_one_to_one_required]}
+      one_to_one_optional:   {requires: [fk_one_to_one_optional]}
+      inline_child_required: {requires: [fk_inline_required]}
+      inline_child_optional: {requires: [fk_inline_optional]}
 
 # Route templates the generator renders under app/api/ for a single entity that
 # are not (yet) an `operation` above, with the reason.

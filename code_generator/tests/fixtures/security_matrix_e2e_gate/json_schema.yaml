@@ -166,7 +166,8 @@ definitions:
         - status: {}
 
   # --- Foreign-reference shapes (one entry per structure the FK-reference rule has to cover) ---
-  #   sx_profile      one-to-one: a required, unique foreign key to sx_account.
+  #   sx_profile      one-to-one: a required, unique foreign key to sx_account, which is also its
+#                   primary display field (so the generated reference tests G3.8-G3.15 run on it).
   #   sx_ticket       many-to-one: a required (sx_account_id) and an optional (sx_backup_account_id)
   #                   foreign key to sx_account; a many-to-many set of sx_tag (tags); an
   #                   optional-foreign-key list of sx_note (a one-to-many set chosen on the parent);
@@ -186,7 +187,7 @@ definitions:
       test: true
     x-display:
       table:
-        - title:
+        - sx_account:
             primary: true
     properties:
       title: {}

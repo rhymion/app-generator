@@ -915,7 +915,7 @@ describe('API: {{ title }}', () => {
     // to, with the same 404 a missing row gets.
 {% if can_new %}
     it('G3.8 POST with a {{ fk_write_probe.prop }} in a foreign org returns 404 (existence hidden)', () => {
-      // security-cell: entity={{ parent }} operation=create case=cross_org
+      // security-cell: entity={{ parent }} operation=create case=fk_to_unreachable fk_shape={{ fk_write_probe.shape }}
       {% if can_list %}cy.request({ url: API_BASE, headers: { 'X-API-Key': TEST_API_KEY } }).its('body.total'){% else %}cy.wrap(null){% endif %}.then((totalBefore) => {
       cy.task<any>('db:populate{{ pascal }}Dependencies').then((deps) => {
         cy.task<any>('db:createCrossOrgScenario', { entityName: '{{ fk_write_probe.target }}', entityId: deps.{{ fk_write_probe.dep_var }}2.id }).then((scenario) => {
@@ -945,7 +945,7 @@ describe('API: {{ title }}', () => {
     });
 
     it('G3.9 bulk POST with a {{ fk_write_probe.prop }} in a foreign org reports Not found and does not create', () => {
-      // security-cell: entity={{ parent }} operation=bulk_create case=cross_org
+      // security-cell: entity={{ parent }} operation=bulk_create case=fk_to_unreachable fk_shape={{ fk_write_probe.shape }}
       {% if can_list %}cy.request({ url: API_BASE, headers: { 'X-API-Key': TEST_API_KEY } }).its('body.total'){% else %}cy.wrap(null){% endif %}.then((totalBefore) => {
       cy.task<any>('db:populate{{ pascal }}Dependencies').then((deps) => {
         cy.task<any>('db:createCrossOrgScenario', { entityName: '{{ fk_write_probe.target }}', entityId: deps.{{ fk_write_probe.dep_var }}2.id }).then((scenario) => {
@@ -980,7 +980,7 @@ describe('API: {{ title }}', () => {
 {% if can_edit %}
 
     it('G3.10 PUT with a {{ fk_write_probe.prop }} in a foreign org returns 404 (existence hidden)', () => {
-      // security-cell: entity={{ parent }} operation=update case=cross_org
+      // security-cell: entity={{ parent }} operation=update case=fk_to_unreachable fk_shape={{ fk_write_probe.shape }}
       cy.task<any>('db:populate{{ pascal }}Dependencies').then((deps) => {
         cy.task<any[]>('db:populate{{ pascal }}', 1).then((records) => {
           cy.task<any>('db:createCrossOrgScenario', { entityName: '{{ fk_write_probe.target }}', entityId: deps.{{ fk_write_probe.dep_var }}2.id }).then((scenario) => {
@@ -1010,7 +1010,7 @@ describe('API: {{ title }}', () => {
     });
 
     it('G3.11 bulk PUT with a {{ fk_write_probe.prop }} in a foreign org reports Not found and does not write', () => {
-      // security-cell: entity={{ parent }} operation=bulk_update case=cross_org
+      // security-cell: entity={{ parent }} operation=bulk_update case=fk_to_unreachable fk_shape={{ fk_write_probe.shape }}
       cy.task<any>('db:populate{{ pascal }}Dependencies').then((deps) => {
         cy.task<any[]>('db:populate{{ pascal }}', 1).then((records) => {
           cy.task<any>('db:createCrossOrgScenario', { entityName: '{{ fk_write_probe.target }}', entityId: deps.{{ fk_write_probe.dep_var }}2.id }).then((scenario) => {
@@ -1041,6 +1041,7 @@ describe('API: {{ title }}', () => {
     // it: the stored target is moved into a foreign organization after the
     // record exists, then the record is re-pointed at a reachable row.
     it('G3.12 PUT re-pointing {{ fk_write_probe.prop }} away from a row in a foreign org returns 403 and writes nothing', () => {
+      // security-cell: entity={{ parent }} operation=update case=fk_away_unreachable fk_shape={{ fk_write_probe.shape }}
       cy.task<any>('db:populate{{ pascal }}Dependencies').then((deps) => {
         cy.task<any[]>('db:populate{{ pascal }}', 1).then((records) => {
           const stored = records[0].{{ fk_write_probe.prop }};
@@ -1072,6 +1073,7 @@ describe('API: {{ title }}', () => {
     });
 
     it('G3.13 bulk PUT re-pointing {{ fk_write_probe.prop }} away from a row in a foreign org reports an error and writes nothing', () => {
+      // security-cell: entity={{ parent }} operation=bulk_update case=fk_away_unreachable fk_shape={{ fk_write_probe.shape }}
       cy.task<any>('db:populate{{ pascal }}Dependencies').then((deps) => {
         cy.task<any[]>('db:populate{{ pascal }}', 1).then((records) => {
           const stored = records[0].{{ fk_write_probe.prop }};
@@ -1102,6 +1104,7 @@ describe('API: {{ title }}', () => {
 {% if can_delete %}
 
     it('G3.14 DELETE of a record whose {{ fk_write_probe.prop }} points at a row in a foreign org returns 403 and keeps the record', () => {
+      // security-cell: entity={{ parent }} operation=delete case=fk_delete_unreachable fk_shape={{ fk_write_probe.shape }}
       cy.task<any>('db:populate{{ pascal }}Dependencies').then(() => {
         cy.task<any[]>('db:populate{{ pascal }}', 1).then((records) => {
           cy.task<any>('db:createCrossOrgScenario', { entityName: '{{ fk_write_probe.target }}', entityId: records[0].{{ fk_write_probe.prop }} }).then(() => {
@@ -1123,6 +1126,7 @@ describe('API: {{ title }}', () => {
     });
 
     it('G3.15 bulk DELETE of a record whose {{ fk_write_probe.prop }} points at a row in a foreign org reports an error and keeps the record', () => {
+      // security-cell: entity={{ parent }} operation=bulk_delete case=fk_delete_unreachable fk_shape={{ fk_write_probe.shape }}
       cy.task<any>('db:populate{{ pascal }}Dependencies').then(() => {
         cy.task<any[]>('db:populate{{ pascal }}', 1).then((records) => {
           cy.task<any>('db:createCrossOrgScenario', { entityName: '{{ fk_write_probe.target }}', entityId: records[0].{{ fk_write_probe.prop }} }).then(() => {
