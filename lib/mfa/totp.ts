@@ -56,7 +56,11 @@ export async function verifyTotpStep(
       epochTolerance: EPOCH_TOLERANCE_SECONDS,
       ...(afterTimeStep == null ? {} : { afterTimeStep }),
     });
-    return result?.valid ? result.timeStep : null;
+    if (!result?.valid) return null;
+    // The otplib result type is a union whose TOTP member carries `timeStep`; without it the code
+    // cannot be recorded, so it is not accepted.
+    const { timeStep } = result as { timeStep?: number };
+    return typeof timeStep === 'number' ? timeStep : null;
   } catch {
     // `otplib` throws on malformed secrets; treat as a hard fail.
     return null;
