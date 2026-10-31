@@ -118,7 +118,7 @@ describe('MFA (TOTP + Recovery Code)', () => {
       cy.visit(MFA_SETTINGS_URL);
       cy.contains('Two-factor authentication is enabled on this account.').should('be.visible');
 
-      cy.task('generateTotp', secret).then((code) => {
+      cy.task('generateNextTotp', secret).then((code) => {
         cy.get('input[autocomplete="one-time-code"]:visible').first().type(code as string);
         cy.contains('Disable MFA').click();
       });
@@ -168,7 +168,7 @@ describe('MFA (TOTP + Recovery Code)', () => {
 
       cy.contains('MFA Enabled').should('be.visible');
       cy.contains('Disable MFA').click();
-      cy.task('generateTotp', secret).then((code) => {
+      cy.task('generateNextTotp', secret).then((code) => {
         cy.get('input[autocomplete="one-time-code"]:visible').first().type(code as string);
         cy.contains('Disable MFA').click();
       });
@@ -232,7 +232,7 @@ describe('MFA (TOTP + Recovery Code)', () => {
 
       cy.contains('MFA Enabled').should('be.visible');
       cy.contains('Disable MFA').click();
-      cy.task('generateTotp', secret).then((code) => {
+      cy.task('generateNextTotp', secret).then((code) => {
         cy.get('input[autocomplete="one-time-code"]:visible').first().type(code as string);
         cy.contains('Disable MFA').click();
       });

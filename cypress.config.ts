@@ -173,6 +173,13 @@ export default defineConfig({
           const otplib = require('otplib');
           return otplib.generateSync({ secret });
         },
+        // Code for the following 30 s step. A TOTP code is single-use, so a
+        // test that signs in and then confirms a second action in the same
+        // window must use the next step (accepted via the verify tolerance).
+        async 'generateNextTotp'(secret: string) {
+          const otplib = require('otplib');
+          return otplib.generateSync({ secret, epoch: Math.floor(Date.now() / 1000) + 30 });
+        },
         // Hand-written fixtures for the mobile token-auth tests (not part of
         // the generated entity-driven task set above).
         async 'db:createPasswordlessUser'() {
