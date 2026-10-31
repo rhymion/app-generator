@@ -57,3 +57,5 @@ authenticated, and each update, delete and action handler checks the permission 
 at entity level). `test_security_matrix.py` checks that every route template `generate.py` renders for an entity is
 either an operation in the matrix or listed under `unmodelled_templates` with a reason, so a new kind of route cannot
 skip the matrix.
+
+See also [security-asvs-coverage.md](security-asvs-coverage.md), which maps each OWASP ASVS 5.0 requirement to the code, test or Issue that covers it.
