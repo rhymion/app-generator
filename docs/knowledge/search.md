@@ -158,7 +158,9 @@ pg_trgm/ILIKE-based, not pg_bigm.
   - `instrumentation.ts` (`code_generator/templates/instrumentation.ts.jinja2`) — Next.js's own
     `register()` hook, called once per server instance bootstrap on both Vercel and GCP/Cloud
     Run (one wiring point reaches both deployment targets). It imports and awaits
-    `lib/db-init.ts`'s `ensureSearchIndexes()` — the automatic, always-on path.
+    `lib/db-init.ts`'s `ensureSearchIndexes()` — the automatic, always-on path. The file itself is
+    written for every app (it also exports `onRequestError`); `register()` is rendered only when
+    the app has search indexes.
   - `scripts/create-gin-indexes.sql` (`code_generator/templates/create_gin_indexes.sql.jinja2`)
     — the same indexes as plain SQL, kept as a manual/migration-time fallback:
     `psql "$DATABASE_URL" -f scripts/create-gin-indexes.sql`.
@@ -272,12 +274,11 @@ deleted automatically:
 - `app/[locale]/search/page.tsx`
 - `app/[locale]/search/actions.ts`
 - `scripts/create-gin-indexes.sql`
-- `instrumentation.ts`
 
 (`code_generator/generate.py`'s `_stale_search_files` list — confirmed against the source.
 `lib/db-init.ts` is not in this cleanup list, so it is not deleted when search entities go to
-zero — harmless, since `instrumentation.ts` (its only caller) is deleted, so no import breaks;
-it just lingers as an unused file. Pre-existing gap, not introduced by the Issue #725 fix.)
+zero — harmless, since `instrumentation.ts` renders `register()` (its only caller) only when index
+entities exist, so no import breaks; it just lingers as an unused file. Pre-existing gap, not introduced by the Issue #725 fix.)
 
 This keeps the project free of dead code when search is disabled.
 
