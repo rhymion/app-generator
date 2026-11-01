@@ -36,6 +36,9 @@
   },
   "Errors": {
     "capacityExhausted": "利用可能な容量がありません。別の選択肢をお試しください。",
+    "currentPasswordIncorrect": "現在のパスワードが正しくありません。",
+    "currentPasswordRateLimited": "試行回数が多すぎます。数分待ってからもう一度お試しください。",
+    "currentPasswordRequired": "メールアドレスを変更するには現在のパスワードを入力してください。",
     "exclusiveParentsInvalid": "{fields}は一つだけ設定でき、他は空にしてください。",
     "exclusiveParentsMissing": "{fields}のうち、ちょうど一つを設定してください。",
     "fieldAlreadyLinked": "{field}は既に他のレコードにリンクされています。",
@@ -267,7 +270,9 @@
     "mfaStatusEnabled": "有効",
     "mfaStatusDisabled": "無効",
     "accountsTitle": "連携アカウント",
-    "accountsBody": "このアカウントへサインインできるプロバイダーを管理します。"
+    "accountsBody": "このアカウントへサインインできるプロバイダーを管理します。",
+    "currentPassword": "現在のパスワード",
+    "currentPasswordHelp": "メールアドレスを変更する場合のみ必要です。"
   },
   "LinkedAccounts": {
     "title": "連携アカウント",
