@@ -14,6 +14,7 @@ Limiter calls recognised:
 """
 import pathlib
 import re
+import subprocess
 
 import pytest
 
@@ -81,11 +82,19 @@ def _strip_comments(text: str) -> str:
     return re.sub(r'(?m)^\s*//.*$|(?<=\s)//.*$', '', text)
 
 
+def _tracked(root: pathlib.Path, pattern: str) -> list:
+    """Git-tracked files under root. Generated, git-ignored output is covered by its template."""
+    out = subprocess.run(
+        ['git', 'ls-files', '--', pattern], cwd=root, check=True, capture_output=True, text=True
+    ).stdout.split('\n')
+    return sorted(root / name for name in out if name)
+
+
 def _route_sources() -> dict:
     sources = {}
     for path in sorted(TEMPLATES_DIR.glob('*route*.jinja2')):
         sources[f'templates/{path.name}'] = path
-    for path in sorted(HAND_WRITTEN_API_DIR.rglob('route.ts')):
+    for path in _tracked(HAND_WRITTEN_API_DIR, '*route.ts'):
         sources[path.relative_to(REPO_ROOT).as_posix()] = path
     return sources
 
@@ -96,7 +105,7 @@ def _action_sources() -> dict:
         if "'use server'" in path.read_text(encoding='utf-8'):
             sources[f'templates/{path.name}'] = path
     for root in ('app', 'lib'):
-        for path in sorted((REPO_ROOT / root).rglob('*.ts')):
+        for path in _tracked(REPO_ROOT / root, '*.ts'):
             if path.name.endswith('.test.ts'):
                 continue
             head = path.read_text(encoding='utf-8')[:400]
