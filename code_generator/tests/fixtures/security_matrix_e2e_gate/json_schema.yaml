@@ -164,3 +164,144 @@ definitions:
         - title:
             primary: true
         - status: {}
+
+  # --- Foreign-reference shapes (one entry per structure the FK-reference rule has to cover) ---
+  #   sx_profile      one-to-one: a required, unique foreign key to sx_account, which is also its
+#                   primary display field (so the generated reference tests G3.8-G3.15 run on it).
+  #   sx_ticket       many-to-one: a required (sx_account_id) and an optional (sx_backup_account_id)
+  #                   foreign key to sx_account; a many-to-many set of sx_tag (tags); an
+  #                   optional-foreign-key list of sx_note (a one-to-many set chosen on the parent);
+  #                   and an inline-editable child, sx_ticket_line.
+  #   sx_ticket_line  inline child (no pages of its own) whose rows carry a required and an optional
+  #                   foreign key to sx_account.
+  #   sx_note         independent child of sx_ticket, held by a nullable foreign key.
+  sx_profile:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: true
+    x-display:
+      table:
+        - sx_account:
+            primary: true
+    properties:
+      title: {}
+      organization_id:
+        x-relationship:
+          labelField: name
+      sx_account_id:
+        x-relationship:
+          type: one-to-one
+          target: sx_account
+          labelField: name
+
+  sx_ticket:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: true
+    x-display:
+      table:
+        - title:
+            primary: true
+    x-relationships:
+      tags:
+        type: many-to-many
+        target: sx_tag
+    properties:
+      title: {}
+      organization_id:
+        x-relationship:
+          labelField: name
+      sx_account_id:
+        x-relationship:
+          type: many-to-one
+          target: sx_account
+          labelField: name
+      sx_backup_account_id:
+        x-relationship:
+          type: many-to-one
+          target: sx_account
+          labelField: name
+      tags:
+        type: array
+        x-outputType: list
+        items:
+          $ref: "#/definitions/sx_tag"
+      sx_notes:
+        type: array
+        x-outputType: list
+        items:
+          $ref: "#/definitions/sx_note"
+      sx_ticket_lines:
+        type: array
+        items:
+          $ref: "#/definitions/sx_ticket_line"
+    required:
+      - sx_ticket_lines
+
+  sx_ticket_line:
+    properties:
+      sx_ticket_id:
+        pattern: "^c[a-z0-9]{24,}$"
+      label: {}
+      sx_account_id:
+        pattern: "^c[a-z0-9]{24,}$"
+        x-relationship: {}
+      sx_backup_account_id:
+        pattern: "^c[a-z0-9]{24,}$"
+        x-relationship: {}
+
+  sx_note:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: false
+      test: false
+    x-display:
+      table:
+        - name:
+            primary: true
+    properties:
+      name: {}
+      organization_id:
+        x-relationship:
+          labelField: name
+      sx_ticket_id:
+        pattern: "^c[a-z0-9]{24,}$"
+        x-relationship:
+          labelField: title
+
+  sx_tag:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: false
+      test: false
+    x-display:
+      table:
+        - name:
+            primary: true
+    properties:
+      name: {}
+      organization_id:
+        x-relationship:
+          labelField: name

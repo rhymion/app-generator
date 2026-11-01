@@ -240,18 +240,8 @@ ALLOWLIST: list[tuple[str, str, str]] = [
      'Session actor; returns only entity names the actor may read.'),
     (r'lib/mention/search\.ts', r'searchMentionUserOptions',
      'Session actor; getModelPermissions(\'user\', sessionUserId) and organization scope before the query.'),
-    # --- lib/authz.ts: pure or session-own helpers ---
-    (r'lib/authz\.ts', r'getSessionUserId(?:OrThrow)?|toPermissions|deriveRichPermissionsFromRows|assertPermission',
-     'Pure functions or the caller\'s own session identity; no data access.'),
-    # --- PENDING: known gaps ---
-    (r'lib/authz\.ts',
-     r'getPermissionRowsForUser|getModelPermissions|getUserRoleIds|canAccess(?:Entity|Record)'
-     r'|require(?:Entity|Record)Permission|resolve(?:Entity|Record)Permissions'
-     r'|invalidatePermissionCache',
-     'PENDING (tracked publicly as #1214): accept an arbitrary subject / unauthenticated cache flush; '
-     'not part of this change.'),
 ]
-PENDING_ALLOWLIST_PATHS = {r'lib/authz\.ts'}
+PENDING_ALLOWLIST_PATHS: set[str] = set()
 
 # Function-level (inline) directives in page files: each is an opts-only closure
 # over a fetch*Page helper that itself checks session + read permission.

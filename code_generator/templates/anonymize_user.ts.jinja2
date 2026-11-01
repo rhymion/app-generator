@@ -11,6 +11,7 @@
 
 import { logger } from '@/lib/logger';
 import prisma from '@/lib/prisma';
+import { invalidateApiKeyCache } from '@/lib/api-auth';
 {% if scrubs_avatar %}
 import { deleteStoredObject, isStorageKey } from '@/lib/attachment/storage';
 {% endif %}
@@ -39,6 +40,9 @@ export async function anonymizeUser(userId: string): Promise<AnonymizeUserResult
   const avatar = { path: null as string | null };
 {% endif %}
 
+  // The hash of the API key the erasure removes, so its cache entry can be dropped after the commit.
+  let previousApiKeyHash: string | null = null;
+
   // Unique placeholder email to satisfy @unique constraint after scrub
   const placeholderEmail = `${userId}@deleted.invalid`;
 
@@ -48,9 +52,10 @@ export async function anonymizeUser(userId: string): Promise<AnonymizeUserResult
       // whatever related records an earlier call left behind.
       const current = await tx.user.findUnique({
         where: { id: userId },
-        select: { anonymized_at: true, invalidated_at: true{% if scrubs_avatar %}, image_id: true{% endif %} },
+        select: { anonymized_at: true, invalidated_at: true, api_key_hash: true{% if scrubs_avatar %}, image_id: true{% endif %} },
       });
       if (!current) throw new Error(`User ${userId} not found`);
+      previousApiKeyHash = current.api_key_hash;
       if (current.anonymized_at) anonymizedAt = current.anonymized_at;
       const invalidatedAt = current.invalidated_at ?? anonymizedAt;
 
@@ -107,6 +112,9 @@ export async function anonymizeUser(userId: string): Promise<AnonymizeUserResult
     errors.push('Anonymization failed');
     return { success: false, userId, anonymizedAt, errors };
   }
+
+  // The key is gone from the row; stop the per-process cache from still accepting it.
+  invalidateApiKeyCache(previousApiKeyHash);
 
   // The stored file goes after the commit: a failure here leaves the erasure
   // in place and is reported instead of rolling it back.

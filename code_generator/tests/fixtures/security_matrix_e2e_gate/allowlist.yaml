@@ -30,3 +30,11 @@ exempt:
     operation: export
     case: permission_denied
     reason: The security fixture declares this proxy view without a generated test (x-generate.test is false), so no API spec is generated for it; the audit of missing cells is tracked in Issue #1231.
+  - case: fk_to_unreachable
+    reason: The generated reference tests (G3.8-G3.11) cover only the primary display field when it is a foreign key; the other reference shapes, bulk routes and Server Actions have no test yet, tracked in Issue #1324.
+  - case: fk_away_unreachable
+    reason: The generated reference tests (G3.12-G3.13) cover only the primary display field when it is a foreign key; the other reference shapes and Server Actions have no test yet, tracked in Issue #1324.
+  - case: fk_null_unreachable
+    reason: Clearing an optional reference that holds an unreachable row has no generated test for any route yet, tracked in Issue #1324.
+  - case: fk_delete_unreachable
+    reason: The generated reference tests (G3.14-G3.15) cover only the primary display field when it is a foreign key; the other reference shapes and Server Actions have no test yet, tracked in Issue #1324.

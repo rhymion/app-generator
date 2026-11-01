@@ -1414,6 +1414,33 @@ def get_parent_relationships(parent_def: dict, schema: dict | None = None) -> li
     return result
 
 
+def fk_reference_shapes(model: str, schema: dict) -> dict[str, str]:
+    """Shape of every foreign-key property of `model` that refers to an
+    organization-scoped entity: ``{prop_name: '<one_to_one|many_to_one>_<required|optional>'}``.
+
+    These are the references the write-time reachability check applies to
+    (a target without an `organization_id` column, `organization` and `user`
+    are not scoped by organization). The security matrix uses the shape to
+    declare which kinds of reference an entity holds.
+    """
+    defs = schema.get('definitions') or {}
+    base = defs.get(f'__{model}') or defs.get(model) or {}
+    required = set(base.get('required') or [])
+    shapes = {}
+    for prop_name, prop in (base.get('properties') or {}).items():
+        rel = (prop or {}).get('x-relationship') or {}
+        kind, target = rel.get('type'), rel.get('target')
+        if kind not in ('many-to-one', 'one-to-one') or not target or prop_name == 'creator_id':
+            continue
+        if target in ('organization', 'user'):
+            continue
+        target_def = defs.get(f'__{target}') or defs.get(target) or {}
+        if 'organization_id' not in (target_def.get('properties') or {}):
+            continue
+        shapes[prop_name] = f"{kind.replace('-', '_')}_{'required' if prop_name in required else 'optional'}"
+    return shapes
+
+
 def get_inline_create_fields(schema: dict) -> list[dict]:
     """Every field that declares `x-create-inline: true`.
 
