@@ -46,7 +46,7 @@ from helpers.schema_helpers import resolve_ledger_domain
 from helpers.timezones import TIMEZONES, DEFAULT_MEMBER
 from helpers.schema_helpers import get_entity_properties
 from helpers.schema_helpers import get_self_only_flags
-from helpers.schema_helpers import get_parent_relationships
+from helpers.schema_helpers import fk_reference_shapes, get_parent_relationships
 from helpers.schema_helpers import resolve_set_fields as _resolve_set_fields
 from helpers.schema_helpers import schema_has_direct_attachment_fk
 from helpers.schema_helpers import get_parent_fk_props
@@ -1501,6 +1501,33 @@ def _resolve_search_columns(entity: dict, schema: dict, search_default_scope: st
     }
 
 
+def _security_fk_shape_flags(model: str, entity: dict, schema: dict, filters_by_org: bool) -> dict[str, bool]:
+    """Flags for the security matrix's `fk_shape` axis: which kinds of reference to an
+    organization-scoped entity `model` holds, directly or in an inline child grid.
+
+    Shapes come from helpers.schema_helpers.fk_reference_shapes. A child's foreign key
+    back to its parent is the ownership link, not a reference the user picks, so it is
+    left out. Without an organization column nothing is unreachable, so every flag is false.
+    """
+    kinds = ('many_to_one', 'one_to_one')
+    flags = {f'fk_{kind}_{need}': False for kind in kinds for need in ('required', 'optional')}
+    flags.update({'fk_inline_required': False, 'fk_inline_optional': False})
+    if not filters_by_org:
+        return flags
+    for shape in fk_reference_shapes(model, schema).values():
+        flags[f'fk_{shape}'] = True
+    for child in entity.get('children') or []:
+        if child.get('output_type') not in (None, 'list'):
+            continue
+        if (child.get('relationship') or {}).get('type') == 'many-to-many':
+            continue
+        for prop, shape in fk_reference_shapes(child['name'], schema).items():
+            if prop == f'{model}_id':
+                continue
+            flags[f"fk_inline_{shape.rsplit('_', 1)[1]}"] = True
+    return flags
+
+
 def generate(schema_path: str, output_dir: str) -> None:
     with open(schema_path) as f:
         schema = yaml.safe_load(f)
@@ -2095,6 +2122,7 @@ def generate(schema_path: str, output_dir: str) -> None:
             'can_export': bool(can_export), 'can_invalidate': bool(can_invalidate),
             'import_eligible': bool(ctx.get('import_eligible')),
             'should_filter_by_org': bool(ctx.get('should_filter_by_org')),
+            **_security_fk_shape_flags(parent, entity, schema, bool(ctx.get('should_filter_by_org'))),
         }
 
         # --- Invalidate action route (independent of can_api) ---

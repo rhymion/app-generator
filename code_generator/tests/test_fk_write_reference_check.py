@@ -139,7 +139,7 @@ def _api_spec(primary_target_scoped: bool) -> tuple[dict, str]:
 
 def test_generated_spec_points_the_primary_fk_at_a_foreign_org_row():
     ctx, out = _api_spec(primary_target_scoped=True)
-    assert ctx['fk_write_probe'] == {'prop': 'gadget_id', 'dep_var': 'gadget', 'target': 'gadget'}
+    assert ctx['fk_write_probe'] == {'prop': 'gadget_id', 'dep_var': 'gadget', 'target': 'gadget', 'shape': 'many_to_one_required'}
     for case in ('G3.8 POST', 'G3.9 bulk POST', 'G3.10 PUT', 'G3.11 bulk PUT'):
         assert case in out
     assert "entityName: 'gadget'" in out

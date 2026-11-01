@@ -8,6 +8,15 @@ type Account = { id: string; name: string };
 describe('hand-written route /api/sx_account/{id}/rename_probe', () => {
   const url = (id: string) => `/api/sx_account/${id}/rename_probe`;
 
+  // Start from a freshly seeded database, as the generated specs do: the helpers create fixed-name
+  // users and keys, which collide with rows left behind by the spec that ran before this one.
+  beforeEach(() => {
+    cy.task('db:reset');
+    cy.task('db:seed');
+    cy.task('db:grantAllPermissions');
+    Cypress.session.clearAllSavedSessions();
+  });
+
   it('refuses an actor without the permission (403) and leaves the row unchanged', () => {
     // The route is another write path to the update cell, so it claims that cell.
     // security-cell: entity=sx_account operation=update case=permission_denied

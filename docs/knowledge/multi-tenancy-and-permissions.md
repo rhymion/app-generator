@@ -272,7 +272,7 @@ Two layers of caching are in place (production-only, gated by `process.env.NODE_
 | React `cache()` | Per request | Deduplicates concurrent calls within one render |
 | `TtlLruCache` (`lib/_ttl_lru.ts`) | 30 seconds, 1000 entries | Per-process; spans multiple requests |
 
-The cache can be manually invalidated via `invalidatePermissionCache()` from `lib/authz.ts`. Role-mutation endpoints should call this to avoid stale grants within the TTL window.
+The cache is held on `globalThis`, so every bundle of `lib/authz.ts` in a process shares it. `invalidatePermissionCache()` from `lib/authz.ts` clears it. The generated `service.ts` of `role`, `permission` and `user` (whose `roles` field sets role membership) calls it after each create, update or delete commits, so these writes apply at once on the instance that handled them (`PERMISSION_CACHE_MODELS` in `code_generator/build_context.py` lists the entities). Code that changes permissions, roles or role membership outside those service functions must call it too.
 
 ---
 
@@ -464,13 +464,13 @@ See `docs/multi-tenancy.md` § "Decisions" for the rationale (app-layer for v1, 
 
 `getModelPermissions('my_entity', userId)` grants or denies CRUD at the model level. There is no mechanism to restrict which fields a user may read or write within a model.
 
-### Permission cache does not invalidate on role change
+### Permission cache lag on other instances
 
-When an admin modifies a user's roles, the permission cache entry for that user persists until its 30-second TTL expires. During this window, the user may still see stale permissions. Call `invalidatePermissionCache()` from `lib/authz.ts` in role-mutation endpoints to tighten this bound.
+A role, permission or role-membership write clears the permission cache of the process that handled it (see the caching table above). Another server process keeps its cached answer until the 30-second TTL expires, so a revoked grant can stay usable there for up to 30 seconds.
 
 ### API key cache has a 5-minute lag
 
-Issuing a new key through the settings page (`issueApiKey()` in `lib/setting/api-key-actions.ts`) calls `invalidateApiKeyCache(oldHash)` in the same process, so the old key stops working there at once. Another server process keeps accepting the old key until its own cache entry ages out, up to 5 minutes in production. Any other code that replaces or clears `user.api_key_hash` must call `invalidateApiKeyCache()` with the old hash.
+Issuing a new key through the settings page (`issueApiKey()` in `lib/setting/api-key-actions.ts`) calls `invalidateApiKeyCache(oldHash)` in the same process, so the old key stops working there at once. Another server process keeps accepting the old key until its own cache entry ages out, up to 5 minutes in production. Erasing a user (`anonymizeUser()`) drops the cached entry for the removed key the same way. Any other code that replaces or clears `user.api_key_hash` must call `invalidateApiKeyCache()` with the old hash.
 
 ### No approval-flow permission integration
 
