@@ -234,6 +234,7 @@ lib/dashboard/use_entity_approval_actions.ts
 !lib/attachment/orphan_cleanup.ts
 !lib/attachment/owner_cleanup.ts
 !lib/attachment/url.ts
+!lib/attachment/content-disposition.ts
 !lib/attachment/*.test.ts
 !lib/approval_flow/autocomplete_filter.ts
 !lib/approval_flow/service_validation_custom.ts
