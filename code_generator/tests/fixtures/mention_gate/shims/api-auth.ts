@@ -42,3 +42,7 @@ export function handleApiError(_error: unknown): NextResponse {
 export function withActor<T>(_userId: string, fn: () => Promise<T>): Promise<T> {
   return fn();
 }
+
+export async function enforceApiRateLimit(_userId: string, _bucket?: 'api:read' | 'api:write'): Promise<void> {
+  throw new Error('fixture stub');
+}

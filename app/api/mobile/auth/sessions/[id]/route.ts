@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { ApiError, handleApiError, requireMobileAuth } from '@/lib/api-auth';
+import { enforceApiRateLimit } from '@/lib/api-auth';
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -19,6 +20,7 @@ export async function DELETE(request: NextRequest, { params }: Params) {
 async function handleDelete(request: NextRequest, { params }: Params): Promise<NextResponse> {
   try {
     const { userId } = await requireMobileAuth(request);
+    await enforceApiRateLimit(userId);
     const { id } = await params;
 
     const result = await prisma.mobile_session.updateMany({

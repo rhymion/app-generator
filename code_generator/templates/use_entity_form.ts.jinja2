@@ -51,6 +51,7 @@ export function getEntityFormErrorMessage(err: ActionFailure, { terr, tmsg }: En
     case 'RESERVATION_LOCKED': return terr('reservationLocked');
     case 'RELATED_RECORD_INVALID': return terr('relatedRecordInvalid');
     case 'CAPACITY':          return terr('capacityExhausted');
+    case 'RATE_LIMITED':      return terr('rateLimited');
     default:                  return terr('unknown');
   }
 }

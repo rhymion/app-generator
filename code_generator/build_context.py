@@ -1512,6 +1512,7 @@ def _build_comment_actions(comment_children: list[dict], parent: str, model: str
         lines.append(f"""
 export async function add{parent_pascal}Comment({parent_id_prop}: string, message: string): Promise<{{ id: string }}> {{
   const userId = await getSessionUserIdOrThrow();
+  await enforceActionRateLimit(userId);
 {add_access}  const created = await prisma.{child_model}.create({{
     data: {{ message, {parent_id_prop}, creator_id: userId }},
     select: {{ id: true }},
@@ -1534,6 +1535,7 @@ export async function add{parent_pascal}Comment({parent_id_prop}: string, messag
 
 export async function update{parent_pascal}Comment(commentId: string, message: string): Promise<void> {{
   const userId = await getSessionUserIdOrThrow();
+  await enforceActionRateLimit(userId);
   const comment = await prisma.{child_model}.findUnique({{ where: {{ id: commentId }}, select: {update_select} }});
   if (!comment || comment.creator_id !== userId) {{
     throw new Error('Not authorized to edit this comment');
@@ -1544,6 +1546,7 @@ export async function update{parent_pascal}Comment(commentId: string, message: s
 
 export async function delete{parent_pascal}Comment(commentId: string): Promise<void> {{
   const userId = await getSessionUserIdOrThrow();
+  await enforceActionRateLimit(userId);
   const comment = await prisma.{child_model}.findUnique({{ where: {{ id: commentId }}, select: {{ creator_id: true, {parent_id_prop}: true }} }});
   if (!comment) return;
 {comment_access}  if (comment.creator_id !== userId) {{
@@ -1601,6 +1604,7 @@ def _build_comment_actions_bridge(parent: str, model: str, has_assignee_id: bool
     return f"""
 export async function add{parent_pascal}Comment(commentable_id: string, message: string): Promise<{{ id: string }}> {{
   const userId = await getSessionUserIdOrThrow();
+  await enforceActionRateLimit(userId);
 {add_access}  const created = await createComment({{ message, commentable_id, creator_id: userId }});
   // Trigger #4 (notification design 2026-05-11): notify the entity creator
   // and (if present) assignee; never the commenter themselves.
@@ -1620,6 +1624,7 @@ export async function add{parent_pascal}Comment(commentable_id: string, message:
 
 export async function update{parent_pascal}Comment(commentId: string, message: string): Promise<void> {{
   const userId = await getSessionUserIdOrThrow();
+  await enforceActionRateLimit(userId);
   const comment = await prisma.comment.findUnique({{ where: {{ id: commentId }}, select: {update_select} }});
   if (!comment || comment.creator_id !== userId) {{
     throw new Error('Not authorized to edit this comment');
@@ -1630,6 +1635,7 @@ export async function update{parent_pascal}Comment(commentId: string, message: s
 
 export async function delete{parent_pascal}Comment(commentId: string): Promise<void> {{
   const userId = await getSessionUserIdOrThrow();
+  await enforceActionRateLimit(userId);
   const comment = await prisma.comment.findUnique({{ where: {{ id: commentId }}, select: {{ creator_id: true, commentable_id: true }} }});
   if (!comment) return;
 {comment_access}  if (comment.creator_id !== userId) {{

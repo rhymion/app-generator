@@ -157,6 +157,27 @@ UI caller on the same route, and the design doc's own buckets are scoped to
 Left as an open scope question for a future stage if a real need for
 rate-limiting those two surfaces surfaces.
 
+### Coverage and Server Actions
+
+Rate limiting is applied inside each handler. The `proxy.ts` matcher only pulls
+`/api/auth/*` through the proxy and excludes every other `/api` route, so a
+route that forgets the limiter is not throttled by anything else.
+`code_generator/tests/test_rate_limit_coverage.py` enumerates the route
+templates, the hand-written `app/api/**/route.ts` files and the Server Action
+sources, and fails when one has no limiter call and no entry in its allowlist
+(each entry carries the reason). The allowlists are checked for stale entries.
+
+Generated Server Actions that change data call `enforceActionRateLimit(userId)`
+(`lib/rate-limit/action.ts`). It spends the same `api:write` bucket, keyed by the
+same user id, as the equivalent REST operation, so a user has one write budget
+across both surfaces. The action returns `{ ok: false, errorCode: 'RATE_LIMITED' }`
+(shown with the `Errors.rateLimited` message); a throwing action raises
+`AppError('RATE_LIMITED')`, which `handleApiError` maps to HTTP 429.
+REST routes outside the API-key handlers (invalidate, split, import, reactions,
+direct attachments, approval decisions, mobile session revoke) call
+`enforceApiRateLimit(userId)` from `lib/api-auth.ts`, which answers 429 with
+`Retry-After`.
+
 ## Verification
 
 - Full `.claude/commands/update-generator.md` Completion gate (all 20

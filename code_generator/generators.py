@@ -1243,6 +1243,7 @@ def actions_context(ctx: dict) -> dict:
         warning. See docs/knowledge/error-message-framework.md."""
         lines = [
             f"{indent}try {{",
+            f"{indent}  await enforceActionRateLimit(actorId);",
             f"{indent}  {call_stmt}",
             f"{indent}}} catch (e) {{",
             f"{indent}  if (e instanceof AppError) {{",
