@@ -283,9 +283,9 @@ Chapter V17 (WebRTC) does not apply: the generated app has no real-time media, T
 | V12.1.1 | 1 | environment | TLS is terminated by Cloud Run or Vercel; the Dockerfile serves plain HTTP behind it | none | - | - |
 | V12.1.2 | 2 | environment | Cipher suites are chosen by the platform | none | - | - |
 | V12.1.3 | 2 | n/a | No client-certificate authentication | none | - | - |
-| V12.2.1 | 1 | generator | HSTS via lib/security-headers.ts; the mobile base URL is not forced to https | lib/security-headers.test.ts | #1293 | - |
+| V12.2.1 | 1 | generator | HSTS via lib/security-headers.ts; the generated mobile client throws unless `EXPO_PUBLIC_API_BASE_URL` is https outside `__DEV__` (`lib/api-base.ts`) | lib/security-headers.test.ts, code_generator/tests/test_mobile_api_base_https.py | - | - |
 | V12.2.2 | 1 | environment | Managed certificates from Cloud Run or Vercel | none | - | - |
-| V12.3.1 | 2 | generator | lib/db-url.ts pins verify-full for Postgres; the Upstash database is created with TLS; production does not fail on an unprotected URL | lib/db-url.test.ts | #1293 | - |
+| V12.3.1 | 2 | generator | lib/db-url.ts pins verify-full for Postgres; the Upstash database is created with TLS; on a hosted production deployment `lib/transport-security.ts` fails startup for a database URL without TLS and for a `redis://` Redis URL | lib/db-url.test.ts, lib/transport-security.test.ts | - | - |
 | V12.3.2 | 2 | generator | lib/db-url.ts verify-full; nothing sets NODE_TLS_REJECT_UNAUTHORIZED or rejectUnauthorized false | lib/db-url.test.ts | - | - |
 | V12.3.3 | 2 | environment | Single service; no internal HTTP between services | none | - | - |
 | V12.3.4 | 2 | n/a | No internal services with internal CAs | none | - | - |
