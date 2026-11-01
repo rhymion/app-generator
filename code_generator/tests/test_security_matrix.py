@@ -216,6 +216,12 @@ def test_manifest_carries_the_denied_status_the_helpers_assert(matrix):
     assert manifest['denied_status'] == {'case': {'permission_denied': 403, 'cross_org': 404}}
 
 
+def test_manifest_carries_the_axis_defaults_the_helpers_fill_in(matrix):
+    manifest = sm.build_manifest(matrix, {'widget': ALL_FLAGS})
+    expected = {a: spec['default'] for a, spec in matrix['axes'].items() if 'default' in spec}
+    assert manifest['axis_defaults'] == expected
+
+
 def test_denied_status_must_be_an_explicit_denial_status(tmp_path, matrix):
     bad = copy.deepcopy(matrix)
     bad['axes']['case']['values']['permission_denied']['denied_status'] = 400
