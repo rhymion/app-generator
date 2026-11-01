@@ -48,6 +48,10 @@ import warnings
 # ---------------------------------------------------------------------------
 
 _EXCLUDE_FIELDS = {'created_at', 'updated_at'}
+# Entities whose writes change what getModelPermissions() returns: roles, the
+# permission rows, and the user's role membership. The generated service layer
+# drops the per-process permission cache after each of their writes commit.
+PERMISSION_CACHE_MODELS = frozenset({'role', 'permission', 'user'})
 _EXCLUDE_ID_TS  = {'id', 'created_at', 'updated_at', 'creator_id'}
 _SCALAR_TYPES   = {'string', 'integer', 'number', 'boolean'}
 
@@ -4971,6 +4975,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         import_field_specs=import_field_specs,
         has_assignee_id=has_assignee_id,
         is_audited=is_audited,
+        invalidates_permission_cache=model in PERMISSION_CACHE_MODELS,
         item_context_select=item_context_select,
         sortable_fields_quoted=sortable_fields_quoted,
         filterable_fields_quoted=filterable_fields_quoted,

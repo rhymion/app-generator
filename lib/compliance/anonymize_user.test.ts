@@ -13,7 +13,10 @@ const mocks = vi.hoisted(() => ({
   sessionDeleteMany: vi.fn(),
   recoveryDeleteMany: vi.fn(),
   deleteStoredObject: vi.fn(),
+  invalidateApiKeyCache: vi.fn(),
 }));
+
+vi.mock('@/lib/api-auth', () => ({ invalidateApiKeyCache: mocks.invalidateApiKeyCache }));
 
 vi.mock('@/lib/prisma', () => {
   const tx = {
@@ -42,7 +45,7 @@ describe('anonymizeUser related records', () => {
     vi.clearAllMocks();
     mocks.accountCount.mockResolvedValue(0);
     mocks.deleteStoredObject.mockResolvedValue(undefined);
-    mocks.userFindUnique.mockResolvedValue({ anonymized_at: null, invalidated_at: null, image_id: 'att1' });
+    mocks.userFindUnique.mockResolvedValue({ anonymized_at: null, invalidated_at: null, api_key_hash: 'hash-1', image_id: 'att1' });
     mocks.attachmentFindUnique.mockResolvedValue({ path: STORED_KEY });
   });
 
@@ -94,6 +97,20 @@ describe('anonymizeUser related records', () => {
     expect(JSON.stringify(res.errors)).not.toContain('secret-bucket');
     expect(JSON.stringify(errorSpy.mock.calls)).not.toContain('secret-bucket');
     errorSpy.mockRestore();
+  });
+
+  it('drops the cached API key of the erased user once the erasure has committed', async () => {
+    const res = await anonymizeUser('u1');
+    expect(res.success).toBe(true);
+    expect(mocks.userUpdate.mock.calls[0][0].data.api_key_hash).toBeNull();
+    expect(mocks.invalidateApiKeyCache).toHaveBeenCalledTimes(1);
+    expect(mocks.invalidateApiKeyCache).toHaveBeenCalledWith('hash-1');
+  });
+
+  it('does not touch the API key cache when the erasure fails', async () => {
+    mocks.userFindUnique.mockResolvedValue(null);
+    await anonymizeUser('nope');
+    expect(mocks.invalidateApiKeyCache).not.toHaveBeenCalled();
   });
 
   it('rolls back and reports when the user does not exist', async () => {
