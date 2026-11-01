@@ -394,8 +394,8 @@ describe('cookie-authenticated writes from another site', () => {
 });
 
 describe('handleApiError security events', () => {
-  const lines = (spy: ReturnType<typeof vi.spyOn>) =>
-    spy.mock.calls.filter((c) => c[0] === '[security-event]').map((c) => JSON.parse(String(c[1])));
+  const lines = (spy: { mock: { calls: unknown[][] } }) =>
+    spy.mock.calls.filter((c: unknown[]) => c[0] === '[security-event]').map((c) => JSON.parse(String(c[1])));
 
   it.each([
     [new ApiError(401, 'Invalid API key.'), 'auth.rejected', 401],
