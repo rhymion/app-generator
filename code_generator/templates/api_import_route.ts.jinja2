@@ -5,6 +5,7 @@ import Papa from 'papaparse';
 import prisma from '@/lib/prisma';
 import { getModelPermissions, assertPermission{% if import_can_update and not is_self_only %}, resolveRecordPermissions{% endif %} } from '@/lib/authz';
 import { handleApiError, resolveActorId } from '@/lib/api-auth';
+import { enforceApiRateLimit } from '@/lib/api-auth';
 import { unescapeImportValue } from '@/lib/_csv';
 import { generateImportToken, verifyImportToken } from '@/lib/_import';
 {% if import_uses_format_label_value %}
@@ -101,6 +102,7 @@ export async function POST(request: NextRequest) {
     // session cookie otherwise (see app/api/search/route.ts).
     const actorId = await resolveActorId(request);
     if (!actorId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    await enforceApiRateLimit(actorId);
     const { permissions } = await getModelPermissions('{{ parent }}', actorId);
     try {
       await assertPermission(permissions, 'import', '{{ parent }}');

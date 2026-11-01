@@ -75,7 +75,7 @@ Chapter V17 (WebRTC) does not apply: the generated app has no real-time media, T
 | V2.3.2 | 2 | gap | Global limits are documented (docs/knowledge/input-validation-rules-and-limits.md); no per-user business limit exists to enforce | none | #1270 | - |
 | V2.3.3 | 2 | generator | Serializable $transaction in service.ts.jinja2 and submit_for_approval.ts.jinja2 | none | #1272, #735 | - |
 | V2.3.4 | 2 | generator | x-reservation templates with Serializable isolation | none | #1272 | - |
-| V2.4.1 | 2 | generator | lib/rate-limit/{index,redis,in-memory,client-ip}.ts; generated REST routes return 429 | lib/rate-limit/redis.test.ts, in-memory.test.ts, client-ip.test.ts | #1245, #1092, #1125 | - |
+| V2.4.1 | 2 | generator | lib/rate-limit/{index,redis,in-memory,client-ip,action}.ts; generated REST routes return 429; generated Server Actions share the api:write bucket | lib/rate-limit/redis.test.ts, in-memory.test.ts, client-ip.test.ts, action.test.ts, code_generator/tests/test_rate_limit_coverage.py | #1092, #1125 | - |
 
 ## V3 Web Frontend Security
 
@@ -149,7 +149,7 @@ Chapter V17 (WebRTC) does not apply: the generated app has no real-time media, T
 | V6.2.10 | 2 | generator | No password expiry or rotation exists | none | - | - |
 | V6.2.11 | 2 | gap | No context-word check | none | #1280 | - |
 | V6.2.12 | 2 | gap | No breached-password check | none | #1280 | - |
-| V6.3.1 | 1 | generator | proxy.ts sign-in bucket (10 per minute per IP); register, mobile-token, MFA and API-key buckets in lib/rate-limit/index.ts | app/api/auth/register/route.test.ts, lib/mfa/verify.test.ts, lib/rate-limit/redis.test.ts, app/api/mobile/auth/token/route.test.ts | #1245, #1125 | - |
+| V6.3.1 | 1 | generator | proxy.ts sign-in bucket (10 per minute per IP); register, mobile-token, MFA and API-key buckets in lib/rate-limit/index.ts | app/api/auth/register/route.test.ts, lib/mfa/verify.test.ts, lib/rate-limit/redis.test.ts, app/api/mobile/auth/token/route.test.ts | #1125 | - |
 | V6.3.2 | 1 | generator | scripts/seed-baseline-credentials.ts requires explicit admin credentials in production; outside production a documented default is seeded | scripts/seed-baseline-credentials.test.ts | - | - |
 | V6.3.3 | 2 | gap | MFA is opt-in per user | none | #1281 | - |
 | V6.3.4 | 2 | generator | MFA is enforced on credentials, OAuth and the mobile token route; API keys are machine access without MFA by design | cypress/e2e/auth/mfa.cy.ts, cypress/e2e/api/mobile_auth.cy.ts | - | - |
@@ -330,12 +330,12 @@ Chapter V17 (WebRTC) does not apply: the generated app has no real-time media, T
 | V15.1.2 | 2 | gap | package-lock.json and npm ci; trusted sources documented in docs/knowledge/dependency-and-resource-controls.md; no SBOM | none | #1320 | - |
 | V15.1.3 | 2 | generator | Resource-demanding functions and their limits are listed in docs/knowledge/dependency-and-resource-controls.md | none | - | - |
 | V15.2.1 | 1 | generator | CI audit job (npm audit, pip-audit) blocks on high and critical | CI job audit (.github/workflows/ci.yml); gate steps 19 and 20 | #1074 | - |
-| V15.2.2 | 2 | generator | Rate-limit buckets, MAX_PAGE_SIZE, import limits, upload quota | lib/rate-limit/redis.test.ts, lib/rate-limit/in-memory.test.ts, lib/_pagination.test.ts | #1245 | - |
+| V15.2.2 | 2 | generator | Rate-limit buckets, MAX_PAGE_SIZE, import limits, upload quota | lib/rate-limit/redis.test.ts, lib/rate-limit/in-memory.test.ts, lib/_pagination.test.ts, code_generator/tests/test_rate_limit_coverage.py | - | - |
 | V15.2.3 | 2 | generator | reset-caches route is token-gated; mock OAuth is gated by a filesystem sentinel | lib/auth/mock-oauth-gate.test.ts, lib/_secret_compare.test.ts | - | - |
 | V15.3.1 | 1 | generator | Write-only fields are removed from reads (getters_internal.ts.jinja2); other fields are returned in full | code_generator/tests/test_rest_update_write_only_omitted_unchanged.py, cypress/e2e/api/setting_write_only_omitted.cy.ts | #1235 | - |
 | V15.3.2 | 2 | n/a | No server-side fetch of a user-controlled URL | none | - | - |
 | V15.3.3 | 2 | generator | api_route.ts.jinja2 destructures only the allowed create fields and rejects read-only fields | code_generator/tests/test_bulk_route_readonly_fields.py, test_readonly_fields.py, test_org_readonly_field_write_guard.py, test_write_locked_values.py | - | - |
-| V15.3.4 | 2 | generator | lib/rate-limit/client-ip.ts takes the entry TRUSTED_PROXY_HOPS from the right of X-Forwarded-For | lib/rate-limit/client-ip.test.ts | #1245 | - |
+| V15.3.4 | 2 | generator | lib/rate-limit/client-ip.ts takes the entry TRUSTED_PROXY_HOPS from the right of X-Forwarded-For; per-platform rule in docs/knowledge/authentication.md | lib/rate-limit/client-ip.test.ts | - | - |
 | V15.3.5 | 2 | gap | Request bodies are untyped (request.json()); no strict-equality lint rule | none | #1271, #1303 | - |
 | V15.3.6 | 2 | gap | No prototype-pollution policy or lint rule; bodies are destructured into explicit fields | none | #1303 | - |
 | V15.3.7 | 2 | framework | Query parameters are read first-value-only and the body separately; the two are never merged | none | #1234 | next 16.4.2 (package-lock.json); Route Handlers docs |
