@@ -142,6 +142,7 @@ from helpers.naming import (
     to_camel_case, to_pascal_case, to_title_case, safe_var_name, singularize,
 )
 from helpers.schema_helpers import (
+    fk_reference_shapes,
     filter_fields,
     get_parent_relationships,
     get_direct_attachment_fk_props,
@@ -6023,6 +6024,7 @@ def api_spec_context(
                     'prop': _probe_prop,
                     'dep_var': primary_dep_var,
                     'target': primary_fk_rel['target'],
+                    'shape': fk_reference_shapes(model, schema)[_probe_prop],
                 }
 
     return {

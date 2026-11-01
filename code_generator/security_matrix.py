@@ -113,6 +113,8 @@ def build_manifest(matrix: dict, entity_flags: dict[str, dict]) -> dict:
         'axes': axes,
         # Read by the test helpers (test/helpers/security_core.ts); see security_matrix.yaml.
         'denied_status': {a: v for a, v in denied_status.items() if v},
+        # Value of an axis a marker may leave out; read by the helpers when matching a claimed cell.
+        'axis_defaults': {a: spec['default'] for a, spec in matrix['axes'].items() if 'default' in spec},
         'entities': {
             entity: {'cells': applicable_cells(matrix, flags)}
             for entity, flags in sorted(entity_flags.items())

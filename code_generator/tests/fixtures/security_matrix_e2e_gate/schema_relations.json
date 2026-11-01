@@ -7,12 +7,26 @@
     "updated_sx_tasks sx_task[] @relation(\"SxTaskUpdater\")",
     "assigned_sx_tasks sx_task[] @relation(\"SxTaskAssignee\")",
     "created_sx_splits sx_split[] @relation(\"SxSplitCreator\")",
-    "updated_sx_splits sx_split[] @relation(\"SxSplitUpdater\")"
+    "updated_sx_splits sx_split[] @relation(\"SxSplitUpdater\")",
+    "created_sx_profiles sx_profile[] @relation(\"SxProfileCreator\")",
+    "updated_sx_profiles sx_profile[] @relation(\"SxProfileUpdater\")",
+    "created_sx_tickets sx_ticket[] @relation(\"SxTicketCreator\")",
+    "updated_sx_tickets sx_ticket[] @relation(\"SxTicketUpdater\")",
+    "created_sx_ticket_lines sx_ticket_line[] @relation(\"SxLineCreator\")",
+    "updated_sx_ticket_lines sx_ticket_line[] @relation(\"SxLineUpdater\")",
+    "created_sx_notes sx_note[] @relation(\"SxNoteCreator\")",
+    "updated_sx_notes sx_note[] @relation(\"SxNoteUpdater\")",
+    "created_sx_tags sx_tag[] @relation(\"SxTagCreator\")",
+    "updated_sx_tags sx_tag[] @relation(\"SxTagUpdater\")"
   ],
   "organization": [
     "sx_accounts sx_account[]",
     "sx_tasks sx_task[]",
-    "sx_splits sx_split[]"
+    "sx_splits sx_split[]",
+    "sx_profiles sx_profile[]",
+    "sx_tickets sx_ticket[]",
+    "sx_notes sx_note[]",
+    "sx_tags sx_tag[]"
   ],
   "commentable": [
     "sx_account sx_account?"

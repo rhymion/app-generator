@@ -38,6 +38,25 @@ const request = { method: 'PATCH', url: 'http://x/api/widget/a/rename', body: { 
 const persistence = { model: 'widget', where: { id: 'a' } };
 
 describe('security test helpers', () => {
+  it('matches a claimed cell that leaves out an axis by that axis default', () => {
+    const withShape: SecurityManifest = {
+      axes: ['operation', 'case', 'fk_shape'],
+      axis_defaults: { fk_shape: 'none' },
+      entities: {
+        widget: {
+          cells: [
+            { operation: 'update', case: 'permission_denied', fk_shape: 'none' },
+            { operation: 'update', case: 'fk_to_unreachable', fk_shape: 'many_to_one_required' },
+          ],
+        },
+      },
+    };
+    expect(() => assertCellAndStatus(denied, 403, withShape)).not.toThrow();
+    const shaped = { entity: 'widget', operation: 'update', case: 'fk_to_unreachable', fk_shape: 'many_to_one_required' };
+    expect(() => assertCellAndStatus(shaped, 403, withShape)).not.toThrow();
+    expect(() => assertCellAndStatus({ ...shaped, fk_shape: 'none' }, 403, withShape)).toThrow('the manifest has no cell');
+  });
+
   it('passes when the explicit status is returned and the row is unchanged', async () => {
     const { expectDeniedFor: denyCheck, calls } = harness({ status: 403 });
     await denyCheck({ cell: denied, status: 403, actor: { apiKey: 'k' }, request, persistence });
