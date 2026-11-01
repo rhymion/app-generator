@@ -98,3 +98,15 @@ describe('POST /api/mobile/auth/token password timing', () => {
     expect(await wrong.json()).toEqual(await unknown.json());
   });
 });
+
+describe('POST /api/mobile/auth/token account lockout', () => {
+  it('answers 429 for the account after repeated wrong passwords from different IPs, even with the right one', async () => {
+    userFindUnique.mockResolvedValue({ id: 'user-1', password: 'hash', mfa_enabled: false, anonymized_at: null });
+    bcryptCompare.mockResolvedValue(false);
+    for (let i = 1; i <= 10; i++) expect((await POST(tokenRequest(i))).status).toBe(401);
+    bcryptCompare.mockResolvedValue(true);
+    const locked = await POST(tokenRequest(99));
+    expect(locked.status).toBe(429);
+    expect(Number(locked.headers.get('Retry-After'))).toBeGreaterThan(0);
+  });
+});

@@ -8,6 +8,7 @@ import GoogleProvider from "next-auth/providers/google";
 import { PrismaAdapter } from "@auth/prisma-adapter";
 import prisma from "@/lib/prisma";
 import { verifyPassword } from "@/lib/auth/password-check";
+import { clearFailedSignIns, getAccountLockState, recordFailedSignIn } from "@/lib/auth/account-lockout";
 import { siteConfig } from "@/lib/site-config";
 import { recordAuditEvent } from "@/lib/audit-log";
 import { verifyMfaCode } from "@/lib/mfa/verify";
@@ -66,8 +67,19 @@ function buildProviders(): Provider[] {
           throw new Error("Invalid credentials");
         }
 
+        const email = credentials.email as string;
+
+        // Account lockout (Issue #1125): while the account's failure budget is
+        // spent no password is accepted for it, whichever address the attempt
+        // comes from. The reply and the work done match a wrong password, and
+        // the lock applies to unknown emails alike, so it reveals nothing.
+        if ((await getAccountLockState(email)).locked) {
+          await verifyPassword(credentials.password as string, null);
+          throw new Error("Invalid credentials");
+        }
+
         const user = await prisma.user.findUnique({
-          where: { email: credentials.email as string },
+          where: { email },
         });
 
         // SSO-provisioned users have password === null and must not be allowed
@@ -81,8 +93,10 @@ function buildProviders(): Provider[] {
         );
 
         if (!user || !user.password || !isCorrectPassword) {
+          await recordFailedSignIn(email);
           throw new Error("Invalid credentials");
         }
+        await clearFailedSignIns(email);
 
         // MFA gate. The cast covers the case where the generated Prisma
         // client in the current checkout predates the user.mfa_enabled

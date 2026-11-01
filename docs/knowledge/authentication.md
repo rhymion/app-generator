@@ -372,6 +372,27 @@ overwrites the header yields a single entry, which is returned as is. When
 the list is shorter than the hop count the left-most entry is used.
 `X-Real-IP` is consulted only when `X-Forwarded-For` is absent.
 
+**Account lockout (Issue #1125).** The per-IP buckets cannot stop one account
+being guessed from many addresses, so password sign-in also counts failures per
+account in the `auth:account:lockout` bucket (10 failures / 15 min; override
+`RATE_LIMIT_ACCOUNT_LOCKOUT_LIMIT`). The key is the SHA-256 of the lower-cased
+email whether or not an account exists, so a lock reveals nothing about which
+emails are registered. While the budget is spent the web credentials sign-in
+refuses every password with the usual "Invalid credentials" and the mobile token
+route answers `429` with `Retry-After`; the lock lifts when the oldest counted
+failure leaves the window, and a successful sign-in resets the count. The attempt
+that locks the account records an `auth:account.locked` audit event. Both paths go
+through `lib/auth/account-lockout.ts`. Trade-off: anyone who knows an email can
+keep that account from signing in by password for the window; an administrator
+cannot unlock earlier because no state is stored in the database. The state is
+shared across instances only when `REDIS_URL` is set.
+
+**Password strength.** `lib/auth/password-policy.ts` requires at least 8
+characters (ASVS V6.2.1) and no composition rules (V6.2.5). Registration, the
+settings password form and the REST and bulk credential change all apply it, so no
+path can set a weaker password. Maximum length and common or breached passwords are
+tracked in #1280.
+
 **Self-registration and API keys.** `POST /api/auth/register` is limited per
 client IP by the `auth:register` bucket (5 requests / 10 min) and answers
 `429` with `Retry-After` when it is spent. `authenticateApiKey`

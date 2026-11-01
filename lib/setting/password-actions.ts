@@ -3,6 +3,7 @@
 import prisma from '@/lib/prisma';
 import bcrypt from 'bcryptjs';
 import { getSessionUserIdOrThrow } from '@/lib/authz';
+import { passwordPolicyError } from '@/lib/auth/password-policy';
 
 export async function verifyAndHashPassword(currentPassword: string, newPassword: string): Promise<string> {
   const userId = await getSessionUserIdOrThrow();
@@ -15,6 +16,9 @@ export async function verifyAndHashPassword(currentPassword: string, newPassword
 
   const isCorrect = await bcrypt.compare(currentPassword, user.password);
   if (!isCorrect) throw new Error('Current password is incorrect');
+
+  const weak = passwordPolicyError(newPassword);
+  if (weak) throw new Error(weak);
 
   return bcrypt.hash(newPassword, 10);
 }

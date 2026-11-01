@@ -5,6 +5,7 @@ import bcrypt from "bcryptjs";
 import prisma from "@/lib/prisma";
 import { getRateLimiter } from "@/lib/rate-limit";
 import { clientIp } from "@/lib/rate-limit/client-ip";
+import { passwordPolicyError } from "@/lib/auth/password-policy";
 
 export async function POST(request: Request) {
   try {
@@ -21,6 +22,11 @@ export async function POST(request: Request) {
 
     if (!email || !password) {
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
+    }
+
+    const weak = passwordPolicyError(password);
+    if (weak) {
+      return NextResponse.json({ error: weak, code: "WEAK_PASSWORD" }, { status: 400 });
     }
 
     const existing = await prisma.user.findUnique({ where: { email } });
