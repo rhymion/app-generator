@@ -1,9 +1,15 @@
-'use server';
+// Deliberately NOT a 'use server' module. Every export of a 'use server' file is a
+// Server Action that a signed-in browser can invoke with arguments of its choosing;
+// several helpers here take a caller-supplied user id (API key and mobile token
+// paths pass the authenticated actor), so as actions they would disclose another
+// user's roles and permission flags. Keep this file a plain server-side module
+// (lib/authz_not_server_action.test.ts enforces it).
 
 import { auth } from '@/auth';
 import prisma from '@/lib/prisma';
 import { cache } from 'react';
 import { TtlLruCache } from '@/lib/_ttl_lru';
+import { cacheOnGlobal } from '@/lib/global-singleton';
 import { SELF_ONLY_ADMIN_BYPASS_ENTITIES } from '@/lib/self_only_admin_bypass_entities';
 import { AppError } from '@/lib/_errors';
 import { enterRequestScope, getActorOverride, memoizeInRequestScope } from '@/lib/_request_scope';
@@ -170,7 +176,14 @@ const PERMISSION_TTL_MS = 30 * 1000;
 const PERMISSION_MAX_ENTRIES = 1000;
 const permissionCacheEnabled = process.env.NODE_ENV === 'production';
 type PermissionEntry = { permissions: RichPermissions; userId: string };
-const permissionCache = new TtlLruCache<string, PermissionEntry>(PERMISSION_MAX_ENTRIES, PERMISSION_TTL_MS);
+// Held on globalThis so the Server Actions and route handlers that clear the
+// caches share one instance even when the build bundles this module separately
+// for each of them (same reason as the api-key cache in lib/api-auth.ts).
+const permissionCache = cacheOnGlobal(
+  globalThis as unknown as Record<string, unknown>,
+  '__permissionCache',
+  () => new TtlLruCache<string, PermissionEntry>(PERMISSION_MAX_ENTRIES, PERMISSION_TTL_MS),
+);
 
 type PermissionRow = {
   name: string;
@@ -188,7 +201,11 @@ type PermissionRow = {
  * Same TTL/size bounds as `permissionCache`; both are cleared together by
  * `invalidatePermissionCache()`.
  */
-const permissionRowsCache = new TtlLruCache<string, PermissionRow[]>(PERMISSION_MAX_ENTRIES, PERMISSION_TTL_MS);
+const permissionRowsCache = cacheOnGlobal(
+  globalThis as unknown as Record<string, unknown>,
+  '__permissionRowsCache',
+  () => new TtlLruCache<string, PermissionRow[]>(PERMISSION_MAX_ENTRIES, PERMISSION_TTL_MS),
+);
 
 /**
  * Fetch every permission row relevant to a user in a single query, instead of
@@ -255,10 +272,9 @@ export async function invalidatePermissionCache(): Promise<void> {
  * Pure (no DB access) grouping of a set of permission rows (already filtered
  * to one model, e.g. via
  * `getPermissionRowsForUser(userId).filter(row => row.name === model)`) into
- * the general/creator/assignee RichPermissions shape. `async` only because
- * this file is a `'use server'` module, where every exported function is a
- * Server Action and Server Actions must be async — there is no actual
- * asynchronous work inside.
+ * the general/creator/assignee RichPermissions shape. `async` only to keep
+ * the signature stable for its callers — there is no actual asynchronous work
+ * inside.
  *
  * Shared by `getModelPermissions` below and by `buildSearchQuery`
  * (search_helpers.ts.jinja2) so the merge rule (general OR creator OR

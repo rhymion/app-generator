@@ -3453,6 +3453,7 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
     has_delete_guard        = bool(ctx.get('has_delete_guard'))
     lockdown_field          = ctx.get('lockdown_field')
     is_audited              = ctx.get('is_audited', False)
+    invalidates_permission_cache = bool(ctx.get('invalidates_permission_cache'))
     should_filter_by_org    = bool(ctx.get('should_filter_by_org'))
     org_id_client_writable  = bool(ctx.get('org_id_client_writable'))
     fk_write_checks         = ctx.get('fk_write_checks') or []
@@ -4109,6 +4110,7 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
                or reservation_self_case_notifies or approval_edge_trigger_create_code
                or approval_edge_trigger_update_code) else '')
         + (f"\nimport {{ recordAuditEvent }} from '@/lib/audit-log';" if is_audited else '')
+        + ("\nimport { invalidatePermissionCache } from '@/lib/authz';" if invalidates_permission_cache else '')
         + (f"\nimport {{ getAssociatedOrganizations }} from '@/lib/organization/associated_internal';" if org_id_client_writable and (can_create or can_update) else '')
         + ("\nimport { assertFkReferencesUsable } from '@/lib/_fk_reference';" if (fk_write_checks or child_fk_check_create or child_fk_check_update) and (can_create or can_update) else '')
         + ("\nimport { assertStoredFkReferencesReachable } from '@/lib/_fk_reference';" if fk_write_checks and can_delete else '')
