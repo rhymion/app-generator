@@ -1,4 +1,9 @@
-'use server';
+// Deliberately NOT a 'use server' module. Every export of a 'use server' file is a
+// Server Action that a signed-in browser can invoke with arguments of its choosing;
+// several helpers here take a caller-supplied user id (API key and mobile token
+// paths pass the authenticated actor), so as actions they would disclose another
+// user's roles and permission flags. Keep this file a plain server-side module
+// (lib/authz_not_server_action.test.ts enforces it).
 
 import { auth } from '@/auth';
 import prisma from '@/lib/prisma';
@@ -255,10 +260,9 @@ export async function invalidatePermissionCache(): Promise<void> {
  * Pure (no DB access) grouping of a set of permission rows (already filtered
  * to one model, e.g. via
  * `getPermissionRowsForUser(userId).filter(row => row.name === model)`) into
- * the general/creator/assignee RichPermissions shape. `async` only because
- * this file is a `'use server'` module, where every exported function is a
- * Server Action and Server Actions must be async — there is no actual
- * asynchronous work inside.
+ * the general/creator/assignee RichPermissions shape. `async` only to keep
+ * the signature stable for its callers — there is no actual asynchronous work
+ * inside.
  *
  * Shared by `getModelPermissions` below and by `buildSearchQuery`
  * (search_helpers.ts.jinja2) so the merge rule (general OR creator OR
