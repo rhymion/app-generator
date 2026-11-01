@@ -129,13 +129,14 @@ const PRODUCTION_BUCKETS: Record<string, RateLimitBucketConfig> = {
   // authenticated user id: the upload route only requires a signed-in caller,
   // so the account, not the IP, is the identity that consumes storage.
   'upload:file':             { limit: 30, windowMs: 10 * 60_000 },
-  // Account lockout (Issue #1125): 10 failed password attempts per account
-  // within 15 minutes lock that account for the rest of the window,
-  // whichever IPs the attempts came from. Keyed by a hash of the normalised
-  // email and counted only on failures (see lib/auth/account-lockout.ts), in
-  // addition to the per-IP `auth:signin:credentials` ceiling. The lock lifts
-  // by itself when the oldest counted failure leaves the window.
-  'auth:account:lockout':    { limit: 10, windowMs: 15 * 60_000 },
+  // Account lockout (Issue #1125), two tiers, failures only (see
+  // lib/auth/account-lockout.ts). Tier 1: 10 failed password attempts per
+  // (email, source address) per 15 minutes lock that email from that address.
+  // Tier 2: a much higher ceiling per email across all addresses, which stops
+  // distributed guessing and a spoofed address header. Both lift by themselves
+  // when the oldest counted failure leaves the window.
+  'auth:account:lockout':       { limit: 10, windowMs: 15 * 60_000 },
+  'auth:account:lockout:email': { limit: 100, windowMs: 15 * 60_000 },
 };
 
 // The Cypress UI suite intentionally logs in fresh for every `it()` (each
@@ -174,6 +175,7 @@ const uploadLimitOverride = Number(process.env.RATE_LIMIT_UPLOAD_LIMIT);
 // on purpose in many specs; the threshold is overridable the same way as the
 // buckets above.
 const accountLockoutLimitOverride = Number(process.env.RATE_LIMIT_ACCOUNT_LOCKOUT_LIMIT);
+const accountLockoutEmailLimitOverride = Number(process.env.RATE_LIMIT_ACCOUNT_LOCKOUT_EMAIL_LIMIT);
 
 export const DEFAULT_BUCKETS: Record<string, RateLimitBucketConfig> = {
   ...PRODUCTION_BUCKETS,
@@ -194,6 +196,9 @@ export const DEFAULT_BUCKETS: Record<string, RateLimitBucketConfig> = {
     : {}),
   ...(Number.isFinite(accountLockoutLimitOverride) && accountLockoutLimitOverride > 0
     ? { 'auth:account:lockout': { limit: accountLockoutLimitOverride, windowMs: 15 * 60_000 } }
+    : {}),
+  ...(Number.isFinite(accountLockoutEmailLimitOverride) && accountLockoutEmailLimitOverride > 0
+    ? { 'auth:account:lockout:email': { limit: accountLockoutEmailLimitOverride, windowMs: 15 * 60_000 } }
     : {}),
 };
 

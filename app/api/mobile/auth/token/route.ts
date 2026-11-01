@@ -55,8 +55,8 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
       );
     }
 
-    // Account lockout (Issue #1125): shared with the web sign-in, independent of IP.
-    const lock = await getAccountLockState(email);
+    // Account lockout (Issue #1125): two tiers, shared with the web sign-in.
+    const lock = await getAccountLockState(email, request.headers);
     if (lock.locked) {
       return NextResponse.json(
         { error: 'rate_limited', retryAfter: lock.retryAfterSeconds },
@@ -72,10 +72,10 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
     // the response time does not reveal which case applied.
     const passwordOk = await verifyPassword(password, user?.password);
     if (!user || !user.password || !passwordOk) {
-      await recordFailedSignIn(email);
+      await recordFailedSignIn(email, request.headers);
       throw new ApiError(401, 'Invalid credentials');
     }
-    await clearFailedSignIns(email);
+    await clearFailedSignIns(email, request.headers);
 
     const mfaUser = user as unknown as { mfa_enabled?: boolean };
     if (mfaUser.mfa_enabled) {

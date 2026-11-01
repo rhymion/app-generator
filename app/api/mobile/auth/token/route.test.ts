@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
-const { userFindUnique, recoveryFindMany, verifyTotpStep } = vi.hoisted(() => ({
+const { userFindUnique, recoveryFindMany, verifyTotpStep, sessionCreate } = vi.hoisted(() => ({
+  sessionCreate: vi.fn().mockResolvedValue({ id: 'session-1' }),
   userFindUnique: vi.fn(),
   recoveryFindMany: vi.fn(),
   verifyTotpStep: vi.fn(),
@@ -10,6 +11,7 @@ vi.mock('@/lib/prisma', () => ({
   default: {
     user: { findUnique: userFindUnique },
     mfa_recovery_code: { findMany: recoveryFindMany, update: vi.fn() },
+    mobile_session: { create: sessionCreate, update: vi.fn() },
   },
 }));
 const { bcryptCompare } = vi.hoisted(() => ({ bcryptCompare: vi.fn() }));
@@ -30,10 +32,10 @@ vi.mock('@/lib/mobile-auth', () => ({
   REFRESH_TOKEN_TTL_MS: 1000,
   generateRefreshTokenPlaintext: () => 'r',
   hashRefreshToken: (s: string) => s,
-  signMobileAccessToken: vi.fn(),
+  signMobileAccessToken: vi.fn().mockResolvedValue('access-token'),
 }));
 
-import { _resetForTests } from '@/lib/rate-limit';
+import { _resetForTests, DEFAULT_BUCKETS } from '@/lib/rate-limit';
 import { POST } from './route';
 
 // Distinct client IPs keep the per-(IP, email) `mobile:auth:token` bucket out
@@ -99,14 +101,46 @@ describe('POST /api/mobile/auth/token password timing', () => {
   });
 });
 
+function tokenRequestWith(headers: Record<string, string>) {
+  return new Request('http://localhost/api/mobile/auth/token', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', ...headers },
+    body: JSON.stringify({ email: 'mfa@example.com', password: 'pw' }),
+  }) as unknown as Parameters<typeof POST>[0];
+}
+
 describe('POST /api/mobile/auth/token account lockout', () => {
-  it('answers 429 for the account after repeated wrong passwords from different IPs, even with the right one', async () => {
-    userFindUnique.mockResolvedValue({ id: 'user-1', password: 'hash', mfa_enabled: false, anonymized_at: null });
+  const plainUser = { id: 'user-1', password: 'hash', mfa_enabled: false, anonymized_at: null };
+  const TIER2 = DEFAULT_BUCKETS['auth:account:lockout:email'].limit;
+
+  it("failures from other addresses do not stop the owner's address from signing in", async () => {
+    userFindUnique.mockResolvedValue(plainUser);
     bcryptCompare.mockResolvedValue(false);
-    for (let i = 1; i <= 10; i++) expect((await POST(tokenRequest(i))).status).toBe(401);
+    for (let i = 1; i <= 30; i++) expect((await POST(tokenRequest(i))).status).toBe(401);
     bcryptCompare.mockResolvedValue(true);
-    const locked = await POST(tokenRequest(99));
+    const owner = await POST(tokenRequest(200));
+    expect(owner.status).toBe(201);
+  });
+
+  it('answers 429 with Retry-After once failures from many addresses spend the email-wide ceiling, even with the right password', async () => {
+    userFindUnique.mockResolvedValue(plainUser);
+    bcryptCompare.mockResolvedValue(false);
+    for (let i = 0; i < TIER2; i++) {
+      expect((await POST(tokenRequestWith({ 'x-forwarded-for': `10.9.${Math.floor(i / 250)}.${i % 250}` }))).status).toBe(401);
+    }
+    bcryptCompare.mockResolvedValue(true);
+    const locked = await POST(tokenRequest(201));
     expect(locked.status).toBe(429);
     expect(Number(locked.headers.get('Retry-After'))).toBeGreaterThan(0);
+  });
+
+  it('still stops at the email-wide ceiling when a spoofable header gives every request a fresh address', async () => {
+    userFindUnique.mockResolvedValue(plainUser);
+    bcryptCompare.mockResolvedValue(false);
+    for (let i = 0; i < TIER2; i++) {
+      expect((await POST(tokenRequestWith({ 'x-real-ip': `spoof-${i}` }))).status).toBe(401);
+    }
+    bcryptCompare.mockResolvedValue(true);
+    expect((await POST(tokenRequestWith({ 'x-real-ip': 'spoof-next' }))).status).toBe(429);
   });
 });
