@@ -134,22 +134,22 @@ Chapter V17 (WebRTC) does not apply: the generated app has no real-time media, T
 
 | ID | Level | Status | Covered by | Verified by | Gap Issue | Source and version |
 |----|-------|--------|------------|-------------|-----------|--------------------|
-| V6.1.1 | 1 | generator | docs/knowledge/authentication.md and api-idempotency-and-rate-limiting.md describe the rate limits; lockout and credential stuffing are not discussed | none | #1125 | - |
+| V6.1.1 | 1 | generator | docs/knowledge/authentication.md (Account lockout, Password strength) and api-idempotency-and-rate-limiting.md describe the rate limits, the two-tier account lockout and the minimum length; credential stuffing beyond the lockout is not discussed | lib/auth/account-lockout.test.ts, lib/auth/password-policy.test.ts | #1245 | - |
 | V6.1.2 | 2 | gap | No context-specific word list or policy | none | #1280 | - |
 | V6.1.3 | 2 | generator | docs/knowledge/authentication.md lists the pathways (credentials, Google, mobile token, API key); required strength per pathway is not stated | code_generator/tests/test_api_route_authentication_enumeration.py (routes call an auth helper) | - | - |
-| V6.2.1 | 1 | gap | Registration checks only that a password is present; no minimum length | none | #1125 | - |
+| V6.2.1 | 1 | generator | lib/auth/password-policy.ts (minimum 8 characters) applied by the register route, lib/setting/password-actions.ts and lib/auth/credential-confirmation.ts | lib/auth/password-policy.test.ts, app/api/auth/register/route.test.ts, lib/auth/credential-confirmation.test.ts | - | - |
 | V6.2.2 | 1 | generator | components/setting/password.tsx, lib/setting/password-actions.ts, lib/auth/credential-confirmation.ts | lib/auth/credential-confirmation.test.ts, cypress/e2e/api/setting_credential_confirmation.cy.ts | - | - |
 | V6.2.3 | 1 | generator | Current password is verified before a change (lib/setting/password-actions.ts) | lib/auth/credential-confirmation.test.ts, cypress/e2e/api/setting_credential_confirmation.cy.ts | - | - |
 | V6.2.4 | 1 | gap | No common-password list | none | #1280 | - |
-| V6.2.5 | 1 | generator | No composition rules exist (read in register route and password-actions) | none | #1125 | - |
+| V6.2.5 | 1 | generator | lib/auth/password-policy.ts imposes length only, no composition rules | lib/auth/password-policy.test.ts | - | - |
 | V6.2.6 | 1 | generator | type=password on login, register and setting inputs | none | - | - |
 | V6.2.7 | 1 | generator | No onPaste handler and no autocomplete=off | none | - | - |
 | V6.2.8 | 1 | gap | bcrypt is applied to the raw string and reads only 72 bytes; longer passwords are truncated silently | lib/auth/password-check.test.ts | #1280 | - |
-| V6.2.9 | 2 | gap | No maximum or minimum length is enforced | none | #1280, #1125 | - |
+| V6.2.9 | 2 | gap | A minimum length of 8 is enforced (lib/auth/password-policy.ts); no maximum is enforced, so passwords of 65 characters or more are not guaranteed to be accepted in full | lib/auth/password-policy.test.ts | #1280 | - |
 | V6.2.10 | 2 | generator | No password expiry or rotation exists | none | - | - |
 | V6.2.11 | 2 | gap | No context-word check | none | #1280 | - |
 | V6.2.12 | 2 | gap | No breached-password check | none | #1280 | - |
-| V6.3.1 | 1 | generator | proxy.ts sign-in bucket (10 per minute per IP); register, mobile-token, MFA and API-key buckets in lib/rate-limit/index.ts | app/api/auth/register/route.test.ts, lib/mfa/verify.test.ts, lib/rate-limit/redis.test.ts, app/api/mobile/auth/token/route.test.ts | #1245, #1125 | - |
+| V6.3.1 | 1 | generator | proxy.ts sign-in bucket (10 per minute per IP); register, mobile-token, MFA and API-key buckets in lib/rate-limit/index.ts; two-tier account lockout (auth:account:lockout per email and address, auth:account:lockout:email per email) in lib/auth/account-lockout.ts | app/api/auth/register/route.test.ts, lib/mfa/verify.test.ts, lib/rate-limit/redis.test.ts, app/api/mobile/auth/token/route.test.ts, lib/auth/account-lockout.test.ts | #1245 | - |
 | V6.3.2 | 1 | generator | scripts/seed-baseline-credentials.ts requires explicit admin credentials in production; outside production a documented default is seeded | scripts/seed-baseline-credentials.test.ts | - | - |
 | V6.3.3 | 2 | gap | MFA is opt-in per user | none | #1281 | - |
 | V6.3.4 | 2 | generator | MFA is enforced on credentials, OAuth and the mobile token route; API keys are machine access without MFA by design | cypress/e2e/auth/mfa.cy.ts, cypress/e2e/api/mobile_auth.cy.ts | - | - |

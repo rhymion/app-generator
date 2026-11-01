@@ -8,6 +8,7 @@ import GoogleProvider from "next-auth/providers/google";
 import { PrismaAdapter } from "@auth/prisma-adapter";
 import prisma from "@/lib/prisma";
 import { verifyPassword } from "@/lib/auth/password-check";
+import { clearFailedSignIns, getAccountLockState, recordFailedSignIn } from "@/lib/auth/account-lockout";
 import { siteConfig } from "@/lib/site-config";
 import { recordAuditEvent } from "@/lib/audit-log";
 import { verifyMfaCode } from "@/lib/mfa/verify";
@@ -61,13 +62,24 @@ function buildProviders(): Provider[] {
         // sentinel error string "MFA_REQUIRED" (see app/[locale]/login).
         mfa_code: { label: "MFA Code", type: "text" },
       },
-      async authorize(credentials) {
+      async authorize(credentials, request) {
         if (!credentials?.email || !credentials?.password) {
           throw new Error("Invalid credentials");
         }
 
+        const email = credentials.email as string;
+
+        // Account lockout (Issue #1125, two tiers): while the failure budget of
+        // this email from this address, or the higher email-wide budget, is
+        // spent no password is accepted. The reply and the work done match a wrong password, and
+        // the lock applies to unknown emails alike, so it reveals nothing.
+        if ((await getAccountLockState(email, request.headers)).locked) {
+          await verifyPassword(credentials.password as string, null);
+          throw new Error("Invalid credentials");
+        }
+
         const user = await prisma.user.findUnique({
-          where: { email: credentials.email as string },
+          where: { email },
         });
 
         // SSO-provisioned users have password === null and must not be allowed
@@ -81,8 +93,10 @@ function buildProviders(): Provider[] {
         );
 
         if (!user || !user.password || !isCorrectPassword) {
+          await recordFailedSignIn(email, request.headers);
           throw new Error("Invalid credentials");
         }
+        await clearFailedSignIns(email, request.headers);
 
         // MFA gate. The cast covers the case where the generated Prisma
         // client in the current checkout predates the user.mfa_enabled

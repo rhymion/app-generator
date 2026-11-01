@@ -372,6 +372,56 @@ overwrites the header yields a single entry, which is returned as is. When
 the list is shorter than the hop count the left-most entry is used.
 `X-Real-IP` is consulted only when `X-Forwarded-For` is absent.
 
+**Account lockout (Issue #1125).** Password sign-in counts failures in two
+tiers, both in the rate-limit store and both counting failures only:
+
+| Tier | Bucket | Key | Default | Override |
+|------|--------|-----|---------|----------|
+| 1 | `auth:account:lockout` | SHA-256 of the lower-cased email and the client address | 10 failures / 15 min | `RATE_LIMIT_ACCOUNT_LOCKOUT_LIMIT` |
+| 2 | `auth:account:lockout:email` | SHA-256 of the lower-cased email | 100 failures / 15 min | `RATE_LIMIT_ACCOUNT_LOCKOUT_EMAIL_LIMIT` |
+
+Tier 1 locks one email from one address, so failures sent from elsewhere never
+lock the owner's own address. Tier 2 counts the email across every address and
+stops guessing that is spread over many of them; 100 failures per 15 minutes is
+the ceiling NIST SP 800-63B (section 5.2.2) allows for memorized secrets. The
+client address comes from `clientIp()` in `lib/rate-limit/client-ip.ts`, the
+function `proxy.ts` uses for the per-IP limits, so the left-most (client
+controlled) `X-Forwarded-For` entries never choose the tier-1 key; it inherits
+the `TRUSTED_PROXY_HOPS` requirement above. If a deployment does trust a
+client-set address, every request gets a fresh tier-1 key and only tier 2 stops
+the guessing.
+
+Keys are derived from the submitted email whether or not an account exists, so
+a lock reveals nothing about which emails are registered. While either tier is
+spent the web credentials sign-in refuses every password with the usual
+"Invalid credentials", after the same password comparison a wrong password gets,
+and the mobile token route answers `429` with `Retry-After`. A tier lifts when
+its oldest counted failure leaves the window. A successful sign-in resets both
+counts for that email (tier 1 for the signing-in address, and tier 2): a correct
+password ends the guessing the counters measure, and keeping the tier-2 count
+would let mistypes spread over the owner's devices lock the owner out later in
+the same window. The attempt that locks a tier records an `auth:account.locked` audit event
+(metadata `tier`: `email_and_address` or `email`). Both paths go through
+`lib/auth/account-lockout.ts`. The state is shared across instances only when
+`REDIS_URL` is set.
+
+Known limits:
+
+- Users behind one shared address (an office NAT, a mobile carrier gateway)
+  share the tier-1 counter for an email, so they can lock one another out of
+  that email from that address.
+- Anyone who can send failures from many addresses can spend tier 2 and keep an
+  account from signing in by password until the window passes (about 100
+  requests, each from an address that stays under 10 failures).
+- An administrator cannot unlock an account early: no state is stored in the
+  database, and there is no unlock link or reset flow.
+
+**Password strength.** `lib/auth/password-policy.ts` requires at least 8
+characters (ASVS V6.2.1) and no composition rules (V6.2.5). Registration, the
+settings password form and the REST and bulk credential change all apply it, so no
+path can set a weaker password. Maximum length and common or breached passwords are
+tracked in #1280.
+
 **Self-registration and API keys.** `POST /api/auth/register` is limited per
 client IP by the `auth:register` bucket (5 requests / 10 min) and answers
 `429` with `Retry-After` when it is spent. `authenticateApiKey`

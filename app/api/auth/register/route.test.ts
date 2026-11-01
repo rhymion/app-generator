@@ -61,6 +61,21 @@ describe('POST /api/auth/register rate limit', () => {
   });
 });
 
+describe('POST /api/auth/register password strength', () => {
+  it('answers 400 for a password under the minimum length and creates nothing', async () => {
+    const res = await POST(
+      new Request('http://localhost/api/auth/register', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-forwarded-for': '203.0.113.50' },
+        body: JSON.stringify({ email: 'weak@example.com', password: 'short' }),
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect((await res.json()).code).toBe('WEAK_PASSWORD');
+    expect(userCreate).not.toHaveBeenCalled();
+  });
+});
+
 describe('POST /api/auth/register unexpected failure', () => {
   it('returns a generic body and logs no error message text', async () => {
     const leaked = 'Invalid `prisma.user.create()` invocation: password: "$2a$10$abcdefghijklmnopqrstuv"';

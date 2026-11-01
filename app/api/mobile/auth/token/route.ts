@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyPassword } from '@/lib/auth/password-check';
+import { clearFailedSignIns, getAccountLockState, recordFailedSignIn } from '@/lib/auth/account-lockout';
 import prisma from '@/lib/prisma';
 import { ApiError, handleApiError, requireMobileAuth } from '@/lib/api-auth';
 import { verifyMfaCode } from '@/lib/mfa/verify';
@@ -54,6 +55,15 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
       );
     }
 
+    // Account lockout (Issue #1125): two tiers, shared with the web sign-in.
+    const lock = await getAccountLockState(email, request.headers);
+    if (lock.locked) {
+      return NextResponse.json(
+        { error: 'rate_limited', retryAfter: lock.retryAfterSeconds },
+        { status: 429, headers: { 'Retry-After': String(lock.retryAfterSeconds) } },
+      );
+    }
+
     const user = await prisma.user.findUnique({ where: { email } });
     // SSO-only users (password === null) and unknown emails must be
     // indistinguishable from the caller's point of view — same as the
@@ -62,8 +72,10 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
     // the response time does not reveal which case applied.
     const passwordOk = await verifyPassword(password, user?.password);
     if (!user || !user.password || !passwordOk) {
+      await recordFailedSignIn(email, request.headers);
       throw new ApiError(401, 'Invalid credentials');
     }
+    await clearFailedSignIns(email, request.headers);
 
     const mfaUser = user as unknown as { mfa_enabled?: boolean };
     if (mfaUser.mfa_enabled) {
