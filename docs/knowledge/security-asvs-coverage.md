@@ -350,9 +350,9 @@ Chapter V17 (WebRTC) does not apply: the generated app has no real-time media, T
 | V16.2.3 | 2 | generator | Permitted log sinks are listed in docs/knowledge/logging-inventory.md; application code has no other sink (lint, check:generated) | none | - | - |
 | V16.2.4 | 2 | gap | Console output formats are mixed | none | #1237 | - |
 | V16.2.5 | 2 | generator | Emails are kept out of audit_log metadata and auth logs; slow-query parameters are redacted | lib/auth/audit-no-pii.test.ts, lib/prisma-slow-query.test.ts | #1237 | - |
-| V16.3.1 | 2 | gap | Sign-in, sign-out, rejects and MFA events are audited; failed credentials, invalid API keys and failed mobile tokens are not | cypress/e2e/audit_log.cy.ts (sign-in only) | #1307 | - |
-| V16.3.2 | 2 | gap | Authorization denials are not logged | none | #1307 | - |
-| V16.3.3 | 2 | gap | No security-event list; rate-limit hits and control bypass attempts are not logged | none | #1307 | - |
+| V16.3.1 | 2 | generator | Sign-in, sign-out, rejects and MFA events are audited. On REST routes every 401 (invalid or missing API key, failed mobile sign-in or token) writes a `[security-event]` log line. A wrong password on the web form and a failed Server Action are not yet recorded | lib/api-auth.test.ts, cypress/e2e/audit_log.cy.ts (sign-in only) | #1307 | - |
+| V16.3.2 | 2 | generator | Authorization denials on REST routes (403, `PERMISSION_DENIED`) write a `[security-event]` log line. Denials in Server Actions are not yet recorded | lib/api-auth.test.ts | #1307 | - |
+| V16.3.3 | 2 | generator | The security events are listed in docs/knowledge/logging-inventory.md (`auth.rejected`, `authz.denied`, `rate_limit.hit`); a rate-limit hit on a REST route (429) is logged. Control bypass attempts beyond these are not logged | lib/api-auth.test.ts | #1307 | - |
 | V16.3.4 | 2 | generator | handleApiError logs unexpected errors; Redis rate-limit failures and startup failures are logged | lib/api-auth.test.ts, lib/rate-limit/redis.test.ts | - | - |
 | V16.4.1 | 2 | gap | Only some log lines are JSON-encoded; others pass raw values | none | #1237 | - |
 | V16.4.2 | 2 | generator | audit_log is append-only (Prisma guard, database trigger, restricted role, digest chain) | lib/audit-log-integrity/guard.test.ts, digest.test.ts, code_generator/tests/test_audit_log_append_only_templates.py | #990, #1193 | - |

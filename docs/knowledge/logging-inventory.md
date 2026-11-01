@@ -34,6 +34,18 @@ Emails and free text are kept out of `metadata`; the table is append-only, so a 
 
 A failed audit write outside a transaction is logged and does not fail the request. Inside a transaction the error is rethrown and the transaction rolls back.
 
+### Security-event log
+
+`lib/security-event.ts` writes one `[security-event]` line through the application log for each failed authentication, authorization denial and rate-limit hit that a REST route answers through `handleApiError`. It does not write to `audit_log`: unauthenticated callers produce these events, and a database row per probe would let a caller grow an append-only table.
+
+| Event | Status | When |
+|---|---|---|
+| `auth.rejected` | 401 | Missing or invalid API key, expired key, invalid mobile access token, failed mobile sign-in, expired session (`SESSION_EXPIRED`) |
+| `authz.denied` | 403 | The caller is known but may not perform the operation (`PERMISSION_DENIED`, cross-site write refused) |
+| `rate_limit.hit` | 429 | A rate-limit bucket is spent, including the repeated-invalid-API-key bucket |
+
+A line is JSON with `at`, `event`, `status` and, for an `AppError`, `code`. It carries no user id, email, address, credential, request path or error message. Not yet covered: a wrong password on the web sign-in form (handled inside Auth.js) and a denial inside a Server Action; both are tracked in Issue #1307.
+
 ### Application log
 
 Messages carry a bracketed tag naming the source, for example `[audit_log:write_failed]`, `[rate-limit:fail_open]`, `[auth:signIn:reject]`, `[auth:createUser]`, `[register]`, `[anonymizeUser]`, `[_notifier:write_failed]`. They record failures that were swallowed so the request could continue (audit write, rate-limit store, notification write, search index creation), rejected sign-ins, account creation, API errors and which database adapter was chosen at start-up. Severities are `debug`, `info`, `warn` and `error`. Format varies: some records are single-line JSON, others a message plus an object. Normalizing it is tracked in the coverage table (V16.2.4).
