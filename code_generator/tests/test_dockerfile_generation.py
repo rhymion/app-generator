@@ -9,6 +9,7 @@ top-level x-scheduled-tasks entry.
 Run:
     cd code_generator && python3 -m pytest tests/test_dockerfile_generation.py -v
 """
+import re
 import shutil
 from pathlib import Path
 
@@ -20,6 +21,7 @@ from build_user_schema import build_user_schema
 from generate import generate
 from manifest import MANIFEST_FILENAME
 
+REPO = Path(__file__).resolve().parents[2]
 FIXTURES = Path(__file__).resolve().parent / 'fixtures'
 FIXTURE = FIXTURES / 'mobile_entity_gate'
 _TASKS = [{'task_id': 'nightly_task', 'handler': 'runNightly'}]
@@ -58,6 +60,28 @@ def test_dockerignore_keeps_secrets_and_node_modules_out_of_the_image(tmp_path):
     assert 'node_modules' in lines
     assert '.env*' in lines
     assert '!.env.example' in lines
+
+
+def test_dockerignore_keeps_git_history_and_build_output_out_of_the_build_context(tmp_path):
+    lines = (_build(tmp_path, True) / '.dockerignore').read_text().splitlines()
+    assert '.git' in lines
+    assert '.next' in lines
+
+
+def test_healthcheck_probes_a_route_the_app_serves_without_a_session(tmp_path):
+    dockerfile = (_build(tmp_path, True) / 'Dockerfile').read_text()
+    healthcheck = re.search(r'^HEALTHCHECK .*?(?=^\S)', dockerfile, re.M | re.S)
+    assert healthcheck, 'the runner stage has no HEALTHCHECK'
+    paths = re.findall(r'http://[^/\s]+(/[^\s]*)', healthcheck.group(0))
+    assert len(paths) == 1, healthcheck.group(0)
+    # Auth.js answers /api/auth/* without a session or a database round trip, and proxy.ts does not redirect it
+    # to the login page. /api/health is not served by any route.
+    assert paths[0] == '/api/auth/csrf'
+    assert (REPO / 'app' / 'api' / 'auth' / '[...nextauth]' / 'route.ts').exists()
+    assert '/api/auth/:path*' in (REPO / 'proxy.ts').read_text()
+    assert not (REPO / 'app' / 'api' / 'health').exists()
+    # Cloud Run and `docker run -e PORT=...` change the listen port; the probe must follow it.
+    assert '${PORT:-3000}' in healthcheck.group(0)
 
 
 def test_no_scheduled_tasks_and_no_x_cloud_generates_neither_file(tmp_path):
