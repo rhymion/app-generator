@@ -302,11 +302,11 @@ Chapter V17 (WebRTC) does not apply: the generated app has no real-time media, T
 | V13.2.5 | 2 | environment | Egress restriction is a platform setting; docs/knowledge/outbound-communications.md says what to allow and that the deploy scripts configure none | none | - | - |
 | V13.3.1 | 2 | generator | Secrets go to Secret Manager (scripts/gcp-setup.sh) or sensitive Vercel variables (scripts/vercel-env.sh) | scripts/vercel-env.test.ts, scripts/env-file-permissions.test.ts | #1248 | - |
 | V13.3.2 | 2 | generator | Least-privilege roles for GCS and Vercel previews; per-secret scope of the GCP accessor binding was not verified | scripts/gcp-storage-config.test.ts, scripts/vercel-env.test.ts | - | - |
-| V13.4.1 | 1 | environment | The runner image copies only build output; there is no .dockerignore for the build context | none | #1297 | - |
+| V13.4.1 | 1 | generator | The runner image copies only build output, and the generated .dockerignore keeps .git, .env* (except .env.example), node_modules and .next out of the build context | code_generator/tests/test_dockerfile_generation.py | - | - |
 | V13.4.2 | 2 | generator | Swagger UI gated on SWAGGER_UI_ENABLED; reset-caches route returns 404 without TEST_RESET_TOKEN; poweredByHeader false | none (no direct test of the production-off behavior) | - | - |
 | V13.4.3 | 2 | framework | Next.js serves no directory listing; only files under public/ by exact path | none | #1234 | next 16.4.2 (package-lock.json); public folder docs |
 | V13.4.4 | 2 | environment | Next.js route handlers answer only their exported methods; the platform front end filters TRACE | none | #1234 | - |
-| V13.4.5 | 2 | gap | The OpenAPI document is served to any authenticated user; the Dockerfile HEALTHCHECK calls /api/health, which no route serves | none | #1161, #1297 | - |
+| V13.4.5 | 2 | gap | The OpenAPI document is served to any authenticated user; the Dockerfile HEALTHCHECK probes /api/auth/csrf, which Auth.js serves without a session | code_generator/tests/test_dockerfile_generation.py | #1161 | - |
 
 ## V14 Data Protection
 
