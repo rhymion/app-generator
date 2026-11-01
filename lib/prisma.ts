@@ -4,6 +4,7 @@ import { withAccelerate } from '@prisma/extension-accelerate';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaNeon } from '@prisma/adapter-neon';
 import { pinSslModeVerifyFull } from './db-url';
+import { assertSecureDatabaseUrl } from './transport-security';
 import { resolvePrismaPoolMax } from './prisma-pool';
 import { cacheOnGlobal } from './global-singleton';
 import { auditLogAppendOnlyExtension } from './audit-log-integrity/guard';
@@ -92,6 +93,7 @@ const createBasePrismaClient = () => {
     // never set this var, so they always take that branch.
     logger.info('Using Neon adapter for Prisma Client');
     const rawUrl = `${process.env.DATABASE_URL}`;
+    assertSecureDatabaseUrl(rawUrl);
 
     // Same URL handling as the PrismaPg branch below (schema extraction +
     // statement_timeout) — Postgres connection-string semantics, not a
@@ -149,6 +151,7 @@ const createBasePrismaClient = () => {
   } else {
     logger.info('Using direct database connection for Prisma Client');
     const rawUrl = `${process.env.DATABASE_URL}`;
+    assertSecureDatabaseUrl(rawUrl);
 
     // PrismaPg passes the connection string to pg.Pool, which ignores Prisma's
     // ?schema= extension. Strip it from the URL and pass it via the adapter's
