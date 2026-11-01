@@ -4,6 +4,7 @@ import { auth } from '@/auth';
 import prisma from '@/lib/prisma';
 import { cache } from 'react';
 import { TtlLruCache } from '@/lib/_ttl_lru';
+import { cacheOnGlobal } from '@/lib/global-singleton';
 import { SELF_ONLY_ADMIN_BYPASS_ENTITIES } from '@/lib/self_only_admin_bypass_entities';
 import { AppError } from '@/lib/_errors';
 import { enterRequestScope, getActorOverride, memoizeInRequestScope } from '@/lib/_request_scope';
@@ -170,7 +171,14 @@ const PERMISSION_TTL_MS = 30 * 1000;
 const PERMISSION_MAX_ENTRIES = 1000;
 const permissionCacheEnabled = process.env.NODE_ENV === 'production';
 type PermissionEntry = { permissions: RichPermissions; userId: string };
-const permissionCache = new TtlLruCache<string, PermissionEntry>(PERMISSION_MAX_ENTRIES, PERMISSION_TTL_MS);
+// Held on globalThis so the Server Actions and route handlers that clear the
+// caches share one instance even when the build bundles this module separately
+// for each of them (same reason as the api-key cache in lib/api-auth.ts).
+const permissionCache = cacheOnGlobal(
+  globalThis as unknown as Record<string, unknown>,
+  '__permissionCache',
+  () => new TtlLruCache<string, PermissionEntry>(PERMISSION_MAX_ENTRIES, PERMISSION_TTL_MS),
+);
 
 type PermissionRow = {
   name: string;
@@ -188,7 +196,11 @@ type PermissionRow = {
  * Same TTL/size bounds as `permissionCache`; both are cleared together by
  * `invalidatePermissionCache()`.
  */
-const permissionRowsCache = new TtlLruCache<string, PermissionRow[]>(PERMISSION_MAX_ENTRIES, PERMISSION_TTL_MS);
+const permissionRowsCache = cacheOnGlobal(
+  globalThis as unknown as Record<string, unknown>,
+  '__permissionRowsCache',
+  () => new TtlLruCache<string, PermissionRow[]>(PERMISSION_MAX_ENTRIES, PERMISSION_TTL_MS),
+);
 
 /**
  * Fetch every permission row relevant to a user in a single query, instead of

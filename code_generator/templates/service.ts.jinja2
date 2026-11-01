@@ -191,6 +191,12 @@ export async function add{{ parent_pascal }}(actorId: string{% if parent_params_
     }
     throw e;
   }
+{% if invalidates_permission_cache %}
+  // The write is committed: drop the per-process permission cache so a role,
+  // permission or role-membership change applies on this instance at once
+  // instead of after the cache TTL.
+  await invalidatePermissionCache();
+{% endif %}
 {% if has_assignee_id or child_assignee_notify_create_code %}
   // Idempotent replay (see the check at the top of the transaction above)
   // means these notifications already fired on the original request --
@@ -462,6 +468,12 @@ export async function update{{ parent_pascal }}(actorId: string, id: string{% if
     }
     throw e;
   }
+{% if invalidates_permission_cache %}
+  // The write is committed: drop the per-process permission cache so a role,
+  // permission or role-membership change applies on this instance at once
+  // instead of after the cache TTL.
+  await invalidatePermissionCache();
+{% endif %}
 {% if has_assignee_id %}
   if (_newAssigneeId && _newAssigneeId !== _prevAssigneeId && _newAssigneeId !== actorId) {
     notify(_newAssigneeId, 'assigned', {
@@ -548,6 +560,12 @@ export async function delete{{ parent_pascal }}(actorId: string | null, ids: str
       await afterDelete(tx, id);
     }
   });
+{% if invalidates_permission_cache %}
+  // The write is committed: drop the per-process permission cache so a role,
+  // permission or role-membership change applies on this instance at once
+  // instead of after the cache TTL.
+  await invalidatePermissionCache();
+{% endif %}
 {% if bridge_attachment_cleanup %}
   // The rows are gone and the delete committed; remove the stored files too.
   await removeStoredObjects(_removedAttachmentKeys);
@@ -599,6 +617,12 @@ export async function delete{{ parent_pascal }}(ids: string[]): Promise<void> {
       await afterDelete(tx, id);
     }
   });
+{% if invalidates_permission_cache %}
+  // The write is committed: drop the per-process permission cache so a role,
+  // permission or role-membership change applies on this instance at once
+  // instead of after the cache TTL.
+  await invalidatePermissionCache();
+{% endif %}
 {% if bridge_attachment_cleanup %}
   // The rows are gone and the delete committed; remove the stored files too.
   await removeStoredObjects(_removedAttachmentKeys);
