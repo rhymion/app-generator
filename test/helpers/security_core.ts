@@ -15,6 +15,8 @@ export type SecurityCell = { entity: string; operation: string; case: string; [a
 export type SecurityManifest = {
   axes: string[];
   denied_status?: Record<string, Record<string, number>>;
+  /** Value of an axis a claimed cell may leave out (e.g. `fk_shape` is `none` for the plain cells). */
+  axis_defaults?: Record<string, string>;
   entities: Record<string, { cells: Array<Record<string, string>> }>;
 };
 
@@ -30,17 +32,18 @@ export function assertCellAndStatus(cell: SecurityCell, status: number, manifest
   }
   const entity = manifest.entities[cell.entity];
   if (!entity) throw new Error(`expectDeniedFor: entity "${cell.entity}" is not in the security manifest.`);
-  const match = entity.cells.some((c) => manifest.axes.every((axis) => c[axis] === cell[axis]));
+  const valueOf = (axis: string) => cell[axis] ?? manifest.axis_defaults?.[axis];
+  const match = entity.cells.some((c) => manifest.axes.every((axis) => c[axis] === valueOf(axis)));
   if (!match) {
     throw new Error(
       `expectDeniedFor: the manifest has no cell ${JSON.stringify(cell)}; fix the cell or the security-cell marker.`,
     );
   }
   for (const [axis, values] of Object.entries(manifest.denied_status ?? {})) {
-    const declared = values[cell[axis]];
+    const declared = values[valueOf(axis)];
     if (declared !== undefined && declared !== status) {
       throw new Error(
-        `expectDeniedFor: the matrix declares status ${declared} for ${axis}=${cell[axis]}, the test expects ${status}.`,
+        `expectDeniedFor: the matrix declares status ${declared} for ${axis}=${valueOf(axis)}, the test expects ${status}.`,
       );
     }
   }

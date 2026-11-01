@@ -18,8 +18,11 @@ by a test nor listed, with a reason, in the allowlist.
 A test carries a comment anywhere in the file:
 
 ```
-// security-cell: entity=<entity> operation=<operation> case=<case>
+// security-cell: entity=<entity> operation=<operation> case=<case> [fk_shape=<shape>]
 ```
+
+`fk_shape` defaults to `none`, so a marker that does not name it claims the cell of a test that is not about a
+reference.
 
 The generated API spec (`test_api_spec.cy.ts.jinja2`) carries these markers for its permission-denied and
 cross-organization tests. A hand-written spec claims a cell the same way, with the entity written out.
@@ -44,6 +47,30 @@ Edit `security_matrix.yaml` only:
 The cells the new axis creates and no test claims are reported as missing until a test claims them or the allowlist
 lists them. A `requires` flag must be one of the booleans `generate.py` collects in `security_entity_flags`; an unknown
 flag fails the check instead of reading as false.
+
+## References to rows the actor cannot reach
+
+A write that touches a foreign key is tested per kind of reference. The `fk_shape` axis names the kind and applies to
+an entity that holds such a reference to an organization-scoped entity (not `organization` or `user`):
+
+| `fk_shape` | Reference held by |
+|---|---|
+| `many_to_one_required`, `many_to_one_optional` | the entity itself, many-to-one |
+| `one_to_one_required`, `one_to_one_optional` | the entity itself, one-to-one |
+| `inline_child_required`, `inline_child_optional` | a row of an inline-edited child grid (the key back to the parent is not counted) |
+
+Four cases combine with these shapes only, each limited to the operations that can perform it:
+
+| `case` | Meaning |
+|---|---|
+| `fk_to_unreachable` | write a reference to an unreachable row (create, update, bulk, import, Server Action) |
+| `fk_away_unreachable` | re-point a reference that already holds an unreachable row |
+| `fk_null_unreachable` | clear an optional reference that holds an unreachable row (optional shapes only) |
+| `fk_delete_unreachable` | delete a record whose reference holds an unreachable row |
+
+The generated tests `G3.8`-`G3.15` claim the REST cells for the primary display field, and are generated only when
+that field is a foreign key. To-many sets (one-to-many, many-to-many) chosen on a parent are not a shape yet; the
+behavior for an unreachable member is undecided. Untested cells are tracked in Issue #1324.
 
 ## Applicability
 
