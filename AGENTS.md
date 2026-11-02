@@ -354,7 +354,7 @@ Rules for routes, Server Actions and services you write in an app:
    organization, with `expectDeniedFor` and a `security-cell:` marker; `npm run check:security-matrix` checks the claims.
 
 See `docs/knowledge/security-test-helpers.md`, `docs/knowledge/security-test-matrix.md` and the
-`org-scoped-mutation-path-idor-checklist` skill (`.claude/skills/`).
+`security-test-matrix` skill (`.claude/skills/`).
 
 ## Sanity check
 
