@@ -47,6 +47,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 - **A security section in `CLAUDE.md` and `AGENTS.md`** (Refs #1260), the files an app's own `CLAUDE.md`/`AGENTS.md` point to: use the wrappers, write only through the checked service entry points, add a security matrix test for every new route. `docs/knowledge/multi-tenancy-and-permissions.md` no longer says `check:handwritten-routes` is outside CI.
 
 ### Fixed
+- **The Comment REST gate's mention-scope spec no longer races the notification write** (Refs #1346). The notification row is written after the HTTP response, so the spec's single `db:getNotificationsForUser` read could run too early and see `0` instead of `1` under heavy parallel load. Every mention-count assertion in `mention_scope.cy.ts` now goes through one polling helper that re-runs the task until the count matches (up to 5 seconds); an expected count of `0` must hold for the whole wait. No product code changed.
 - **The dashboard widget editor spec no longer fails intermittently on a detached element** (Issue #1056). It looked up the group-by input by the label's generated `for` id, which can change between the server render and hydration; it now reaches the input through the DOM. Test-only change.
 
 ## [6.1.0] - 2026-10-30
