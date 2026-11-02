@@ -3746,16 +3746,19 @@ def generate(schema_path: str, output_dir: str) -> None:
             _render(env, 'db_init.ts.jinja2', index_ctx_base),
         )
         print(f'  DB init → lib/db-init.ts (GIN indexes for gin_trgm_ops)')
-        _write(
-            out / 'instrumentation.ts',
-            _render(env, 'instrumentation.ts.jinja2', index_ctx_base),
-        )
-        print(f'  Instrumentation hook → instrumentation.ts (calls ensureSearchIndexes() on cold start)')
     else:
-        for _stale in (out / 'scripts' / 'create-gin-indexes.sql', out / 'instrumentation.ts'):
+        for _stale in (out / 'scripts' / 'create-gin-indexes.sql',):
             if _stale.exists():
                 _stale.unlink()
                 print(f'  Search: deleted stale {_stale.relative_to(out)}')
+
+    # Issue #1304: instrumentation.ts is written for every app (onRequestError); its register()
+    # hook, which provisions the GIN indexes, is rendered only when gin_index_entities is non-empty.
+    _write(
+        out / 'instrumentation.ts',
+        _render(env, 'instrumentation.ts.jinja2', index_ctx_base),
+    )
+    print('  Instrumentation hooks → instrumentation.ts (onRequestError; register() when search indexes exist)')
 
     # --- docs/generated/index.md + app/[locale]/docs/page.mdx ---
     print('\nGenerating documentation index...')
