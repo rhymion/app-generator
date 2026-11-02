@@ -273,7 +273,7 @@ Chapter V17 (WebRTC) does not apply: the generated app has no real-time media, T
 | V11.4.2 | 2 | generator | bcryptjs for passwords at cost 10 | lib/auth/password-check.test.ts, lib/auth/credential-confirmation.test.ts | #1291 | - |
 | V11.4.3 | 2 | generator | SHA-256 audit-log digest and HMAC-SHA256 tokens | lib/audit-log-integrity/digest.test.ts | - | - |
 | V11.4.4 | 2 | n/a | No password-derived keys; the MFA key is derived from the server secret | none | - | - |
-| V11.5.1 | 2 | gap | Recovery codes carry about 40 bits; other tokens use randomBytes(32) or randomUUID() | lib/mfa/recovery.test.ts (no modulo bias) | #1292 | - |
+| V11.5.1 | 2 | generator | Other tokens use randomBytes(32) or randomUUID(). Recovery codes carry about 40 bits (31^8), below the 128 bits asked for; docs/knowledge/authentication.md documents the compensating controls (a code needs the password or a first-factor session, per-user limit of 10 attempts per 5 minutes, single use, bcrypt-hashed storage) and the residual offline-guessing risk | lib/mfa/recovery.test.ts (no modulo bias), lib/mfa/verify.test.ts (per-user attempt limit) | - | - |
 | V11.6.1 | 2 | n/a | No asymmetric key generation or digital signatures | none | - | - |
 
 ## V12 Secure Communication
@@ -295,7 +295,7 @@ Chapter V17 (WebRTC) does not apply: the generated app has no real-time media, T
 | ID | Level | Status | Covered by | Verified by | Gap Issue | Source and version |
 |----|-------|--------|------------|-------------|-----------|--------------------|
 | V13.1.1 | 2 | generator | Every external service and endpoint is listed in docs/knowledge/outbound-communications.md | none (document read against the code) | #1241 | - |
-| V13.2.1 | 2 | gap | Backend dependencies use static credentials (database password, Redis URL, CRON_SECRET); audit-log GCS can use workload identity | lib/audit-log-integrity/storage-gcs.test.ts | #1295, #1124, #1143 | - |
+| V13.2.1 | 2 | gap | Backend dependencies use static credentials (database password, Redis URL, CRON_SECRET); docs/knowledge/backend-credentials.md lists them, what a leak allows, the evaluation of short-lived alternatives and the rotation steps; audit-log GCS can use workload identity | lib/audit-log-integrity/storage-gcs.test.ts | #1124, #1143 | - |
 | V13.2.2 | 2 | generator | Restricted database role on Vercel; narrow GCS bucket role; GCP database role was not verified | scripts/vercel-env.test.ts, scripts/gcp-storage-config.test.ts | - | - |
 | V13.2.3 | 2 | generator | Production seeding requires explicit admin credentials; docker-compose.prod.yml requires POSTGRES_PASSWORD from the environment and has no default | scripts/seed-baseline-credentials.test.ts, scripts/docker-compose-prod-password.test.ts | - | - |
 | V13.2.4 | 2 | environment | The application fetches no user-supplied URL; the fixed destinations are listed in docs/knowledge/outbound-communications.md and an allow-list is applied on the platform, which the deploy scripts do not configure | none | - | - |

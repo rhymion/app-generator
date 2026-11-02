@@ -304,6 +304,31 @@ to close) if it shows up in profiling for a specific deployment.
 `crypto.randomInt`, which rejection-samples internally, so every character is
 equally likely. Codes are shown as `abcd-efgh` and stored bcrypt-hashed.
 
+**Recovery code strength and the compensating controls (Issue #1292):** a code is 8 characters from a
+31-character alphabet, so one code carries 31^8 (about 8.5 x 10^11, roughly 40 bits) of entropy. That is below the
+128 bits ASVS 5.0 V11.5.1 asks of a random secret, and the codes were deliberately kept short enough to be typed
+from a printout. The app instead limits what an attacker can do with a guess:
+
+- **A recovery code is never the only credential.** It is accepted by the MFA challenge (after the first factor
+  succeeded), by the credentials sign-in step that follows a correct password, and by the mobile token route after a
+  correct password. Guessing one therefore needs the user's password or a stolen first-factor session.
+- **Guesses are rate limited per user.** Every attempt, whether it presents a TOTP code or a recovery code, spends one
+  attempt from the per-user `auth:mfa:challenge` bucket (10 attempts per 5 minutes, `lib/rate-limit/index.ts`),
+  and the check runs before the code is evaluated (see "Rate limiting the challenge itself" below). That caps one
+  user at 2,880 guesses a day. With 8 valid codes among 8.5 x 10^11 possibilities, each guess succeeds with a
+  probability of about 10^-11, so reaching even odds takes about 7 x 10^10 guesses, which is more than 70,000 years at
+  the cap. With Redis unset or unreachable the bucket is kept per instance in memory, so the cap multiplies by the
+  number of instances, not by orders of magnitude.
+- **A code works once.** A used code is stamped with a conditional write and is never accepted again, and a
+  successful guess spends one of the eight codes, not a reusable credential.
+- **Stored codes are hashed.** A database read yields bcrypt hashes (cost 10, per-hash salt), not codes. An attacker
+  who holds the hashes can test guesses offline without the rate limit; at 31^8 possibilities per hash that is the
+  residual risk this section accepts. Raising the code length or the bcrypt cost is the way to reduce it, and either
+  change makes existing codes unusable or slower to verify, so it is not done here.
+
+These controls make online guessing impractical; they do not make the codes as strong as a 128-bit secret, and
+the ASVS coverage row for V11.5.1 says so.
+
 **One-time use of codes:** `verifyMfaCode()` keeps the last accepted TOTP time step in
 `user.mfa_last_totp_step` and refuses a code from that step or an earlier one, so a code cannot be replayed
 inside its validity window. The step is claimed with a conditional `updateMany`, so two concurrent requests
