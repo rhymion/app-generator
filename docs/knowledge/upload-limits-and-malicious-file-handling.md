@@ -38,7 +38,7 @@ The app does not wait for a scan result: a file is available to anyone allowed t
 
 ## Download file names
 
-The download response sets `Content-Disposition` to the disposition (`inline` or `attachment`), an ASCII `filename` and an RFC 5987 `filename*=UTF-8''` value:
+The download response sets `Content-Disposition` to the disposition (`inline` or `attachment`), an ASCII `filename` and an RFC 5987 `filename*=UTF-8''` value (built by `contentDisposition()` in `lib/attachment/content-disposition.ts`, covered by a unit test):
 
 - in the ASCII `filename`, every character outside printable ASCII (`0x20`–`0x7e`), every double quote and every backslash is replaced with `_`, so a quote, a CR or LF, or a non-ASCII character in a name cannot end the quoted string or add a header;
 - `filename*` is the name passed through `encodeURIComponent`, which percent-encodes quotes, spaces, CR, LF and non-ASCII characters.
