@@ -73,8 +73,8 @@ Chapter V17 (WebRTC) does not apply: the generated app has no real-time media, T
 | V2.2.3 | 2 | generator | docs/knowledge/same-entity-validation-socket.md (hand-written per relation, not generic) | none | #1271 | - |
 | V2.3.1 | 1 | generator | state_transitions.ts.jinja2 (assertTransitionAllowed); lib/approval_request/order-check.ts | code_generator/tests/test_state_transition_gatekeeper.py, lib/approval_request/actions.test.ts, cypress/e2e/api/multi_stage_approval_order_reached.cy.ts | #1230 | - |
 | V2.3.2 | 2 | gap | Global limits are documented (docs/knowledge/input-validation-rules-and-limits.md); no per-user business limit exists to enforce | none | #1270 | - |
-| V2.3.3 | 2 | generator | Serializable $transaction in service.ts.jinja2 and submit_for_approval.ts.jinja2 | none | #1272, #735 | - |
-| V2.3.4 | 2 | generator | x-reservation templates with Serializable isolation | none | #1272 | - |
+| V2.3.3 | 2 | generator | Serializable $transaction in service.ts.jinja2 and submit_for_approval.ts.jinja2 | generated reservation spec case (5) (code_generator/templates/test_reservation_spec.cy.ts.jinja2): a failing second line leaves no allocation and no reserved quantity; pinned by code_generator/tests/test_reservation_atomicity_concurrency_tests.py | #1272, #735 | - |
+| V2.3.4 | 2 | generator | x-reservation templates with Serializable isolation | generated reservation spec case (6): two simultaneous requests for stock that fits only one end with one 201 and one 409 and a single claim; pinned by code_generator/tests/test_reservation_atomicity_concurrency_tests.py | #1272 | - |
 | V2.4.1 | 2 | generator | lib/rate-limit/{index,redis,in-memory,client-ip,action}.ts; generated REST routes return 429; generated Server Actions share the api:write bucket | lib/rate-limit/redis.test.ts, in-memory.test.ts, client-ip.test.ts, action.test.ts, code_generator/tests/test_rate_limit_coverage.py | #1092, #1125 | - |
 
 ## V3 Web Frontend Security
