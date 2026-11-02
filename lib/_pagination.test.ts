@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildFilter, buildOrderBy, parsePageOpts } from './_pagination';
+import {
+  DEFAULT_PAGE_SIZE,
+  MAX_PAGE_SIZE,
+  buildFilter,
+  buildOrderBy,
+  clampPage,
+  parsePageOpts,
+} from './_pagination';
 
 /**
  * Per-kind × operator coverage for buildFilter/buildOrderBy's clause-shape
@@ -319,5 +326,41 @@ describe('parsePageOpts search', () => {
     const opts = parsePageOpts(new URLSearchParams('search=a&f.name=b'));
     expect(opts.search).toBe('a');
     expect(opts.filter).toEqual({ name: 'b' });
+  });
+});
+
+describe('clampPage page-size ceiling (ASVS V4.3.1)', () => {
+  it('pins the ceiling at 200 rows and the default at 50', () => {
+    expect(MAX_PAGE_SIZE).toBe(200);
+    expect(DEFAULT_PAGE_SIZE).toBe(50);
+  });
+
+  it('caps a page size above the ceiling and bounds the Prisma take and skip with it', () => {
+    expect(clampPage({ page: 0, pageSize: MAX_PAGE_SIZE + 1 })).toEqual({
+      page: 0,
+      pageSize: MAX_PAGE_SIZE,
+      skip: 0,
+      take: MAX_PAGE_SIZE,
+    });
+    const huge = clampPage({ page: 3, pageSize: 1_000_000 });
+    expect(huge.take).toBe(MAX_PAGE_SIZE);
+    expect(huge.skip).toBe(3 * MAX_PAGE_SIZE);
+    expect(clampPage({ pageSize: Number.MAX_SAFE_INTEGER }).take).toBe(MAX_PAGE_SIZE);
+  });
+
+  it('keeps a page size at the ceiling and below it unchanged', () => {
+    expect(clampPage({ pageSize: MAX_PAGE_SIZE }).take).toBe(MAX_PAGE_SIZE);
+    expect(clampPage({ pageSize: 10 }).take).toBe(10);
+  });
+
+  it('raises a page size below one to one row and floors a fraction', () => {
+    expect(clampPage({ pageSize: 0 }).take).toBe(1);
+    expect(clampPage({ pageSize: -5 }).take).toBe(1);
+    expect(clampPage({ pageSize: 12.9 }).take).toBe(12);
+  });
+
+  it('falls back to the default page size when none is given and never goes below page zero', () => {
+    expect(clampPage(undefined)).toEqual({ page: 0, pageSize: DEFAULT_PAGE_SIZE, skip: 0, take: DEFAULT_PAGE_SIZE });
+    expect(clampPage({ page: -4 }).page).toBe(0);
   });
 });

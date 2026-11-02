@@ -109,7 +109,7 @@ Chapter V17 (WebRTC) does not apply: the generated app has no real-time media, T
 | V4.1.2 | 2 | environment | TLS is terminated by Cloud Run or Vercel; no application redirect code | none | - | - |
 | V4.1.3 | 2 | generator | lib/auth/external-url.ts `resolveExternalUrl()` builds the redirect host and scheme in proxy.ts; `x-forwarded-host`, `Host` and `x-forwarded-proto` count only when the host is the one in `AUTH_URL` / `NEXTAUTH_URL`, a Vercel deployment host or an `AUTH_ALLOWED_HOSTS` entry; anything else redirects to the configured application URL | lib/auth/external-url.test.ts, lib/proxy-forwarded-headers.test.ts | - | - |
 | V4.2.1 | 2 | environment | Request-smuggling defense belongs to the platform edge and the Next.js server | none | #1244 | - |
-| V4.3.1 | 2 | generator | lib/_pagination.ts MAX_PAGE_SIZE=200; sort and filter column allow-lists; import row and byte limits; no GraphQL | none | #1277 | - |
+| V4.3.1 | 2 | generator | lib/_pagination.ts MAX_PAGE_SIZE=200 (clampPage); the `include` of every generated getter is rendered from the schema, never from request input, and its nesting is bounded; sort and filter column allow-lists; import row and byte limits; no GraphQL | lib/_pagination.test.ts, code_generator/tests/test_getter_include_depth_bounded.py | - | - |
 | V4.3.2 | 2 | n/a | No GraphQL endpoint | none | - | - |
 | V4.4.1 | 1 | n/a | No WebSocket usage | none | - | - |
 | V4.4.2 | 2 | n/a | No WebSocket usage | none | - | - |
@@ -126,8 +126,8 @@ Chapter V17 (WebRTC) does not apply: the generated app has no real-time media, T
 | V5.2.3 | 2 | n/a | Uploaded archives are stored and served untouched; the app never decompresses them | none | - | - |
 | V5.3.1 | 1 | generator | lib/attachment/storage.ts opaque random key, storage root outside public/ | cypress/e2e/api/upload_path_safety.cy.ts, lib/attachment/storage.test.ts | - | - |
 | V5.3.2 | 1 | generator | lib/attachment/upload_core.ts newStorageKey; the original name is stored encrypted for display only | cypress/e2e/api/upload_path_safety.cy.ts, lib/attachment/storage.test.ts | - | - |
-| V5.4.1 | 2 | generator | attachment_serve_route.ts.jinja2 contentDisposition(); the name comes from the stored record, not the URL | cypress/e2e/api/upload_path_safety.cy.ts | - | - |
-| V5.4.2 | 2 | generator | contentDisposition() sends an ASCII fallback plus filename*=UTF-8''; the function is local to the generated route and its output is not unit-tested | none | #1321 | - |
+| V5.4.1 | 2 | generator | lib/attachment/content-disposition.ts contentDisposition(), imported by attachment_serve_route.ts.jinja2; the name comes from the stored record, not the URL | cypress/e2e/api/upload_path_safety.cy.ts, lib/attachment/content-disposition.test.ts | - | - |
+| V5.4.2 | 2 | generator | lib/attachment/content-disposition.ts contentDisposition() sends an ASCII fallback plus filename*=UTF-8''; quotes, backslashes, CR, LF and non-ASCII characters are replaced in the fallback and percent-encoded in filename* | lib/attachment/content-disposition.test.ts | - | - |
 | V5.4.3 | 2 | gap | No antivirus scan or hook; docs/knowledge/upload-limits-and-malicious-file-handling.md states that scanning is the deployer's responsibility | none | #1279 | - |
 
 ## V6 Authentication

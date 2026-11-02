@@ -5,6 +5,7 @@ import { authenticate, ApiError } from '@/lib/api-auth';
 import { getSessionUserId } from '@/lib/authz';
 import prisma from '@/lib/prisma';
 import { authorizeAttachmentRead } from '@/lib/attachment/access';
+import { contentDisposition } from '@/lib/attachment/content-disposition';
 import { isStorageKey, serveStoredObject } from '@/lib/attachment/storage';
 import { decryptFileName } from '@/lib/compliance/attachment_name_crypto';
 import { UPLOAD_CONTENT_TYPE_BY_EXTENSION, extensionOf } from '@/lib/_upload_validation';
@@ -20,11 +21,6 @@ import { UPLOAD_CONTENT_TYPE_BY_EXTENSION, extensionOf } from '@/lib/_upload_val
 type Params = { params: Promise<{ id: string }> };
 
 const INLINE_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp']);
-
-function contentDisposition(kind: 'inline' | 'attachment', filename: string): string {
-  const ascii = filename.replace(/[^\x20-\x7e]|["\\]/g, '_');
-  return `${kind}; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
-}
 
 async function resolveActorId(request: NextRequest): Promise<string | null> {
   if (request.headers.get('Authorization') || request.headers.get('X-API-Key')) {
