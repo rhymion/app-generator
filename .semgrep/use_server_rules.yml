@@ -1,0 +1,60 @@
+# Rules that depend on the file starting with the 'use server' directive; their test
+# fixture is use_server_rules.ts (Semgrep pairs a rule file with the test file of the same name).
+rules:
+  - id: server-action-writes-without-authorization
+    languages: [typescript]
+    severity: ERROR
+    message: >-
+      An exported function of a 'use server' module is callable from any browser.
+      One that writes through Prisma must authorize the caller first
+      (getSessionUserIdOrThrow(), requireEntityPermission(), requireRecordPermission(),
+      requireDualAuth() or auth()).
+    patterns:
+      - pattern-inside: |
+          'use server';
+          ...
+      - pattern: |
+          export async function $F(...) {
+            ...
+            $DB.$MODEL.$WRITE(...)
+            ...
+          }
+      - metavariable-regex:
+          metavariable: $WRITE
+          regex: ^(create|createMany|update|updateMany|upsert|delete|deleteMany)$
+      - pattern-not: |
+          export async function $F(...) {
+            ...
+            getSessionUserIdOrThrow(...)
+            ...
+          }
+      - pattern-not: |
+          export async function $F(...) {
+            ...
+            requireEntityPermission(...)
+            ...
+          }
+      - pattern-not: |
+          export async function $F(...) {
+            ...
+            requireRecordPermission(...)
+            ...
+          }
+      - pattern-not: |
+          export async function $F(...) {
+            ...
+            requireDualAuth(...)
+            ...
+          }
+      - pattern-not: |
+          export async function $F(...) {
+            ...
+            auth()
+            ...
+          }
+      - pattern-not: |
+          export async function $F(...) {
+            ...
+            await auth()
+            ...
+          }

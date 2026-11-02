@@ -32,3 +32,102 @@ rules:
     pattern-either:
       - pattern: eval(...)
       - pattern: new Function(...)
+
+  - id: entity-only-permission-check-for-record-operation
+    languages: [typescript]
+    severity: ERROR
+    message: >-
+      Update and delete (and invalidate) depend on the record, not only on the
+      entity: the entity-level check ignores the creator/assignee scope and the
+      organization of the row. Call requireRecordPermission() or
+      canAccessRecord() with the loaded record in the same function.
+    paths:
+      exclude:
+        - "*.test.ts"
+        - "*.test.tsx"
+    patterns:
+      - pattern-either:
+          - pattern: requireEntityPermission($M, 'update', ...)
+          - pattern: requireEntityPermission($M, 'delete', ...)
+          - pattern: canAccessEntity($M, 'update', ...)
+          - pattern: canAccessEntity($M, 'delete', ...)
+      - pattern-not-inside: |
+          function $F(...) {
+            ...
+            requireRecordPermission(...)
+            ...
+          }
+      - pattern-not-inside: |
+          function $F(...) {
+            ...
+            canAccessRecord(...)
+            ...
+          }
+      - pattern-not-inside: |
+          ($...ARGS) => {
+            ...
+            requireRecordPermission(...)
+            ...
+          }
+      - pattern-not-inside: |
+          ($...ARGS) => {
+            ...
+            canAccessRecord(...)
+            ...
+          }
+
+  - id: public-object-storage-access
+    languages: [typescript]
+    severity: ERROR
+    message: >-
+      Object storage must stay private; files are served through an
+      authorization-checked route. Remove the public access setting.
+    pattern-either:
+      - pattern: "{..., access: 'public', ...}"
+      - pattern: "{..., ACL: 'public-read', ...}"
+      - pattern: "{..., ACL: 'public-read-write', ...}"
+      - pattern: "{..., predefinedAcl: 'publicRead', ...}"
+      - pattern: $X.makePublic(...)
+      - pattern: "'allUsers'"
+      - pattern: "'allAuthenticatedUsers'"
+
+  - id: secret-compared-with-equality-operator
+    languages: [typescript]
+    severity: ERROR
+    message: >-
+      Comparing a secret with ==, !=, === or !== leaks its prefix through timing.
+      Use secretsEqual() from lib/_secret_compare.ts.
+    patterns:
+      - pattern-either:
+          - pattern: $A === $B
+          - pattern: $A !== $B
+          - pattern: $A == $B
+          - pattern: $A != $B
+      - metavariable-regex:
+          metavariable: $A
+          regex: '(?i).*(secret|apikey|api_key|api_key_hash|password_hash|token_hash|bearer|cron_secret|reset_token).*'
+      - pattern-not: $A === undefined
+      - pattern-not: $A !== undefined
+      - pattern-not: $A === null
+      - pattern-not: $A !== null
+      - pattern-not: $A == null
+      - pattern-not: $A != null
+      - pattern-not: $A === ''
+      - pattern-not: $A !== ''
+      - pattern-not: typeof $A === '...'
+      - pattern-not: typeof $A !== '...'
+
+  - id: request-body-or-headers-logged
+    languages: [typescript]
+    severity: ERROR
+    message: >-
+      A request body or its headers can carry credentials and personal data.
+      Log the fields you need by name, not the whole object.
+    pattern-either:
+      - pattern: logger.$LEVEL(..., $REQ.headers, ...)
+      - pattern: logger.$LEVEL(..., $REQ.body, ...)
+      - pattern: logger.$LEVEL(..., await $REQ.json(), ...)
+      - pattern: logger.$LEVEL(..., await $REQ.text(), ...)
+      - pattern: logger.$LEVEL(..., Object.fromEntries($REQ.headers), ...)
+      - pattern: logger.$LEVEL(..., JSON.stringify($REQ.headers), ...)
+      - pattern: logger.$LEVEL(..., JSON.stringify($REQ.body), ...)
