@@ -7,6 +7,7 @@
 'use server';
 
 import { getSessionUserIdOrThrow } from '@/lib/authz';
+import { enforceActionRateLimit } from '@/lib/rate-limit/action';
 import prisma from '@/lib/prisma';
 import { AppError } from '@/lib/_errors';
 import { UNLINKED_ATTACHMENT_WHERE } from '@/lib/attachment/access';
@@ -37,6 +38,7 @@ export async function createDirectAttachment(
   type: {{ type_ts }},
 ): Promise<DirectAttachment> {
   const actorId = await getSessionUserIdOrThrow();
+  await enforceActionRateLimit(actorId);
   const updated = await prisma.attachment.updateMany({
     where: { id, uploader_id: actorId, ...UNLINKED_ATTACHMENT_WHERE },
     data: { type },

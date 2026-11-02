@@ -38,3 +38,7 @@ export async function requireApiRecordPermission(
 export function handleApiError(_error: unknown): NextResponse {
   throw new Error('fixture stub');
 }
+
+export async function enforceApiRateLimit(_userId: string, _bucket?: 'api:read' | 'api:write'): Promise<void> {
+  throw new Error('fixture stub');
+}

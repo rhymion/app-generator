@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { authenticate, handleApiError } from '@/lib/api-auth';
+import { enforceApiRateLimit } from '@/lib/api-auth';
 import prisma from '@/lib/prisma';
 import { COMMENT_REACTION_TYPES } from '@/lib/reaction_constants';
 import { createReaction, deleteReaction } from '@/lib/reaction/service';
@@ -57,6 +58,7 @@ export async function POST(request: NextRequest, { params }: Params) {
   try {
     const { commentId } = await params;
     const { userId } = await authenticate(request);
+    await enforceApiRateLimit(userId);
 
     const body = await request.json();
     const { type } = body as { type: {{ value_type }} };

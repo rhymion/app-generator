@@ -7,6 +7,7 @@
 {% if owners %}import { revalidatePath } from 'next/cache';
 {% endif %}import prisma from '@/lib/prisma';
 import { getSessionUserIdOrThrow{% if owners %}, getModelPermissions, resolveRecordPermissions, type RichPermissions{% endif %} } from '@/lib/authz';
+import { enforceActionRateLimit } from '@/lib/rate-limit/action';
 import { AppError } from '@/lib/_errors';
 import { UNLINKED_ATTACHMENT_WHERE } from '@/lib/attachment/access';
 import { deleteStoredObject, isStorageKey } from '@/lib/attachment/storage';
@@ -98,6 +99,7 @@ export async function setAttachmentsForBridge(
 ): Promise<void> {
   await assertCanEditBridge(attachable_id);
   const actorId = await getSessionUserIdOrThrow();
+  await enforceActionRateLimit(actorId);
   const removedKeys: string[] = [];
   await prisma.$transaction(async (tx) => {
     const existing = await tx.attachment.findMany({

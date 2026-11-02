@@ -32,6 +32,7 @@
  */
 import { logger } from '@/lib/logger';
 import Redis, { type RedisOptions } from 'ioredis';
+import { assertSecureRedisUrl } from '../transport-security';
 
 import type { RateLimitBucketConfig, RateLimitDecision, RateLimiter } from './index';
 import { createInMemoryRateLimiter } from './in-memory';
@@ -118,6 +119,7 @@ export function createRedisRateLimiter(
   options: CreateRedisRateLimiterOptions = {},
 ): RateLimiter {
   const url = options.url ?? process.env.REDIS_URL;
+  if (!options.client) assertSecureRedisUrl(url);
   if (!options.client && !url) {
     throw new Error(
       'Redis rate-limit adapter requires REDIS_URL (or an injected client). ' +

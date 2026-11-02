@@ -41,4 +41,46 @@ describe('clientIp', () => {
     expect(clientIp(h({ 'x-real-ip': '198.51.100.4' }))).toBe('198.51.100.4');
     expect(clientIp(h({}))).toBe('unknown');
   });
+
+  // One case per documented deployment shape (docs/knowledge/authentication.md,
+  // "Trusted proxy rule"). Every case sends a forged left-most entry and must
+  // still key on the address the platform recorded.
+  describe.each([
+    {
+      platform: 'Vercel (the edge overwrites X-Forwarded-For with the peer address)',
+      hops: undefined,
+      header: '203.0.113.9',
+      forged: '6.6.6.6, 203.0.113.9',
+      expected: '203.0.113.9',
+    },
+    {
+      platform: 'Cloud Run (the front end appends the peer address)',
+      hops: undefined,
+      header: '6.6.6.6, 203.0.113.9',
+      forged: '1.1.1.1, 2.2.2.2, 6.6.6.6, 203.0.113.9',
+      expected: '203.0.113.9',
+    },
+    {
+      platform: 'Cloud Run behind an external HTTPS load balancer (two trusted hops)',
+      hops: '2',
+      header: '6.6.6.6, 203.0.113.9, 35.191.0.1',
+      forged: '1.1.1.1, 6.6.6.6, 203.0.113.9, 35.191.0.1',
+      expected: '203.0.113.9',
+    },
+  ])('$platform', ({ hops, header, forged, expected }) => {
+    it('keys on the address the platform recorded', () => {
+      if (hops) process.env.TRUSTED_PROXY_HOPS = hops;
+      expect(clientIp(h({ 'x-forwarded-for': header }))).toBe(expected);
+    });
+
+    it('is not moved by extra forged entries on the left', () => {
+      if (hops) process.env.TRUSTED_PROXY_HOPS = hops;
+      expect(clientIp(h({ 'x-forwarded-for': forged }))).toBe(expected);
+    });
+
+    it('ignores a forged X-Real-IP when X-Forwarded-For is present', () => {
+      if (hops) process.env.TRUSTED_PROXY_HOPS = hops;
+      expect(clientIp(h({ 'x-forwarded-for': header, 'x-real-ip': '9.9.9.9' }))).toBe(expected);
+    });
+  });
 });

@@ -416,6 +416,25 @@ Known limits:
 - An administrator cannot unlock an account early: no state is stored in the
   database, and there is no unlock link or reset flow.
 
+**Trusted proxy rule per platform.** The rule is a deployment contract: set
+`TRUSTED_PROXY_HOPS` to the number of proxies you operate between the internet
+and the app, and make sure nothing else can reach the app directly (a direct
+connection lets a caller send any `X-Forwarded-For`).
+
+| Deployment | What the platform does to `X-Forwarded-For` | `TRUSTED_PROXY_HOPS` |
+|---|---|---|
+| Vercel | overwrites the header with the peer address (one entry) | `1` (default) |
+| Cloud Run, reached directly | appends the peer address | `1` (default) |
+| Cloud Run behind an external HTTPS load balancer | the balancer appends the client address and Cloud Run appends the balancer address | `2` |
+| Any other host | check what your proxies append and count them | the number of your proxies |
+
+`lib/rate-limit/client-ip.test.ts` has a case for each row that sends a forged
+left-most entry and a forged `X-Real-IP`, and expects the key to stay the
+address the platform recorded. If the app is run where no proxy sets the
+header, every caller can choose its own key, so the per-IP buckets are no
+barrier there; keep the per-user buckets (`api:read`, `api:write`) in mind
+as the real ceiling.
+
 **Password strength.** `lib/auth/password-policy.ts` requires at least 8
 characters (ASVS V6.2.1) and no composition rules (V6.2.5). Registration, the
 settings password form and the REST and bulk credential change all apply it, so no

@@ -46,6 +46,7 @@ export async function upsert{{ parent_pascal }}(data: FormData) {
 {% if can_delete %}
 export async function remove{{ parent_pascal }}(ids: string[]) {
   try {
+    await enforceActionRateLimit(await getSessionUserIdOrThrow());
 {% if should_filter_by_org %}
     const {% if is_self_only %}{ userId }{% else %}{ permissions: userPermissions, userId }{% endif %} = await getModelPermissions('{{ parent }}');
     if (!userId) throw new AppError('PERMISSION_DENIED', 'No permission to delete');
@@ -119,6 +120,7 @@ export async function remove{{ parent_pascal }}(ids: string[]) {
 
 export async function invalidate{{ parent_pascal }}(id: string): Promise<void> {
   const userId = await getSessionUserIdOrThrow();
+  await enforceActionRateLimit(userId);
   // TODO: separate 'invalidate' permission from 'delete' in future
   // Coarse gate first, then the record-level resolution the delete path uses:
   // Creator/Assignee grants only apply to records the caller created / is
@@ -173,6 +175,7 @@ export async function toggle{{ parent_pascal }}CommentReaction(
   type: {{ reaction_value_type }}
 ): Promise<CommentReactionSummary> {
   const userId = await getSessionUserIdOrThrow();
+  await enforceActionRateLimit(userId);
   const validTypes: ({{ reaction_value_type }})[] = COMMENT_REACTION_TYPES.map((t) => t.value);
   if (!validTypes.includes(type)) {
     throw new Error(`Invalid reaction type: ${type}`);
@@ -231,11 +234,12 @@ export async function toggle{{ parent_pascal }}CommentReaction(
 
 {% endset %}
 {% set _authz_names = [] %}
-{% if can_create or can_update or can_invalidate or has_commentable or comment_actions_code %}{% set _ = _authz_names.append('getSessionUserIdOrThrow') %}{% if 'requireEntityPermission(' in _actions_body %}{% set _ = _authz_names.append('requireEntityPermission') %}{% endif %}{% if 'requireRecordPermission(' in _actions_body %}{% set _ = _authz_names.append('requireRecordPermission') %}{% endif %}{% if has_commentable or (can_invalidate and not is_self_only) %}{% set _ = _authz_names.append('resolveRecordPermissions') %}{% endif %}{% endif %}
+{% if can_create or can_update or can_delete or can_invalidate or has_commentable or comment_actions_code %}{% set _ = _authz_names.append('getSessionUserIdOrThrow') %}{% if 'requireEntityPermission(' in _actions_body %}{% set _ = _authz_names.append('requireEntityPermission') %}{% endif %}{% if 'requireRecordPermission(' in _actions_body %}{% set _ = _authz_names.append('requireRecordPermission') %}{% endif %}{% if has_commentable or (can_invalidate and not is_self_only) %}{% set _ = _authz_names.append('resolveRecordPermissions') %}{% endif %}{% endif %}
 {% if can_delete %}{% set _ = _authz_names.append('getModelPermissions') %}{% endif %}
 import { redirect } from 'next/navigation';
 {% if comment_actions_code or (can_list and can_delete) or can_invalidate %}import { revalidatePath } from 'next/cache';
-{% endif %}{% if can_create or can_update or can_invalidate or has_commentable or can_delete or comment_actions_code %}import { {{ _authz_names | join(', ') }} } from '@/lib/authz';
+{% endif %}{% if can_create or can_update or can_invalidate or has_commentable or can_delete or comment_actions_code %}import { enforceActionRateLimit } from '@/lib/rate-limit/action';
+import { {{ _authz_names | join(', ') }} } from '@/lib/authz';
 {% endif %}
 {% if can_create or can_update or can_delete %}import { AppError, type ActionFailure } from '@/lib/_errors';
 {% elif has_commentable or comment_actions_code or can_invalidate %}import { AppError } from '@/lib/_errors';

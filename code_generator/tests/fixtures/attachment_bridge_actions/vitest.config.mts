@@ -17,6 +17,7 @@ export default {
       { find: '@/lib/_errors', replacement: path.join(root, '../lib/_errors.ts') },
       { find: '@/lib/attachment/access', replacement: path.join(root, 'fake/access.ts') },
       { find: '@/lib/attachment/storage', replacement: path.join(root, 'fake/storage.ts') },
+      { find: '@/lib/rate-limit/action', replacement: path.join(root, 'fake/rate-limit.ts') },
       { find: 'next/cache', replacement: path.join(root, 'fake/cache.ts') },
       { find: '@/lib/attachment/bridge_actions', replacement: path.join(root, 'bridge_actions.ts') },
     ],

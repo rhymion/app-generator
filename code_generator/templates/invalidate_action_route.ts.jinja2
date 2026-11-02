@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { authenticate, requireApiPermission, handleApiError{% if not is_self_only %}, ApiError{% endif %} } from '@/lib/api-auth';
+import { enforceApiRateLimit } from '@/lib/api-auth';
 {% if not is_self_only %}
 import { resolveRecordPermissions } from '@/lib/authz';
 {% endif %}
@@ -26,6 +27,7 @@ export async function POST(
   try {
     const { id } = await params;
     const { userId } = await authenticate(request);
+    await enforceApiRateLimit(userId);
 
     // Coarse, item-independent gate first (a caller with no possible access
     // path is rejected before the record is looked up), then the same

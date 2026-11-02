@@ -34,7 +34,7 @@ Chapter V17 (WebRTC) does not apply: the generated app has no real-time media, T
 | ID | Level | Status | Covered by | Verified by | Gap Issue | Source and version |
 |----|-------|--------|------------|-------------|-----------|--------------------|
 | V1.1.1 | 2 | framework | Routes read the body once with request.json(); no decode after validation found | none | - | next 16.4.2 (package-lock.json); Route Handlers docs |
-| V1.1.2 | 2 | framework | React JSX escaping, Prisma parameter binding, escapeCSV in lib/_csv.ts | none | #1273 | react 19.3.1 (package-lock.json); JSX escaping docs |
+| V1.1.2 | 2 | framework | React JSX escaping, Prisma parameter binding, escapeCSV in lib/_csv.ts | lib/_output_encoding.test.tsx (JSX text and attribute escaping), lib/_csv.test.ts (CSV quoting and formula neutralization); no test yet for SQL parameter binding | #1273 | react 19.3.1 (package-lock.json); JSX escaping docs |
 | V1.2.1 | 1 | framework | React JSX escaping; no dangerouslySetInnerHTML in app, components or templates | components/_standard/ListWrapper.test.tsx, EditableListWrapper.test.tsx | - | react 19.3.1 (package-lock.json); JSX escaping docs |
 | V1.2.2 | 1 | generator | lib/_safe_url.ts isSafeUrl; lib/auth/safe-redirect.ts | lib/_safe_url.test.ts, lib/auth/safe-redirect.test.ts | - | - |
 | V1.2.3 | 1 | framework | React JSX escaping; NextResponse.json serializes JSON; no inline script construction found | none | - | next 16.4.2 (package-lock.json); NextResponse.json |
@@ -75,7 +75,7 @@ Chapter V17 (WebRTC) does not apply: the generated app has no real-time media, T
 | V2.3.2 | 2 | gap | Global limits are documented (docs/knowledge/input-validation-rules-and-limits.md); no per-user business limit exists to enforce | none | #1270 | - |
 | V2.3.3 | 2 | generator | Serializable $transaction in service.ts.jinja2 and submit_for_approval.ts.jinja2 | none | #1272, #735 | - |
 | V2.3.4 | 2 | generator | x-reservation templates with Serializable isolation | none | #1272 | - |
-| V2.4.1 | 2 | generator | lib/rate-limit/{index,redis,in-memory,client-ip}.ts; generated REST routes return 429 | lib/rate-limit/redis.test.ts, in-memory.test.ts, client-ip.test.ts | #1245, #1092, #1125 | - |
+| V2.4.1 | 2 | generator | lib/rate-limit/{index,redis,in-memory,client-ip,action}.ts; generated REST routes return 429; generated Server Actions share the api:write bucket | lib/rate-limit/redis.test.ts, in-memory.test.ts, client-ip.test.ts, action.test.ts, code_generator/tests/test_rate_limit_coverage.py | #1092, #1125 | - |
 
 ## V3 Web Frontend Security
 
@@ -149,7 +149,7 @@ Chapter V17 (WebRTC) does not apply: the generated app has no real-time media, T
 | V6.2.10 | 2 | generator | No password expiry or rotation exists | none | - | - |
 | V6.2.11 | 2 | gap | No context-word check | none | #1280 | - |
 | V6.2.12 | 2 | gap | No breached-password check | none | #1280 | - |
-| V6.3.1 | 1 | generator | proxy.ts sign-in bucket (10 per minute per IP); register, mobile-token, MFA and API-key buckets in lib/rate-limit/index.ts; two-tier account lockout (auth:account:lockout per email and address, auth:account:lockout:email per email) in lib/auth/account-lockout.ts | app/api/auth/register/route.test.ts, lib/mfa/verify.test.ts, lib/rate-limit/redis.test.ts, app/api/mobile/auth/token/route.test.ts, lib/auth/account-lockout.test.ts | #1245 | - |
+| V6.3.1 | 1 | generator | proxy.ts sign-in bucket (10 per minute per IP); register, mobile-token, MFA and API-key buckets in lib/rate-limit/index.ts; two-tier account lockout (auth:account:lockout per email and address, auth:account:lockout:email per email) in lib/auth/account-lockout.ts | app/api/auth/register/route.test.ts, lib/mfa/verify.test.ts, lib/rate-limit/redis.test.ts, app/api/mobile/auth/token/route.test.ts, lib/auth/account-lockout.test.ts | - | - |
 | V6.3.2 | 1 | generator | scripts/seed-baseline-credentials.ts requires explicit admin credentials in production; outside production a documented default is seeded | scripts/seed-baseline-credentials.test.ts | - | - |
 | V6.3.3 | 2 | gap | MFA is opt-in per user | none | #1281 | - |
 | V6.3.4 | 2 | generator | MFA is enforced on credentials, OAuth and the mobile token route; API keys are machine access without MFA by design | cypress/e2e/auth/mfa.cy.ts, cypress/e2e/api/mobile_auth.cy.ts | - | - |
@@ -283,9 +283,9 @@ Chapter V17 (WebRTC) does not apply: the generated app has no real-time media, T
 | V12.1.1 | 1 | environment | TLS is terminated by Cloud Run or Vercel; the Dockerfile serves plain HTTP behind it | none | - | - |
 | V12.1.2 | 2 | environment | Cipher suites are chosen by the platform | none | - | - |
 | V12.1.3 | 2 | n/a | No client-certificate authentication | none | - | - |
-| V12.2.1 | 1 | generator | HSTS via lib/security-headers.ts; the mobile base URL is not forced to https | lib/security-headers.test.ts | #1293 | - |
+| V12.2.1 | 1 | generator | HSTS via lib/security-headers.ts; the generated mobile client throws unless `EXPO_PUBLIC_API_BASE_URL` is https outside `__DEV__` (`code_generator/templates/mobile/lib/api-base.ts.jinja2`) | lib/security-headers.test.ts, code_generator/tests/test_mobile_api_base_https.py | - | - |
 | V12.2.2 | 1 | environment | Managed certificates from Cloud Run or Vercel | none | - | - |
-| V12.3.1 | 2 | generator | lib/db-url.ts pins verify-full for Postgres; the Upstash database is created with TLS; production does not fail on an unprotected URL | lib/db-url.test.ts | #1293 | - |
+| V12.3.1 | 2 | generator | lib/db-url.ts pins verify-full for Postgres; the Upstash database is created with TLS; on a hosted production deployment `lib/transport-security.ts` fails startup for a database URL without TLS and for a `redis://` Redis URL | lib/db-url.test.ts, lib/transport-security.test.ts | - | - |
 | V12.3.2 | 2 | generator | lib/db-url.ts verify-full; nothing sets NODE_TLS_REJECT_UNAUTHORIZED or rejectUnauthorized false | lib/db-url.test.ts | - | - |
 | V12.3.3 | 2 | environment | Single service; no internal HTTP between services | none | - | - |
 | V12.3.4 | 2 | n/a | No internal services with internal CAs | none | - | - |
@@ -330,14 +330,14 @@ Chapter V17 (WebRTC) does not apply: the generated app has no real-time media, T
 | V15.1.2 | 2 | gap | package-lock.json and npm ci; trusted sources documented in docs/knowledge/dependency-and-resource-controls.md; no SBOM | none | #1320 | - |
 | V15.1.3 | 2 | generator | Resource-demanding functions and their limits are listed in docs/knowledge/dependency-and-resource-controls.md | none | - | - |
 | V15.2.1 | 1 | generator | CI audit job (npm audit, pip-audit) blocks on high and critical | CI job audit (.github/workflows/ci.yml); gate steps 19 and 20 | #1074 | - |
-| V15.2.2 | 2 | generator | Rate-limit buckets, MAX_PAGE_SIZE, import limits, upload quota | lib/rate-limit/redis.test.ts, lib/rate-limit/in-memory.test.ts, lib/_pagination.test.ts | #1245 | - |
+| V15.2.2 | 2 | generator | Rate-limit buckets, MAX_PAGE_SIZE, import limits, upload quota | lib/rate-limit/redis.test.ts, lib/rate-limit/in-memory.test.ts, lib/_pagination.test.ts, code_generator/tests/test_rate_limit_coverage.py | - | - |
 | V15.2.3 | 2 | generator | reset-caches route is token-gated; mock OAuth is gated by a filesystem sentinel | lib/auth/mock-oauth-gate.test.ts, lib/_secret_compare.test.ts | - | - |
 | V15.3.1 | 1 | generator | Write-only fields are removed from reads (getters_internal.ts.jinja2); other fields are returned in full | code_generator/tests/test_rest_update_write_only_omitted_unchanged.py, cypress/e2e/api/setting_write_only_omitted.cy.ts | #1235 | - |
 | V15.3.2 | 2 | n/a | No server-side fetch of a user-controlled URL | none | - | - |
 | V15.3.3 | 2 | generator | api_route.ts.jinja2 destructures only the allowed create fields and rejects read-only fields | code_generator/tests/test_bulk_route_readonly_fields.py, test_readonly_fields.py, test_org_readonly_field_write_guard.py, test_write_locked_values.py | - | - |
-| V15.3.4 | 2 | generator | lib/rate-limit/client-ip.ts takes the entry TRUSTED_PROXY_HOPS from the right of X-Forwarded-For | lib/rate-limit/client-ip.test.ts | #1245 | - |
-| V15.3.5 | 2 | gap | Request bodies are untyped (request.json()); no strict-equality lint rule | none | #1271, #1303 | - |
-| V15.3.6 | 2 | gap | No prototype-pollution policy or lint rule; bodies are destructured into explicit fields | none | #1303 | - |
+| V15.3.4 | 2 | generator | lib/rate-limit/client-ip.ts takes the entry TRUSTED_PROXY_HOPS from the right of X-Forwarded-For; per-platform rule in docs/knowledge/authentication.md | lib/rate-limit/client-ip.test.ts | - | - |
+| V15.3.5 | 2 | gap | ESLint `eqeqeq` with the `smart` option (eslint.config.mjs) rejects loose `==` and `!=` except the `x == null` idiom; request bodies are still untyped (request.json()) | lib/eslint_config.test.ts | #1271 | - |
+| V15.3.6 | 2 | generator | Documented policy (input-validation-rules-and-limits.md, "Prototype pollution"): bodies are destructured into explicit fields and request data is never deep-merged or used as a dynamic key; there is no lint rule for it | code_generator/tests/test_bulk_route_readonly_fields.py, code_generator/tests/test_readonly_fields.py | - | - |
 | V15.3.7 | 2 | framework | Query parameters are read first-value-only and the body separately; the two are never merged | none | #1234 | next 16.4.2 (package-lock.json); Route Handlers docs |
 
 ## V16 Security Logging and Error Handling
@@ -360,7 +360,7 @@ Chapter V17 (WebRTC) does not apply: the generated app has no real-time media, T
 | V16.5.1 | 2 | generator | handleApiError returns a generic body for unknown errors; some ApiError(403) paths still pass an exception message | lib/api-auth.test.ts, code_generator/tests/test_error_text_not_forwarded.py | #1095 | - |
 | V16.5.2 | 2 | generator | Rate limiter falls back to in-memory when Redis fails; no circuit breaker for the database, Stripe or storage | lib/rate-limit/redis.test.ts | - | - |
 | V16.5.3 | 2 | generator | Default-deny authorization and a 500 fallback in each route wrapper | lib/authz.test.ts, code_generator/tests/test_api_route_authentication_enumeration.py | - | - |
-| V16.5.4 | 3 | framework | Next.js catches unhandled route and render errors and returns a 500; app/[locale]/error.tsx exists | none | #1304, #1234 | next 16.4.2 (package-lock.json); error handling docs |
+| V16.5.4 | 3 | framework | Next.js catches unhandled route and render errors and returns a 500; app/[locale]/error.tsx and app/global-error.tsx are the error boundaries; onRequestError in instrumentation.ts logs the error name, digest and location without the message (lib/request-error.ts); handleApiError returns a generic 500 body. No process-level handler | lib/request-error.test.ts, code_generator/tests/test_request_error_hooks.py, lib/api-auth.test.ts | #1234 | next 16.4.2 (package-lock.json); error handling docs |
 
 ## V17 WebRTC
 

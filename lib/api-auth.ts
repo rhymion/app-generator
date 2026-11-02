@@ -88,6 +88,20 @@ async function rejectUnknownApiKey(apiKeyHash: string): Promise<never> {
   throw new ApiError(401, 'Invalid API key.');
 }
 
+/**
+ * Per-user ceiling for a REST route that is not covered by the API-key
+ * handlers' own check (dual-auth, session-only and mobile routes). Spends the
+ * same `api:read` / `api:write` bucket as the generated entity routes and the
+ * Server Actions (`lib/rate-limit/action.ts`), keyed by the caller's user id,
+ * and answers 429 with `Retry-After` when it is spent.
+ */
+export async function enforceApiRateLimit(userId: string, bucket: 'api:read' | 'api:write' = 'api:write'): Promise<void> {
+  const decision = await getRateLimiter().check(bucket, userId);
+  if (!decision.allowed) {
+    throw new ApiError(429, 'Rate limit reached. Retry later.', decision.retryAfterSeconds);
+  }
+}
+
 export async function authenticateApiKey(request: NextRequest): Promise<{ userId: string }> {
   enterRequestScope();
   const apiKey =
@@ -337,6 +351,7 @@ const APP_ERROR_STATUS_MAP: Record<ErrorCode, number> = {
   RESERVATION_LOCKED: 409,
   RELATED_RECORD_INVALID: 422,
   CAPACITY: 409,
+  RATE_LIMITED: 429,
   UNKNOWN: 500,
 };
 
