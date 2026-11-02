@@ -96,7 +96,10 @@ def test_serve_route_authorizes_before_it_touches_storage():
 def test_serve_route_delivers_the_decrypted_original_name():
     out = _render('attachment_serve_route.ts.jinja2')
     assert 'decryptFileName(attachment.encrypted_original_name)' in out
-    assert "filename*=UTF-8''" in out
+    # The header itself is built by lib/attachment/content-disposition.ts (unit-tested there).
+    assert "import { contentDisposition } from '@/lib/attachment/content-disposition';" in out
+    assert 'disposition: contentDisposition(' in out
+    assert 'function contentDisposition' not in out
 
 
 # --- upload route -----------------------------------------------------------------------------------

@@ -31,7 +31,7 @@ Each limit is configured where the function runs; the table lists where to find 
 
 | Function | Limit | Default | Override | Defined in |
 |---|---|---|---|---|
-| List endpoints | Page size ceiling | 200 rows | none | `lib/_pagination.ts` (`MAX_PAGE_SIZE`) |
+| List endpoints | Page size ceiling | 200 rows | none | `lib/_pagination.ts` (`MAX_PAGE_SIZE`; `lib/_pagination.test.ts` covers the clamp, and `code_generator/tests/test_getter_include_depth_bounded.py` fails if a generated getter nests its relation `include` deeper than three levels) |
 | File upload (`POST /api/upload`) | Size, checked before the body is buffered | 10 MiB plus 64 KiB multipart framing | `UPLOAD_MAX_BYTES` | `lib/_upload_validation.ts` |
 | File upload | Rate | 30 per user per 10 minutes (`upload:file`) | `RATE_LIMIT_UPLOAD_LIMIT` | `lib/rate-limit/index.ts` |
 | CSV import | Rows | 5000 | `IMPORT_MAX_ROWS` | `code_generator/templates/api_import_route.ts.jinja2` |

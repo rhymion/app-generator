@@ -109,7 +109,7 @@ Chapter V17 (WebRTC) does not apply: the generated app has no real-time media, T
 | V4.1.2 | 2 | environment | TLS is terminated by Cloud Run or Vercel; no application redirect code | none | - | - |
 | V4.1.3 | 2 | generator | lib/auth/external-url.ts `resolveExternalUrl()` builds the redirect host and scheme in proxy.ts; `x-forwarded-host`, `Host` and `x-forwarded-proto` count only when the host is the one in `AUTH_URL` / `NEXTAUTH_URL`, a Vercel deployment host or an `AUTH_ALLOWED_HOSTS` entry; anything else redirects to the configured application URL | lib/auth/external-url.test.ts, lib/proxy-forwarded-headers.test.ts | - | - |
 | V4.2.1 | 2 | environment | Request-smuggling defense belongs to the platform edge and the Next.js server | none | #1244 | - |
-| V4.3.1 | 2 | generator | lib/_pagination.ts MAX_PAGE_SIZE=200; sort and filter column allow-lists; import row and byte limits; no GraphQL | none | #1277 | - |
+| V4.3.1 | 2 | generator | lib/_pagination.ts MAX_PAGE_SIZE=200 (clampPage); the `include` of every generated getter is rendered from the schema, never from request input, and its nesting is bounded; sort and filter column allow-lists; import row and byte limits; no GraphQL | lib/_pagination.test.ts, code_generator/tests/test_getter_include_depth_bounded.py | - | - |
 | V4.3.2 | 2 | n/a | No GraphQL endpoint | none | - | - |
 | V4.4.1 | 1 | n/a | No WebSocket usage | none | - | - |
 | V4.4.2 | 2 | n/a | No WebSocket usage | none | - | - |
@@ -126,8 +126,8 @@ Chapter V17 (WebRTC) does not apply: the generated app has no real-time media, T
 | V5.2.3 | 2 | n/a | Uploaded archives are stored and served untouched; the app never decompresses them | none | - | - |
 | V5.3.1 | 1 | generator | lib/attachment/storage.ts opaque random key, storage root outside public/ | cypress/e2e/api/upload_path_safety.cy.ts, lib/attachment/storage.test.ts | - | - |
 | V5.3.2 | 1 | generator | lib/attachment/upload_core.ts newStorageKey; the original name is stored encrypted for display only | cypress/e2e/api/upload_path_safety.cy.ts, lib/attachment/storage.test.ts | - | - |
-| V5.4.1 | 2 | generator | attachment_serve_route.ts.jinja2 contentDisposition(); the name comes from the stored record, not the URL | cypress/e2e/api/upload_path_safety.cy.ts | - | - |
-| V5.4.2 | 2 | generator | contentDisposition() sends an ASCII fallback plus filename*=UTF-8''; the function is local to the generated route and its output is not unit-tested | none | #1321 | - |
+| V5.4.1 | 2 | generator | lib/attachment/content-disposition.ts contentDisposition(), imported by attachment_serve_route.ts.jinja2; the name comes from the stored record, not the URL | cypress/e2e/api/upload_path_safety.cy.ts, lib/attachment/content-disposition.test.ts | - | - |
+| V5.4.2 | 2 | generator | lib/attachment/content-disposition.ts contentDisposition() sends an ASCII fallback plus filename*=UTF-8''; quotes, backslashes, CR, LF and non-ASCII characters are replaced in the fallback and percent-encoded in filename* | lib/attachment/content-disposition.test.ts | - | - |
 | V5.4.3 | 2 | gap | No antivirus scan or hook; docs/knowledge/upload-limits-and-malicious-file-handling.md states that scanning is the deployer's responsibility | none | #1279 | - |
 
 ## V6 Authentication
@@ -273,7 +273,7 @@ Chapter V17 (WebRTC) does not apply: the generated app has no real-time media, T
 | V11.4.2 | 2 | generator | bcryptjs for passwords at cost 10 | lib/auth/password-check.test.ts, lib/auth/credential-confirmation.test.ts | #1291 | - |
 | V11.4.3 | 2 | generator | SHA-256 audit-log digest and HMAC-SHA256 tokens | lib/audit-log-integrity/digest.test.ts | - | - |
 | V11.4.4 | 2 | n/a | No password-derived keys; the MFA key is derived from the server secret | none | - | - |
-| V11.5.1 | 2 | gap | Recovery codes carry about 40 bits; other tokens use randomBytes(32) or randomUUID() | lib/mfa/recovery.test.ts (no modulo bias) | #1292 | - |
+| V11.5.1 | 2 | generator | Other tokens use randomBytes(32) or randomUUID(). Recovery codes carry about 40 bits (31^8), below the 128 bits asked for; docs/knowledge/authentication.md documents the compensating controls (a code needs the password or a first-factor session, per-user limit of 10 attempts per 5 minutes, single use, bcrypt-hashed storage) and the residual offline-guessing risk | lib/mfa/recovery.test.ts (no modulo bias), lib/mfa/verify.test.ts (per-user attempt limit) | - | - |
 | V11.6.1 | 2 | n/a | No asymmetric key generation or digital signatures | none | - | - |
 
 ## V12 Secure Communication
@@ -295,7 +295,7 @@ Chapter V17 (WebRTC) does not apply: the generated app has no real-time media, T
 | ID | Level | Status | Covered by | Verified by | Gap Issue | Source and version |
 |----|-------|--------|------------|-------------|-----------|--------------------|
 | V13.1.1 | 2 | generator | Every external service and endpoint is listed in docs/knowledge/outbound-communications.md | none (document read against the code) | #1241 | - |
-| V13.2.1 | 2 | gap | Backend dependencies use static credentials (database password, Redis URL, CRON_SECRET); audit-log GCS can use workload identity | lib/audit-log-integrity/storage-gcs.test.ts | #1295, #1124, #1143 | - |
+| V13.2.1 | 2 | gap | Backend dependencies use static credentials (database password, Redis URL, CRON_SECRET); docs/knowledge/backend-credentials.md lists them, what a leak allows, the evaluation of short-lived alternatives and the rotation steps; audit-log GCS can use workload identity | lib/audit-log-integrity/storage-gcs.test.ts | #1124, #1143 | - |
 | V13.2.2 | 2 | generator | Restricted database role on Vercel; narrow GCS bucket role; GCP database role was not verified | scripts/vercel-env.test.ts, scripts/gcp-storage-config.test.ts | - | - |
 | V13.2.3 | 2 | generator | Production seeding requires explicit admin credentials; docker-compose.prod.yml requires POSTGRES_PASSWORD from the environment and has no default | scripts/seed-baseline-credentials.test.ts, scripts/docker-compose-prod-password.test.ts | - | - |
 | V13.2.4 | 2 | environment | The application fetches no user-supplied URL; the fixed destinations are listed in docs/knowledge/outbound-communications.md and an allow-list is applied on the platform, which the deploy scripts do not configure | none | - | - |
@@ -350,9 +350,9 @@ Chapter V17 (WebRTC) does not apply: the generated app has no real-time media, T
 | V16.2.3 | 2 | generator | Permitted log sinks are listed in docs/knowledge/logging-inventory.md; application code has no other sink (lint, check:generated) | none | - | - |
 | V16.2.4 | 2 | gap | Console output formats are mixed | none | #1237 | - |
 | V16.2.5 | 2 | generator | Emails are kept out of audit_log metadata and auth logs; slow-query parameters are redacted | lib/auth/audit-no-pii.test.ts, lib/prisma-slow-query.test.ts | #1237 | - |
-| V16.3.1 | 2 | gap | Sign-in, sign-out, rejects and MFA events are audited; failed credentials, invalid API keys and failed mobile tokens are not | cypress/e2e/audit_log.cy.ts (sign-in only) | #1307 | - |
-| V16.3.2 | 2 | gap | Authorization denials are not logged | none | #1307 | - |
-| V16.3.3 | 2 | gap | No security-event list; rate-limit hits and control bypass attempts are not logged | none | #1307 | - |
+| V16.3.1 | 2 | generator | Sign-in, sign-out, rejects and MFA events are audited. On REST routes every 401 (invalid or missing API key, failed mobile sign-in or token) writes a `[security-event]` log line. A wrong password on the web form and a failed Server Action are not yet recorded | lib/api-auth.test.ts, cypress/e2e/audit_log.cy.ts (sign-in only) | #1307 | - |
+| V16.3.2 | 2 | generator | Authorization denials on REST routes (403, `PERMISSION_DENIED`) write a `[security-event]` log line. Denials in Server Actions are not yet recorded | lib/api-auth.test.ts | #1307 | - |
+| V16.3.3 | 2 | generator | The security events are listed in docs/knowledge/logging-inventory.md (`auth.rejected`, `authz.denied`, `rate_limit.hit`); a rate-limit hit on a REST route (429) is logged. Control bypass attempts beyond these are not logged | lib/api-auth.test.ts | #1307 | - |
 | V16.3.4 | 2 | generator | handleApiError logs unexpected errors; Redis rate-limit failures and startup failures are logged | lib/api-auth.test.ts, lib/rate-limit/redis.test.ts | - | - |
 | V16.4.1 | 2 | gap | Only some log lines are JSON-encoded; others pass raw values | none | #1237 | - |
 | V16.4.2 | 2 | generator | audit_log is append-only (Prisma guard, database trigger, restricted role, digest chain) | lib/audit-log-integrity/guard.test.ts, digest.test.ts, code_generator/tests/test_audit_log_append_only_templates.py | #990, #1193 | - |
