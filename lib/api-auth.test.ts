@@ -392,3 +392,41 @@ describe('cookie-authenticated writes from another site', () => {
     ).resolves.toEqual({ userId: 'key-user' });
   });
 });
+
+describe('handleApiError security events', () => {
+  const lines = (spy: { mock: { calls: unknown[][] } }) =>
+    spy.mock.calls.filter((c: unknown[]) => c[0] === '[security-event]').map((c) => JSON.parse(String(c[1])));
+
+  it.each([
+    [new ApiError(401, 'Invalid API key.'), 'auth.rejected', 401],
+    [new ApiError(403, 'Forbidden for user alice@example.com'), 'authz.denied', 403],
+    [new ApiError(429, 'Too many API key attempts.', 30), 'rate_limit.hit', 429],
+  ])('records one event for %s', (err, event, status) => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    handleApiError(err);
+    const events = lines(warn);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ event, status });
+    // Only the event name, status and code: no message, id, address or credential.
+    expect(Object.keys(events[0]).sort()).toEqual(['at', 'event', 'status']);
+    expect(JSON.stringify(warn.mock.calls)).not.toContain('alice@example.com');
+    warn.mockRestore();
+  });
+
+  it('records an AppError permission denial with its code', async () => {
+    const { AppError } = await import('./_errors');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    handleApiError(new AppError('PERMISSION_DENIED', 'no access to order'));
+    expect(lines(warn)).toEqual([expect.objectContaining({ event: 'authz.denied', status: 403, code: 'PERMISSION_DENIED' })]);
+    warn.mockRestore();
+  });
+
+  it('records nothing for ordinary client errors', async () => {
+    const { AppError } = await import('./_errors');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    handleApiError(new ApiError(404, 'Not found'));
+    handleApiError(new AppError('VALIDATION', 'bad'));
+    expect(lines(warn)).toEqual([]);
+    warn.mockRestore();
+  });
+});
