@@ -1,10 +1,15 @@
 // AUTO-GENERATED - DO NOT EDIT
-// Next.js instrumentation hook: register() runs once per server instance
-// bootstrap, on both Vercel and GCP/Cloud Run (a single wiring point
-// reaches both deployment targets, since both dispatch through this same
-// Next.js mechanism). Used here to ensure the search GIN indexes exist —
-// see lib/db-init.ts. CREATE INDEX CONCURRENTLY IF NOT EXISTS makes this
-// non-blocking and a fast no-op after the first successful cold start.
+// Next.js instrumentation hooks, written for every app.
+//
+// onRequestError() records an unhandled request error (render, Route Handler, Server Action or
+// proxy) through lib/request-error.ts, which logs the error name, digest and location but not the
+// message (Issue #1304). The client sees only a generic 500 or the error boundary.
+
+{% if gin_index_entities %}// register() runs once per server instance bootstrap, on both Vercel and GCP/Cloud Run (a single
+// wiring point reaches both deployment targets, since both dispatch through this same Next.js
+// mechanism). Used here to ensure the search GIN indexes exist — see lib/db-init.ts. CREATE INDEX
+// CONCURRENTLY IF NOT EXISTS makes this non-blocking and a fast no-op after the first successful
+// cold start.
 
 export async function register(): Promise<void> {
   if (process.env.NEXT_RUNTIME === 'nodejs') {
@@ -13,5 +18,16 @@ export async function register(): Promise<void> {
     await ensureSearchIndexes().catch((err: unknown) => {
       logger.error('ensureSearchIndexes() failed during startup:', err);
     });
+  }
+}
+
+{% endif %}export async function onRequestError(
+  error: unknown,
+  request: { path: string; method: string },
+  context: { routerKind?: string; routePath?: string; routeType?: string },
+): Promise<void> {
+  if (process.env.NEXT_RUNTIME === 'nodejs') {
+    const { logRequestError } = await import('@/lib/request-error');
+    logRequestError(error, request, context);
   }
 }
