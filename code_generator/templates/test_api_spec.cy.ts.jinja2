@@ -614,18 +614,18 @@ describe('API: {{ title }}', () => {
   });
 
   describe('Permission errors', () => {
-    it('7.1 returns 4xx for GET list when permission denied', () => {
+    it('7.1 returns 403 for GET list when permission denied', () => {
       // security-cell: entity={{ parent }} operation=list case=permission_denied
       cy.task<string>('db:createLimitedApiUser', '{{ parent }}').then((limitedKey) => {
         cy.request({ url: API_BASE, headers: { 'X-API-Key': limitedKey }, failOnStatusCode: false })
           .then((res) => {
-            expect(res.status).to.be.gte(400);
+            expect(res.status).to.eq(403);
           });
       });
     });
 {% if can_new %}
 
-    it('7.2 returns 4xx for POST when permission denied', () => {
+    it('7.2 returns 403 for POST when permission denied', () => {
       // security-cell: entity={{ parent }} operation=create case=permission_denied
 {% if has_deps %}
       cy.task<any>('db:populate{{ pascal }}Dependencies').then((deps) => {
@@ -642,7 +642,7 @@ describe('API: {{ title }}', () => {
 {{ I7 }}    },
 {{ I7 }}    failOnStatusCode: false,
 {{ I7 }}  }).then((res) => {
-{{ I7 }}    expect(res.status).to.be.gte(400);
+{{ I7 }}    expect(res.status).to.eq(403);
 {{ I7 }}  });
 {{ I7 }}});
 {% if has_deps %}
@@ -652,7 +652,7 @@ describe('API: {{ title }}', () => {
 {% endif %}
 {% if can_edit %}
 
-    it('7.3 returns 4xx for PUT when permission denied', () => {
+    it('7.3 returns 403 for PUT when permission denied', () => {
       // security-cell: entity={{ parent }} operation=update case=permission_denied
       cy.task<any>('db:populate{{ pascal }}', 1).then((records) => {
         cy.task<string>('db:createLimitedApiUser', '{{ parent }}').then((limitedKey) => {
@@ -663,7 +663,7 @@ describe('API: {{ title }}', () => {
             body: {},
             failOnStatusCode: false,
           }).then((res) => {
-            expect(res.status).to.be.gte(400);
+            expect(res.status).to.eq(403);
           });
         });
       });
@@ -671,7 +671,7 @@ describe('API: {{ title }}', () => {
 {% endif %}
 {% if can_delete %}
 
-    it('7.4 returns 4xx for DELETE when permission denied', () => {
+    it('7.4 returns 403 for DELETE when permission denied', () => {
       // security-cell: entity={{ parent }} operation=delete case=permission_denied
       cy.task<any>('db:populate{{ pascal }}', 1).then((records) => {
         cy.task<string>('db:createLimitedApiUser', '{{ parent }}').then((limitedKey) => {
@@ -681,7 +681,7 @@ describe('API: {{ title }}', () => {
             headers: { 'X-API-Key': limitedKey },
             failOnStatusCode: false,
           }).then((res) => {
-            expect(res.status).to.be.gte(400);
+            expect(res.status).to.eq(403);
           });
         });
       });
@@ -693,7 +693,7 @@ describe('API: {{ title }}', () => {
     // dual-auth), which reads X-API-Key the same as every other route below —
     // this used to require a SESSION-loginable actor (cy.login) because the
     // route read getSessionUserId() exclusively; that exclusivity is gone.
-    it('7.5 returns 4xx for GET export when permission denied', () => {
+    it('7.5 returns 403 for GET export when permission denied', () => {
       // security-cell: entity={{ parent }} operation=export case=permission_denied
       cy.task<string>('db:createLimitedApiUser', '{{ parent }}').then((limitedKey) => {
         cy.request({
@@ -701,7 +701,7 @@ describe('API: {{ title }}', () => {
           headers: { 'X-API-Key': limitedKey },
           failOnStatusCode: false,
         }).then((res) => {
-          expect(res.status).to.be.gte(400);
+          expect(res.status).to.eq(403);
         });
       });
     });
@@ -710,7 +710,7 @@ describe('API: {{ title }}', () => {
 
     // cmd_658: see the 7.5 comment above — import resolves the actor the same
     // dual-auth way (cmd_648) and no longer needs a session-loginable actor.
-    it('7.6 returns 4xx for POST import when permission denied', () => {
+    it('7.6 returns 403 for POST import when permission denied', () => {
       // security-cell: entity={{ parent }} operation=import case=permission_denied
       cy.task<string>('db:createLimitedApiUser', '{{ parent }}').then((limitedKey) => {
         cy.request({
@@ -720,7 +720,7 @@ describe('API: {{ title }}', () => {
           body: { csv: '', dryRun: true },
           failOnStatusCode: false,
         }).then((res) => {
-          expect(res.status).to.be.gte(400);
+          expect(res.status).to.eq(403);
         });
       });
     });
