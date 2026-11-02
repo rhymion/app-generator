@@ -32,6 +32,16 @@ describe('S3ObjectLockStorage', () => {
     await expect(s.put('a.json', '{"x":2}')).rejects.toThrow(/Refusing to overwrite/);
   });
 
+  it('never sets an ACL on the stored object, so the bucket stays private', async () => {
+    const { client, puts } = fakeClient();
+    await new S3ObjectLockStorage(client, 'bucket', 30, now).put('a.json', '{"x":1}');
+    expect(puts).toHaveLength(1);
+    for (const name of ['ACL', 'GrantRead', 'GrantReadACP', 'GrantWriteACP', 'GrantFullControl']) {
+      expect(puts[0]).not.toHaveProperty(name);
+    }
+    expect(JSON.stringify(puts[0])).not.toMatch(/public-read|authenticated-read|AllUsers/i);
+  });
+
   it('passes ExpectedBucketOwner on put and get only when configured', async () => {
     const calls: unknown[] = [];
     const client: S3ObjectLockClient = {
