@@ -77,6 +77,27 @@ use a deployment check that asserts both are present together.
 
 ---
 
+## Web session lifetime and concurrent sessions
+
+`auth.ts` passes `maxAge` and `updateAge` from `lib/session-policy.ts` to Auth.js:
+
+| Variable | Default | Meaning |
+|----------|---------|---------|
+| `SESSION_MAX_AGE_SECONDS` | `2592000` (30 days) | Inactivity lifetime. The cookie expires this long after its last refresh. |
+| `SESSION_UPDATE_AGE_SECONDS` | `86400` (1 day) | An active session re-issues the cookie at most this often. Capped at the max age. |
+
+An unset, empty, non-numeric or non-positive value falls back to the default, so a typo cannot switch the expiry off.
+Because an active session keeps refreshing its cookie, `SESSION_MAX_AGE_SECONDS` acts as an inactivity timeout; a
+session that is used daily does not end on its own. There is no variable named `JWT_MAX_AGE`.
+
+Not implemented today, and tracked in Issue #1284:
+
+- **Absolute lifetime.** No claim records when the user signed in, so an active session can be renewed without limit.
+- **Concurrent-session policy.** The JWT strategy keeps no server-side session row (see below), so the number of
+  simultaneous web sessions per user is neither counted nor capped. A cap depends on Issue #1127.
+- **Identity-provider session.** Signing out of the app ends the app cookie only. A Google session stays signed in at
+  Google, and the app does not read or end it. The app session (relying party) and the provider session are independent.
+
 ## Session strategy — pinned to JWT (and why)
 
 `auth.ts` sets `session: { strategy: "jwt" }` for the whole deployment.
@@ -280,8 +301,8 @@ nothing left to challenge.
 not, by itself, revoke an already-active JWT (JWT strategy has no
 server-side session table to delete a row from). Without a fix, a user
 with a long-lived session could enable MFA and still ride the
-pre-existing cookie unchallenged for up to `JWT_MAX_AGE` (default 30
-days) — for either provider, not just OAuth. `user.mfa_token_version`
+pre-existing cookie unchallenged until the session expires
+(`SESSION_MAX_AGE_SECONDS`, default 30 days) — for either provider, not just OAuth. `user.mfa_token_version`
 (`Int @default(0)`) closes this: `completeEnrollment()`
 (`lib/mfa/enrollment.ts`) increments it when MFA is enabled; the
 `jwt()` callback snapshots the version into the token at sign-in and

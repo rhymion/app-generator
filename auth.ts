@@ -15,6 +15,7 @@ import { MfaRateLimitedError } from "@/lib/mfa/errors";
 import { createTenantBoundUser } from "@/lib/auth/create-user";
 import { isMockGoogleOAuthTestEnabled } from "@/lib/auth/mock-oauth-gate";
 import { isDomainAllowed } from "@/lib/auth/domain-allow-list";
+import { resolveSessionPolicy } from "@/lib/session-policy";
 
 // Custom CredentialsSignin subclasses so @auth/core re-throws them as-is
 // (plain Error gets wrapped in CallbackRouteError and the code is lost).
@@ -234,7 +235,8 @@ export const authConfig: NextAuthConfig = {
   // adapter NextAuth defaults to JWT anyway, but pin it explicitly so adding
   // a future PrismaAdapter doesn't silently flip us to DB-backed sessions
   // (Phase 2 #9 from performance-plan-session.md).
-  session: { strategy: sessionStrategy },
+  // maxAge / updateAge come from SESSION_MAX_AGE_SECONDS / SESSION_UPDATE_AGE_SECONDS (lib/session-policy.ts).
+  session: { strategy: sessionStrategy, ...resolveSessionPolicy() },
   providers: buildProviders(),
   pages: {
     signIn: "/login",
@@ -394,7 +396,7 @@ export const authConfig: NextAuthConfig = {
     //
     // `mfa_token_version` closes the session-persistence gap this alone
     // would leave open: enabling MFA does not revoke an already-active JWT
-    // (JWT_MAX_AGE default 30 days). Every request re-checks the DB
+    // (SESSION_MAX_AGE_SECONDS, default 30 days). Every request re-checks the DB
     // version against the value snapshotted into the token; a mismatch
     // (someone enabled MFA after this session started) re-arms
     // `mfa_pending` immediately instead of waiting for token expiry. This

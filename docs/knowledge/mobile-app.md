@@ -652,8 +652,8 @@ The mobile app signs in with email and password and holds an access/refresh toke
 | `GET /api/mobile/auth/sessions` | Lists the caller's active devices. |
 | `DELETE /api/mobile/auth/sessions/:id` | Revokes one of the caller's own device sessions. |
 
-The access token is a 15-minute HS256 JWT signed with `AUTH_SECRET` and carrying `type: "mobile_access"`;
-that claim is the only thing separating it from a web session JWT, so every verification path checks it.
+The access token is a 15-minute HS256 JWT signed with `AUTH_SECRET` and carrying `type: "mobile_access"`, `iss: "app:mobile-auth"` and `aud: "app:mobile-api"`;
+the web session JWT carries none of these, so every verification path checks all three.
 Refresh tokens last 30 days and are stored as a keyed HMAC, never in plaintext (`mobile_session` table).
 Access-token verification does not read the `mobile_session` row: a token issued just before sign-out or revocation stays valid for
 the rest of its 15 minutes. It does read the user row (one primary-key lookup), so a token of an anonymized user is
