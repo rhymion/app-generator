@@ -1,6 +1,6 @@
 # Input validation rules, cross-field consistency and limits
 
-This document lists where a generated app validates input, which rules the generator applies to every entity, where an application adds its own cross-field rules, and which numeric limits exist. It describes the code as it is today. Coverage rows: V2.1.1, V2.1.2, V2.1.3 and V2.3.2 in [security-asvs-coverage.md](security-asvs-coverage.md).
+This document lists where a generated app validates input, which rules the generator applies to every entity, where an application adds its own cross-field rules, and which numeric limits exist. It describes the code as it is today. Coverage rows: V2.1.1, V2.1.2, V2.1.3, V2.3.2 and V15.3.6 in [security-asvs-coverage.md](security-asvs-coverage.md).
 
 ## Where validation runs
 
@@ -62,6 +62,16 @@ Every limit in the generated app is global (the same for every user and every en
 | Mention search text | 200 characters | none | `mention_users_api_route.ts.jinja2` |
 | Rate limits (per user id or IP) | `api:read` 300/min, `api:write` 60/min, `upload:file` 30/10 min, sign-in, MFA, registration and API-key buckets | `api:read`, `api:write` and `upload:file` have environment overrides (`RATE_LIMIT_API_READ_LIMIT`, `RATE_LIMIT_API_WRITE_LIMIT`, `RATE_LIMIT_UPLOAD_LIMIT`) | `lib/rate-limit/index.ts`; see [api-idempotency-and-rate-limiting.md](api-idempotency-and-rate-limiting.md) |
 | Idempotency key retention | one day | none | `lib/idempotency.ts` |
+
+## Prototype pollution
+
+Coverage row: V15.3.6. There is no lint rule for it; the protection is how request data is handled, and this is the policy for new code:
+
+- A request body is destructured into the explicit, schema-defined fields of the entity (the generated routes and Server Actions do this); fields that are not declared are dropped, and read-only fields are rejected.
+- Request data is never deep-merged into another object (no `merge`, `defaultsDeep` or `Object.assign` of a whole body into a shared object) and never used as a property name on an object that code later reads (`obj[userKey]`). Where a lookup by a caller-supplied key is needed, use a `Map` or an object built with `Object.fromEntries`, which defines own properties, as `lib/logger.ts` does for redaction.
+- Keys that name the prototype (`__proto__`, `constructor`, `prototype`) have no meaning to the generated code; a body containing them is reduced to the declared fields like any other unknown key.
+
+`deepmerge-ts` is a dependency but no source file imports it; do not use it on request data.
 
 ## Testing a rule
 

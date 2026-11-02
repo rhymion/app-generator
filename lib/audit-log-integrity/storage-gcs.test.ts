@@ -103,6 +103,24 @@ describe('gcsClientFromStorage', () => {
     expect(saves[0].options.metadata).toEqual({ retention: { mode: 'Unlocked', retainUntilTime: '2026-03-31T00:00:00.000Z' } });
   });
 
+  it('never asks for a public object: no predefined ACL, no public flag, no allUsers grant', async () => {
+    const { storage, saves } = fakeStorage({});
+    await gcsClientFromStorage(storage).createIfAbsent({
+      bucket: 'b',
+      key: 'k',
+      body: 'x',
+      contentType: 'application/json',
+      retentionMode: 'locked',
+      retainUntil: new Date('2026-03-31T00:00:00Z'),
+    });
+    const options = saves[0].options;
+    expect(options).not.toHaveProperty('public');
+    expect(options).not.toHaveProperty('private');
+    expect(options).not.toHaveProperty('predefinedAcl');
+    expect(options).not.toHaveProperty('acl');
+    expect(JSON.stringify(options)).not.toMatch(/allUsers|allAuthenticatedUsers|publicRead|publicReadWrite/i);
+  });
+
   it('maps 412 to a precondition error and rethrows anything else', async () => {
     const params = {
       bucket: 'b',
