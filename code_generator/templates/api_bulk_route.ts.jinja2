@@ -194,6 +194,9 @@ export async function PUT(request: NextRequest) {
         // password and turning MFA off needs a TOTP/recovery code.
         const _credential = await confirmCredentialChange(id, {
           password: {{ credential_password_var }},
+{% if credential_email_var %}
+          email: {{ credential_email_var }},
+{% endif %}
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           currentPassword: (bulkItems[i] as any).current_password,
           mfaEnabled: {{ credential_mfa_var }},

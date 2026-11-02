@@ -1,7 +1,7 @@
 // Hand-written -- not part of the generated entity test set.
 // PUT /api/setting/:id and PUT /api/setting/bulk need the same proof the account settings page asks
-// for: the current password to change the password, a current TOTP or recovery code to turn MFA off
-// (Issue #1188). An API key alone is not enough to change either.
+// for: the current password to change the password or the email address (Issue #1285), a current TOTP
+// or recovery code to turn MFA off (Issue #1188). An API key alone is not enough to change any of them.
 type CredentialState = {
   passwordIsNull: boolean;
   apiKeyIsNull: boolean;
@@ -86,6 +86,47 @@ describe('API: setting update confirms password and MFA changes', () => {
         expect(res.body.results[0].success).to.eq(true);
       });
       state().then((st) => expect(st.passwordHash).to.not.eq(originalHash));
+    });
+  });
+
+  describe('email address', () => {
+    const NEW_EMAIL = 'changed-address@example.com';
+
+    function storedEmail() {
+      return cy
+        .request({ url: `/api/setting/${userIdFromApiKey(seed.apiKey)}`, headers: { 'X-API-Key': seed.apiKey } })
+        .then((res) => (res.body.data ?? res.body).email as string);
+    }
+
+    it('rejects a new email address without the current password', () => {
+      put({ email: NEW_EMAIL }).its('status').should('eq', 400);
+      storedEmail().then((email) => expect(email).to.eq(seed.email));
+    });
+
+    it('rejects a new email address with a wrong current password', () => {
+      put({ email: NEW_EMAIL, current_password: 'not-the-password' }).its('status').should('eq', 403);
+      storedEmail().then((email) => expect(email).to.eq(seed.email));
+    });
+
+    it('changes the email address once the current password is confirmed, leaving the password alone', () => {
+      put({ email: NEW_EMAIL, current_password: seed.password }).its('status').should('eq', 200);
+      storedEmail().then((email) => expect(email).to.eq(NEW_EMAIL));
+      cy.task<CredentialState>('db:getCredentialState', NEW_EMAIL).then((st) => expect(st.passwordHash).to.eq(originalHash));
+    });
+
+    it('applies the same check to a bulk update item', () => {
+      const bulk = (extra: Record<string, unknown>) =>
+        cy.request({
+          method: 'PUT',
+          url: '/api/setting/bulk',
+          headers: { 'X-API-Key': seed.apiKey },
+          body: [{ id: userIdFromApiKey(seed.apiKey), name: 'Renamed Account', email: NEW_EMAIL, ...extra }],
+          failOnStatusCode: false,
+        });
+      bulk({}).then((res) => expect(res.body.results[0].success).to.eq(false));
+      storedEmail().then((email) => expect(email).to.eq(seed.email));
+      bulk({ current_password: seed.password }).then((res) => expect(res.body.results[0].success).to.eq(true));
+      storedEmail().then((email) => expect(email).to.eq(NEW_EMAIL));
     });
   });
 

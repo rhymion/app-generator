@@ -39,7 +39,7 @@ describe('confirmCredentialChange', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     hash = await bcrypt.hash('current-pw', 4);
-    findUniqueMock.mockResolvedValue({ password: hash, mfa_enabled: true });
+    findUniqueMock.mockResolvedValue({ password: hash, mfa_enabled: true, email: 'me@example.com' });
     checkMock.mockResolvedValue({ allowed: true });
     disableMfaMock.mockResolvedValue(undefined);
   });
@@ -61,7 +61,7 @@ describe('confirmCredentialChange', () => {
   });
 
   it('rejects a password change for an account that has no password', async () => {
-    findUniqueMock.mockResolvedValue({ password: null, mfa_enabled: false });
+    findUniqueMock.mockResolvedValue({ password: null, mfa_enabled: false, email: 'me@example.com' });
     const err = await rejection(confirmCredentialChange('u1', { password: 'new-pw', currentPassword: 'anything' }));
     expect(err.statusCode).toBe(403);
   });
@@ -70,6 +70,33 @@ describe('confirmCredentialChange', () => {
     const out = await confirmCredentialChange('u1', { password: 'new-pw', currentPassword: 'current-pw' });
     expect(out.password).not.toBe('new-pw');
     expect(await bcrypt.compare('new-pw', out.password)).toBe(true);
+  });
+
+  it('rejects a changed email address without the current password', async () => {
+    const err = await rejection(confirmCredentialChange('u1', { email: 'other@example.com' }));
+    expect(err.statusCode).toBe(400);
+    expect(err.message).toContain('email');
+  });
+
+  it('rejects a changed email address with a wrong current password', async () => {
+    const err = await rejection(confirmCredentialChange('u1', { email: 'other@example.com', currentPassword: 'nope' }));
+    expect(err.statusCode).toBe(403);
+  });
+
+  it('rejects an email change for an account that has no password', async () => {
+    findUniqueMock.mockResolvedValue({ password: null, mfa_enabled: false, email: 'me@example.com' });
+    const err = await rejection(confirmCredentialChange('u1', { email: 'other@example.com', currentPassword: 'anything' }));
+    expect(err.statusCode).toBe(403);
+  });
+
+  it('accepts a changed email address once the current password is confirmed, without touching the password', async () => {
+    const out = await confirmCredentialChange('u1', { email: 'other@example.com', currentPassword: 'current-pw' });
+    expect(out).toEqual({ password: '', mfaEnabled: true });
+  });
+
+  it('asks for nothing when the email is resent unchanged, whatever its case or padding', async () => {
+    expect(await confirmCredentialChange('u1', { email: ' ME@Example.com ' })).toEqual({ password: '', mfaEnabled: true });
+    expect(checkMock).not.toHaveBeenCalled();
   });
 
   it('answers 429 once the confirmation budget is spent, before comparing', async () => {
