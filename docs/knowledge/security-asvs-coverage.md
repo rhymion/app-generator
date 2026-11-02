@@ -34,7 +34,7 @@ Chapter V17 (WebRTC) does not apply: the generated app has no real-time media, T
 | ID | Level | Status | Covered by | Verified by | Gap Issue | Source and version |
 |----|-------|--------|------------|-------------|-----------|--------------------|
 | V1.1.1 | 2 | framework | Routes read the body once with request.json(); no decode after validation found | none | - | next 16.4.2 (package-lock.json); Route Handlers docs |
-| V1.1.2 | 2 | framework | React JSX escaping, Prisma parameter binding, escapeCSV in lib/_csv.ts | none | #1273 | react 19.3.1 (package-lock.json); JSX escaping docs |
+| V1.1.2 | 2 | framework | React JSX escaping, Prisma parameter binding, escapeCSV in lib/_csv.ts | lib/_output_encoding.test.tsx (JSX text and attribute escaping), lib/_csv.test.ts (CSV quoting and formula neutralization); no test yet for SQL parameter binding | #1273 | react 19.3.1 (package-lock.json); JSX escaping docs |
 | V1.2.1 | 1 | framework | React JSX escaping; no dangerouslySetInnerHTML in app, components or templates | components/_standard/ListWrapper.test.tsx, EditableListWrapper.test.tsx | - | react 19.3.1 (package-lock.json); JSX escaping docs |
 | V1.2.2 | 1 | generator | lib/_safe_url.ts isSafeUrl; lib/auth/safe-redirect.ts | lib/_safe_url.test.ts, lib/auth/safe-redirect.test.ts | - | - |
 | V1.2.3 | 1 | framework | React JSX escaping; NextResponse.json serializes JSON; no inline script construction found | none | - | next 16.4.2 (package-lock.json); NextResponse.json |
@@ -336,8 +336,8 @@ Chapter V17 (WebRTC) does not apply: the generated app has no real-time media, T
 | V15.3.2 | 2 | n/a | No server-side fetch of a user-controlled URL | none | - | - |
 | V15.3.3 | 2 | generator | api_route.ts.jinja2 destructures only the allowed create fields and rejects read-only fields | code_generator/tests/test_bulk_route_readonly_fields.py, test_readonly_fields.py, test_org_readonly_field_write_guard.py, test_write_locked_values.py | - | - |
 | V15.3.4 | 2 | generator | lib/rate-limit/client-ip.ts takes the entry TRUSTED_PROXY_HOPS from the right of X-Forwarded-For; per-platform rule in docs/knowledge/authentication.md | lib/rate-limit/client-ip.test.ts | - | - |
-| V15.3.5 | 2 | gap | Request bodies are untyped (request.json()); no strict-equality lint rule | none | #1271, #1303 | - |
-| V15.3.6 | 2 | gap | No prototype-pollution policy or lint rule; bodies are destructured into explicit fields | none | #1303 | - |
+| V15.3.5 | 2 | gap | ESLint `eqeqeq` with the `smart` option (eslint.config.mjs) rejects loose `==` and `!=` except the `x == null` idiom; request bodies are still untyped (request.json()) | lib/eslint_config.test.ts | #1271 | - |
+| V15.3.6 | 2 | generator | Documented policy (input-validation-rules-and-limits.md, "Prototype pollution"): bodies are destructured into explicit fields and request data is never deep-merged or used as a dynamic key; there is no lint rule for it | code_generator/tests/test_bulk_route_readonly_fields.py, code_generator/tests/test_readonly_fields.py | - | - |
 | V15.3.7 | 2 | framework | Query parameters are read first-value-only and the body separately; the two are never merged | none | #1234 | next 16.4.2 (package-lock.json); Route Handlers docs |
 
 ## V16 Security Logging and Error Handling
@@ -360,7 +360,7 @@ Chapter V17 (WebRTC) does not apply: the generated app has no real-time media, T
 | V16.5.1 | 2 | generator | handleApiError returns a generic body for unknown errors; some ApiError(403) paths still pass an exception message | lib/api-auth.test.ts, code_generator/tests/test_error_text_not_forwarded.py | #1095 | - |
 | V16.5.2 | 2 | generator | Rate limiter falls back to in-memory when Redis fails; no circuit breaker for the database, Stripe or storage | lib/rate-limit/redis.test.ts | - | - |
 | V16.5.3 | 2 | generator | Default-deny authorization and a 500 fallback in each route wrapper | lib/authz.test.ts, code_generator/tests/test_api_route_authentication_enumeration.py | - | - |
-| V16.5.4 | 3 | framework | Next.js catches unhandled route and render errors and returns a 500; app/[locale]/error.tsx exists | none | #1304, #1234 | next 16.4.2 (package-lock.json); error handling docs |
+| V16.5.4 | 3 | framework | Next.js catches unhandled route and render errors and returns a 500; app/[locale]/error.tsx and app/global-error.tsx are the error boundaries; onRequestError in instrumentation.ts logs the error name, digest and location without the message (lib/request-error.ts); handleApiError returns a generic 500 body. No process-level handler | lib/request-error.test.ts, code_generator/tests/test_request_error_hooks.py, lib/api-auth.test.ts | #1234 | next 16.4.2 (package-lock.json); error handling docs |
 
 ## V17 WebRTC
 
