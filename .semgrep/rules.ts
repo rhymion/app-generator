@@ -20,6 +20,7 @@ declare function requireEntityPermission(...args: unknown[]): Promise<unknown>;
 declare function requireRecordPermission(...args: unknown[]): Promise<unknown>;
 declare function canAccessEntity(...args: unknown[]): Promise<boolean>;
 declare function canAccessRecord(...args: unknown[]): Promise<boolean>;
+declare function resolveRecordPermissions(...args: unknown[]): Promise<{ delete: boolean }>;
 declare const record: unknown;
 declare const logger: any;
 declare const req: any;
@@ -45,6 +46,12 @@ async function recordAwareDelete() {
   // ok: entity-only-permission-check-for-record-operation
   if (!(await canAccessEntity('ticket', 'delete', 'u1'))) return;
   await canAccessRecord('ticket', 'delete', record, 'u1');
+}
+async function resolvedRecordDelete() {
+  // ok: entity-only-permission-check-for-record-operation
+  const base = await requireEntityPermission('ticket', 'delete', 'u1') as never;
+  const resolved = await resolveRecordPermissions(base, record, 'u1');
+  return resolved.delete;
 }
 async function entityOnlyRead() {
   // ok: entity-only-permission-check-for-record-operation

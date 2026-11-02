@@ -75,6 +75,21 @@ rules:
             canAccessRecord(...)
             ...
           }
+      # resolveRecordPermissions() is the record-level resolution the generated
+      # invalidate handler uses after its coarse entity gate (creator/assignee
+      # grants and organization are applied to the loaded record there).
+      - pattern-not-inside: |
+          function $F(...) {
+            ...
+            resolveRecordPermissions(...)
+            ...
+          }
+      - pattern-not-inside: |
+          ($...ARGS) => {
+            ...
+            resolveRecordPermissions(...)
+            ...
+          }
 
   - id: public-object-storage-access
     languages: [typescript]
