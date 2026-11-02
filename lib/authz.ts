@@ -12,6 +12,7 @@ import { TtlLruCache } from '@/lib/_ttl_lru';
 import { cacheOnGlobal } from '@/lib/global-singleton';
 import { SELF_ONLY_ADMIN_BYPASS_ENTITIES } from '@/lib/self_only_admin_bypass_entities';
 import { AppError } from '@/lib/_errors';
+import { logAuthzDenied } from '@/lib/security-event';
 import { enterRequestScope, getActorOverride, memoizeInRequestScope } from '@/lib/_request_scope';
 
 const getCookieSessionUserId = cache(async function getCookieSessionUserId(): Promise<string | null> {
@@ -448,6 +449,13 @@ export async function canAccessRecord(
   return Boolean((await resolveRecordPermissions(permissions, item, resolvedUserId))[operation]);
 }
 
+/** Builds the denial error and writes the security-event line for it. */
+function permissionDenied(model: ModelName, operation: Operation): AppError {
+  const error = new AppError('PERMISSION_DENIED', `Access denied: ${model}.${operation}`);
+  logAuthzDenied(error);
+  return error;
+}
+
 /**
  * Entity-only assertion, fetching permissions internally. Accepts an optional
  * explicit userId (for API key auth) or falls back to the session user.
@@ -461,7 +469,7 @@ export async function requireEntityPermission(
   const { permissions } = await getModelPermissions(model, userId);
   const resolved = await resolveEntityPermissions(permissions);
   if (!resolved[operation]) {
-    throw new AppError('PERMISSION_DENIED', `Access denied: ${model}.${operation}`);
+    throw permissionDenied(model, operation);
   }
   return resolved;
 }
@@ -482,7 +490,7 @@ export async function requireRecordPermission(
     ? await resolveRecordPermissions(permissions, item, resolvedUserId)
     : await resolveEntityPermissions(permissions);
   if (!resolved[operation]) {
-    throw new AppError('PERMISSION_DENIED', `Access denied: ${model}.${operation}`);
+    throw permissionDenied(model, operation);
   }
   return resolved;
 }

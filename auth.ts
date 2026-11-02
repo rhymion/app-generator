@@ -16,6 +16,7 @@ import { createTenantBoundUser } from "@/lib/auth/create-user";
 import { isMockGoogleOAuthTestEnabled } from "@/lib/auth/mock-oauth-gate";
 import { isDomainAllowed } from "@/lib/auth/domain-allow-list";
 import { isPastAbsoluteLifetime, resolveSessionPolicy } from "@/lib/session-policy";
+import { logSignInRejected } from "@/lib/security-event";
 
 // Custom CredentialsSignin subclasses so @auth/core re-throws them as-is
 // (plain Error gets wrapped in CallbackRouteError and the code is lost).
@@ -64,6 +65,7 @@ function buildProviders(): Provider[] {
       },
       async authorize(credentials) {
         if (!credentials?.email || !credentials?.password) {
+          logSignInRejected("INVALID_CREDENTIALS");
           throw new Error("Invalid credentials");
         }
 
@@ -82,6 +84,7 @@ function buildProviders(): Provider[] {
         );
 
         if (!user || !user.password || !isCorrectPassword) {
+          logSignInRejected("INVALID_CREDENTIALS");
           throw new Error("Invalid credentials");
         }
 
@@ -106,6 +109,7 @@ function buildProviders(): Provider[] {
             if (!(e instanceof MfaRateLimitedError)) throw e;
           }
           if (!ok) {
+            logSignInRejected("INVALID_MFA_CODE");
             throw new InvalidMfaError();
           }
         }

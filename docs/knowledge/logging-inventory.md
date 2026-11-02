@@ -40,11 +40,11 @@ A failed audit write outside a transaction is logged and does not fail the reque
 
 | Event | Status | When |
 |---|---|---|
-| `auth.rejected` | 401 | Missing or invalid API key, expired key, invalid mobile access token, failed mobile sign-in, expired session (`SESSION_EXPIRED`) |
-| `authz.denied` | 403 | The caller is known but may not perform the operation (`PERMISSION_DENIED`, cross-site write refused) |
+| `auth.rejected` | 401 | Missing or invalid API key, expired key, invalid mobile access token, failed mobile sign-in, expired session (`SESSION_EXPIRED`); a refused web sign-in (code `INVALID_CREDENTIALS` or `INVALID_MFA_CODE`) |
+| `authz.denied` | 403 | The caller is known but may not perform the operation (`PERMISSION_DENIED`, cross-site write refused), including a denial raised for a Server Action by `requireEntityPermission` or `requireRecordPermission` |
 | `rate_limit.hit` | 429 | A rate-limit bucket is spent, including the repeated-invalid-API-key bucket |
 
-A line is JSON with `at`, `event`, `status` and, for an `AppError`, `code`. It carries no user id, email, address, credential, request path or error message. Not yet covered: a wrong password on the web sign-in form (handled inside Auth.js) and a denial inside a Server Action; both are tracked in Issue #1307.
+A line is JSON with `at`, `event`, `status` and, for an `AppError`, `code`. It carries no user id, email, address, credential, request path or error message. A refused web sign-in is logged from `authorize()` in `auth.ts`, and a permission check logs its denial where it raises it; an error already logged is not written again when a REST route passes it to `handleApiError`. Not yet covered: a denial thrown by hand inside an action (for example `No permission to delete`), a sign-in refused by the domain allow-list (audited as `auth:signIn.reject`), and a sign-in through a provider other than the credentials form; tracked in Issue #1307.
 
 ### Application log
 
