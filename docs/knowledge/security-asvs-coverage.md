@@ -34,7 +34,7 @@ Chapter V17 (WebRTC) does not apply: the generated app has no real-time media, T
 | ID | Level | Status | Covered by | Verified by | Gap Issue | Source and version |
 |----|-------|--------|------------|-------------|-----------|--------------------|
 | V1.1.1 | 2 | framework | Routes read the body once with request.json(); no decode after validation found | none | - | next 16.4.2 (package-lock.json); Route Handlers docs |
-| V1.1.2 | 2 | framework | React JSX escaping, Prisma parameter binding, escapeCSV in lib/_csv.ts | none | #1273 | react 19.3.1 (package-lock.json); JSX escaping docs |
+| V1.1.2 | 2 | framework | React JSX escaping, Prisma parameter binding, escapeCSV in lib/_csv.ts | lib/_output_encoding.test.tsx (JSX text and attribute escaping), lib/_csv.test.ts (CSV quoting and formula neutralization); no test yet for SQL parameter binding | #1273 | react 19.3.1 (package-lock.json); JSX escaping docs |
 | V1.2.1 | 1 | framework | React JSX escaping; no dangerouslySetInnerHTML in app, components or templates | components/_standard/ListWrapper.test.tsx, EditableListWrapper.test.tsx | - | react 19.3.1 (package-lock.json); JSX escaping docs |
 | V1.2.2 | 1 | generator | lib/_safe_url.ts isSafeUrl; lib/auth/safe-redirect.ts | lib/_safe_url.test.ts, lib/auth/safe-redirect.test.ts | - | - |
 | V1.2.3 | 1 | framework | React JSX escaping; NextResponse.json serializes JSON; no inline script construction found | none | - | next 16.4.2 (package-lock.json); NextResponse.json |
