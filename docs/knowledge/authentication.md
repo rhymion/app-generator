@@ -85,14 +85,22 @@ use a deployment check that asserts both are present together.
 |----------|---------|---------|
 | `SESSION_MAX_AGE_SECONDS` | `2592000` (30 days) | Inactivity lifetime. The cookie expires this long after its last refresh. |
 | `SESSION_UPDATE_AGE_SECONDS` | `86400` (1 day) | An active session re-issues the cookie at most this often. Capped at the max age. |
+| `SESSION_ABSOLUTE_MAX_AGE_SECONDS` | unset (no absolute limit) | Upper bound on a session, counted from sign-in however active the user is. |
 
 An unset, empty, non-numeric or non-positive value falls back to the default, so a typo cannot switch the expiry off.
 Because an active session keeps refreshing its cookie, `SESSION_MAX_AGE_SECONDS` acts as an inactivity timeout; a
-session that is used daily does not end on its own. There is no variable named `JWT_MAX_AGE`.
+session that is used daily does not end on its own unless the absolute lifetime is set. There is no variable named `JWT_MAX_AGE`.
+
+**Absolute lifetime.** `jwt()` in `auth.ts` stamps `session_started_at` (Unix seconds) into the token at sign-in, and every
+later session read compares it with `SESSION_ABSOLUTE_MAX_AGE_SECONDS`. Once the session is that old, `jwt()` returns `null`
+and Auth.js clears the cookie, so the user signs in again. The setting is off by default, so existing deployments behave as
+before. An empty, non-numeric or non-positive value also means off (unlike the other two variables, which fall back to a
+default). With a limit set, a token that has no `session_started_at` (issued before the setting existed) is treated as
+expired, so turning the limit on signs everyone out once; trusting such a token would let it outlive the limit. The limit
+applies to the web (Auth.js) session only; mobile access and refresh tokens have their own lifetimes.
 
 Not implemented today, and tracked in Issue #1284:
 
-- **Absolute lifetime.** No claim records when the user signed in, so an active session can be renewed without limit.
 - **Concurrent-session policy.** The JWT strategy keeps no server-side session row (see below), so the number of
   simultaneous web sessions per user is neither counted nor capped. A cap depends on Issue #1127.
 - **Identity-provider session.** Signing out of the app ends the app cookie only. A Google session stays signed in at

@@ -15,7 +15,7 @@ import { MfaRateLimitedError } from "@/lib/mfa/errors";
 import { createTenantBoundUser } from "@/lib/auth/create-user";
 import { isMockGoogleOAuthTestEnabled } from "@/lib/auth/mock-oauth-gate";
 import { isDomainAllowed } from "@/lib/auth/domain-allow-list";
-import { resolveSessionPolicy } from "@/lib/session-policy";
+import { isPastAbsoluteLifetime, resolveSessionPolicy } from "@/lib/session-policy";
 
 // Custom CredentialsSignin subclasses so @auth/core re-throws them as-is
 // (plain Error gets wrapped in CallbackRouteError and the code is lost).
@@ -227,6 +227,9 @@ function buildAdapter(): Adapter {
 // sessions). Only the *session* row stays empty.
 const sessionStrategy = "jwt" as const;
 
+// Read once at load. The absolute lifetime is enforced in jwt() below.
+const sessionPolicy = resolveSessionPolicy();
+
 export const authConfig: NextAuthConfig = {
   secret: process.env.AUTH_SECRET,
 
@@ -236,7 +239,7 @@ export const authConfig: NextAuthConfig = {
   // a future PrismaAdapter doesn't silently flip us to DB-backed sessions
   // (Phase 2 #9 from performance-plan-session.md).
   // maxAge / updateAge come from SESSION_MAX_AGE_SECONDS / SESSION_UPDATE_AGE_SECONDS (lib/session-policy.ts).
-  session: { strategy: sessionStrategy, ...resolveSessionPolicy() },
+  session: { strategy: sessionStrategy, maxAge: sessionPolicy.maxAge, updateAge: sessionPolicy.updateAge },
   providers: buildProviders(),
   pages: {
     signIn: "/login",
@@ -417,8 +420,16 @@ export const authConfig: NextAuthConfig = {
         return token;
       }
 
+      // Absolute session lifetime (SESSION_ABSOLUTE_MAX_AGE_SECONDS, off by default): end the session once it is
+      // older than the limit, however recently it was used. Returning null makes Auth.js clear the cookie.
+      if (!(account && user?.id) && isPastAbsoluteLifetime(token.session_started_at, sessionPolicy.absoluteMaxAge)) {
+        return null;
+      }
+
       if (account && user?.id) {
-        // Fresh sign-in (any provider). Snapshot mfa_token_version as the
+        // Fresh sign-in (any provider). Stamp the start time the absolute lifetime counts from.
+        token.session_started_at = Math.floor(Date.now() / 1000);
+        // Snapshot mfa_token_version as the
         // baseline for future drift detection below.
         const dbUser = await prisma.user.findUnique({
           where: { id: token.id },
@@ -536,5 +547,7 @@ declare module "@auth/core/jwt" {
     id: string;
     mfa_pending?: boolean;
     mfa_token_version?: number;
+    /** Unix seconds at sign-in; the absolute session lifetime counts from here. */
+    session_started_at?: number;
   }
 }

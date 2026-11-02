@@ -174,7 +174,7 @@ Chapter V17 (WebRTC) does not apply: the generated app has no real-time media, T
 
 | ID | Level | Status | Covered by | Verified by | Gap Issue | Source and version |
 |----|-------|--------|------------|-------------|-----------|--------------------|
-| V7.1.1 | 2 | generator | Web session maxAge and updateAge are configurable (SESSION_MAX_AGE_SECONDS, SESSION_UPDATE_AGE_SECONDS) and documented in docs/knowledge/authentication.md; the absolute lifetime is not enforced (V7.3.2) | lib/session-policy.test.ts | - | - |
+| V7.1.1 | 2 | generator | Web session maxAge and updateAge are configurable (SESSION_MAX_AGE_SECONDS, SESSION_UPDATE_AGE_SECONDS) and documented in docs/knowledge/authentication.md; the absolute lifetime is optional (SESSION_ABSOLUTE_MAX_AGE_SECONDS, off by default; V7.3.2) | lib/session-policy.test.ts | - | - |
 | V7.1.2 | 2 | gap | No concurrent-session policy; the limitation is documented in docs/knowledge/authentication.md | none | #1284, #1127 | - |
 | V7.1.3 | 2 | n/a | The app is the only session creator; no federated session coordination | none | - | - |
 | V7.2.1 | 1 | generator | proxy.ts and auth.ts verify sessions server-side; lib/api-auth.ts for mobile JWT and API key | code_generator/tests/test_api_route_authentication_enumeration.py, auth.jwt-erased.test.ts, lib/api-auth.test.ts | - | - |
@@ -182,7 +182,7 @@ Chapter V17 (WebRTC) does not apply: the generated app has no real-time media, T
 | V7.2.3 | 1 | generator | lib/mobile-auth.ts refresh token is randomBytes(32) stored as HMAC-SHA256; web sessions are self-contained JWTs | cypress/e2e/api/mobile_auth.cy.ts | - | - |
 | V7.2.4 | 1 | gap | A new web JWT is minted at sign-in but the old one stays valid (stateless); mobile refresh rotation is covered | cypress/e2e/api/mobile_auth.cy.ts (rotation) | #1127 | - |
 | V7.3.1 | 2 | generator | SESSION_MAX_AGE_SECONDS is the web inactivity timeout (the cookie is refreshed only while the session is used) | lib/session-policy.test.ts | - | - |
-| V7.3.2 | 2 | gap | No absolute web lifetime; an active session renews without limit (docs/knowledge/authentication.md) | none | #1284 | - |
+| V7.3.2 | 2 | generator | SESSION_ABSOLUTE_MAX_AGE_SECONDS (opt-in, unset by default) ends a web session that is older than the limit since sign-in; with it unset an active session still renews without limit (docs/knowledge/authentication.md) | lib/session-policy.test.ts, auth.jwt-erased.test.ts | - | - |
 | V7.4.1 | 1 | gap | Web sign-out clears the cookie but the JWT stays valid; mobile logout revokes the session | cypress/e2e/api/mobile_auth.cy.ts (mobile revoke) | #1127 | - |
 | V7.4.2 | 1 | gap | Only erasure ends sessions (lib/compliance/anonymize_user.ts); no user disable state | lib/compliance/anonymize_user.test.ts, auth.jwt-erased.test.ts | #1127 | - |
 | V7.4.3 | 2 | gap | Password change and MFA changes do not revoke other sessions | none | #1127 | - |
