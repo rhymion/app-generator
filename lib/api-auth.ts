@@ -10,6 +10,7 @@ import { AppError, type ErrorCode } from '@/lib/_errors';
 import { SCHEDULED_TASK_ROLE_NAME } from '@/lib/scheduled-tasks/system-actor';
 import { enterRequestScope, runAsActor } from '@/lib/_request_scope';
 import { isAllowedHost } from '@/lib/auth/external-url';
+import { logSecurityEvent, securityEventForStatus } from '@/lib/security-event';
 import { isMobileJwt, verifyMobileAccessToken, MobileAuthError } from '@/lib/mobile-auth';
 
 export class ApiError extends Error {
@@ -357,6 +358,8 @@ const APP_ERROR_STATUS_MAP: Record<ErrorCode, number> = {
 
 export function handleApiError(error: unknown): NextResponse {
   if (error instanceof ApiError) {
+    const event = securityEventForStatus(error.statusCode);
+    if (event) logSecurityEvent({ event, status: error.statusCode });
     return NextResponse.json(
       { error: error.message },
       {
@@ -368,6 +371,9 @@ export function handleApiError(error: unknown): NextResponse {
     );
   }
   if (error instanceof AppError) {
+    const status = APP_ERROR_STATUS_MAP[error.code] ?? 500;
+    const event = securityEventForStatus(status);
+    if (event) logSecurityEvent({ event, status, code: error.code });
     return NextResponse.json(
       {
         error: error.message,
