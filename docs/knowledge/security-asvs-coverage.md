@@ -320,7 +320,7 @@ Chapter V17 (WebRTC) does not apply: the generated app has no real-time media, T
 | V14.2.4 | 2 | generator | Controls are traced to the classes in docs/knowledge/data-classification.md | lib/prisma-slow-query.test.ts (parameter redaction), lib/logger.test.ts | - | - |
 | V14.3.1 | 1 | generator | proxy.ts sends `Clear-Site-Data: "cache", "cookies", "storage"` on the Auth.js sign-out response (POST /api/auth/signout) | cypress/e2e/api/framework_guarantees.cy.ts (cache and client-data headers), lib/proxy-forwarded-headers.test.ts | - | - |
 | V14.3.2 | 2 | generator | next.config.ts sends `Cache-Control: no-store` on every `/api/` response except the attachment route, which sets `private, no-store` itself; proxy.ts sets `no-store` on signed-in page responses | cypress/e2e/api/framework_guarantees.cy.ts (cache and client-data headers), lib/security-headers.test.ts, lib/attachment/storage.test.ts | - | - |
-| V14.3.3 | 2 | gap | Mobile web build keeps the refresh token in localStorage; native uses SecureStore | none | #1301 | - |
+| V14.3.3 | 2 | n/a | Accepted gap: the mobile web build (expo start --web) is for development and tests and is not deployed to production, so the refresh token it keeps in localStorage is out of production scope; native builds use SecureStore (docs/knowledge/mobile-app.md) | none | - | - |
 
 ## V15 Secure Coding and Architecture
 
