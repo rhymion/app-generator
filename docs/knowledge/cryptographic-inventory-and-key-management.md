@@ -19,7 +19,7 @@ This document lists every cryptographic key, algorithm and use in the generated 
 | Use | Algorithm | Key | Where | Stored or sent as |
 |-----|-----------|-----|-------|-------------------|
 | Web session cookie | Auth.js JWT strategy: encrypted JWE (Auth.js defaults) | `AUTH_SECRET`, handled by Auth.js | `auth.ts` | Session cookie. No session row is read per request. |
-| Mobile access token | HS256 JWT (`jose`), 15-minute lifetime, claim `type: mobile_access` | `AUTH_SECRET` used directly as the HMAC key | `lib/mobile-auth.ts` | Bearer token, never stored |
+| Mobile access token | HS256 JWT (`jose`), 15-minute lifetime, claims `type: mobile_access`, `iss: app:mobile-auth`, `aud: app:mobile-api` (all checked on verification) | `AUTH_SECRET` used directly as the HMAC key | `lib/mobile-auth.ts` | Bearer token, never stored |
 | Mobile refresh token, stored form | HMAC-SHA256 | `AUTH_SECRET` | `hashRefreshToken()` in `lib/mobile-auth.ts` | Hex digest in `refresh_token_hash` (unique-indexed for lookup). The token itself is 32 random bytes and is never stored. |
 | MFA TOTP secret at rest | AES-256-GCM, 12-byte random nonce | SHA-256 of `AUTH_SECRET` + `mfa-encryption-v1` | `lib/mfa/crypto.ts` | `v1:<nonce>:<tag>:<ciphertext>` (hex) in `user.mfa_secret` |
 | Attachment original file name | AES-256-GCM, 12-byte random nonce | SHA-256 of `AUTH_SECRET` + `attachment-name-encryption-v1` | `lib/compliance/attachment_name_crypto.ts` | Same `v1:` wire format in `encrypted_original_name`; the visible name is a random UUID |

@@ -77,6 +77,35 @@ use a deployment check that asserts both are present together.
 
 ---
 
+## Web session lifetime and concurrent sessions
+
+`auth.ts` passes `maxAge` and `updateAge` from `lib/session-policy.ts` to Auth.js:
+
+| Variable | Default | Meaning |
+|----------|---------|---------|
+| `SESSION_MAX_AGE_SECONDS` | `2592000` (30 days) | Inactivity lifetime. The cookie expires this long after its last refresh. |
+| `SESSION_UPDATE_AGE_SECONDS` | `86400` (1 day) | An active session re-issues the cookie at most this often. Capped at the max age. |
+| `SESSION_ABSOLUTE_MAX_AGE_SECONDS` | unset (no absolute limit) | Upper bound on a session, counted from sign-in however active the user is. |
+
+An unset, empty, non-numeric or non-positive value falls back to the default, so a typo cannot switch the expiry off.
+Because an active session keeps refreshing its cookie, `SESSION_MAX_AGE_SECONDS` acts as an inactivity timeout; a
+session that is used daily does not end on its own unless the absolute lifetime is set. There is no variable named `JWT_MAX_AGE`.
+
+**Absolute lifetime.** `jwt()` in `auth.ts` stamps `session_started_at` (Unix seconds) into the token at sign-in, and every
+later session read compares it with `SESSION_ABSOLUTE_MAX_AGE_SECONDS`. Once the session is that old, `jwt()` returns `null`
+and Auth.js clears the cookie, so the user signs in again. The setting is off by default, so existing deployments behave as
+before. An empty, non-numeric or non-positive value also means off (unlike the other two variables, which fall back to a
+default). With a limit set, a token that has no `session_started_at` (issued before the setting existed) is treated as
+expired, so turning the limit on signs everyone out once; trusting such a token would let it outlive the limit. The limit
+applies to the web (Auth.js) session only; mobile access and refresh tokens have their own lifetimes.
+
+Not implemented today, and tracked in Issue #1284:
+
+- **Concurrent-session policy.** The JWT strategy keeps no server-side session row (see below), so the number of
+  simultaneous web sessions per user is neither counted nor capped. A cap depends on Issue #1127.
+- **Identity-provider session.** Signing out of the app ends the app cookie only. A Google session stays signed in at
+  Google, and the app does not read or end it. The app session (relying party) and the provider session are independent.
+
 ## Session strategy — pinned to JWT (and why)
 
 `auth.ts` sets `session: { strategy: "jwt" }` for the whole deployment.
@@ -280,8 +309,8 @@ nothing left to challenge.
 not, by itself, revoke an already-active JWT (JWT strategy has no
 server-side session table to delete a row from). Without a fix, a user
 with a long-lived session could enable MFA and still ride the
-pre-existing cookie unchallenged for up to `JWT_MAX_AGE` (default 30
-days) — for either provider, not just OAuth. `user.mfa_token_version`
+pre-existing cookie unchallenged until the session expires
+(`SESSION_MAX_AGE_SECONDS`, default 30 days) — for either provider, not just OAuth. `user.mfa_token_version`
 (`Int @default(0)`) closes this: `completeEnrollment()`
 (`lib/mfa/enrollment.ts`) increments it when MFA is enabled; the
 `jwt()` callback snapshots the version into the token at sign-in and
