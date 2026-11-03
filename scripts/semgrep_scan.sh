@@ -36,7 +36,7 @@ out_dir="$(cd "$out_dir" && pwd)"
 export SEMGREP_SEND_METRICS=off
 
 # 0. The rule fixtures: every rule must hit its triggering fixtures and stay quiet on the others.
-(cd "$repo/.semgrep" && semgrep test --metrics=off .)
+(cd "$repo/.semgrep" && semgrep test .)
 
 # 1. Sources: tracked files of this repository.
 own_rc=0
