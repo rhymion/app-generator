@@ -3,7 +3,7 @@ All notable changes to this project will be documented in this file.
 The format is based on Keep a Changelog (https://keepachangelog.com/),
 and this project adheres to Semantic Versioning (https://semver.org/).
 
-## [Unreleased]
+## [6.1.1] - 2026-11-03
 ### Security
 - **The settings screen and the settings REST routes verify the current password when the password or the email address changes.** The generated settings Server Action now runs `confirmCredentialChange()` after the permission check and before the write, as the REST routes do: it applies the rate limit, checks the current password, and stores only the hash it returns. The edit form has a "Current password" field posted as `current_password`. A refusal comes back as a `VALIDATION` failure on that field. The REST routes (`PUT /api/setting/:id`, `PUT /api/setting/bulk`) ask for `current_password` when `email` differs from the stored address, ignoring case and padding. A save that changes neither needs no current password.
 
