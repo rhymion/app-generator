@@ -38,7 +38,7 @@
     "capacityExhausted": "No capacity is available. Please try a different selection.",
     "currentPasswordIncorrect": "The current password is incorrect.",
     "currentPasswordRateLimited": "Too many attempts. Please wait a few minutes and try again.",
-    "currentPasswordRequired": "Enter your current password to change your password.",
+    "currentPasswordRequired": "Enter your current password to confirm this change.",
     "exclusiveParentsInvalid": "Only one of {fields} can be set; the others must be empty.",
     "exclusiveParentsMissing": "Exactly one of {fields} must be set.",
     "fieldAlreadyLinked": "{field} is already linked to another record.",
@@ -272,7 +272,7 @@
     "accountsTitle": "Connected accounts",
     "accountsBody": "Manage which providers can sign you into this account.",
     "currentPassword": "Current password",
-    "currentPasswordHelp": "Required when you change your password."
+    "currentPasswordHelp": "Required when you change your password or email address."
   },
   "LinkedAccounts": {
     "title": "Connected accounts",
