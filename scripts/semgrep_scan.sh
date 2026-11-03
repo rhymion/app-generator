@@ -3,7 +3,7 @@
 #
 #   bash scripts/semgrep_scan.sh [--registry] [--out-dir DIR]
 #
-# Always runs the project-owned rules in .semgrep/rules.yml (blocking: any
+# Always runs the project-owned rules in .semgrep/rules.yml and .semgrep/use_server_rules.yml (blocking: any
 # finding fails the script). With --registry it also runs the registry packs for
 # TypeScript, Next.js and the OWASP Top Ten (report-only: findings are written
 # to SARIF files and never change the exit status).
@@ -31,7 +31,7 @@ export SEMGREP_SEND_METRICS=off
 
 # 1. Sources: tracked files of this repository.
 own_rc=0
-(cd "$repo" && semgrep scan --metrics=off --config .semgrep/rules.yml --exclude .semgrep \
+(cd "$repo" && semgrep scan --metrics=off --config .semgrep/rules.yml --config .semgrep/use_server_rules.yml --exclude .semgrep \
   --sarif --output "$out_dir/own-sources.sarif" --error .) || own_rc=$?
 
 # 2. Generated app: generate into a scratch copy (no .git, so semgrep scans every
@@ -41,7 +41,7 @@ trap 'rm -rf "$scratch"' EXIT
 tar -C "$repo" --exclude=.git --exclude=node_modules --exclude=.next -cf - . | tar -C "$scratch" -xf -
 (cd "$scratch" && npm run --silent generate-code >"$out_dir/generate-code.log" 2>&1)
 gen_rc=0
-(cd "$scratch" && semgrep scan --metrics=off --config .semgrep/rules.yml --exclude .semgrep \
+(cd "$scratch" && semgrep scan --metrics=off --config .semgrep/rules.yml --config .semgrep/use_server_rules.yml --exclude .semgrep \
   --sarif --output "$out_dir/own-generated.sarif" --error .) || gen_rc=$?
 
 # 3. Registry packs, report-only.

@@ -1,0 +1,150 @@
+name: Dynamic Scans
+
+# Starts a generated app (as the end-to-end job does) and runs four checks against it:
+#
+#   OWASP ZAP baseline      report-only   passive scan of the running app
+#   OWASP ZAP API scan      report-only   active scan driven by the generated OpenAPI document
+#   Schemathesis            report-only   fuzzes the API against the same document
+#   Nuclei                  blocking      project templates in security/nuclei/templates
+#
+# Weekly and on demand only; never on pull requests. The app uses the disposable test
+# database and the seeded test admin API key (the fixed default of
+# scripts/seed-baseline-credentials.ts, valid only under NODE_ENV=test). No job uses a
+# repository secret. See docs/knowledge/ci-security-workflows.md for the criteria to
+# make the report-only scans blocking.
+on:
+  schedule:
+    - cron: '23 3 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dynamic-scans
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    name: Scan a running generated app
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      NODE_ENV: test
+      # Fixed default admin key seeded by `db:seed-baseline` when NODE_ENV is not production.
+      SCAN_API_KEY: mk_78d1e51a47f40912f5a1787367e3f7f6ed17c314590eac84edc5b3f785a527b1
+      ZAP_IMAGE: ghcr.io/zaproxy/zaproxy:2.17.0@sha256:030d3df57735dacbb83464854758e674dd9ad01d79d12a129a8e58b1fd384238
+      NUCLEI_VERSION: '3.11.1'
+      NUCLEI_SHA256: 'ea63d4ae232808cd7c6bc00d0142428e231fab59dae01042246097d195835ab6'
+      SCHEMATHESIS_VERSION: '4.33.0'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24.18.0'
+          cache: 'npm'
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+      - run: npm ci
+      - run: pip install -r requirements.txt
+      - name: Write a disposable test environment
+        # Throwaway values for this run only; nothing here is a production secret.
+        run: |
+          echo "AUTH_SECRET=$(openssl rand -base64 32)" >> .env.test.local
+          echo "MOCK_GOOGLE_OAUTH_TEST=true" >> .env.test.local
+      - name: Generate code, start the test database, push the schema and build
+        run: npm run test:e2e:build
+      - name: Start the app
+        run: |
+          set -euo pipefail
+          port="$(sed -n 's/^PORT=//p' .env.test | tr -d '"' | head -n 1)"
+          test -n "$port"
+          echo "SCAN_PORT=$port" >> "$GITHUB_ENV"
+          mkdir -p scan-results
+          npm run test:e2e:start > scan-results/server.log 2>&1 &
+          for _ in $(seq 1 60); do
+            if curl -fsS -o /dev/null "http://localhost:${port}/api/auth/csrf"; then
+              echo "app is up on port ${port}"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::the app did not start"
+          tail -n 50 scan-results/server.log
+          exit 1
+      - name: Fetch the generated OpenAPI document
+        run: |
+          set -euo pipefail
+          curl -fsS -H "X-API-Key: ${SCAN_API_KEY}" "http://localhost:${SCAN_PORT}/api/openapi.json" -o scan-results/openapi.json
+          python3 -c "import json; d = json.load(open('scan-results/openapi.json')); print(len(d['paths']), 'paths')"
+
+      # --- OWASP ZAP (report-only) ---------------------------------------------------
+      - name: ZAP baseline scan
+        if: always()
+        run: |
+          set -uo pipefail
+          chmod 777 scan-results
+          cp .zap/rules.tsv scan-results/zap-rules.tsv
+          # -I: findings never change the exit status. A real failure (the scanner could not run) still does.
+          docker run --rm --network host -v "$PWD/scan-results:/zap/wrk:rw" "$ZAP_IMAGE" \
+            zap-baseline.py -t "http://localhost:${SCAN_PORT}" -c zap-rules.tsv \
+            -r zap-baseline.html -J zap-baseline.json -I
+      - name: ZAP API scan
+        if: always()
+        run: |
+          set -uo pipefail
+          docker run --rm --network host -v "$PWD/scan-results:/zap/wrk:rw" "$ZAP_IMAGE" \
+            zap-api-scan.py -t /zap/wrk/openapi.json -f openapi -O "http://localhost:${SCAN_PORT}" \
+            -c zap-rules.tsv -r zap-api.html -J zap-api.json -I \
+            -z "-config replacer.full_list(0).description=apikey -config replacer.full_list(0).enabled=true -config replacer.full_list(0).matchtype=REQ_HEADER -config replacer.full_list(0).matchstr=X-API-Key -config replacer.full_list(0).regex=false -config replacer.full_list(0).replacement=${SCAN_API_KEY}"
+
+      # --- Schemathesis (report-only) ------------------------------------------------
+      - name: Schemathesis
+        if: always()
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          python3 -m pip install --quiet "schemathesis==${SCHEMATHESIS_VERSION}"
+          schemathesis --config-file schemathesis.toml run scan-results/openapi.json \
+            --url "http://localhost:${SCAN_PORT}" \
+            -H "X-API-Key: ${SCAN_API_KEY}" \
+            --checks not_a_server_error,response_schema_conformance,status_code_conformance \
+            --report junit --report-dir scan-results/schemathesis \
+            2>&1 | tee scan-results/schemathesis.log
+      - name: Summarize the scans
+        if: always()
+        run: python3 scripts/summarize_dynamic_scans.py scan-results >> "$GITHUB_STEP_SUMMARY"
+
+      # --- Nuclei (blocking) ---------------------------------------------------------
+      - name: Install Nuclei
+        if: always()
+        run: |
+          set -euo pipefail
+          curl -fsSL -o nuclei.zip "https://github.com/projectdiscovery/nuclei/releases/download/v${NUCLEI_VERSION}/nuclei_${NUCLEI_VERSION}_linux_amd64.zip"
+          echo "${NUCLEI_SHA256}  nuclei.zip" | sha256sum -c -
+          unzip -o nuclei.zip nuclei
+      - name: Nuclei templates must not match
+        if: always()
+        run: |
+          set -euo pipefail
+          ./nuclei -t security/nuclei/templates -u "http://localhost:${SCAN_PORT}" \
+            -disable-update-check -jsonl -o scan-results/nuclei.jsonl
+          if [ -s scan-results/nuclei.jsonl ]; then
+            echo "::error::a Nuclei template matched; see scan-results/nuclei.jsonl"
+            cat scan-results/nuclei.jsonl
+            exit 1
+          fi
+
+      - name: Stop the test stack
+        if: always()
+        run: docker compose --env-file .env.test -f docker-compose.test.yml down
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: dynamic-scan-results
+          path: scan-results
+          retention-days: 14
+          if-no-files-found: ignore
