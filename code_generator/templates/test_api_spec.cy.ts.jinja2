@@ -757,9 +757,9 @@ describe('API: {{ title }}', () => {
 {% if has_deps %}
       cy.task<any>('db:populate{{ pascal }}Dependencies').then((deps) => {
 {% endif %}
-      // Baseline is read after the dependencies exist: populating them can add rows of this entity.
-      {% if can_list %}cy.request({ url: API_BASE, headers: { 'X-API-Key': TEST_API_KEY } }).its('body.total'){% else %}cy.wrap(null){% endif %}.then((totalBefore) => {
+      // Baseline is read after the dependencies and the limited user exist: creating either can add rows of this entity (permission, role).
 {{ I7 }}cy.task<string>('db:createLimitedApiUser', '{{ parent }}').then((limitedKey) => {
+      {% if can_list %}cy.request({ url: API_BASE, headers: { 'X-API-Key': TEST_API_KEY } }).its('body.total'){% else %}cy.wrap(null){% endif %}.then((totalBefore) => {
 {{ I7 }}  cy.request({
 {{ I7 }}    method: 'POST',
 {{ I7 }}    url: `${API_BASE}/bulk`,
