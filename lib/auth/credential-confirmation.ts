@@ -12,7 +12,9 @@ const BCRYPT_COST = 10;
 export type CredentialChangeInput = {
   /** New password in plain text, as submitted by the caller. Empty or absent leaves the password unchanged. */
   password?: string | null;
-  /** The account's current password. Required whenever `password` is supplied. */
+  /** New email address as submitted by the caller. A value that differs from the stored address needs `currentPassword`. */
+  email?: string | null;
+  /** The account's current password. Required whenever `password` is supplied or `email` changes. */
   currentPassword?: unknown;
   /** Requested MFA state. Absent leaves it unchanged. */
   mfaEnabled?: boolean | null;
@@ -28,9 +30,10 @@ export type ConfirmedCredentialChange = {
 };
 
 /**
- * Confirms a password change or an MFA disable on the REST write path with the
- * same proof the account settings page asks for: the current password to change
- * the password, a current TOTP or recovery code to turn MFA off. An API key or
+ * Confirms a password change, an email change or an MFA disable on the REST
+ * write path with the same proof the account settings page asks for: the
+ * current password to change the password or the email address, a current TOTP
+ * or recovery code to turn MFA off. An API key or
  * mobile token alone is not enough to change either.
  *
  * Returns the values to hand to the service layer: the new password already
@@ -45,14 +48,20 @@ export async function confirmCredentialChange(
 ): Promise<ConfirmedCredentialChange> {
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { password: true, mfa_enabled: true },
+    select: { password: true, mfa_enabled: true, email: true },
   });
   if (!user) throw new ApiError(404, 'Not found');
 
+  const changesPassword = typeof input.password === 'string' && input.password !== '';
+  const changesEmail =
+    typeof input.email === 'string' &&
+    input.email.trim().toLowerCase() !== (user.email ?? '').trim().toLowerCase();
+
   let password = '';
-  if (typeof input.password === 'string' && input.password !== '') {
+  if (changesPassword || changesEmail) {
+    const what = changesPassword ? 'the password' : 'the email address';
     if (typeof input.currentPassword !== 'string' || input.currentPassword === '') {
-      throw new ApiError(400, 'current_password is required to change the password');
+      throw new ApiError(400, `current_password is required to change ${what}`);
     }
     const decision = await getRateLimiter().check('auth:password:confirm', userId);
     if (!decision.allowed) {
@@ -62,7 +71,7 @@ export async function confirmCredentialChange(
     if (!(await verifyPassword(input.currentPassword, user.password))) {
       throw new ApiError(403, 'Current password is incorrect');
     }
-    password = await bcrypt.hash(input.password, BCRYPT_COST);
+    if (changesPassword) password = await bcrypt.hash(input.password as string, BCRYPT_COST);
   }
 
   let mfaEnabled = user.mfa_enabled;

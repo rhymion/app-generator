@@ -24,8 +24,10 @@ export default function Password({ onChange }: { value?: string; onChange?: (val
     setSuccess(false);
     setIsPending(true);
     try {
-      const hash = await verifyAndHashPassword(current, next);
-      onChange?.(hash);
+      // The server confirms the change again when the form is saved; this step only
+      // gives early feedback on the current password.
+      await verifyAndHashPassword(current, next);
+      onChange?.(next);
       setSuccess(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to verify password');

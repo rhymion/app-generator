@@ -82,6 +82,9 @@ import SingleAttachmentDisplay from '@/components/_standard/SingleAttachmentDisp
 {% if custom_upsert_imports %}
 {{ custom_upsert_imports }}
 {% endif %}
+{% if credential_confirmation %}
+import AppFieldInput from '@/components/ui/forms/AppFieldInput';
+{% endif %}
 import { validateForm } from './form_validation';
 
 export default function FormUpsert({{ form_upsert_params }}) {
@@ -92,6 +95,9 @@ export default function FormUpsert({{ form_upsert_params }}) {
   const terr = useTranslations('Errors');
   // Root translator: resolves a hand-written rejection's namespace-qualified messageKey.
   const tmsg = useTranslations();
+{% if credential_confirmation %}
+  const tcred = useTranslations('Setting');
+{% endif %}
 {% if enum_ns_hooks %}
 {{ enum_ns_hooks }}
 {% endif %}
