@@ -21,6 +21,8 @@ declare function requireRecordPermission(...args: unknown[]): Promise<unknown>;
 declare function canAccessEntity(...args: unknown[]): Promise<boolean>;
 declare function canAccessRecord(...args: unknown[]): Promise<boolean>;
 declare function resolveRecordPermissions(...args: unknown[]): Promise<{ delete: boolean }>;
+declare function requireApiPermission(userId: string, model: string, operation: string): Promise<unknown>;
+declare function requireApiRecordPermission(userId: string, model: string, operation: string, item: unknown): Promise<unknown>;
 declare const record: unknown;
 declare const logger: any;
 declare const req: any;
@@ -52,6 +54,57 @@ async function resolvedRecordDelete() {
   const base = await requireEntityPermission('ticket', 'delete', 'u1') as never;
   const resolved = await resolveRecordPermissions(base, record, 'u1');
   return resolved.delete;
+}
+async function entityOnlyInvalidate() {
+  // ruleid: entity-only-permission-check-for-record-operation
+  await requireEntityPermission('ticket', 'invalidate', 'u1');
+}
+async function entityOnlyApiUpdate() {
+  // ruleid: entity-only-permission-check-for-record-operation
+  await requireApiPermission('u1', 'ticket', 'update');
+}
+async function entityOnlyApiDelete() {
+  // ruleid: entity-only-permission-check-for-record-operation
+  const perms = await requireApiPermission('u1', 'ticket', 'delete');
+  return perms;
+}
+async function entityOnlyApiInvalidate() {
+  // ruleid: entity-only-permission-check-for-record-operation
+  await requireApiPermission('u1', 'ticket', 'invalidate');
+}
+async function recordAwareApiUpdate() {
+  // ok: entity-only-permission-check-for-record-operation
+  await requireApiPermission('u1', 'ticket', 'update');
+  await requireApiRecordPermission('u1', 'ticket', 'update', record);
+}
+async function invalidateWithResolvedRecord() {
+  // ok: entity-only-permission-check-for-record-operation
+  const base = await requireApiPermission('u1', 'ticket', 'delete') as never;
+  const resolved = await resolveRecordPermissions(base, record, 'u1');
+  return resolved.delete;
+}
+async function entityOnlyApiRead() {
+  // ok: entity-only-permission-check-for-record-operation
+  await requireApiPermission('u1', 'ticket', 'read');
+}
+async function entityOnlyApiCreate() {
+  // ok: entity-only-permission-check-for-record-operation
+  await requireApiPermission('u1', 'ticket', 'create');
+}
+async function inlineRecordCheckUpdate(richPerms: { general: { update: boolean }; creator?: { update: boolean } }, existing: { creator_id: string }) {
+  // ok: entity-only-permission-check-for-record-operation
+  await requireApiPermission('u1', 'ticket', 'update');
+  return richPerms.general.update || (richPerms.creator?.update && existing.creator_id === 'u1');
+}
+async function inlineRecordCheckDelete(richPerms: { general: { delete: boolean }; creator?: { delete: boolean } }, existing: { creator_id: string }) {
+  // ok: entity-only-permission-check-for-record-operation
+  await requireApiPermission('u1', 'ticket', 'delete');
+  return richPerms.general.delete || (richPerms.creator?.delete && existing.creator_id === 'u1');
+}
+async function selfOnlyOwnershipCheck(existing: { creator_id: string }) {
+  // ok: entity-only-permission-check-for-record-operation
+  await requireApiPermission('u1', 'ticket', 'update');
+  return existing.creator_id === 'u1';
 }
 async function entityOnlyRead() {
   // ok: entity-only-permission-check-for-record-operation

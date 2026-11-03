@@ -379,8 +379,10 @@ key or a mobile token alone cannot change either:
   plain text and stored as a bcrypt hash. Wrong attempts spend the
   `auth:password:confirm` bucket (10 per user per 5 minutes, keyed by user id
   like `auth:mfa:challenge`); a spent budget answers `429` with `Retry-After`.
-- The settings screen asks for it as well: its edit form has a "Current
-  password" field posted as `current_password`, and the generated Server Action
+- The settings screen asks for it as well: its edit form has one "Current
+  password" field posted as `current_password` (the change-password block holds
+  only "New Password" and "Confirm New Password"; it hands the new password to
+  the form once the two agree and shows a message while they differ), and the generated Server Action
   (`upsertSetting`) calls the same `confirmCredentialChange()` after the
   permission check and before the write. The form posts the new password in
   plain text and the action stores only the hash that function returns; a value

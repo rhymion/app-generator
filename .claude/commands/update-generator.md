@@ -64,6 +64,7 @@ Run in this order:
 16. `npm run check:generated`  — generated code matches templates/schema
 16a. `npm run check:security-matrix` — every cell of the security matrix (`code_generator/security_matrix.yaml`) has a test marker or an allowlist entry with a reason (see `docs/knowledge/security-test-matrix.md`); runs on the generated tree right after step 16
 16b. `npm run check:handwritten-routes` — every hand-written API route that writes has a permission check and rate limiting
+16c. `bash scripts/semgrep_scan.sh` — the project Semgrep rules: fixture test (`semgrep test`), then a scan of the sources and of a freshly generated app (any finding fails). Needs `semgrep` (`python3 -m pip install 'semgrep==1.183.0'`); the script exits 3 with a message when it is missing, so the step fails closed and is never skipped (see `docs/knowledge/ci-security-workflows.md`)
 17. `npm run test:e2e:cy:api`  — API Cypress specs only
 18. `npm run test:e2e:cy:ui`   — non-API Cypress specs (desktop, mobile and `cypress/e2e/auth/**`); the auth MFA spec needs `MOCK_GOOGLE_OAUTH_TEST=true` in `.env.test.local`, as the `e2e-tests` CI job sets it; keep `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` empty in the worktree's `.env.test.local` (a copied real value makes the auth specs fail with a 500 on `/api/auth/callback/google`) while leaving `MOCK_GOOGLE_OAUTH_TEST=true` set
 19. `npm audit --omit=dev --audit-level=high`

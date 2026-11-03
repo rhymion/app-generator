@@ -37,10 +37,12 @@ rules:
     languages: [typescript]
     severity: ERROR
     message: >-
-      Update and delete (and invalidate) depend on the record, not only on the
+      Update, delete and invalidate (the generated invalidate action is gated
+      by the delete permission) depend on the record, not only on the
       entity: the entity-level check ignores the creator/assignee scope and the
       organization of the row. Call requireRecordPermission() or
-      canAccessRecord() with the loaded record in the same function.
+      requireApiRecordPermission(), canAccessRecord() or
+      resolveRecordPermissions() with the loaded record in the same function.
     paths:
       exclude:
         - "*.test.ts"
@@ -51,6 +53,11 @@ rules:
           - pattern: requireEntityPermission($M, 'delete', ...)
           - pattern: canAccessEntity($M, 'update', ...)
           - pattern: canAccessEntity($M, 'delete', ...)
+          - pattern: requireEntityPermission($M, 'invalidate', ...)
+          - pattern: canAccessEntity($M, 'invalidate', ...)
+          - pattern: requireApiPermission($U, $M, 'update')
+          - pattern: requireApiPermission($U, $M, 'delete')
+          - pattern: requireApiPermission($U, $M, 'invalidate')
       - pattern-not-inside: |
           function $F(...) {
             ...
@@ -73,6 +80,59 @@ rules:
           ($...ARGS) => {
             ...
             canAccessRecord(...)
+            ...
+          }
+      - pattern-not-inside: |
+          function $F(...) {
+            ...
+            requireApiRecordPermission(...)
+            ...
+          }
+      - pattern-not-inside: |
+          ($...ARGS) => {
+            ...
+            requireApiRecordPermission(...)
+            ...
+          }
+      # The generated bulk routes resolve each loaded record inline (general flag,
+      # or the creator/assignee flag combined with the row's creator_id /
+      # assignee_id) instead of calling a helper.
+      - pattern-not-inside: |
+          function $F(...) {
+            ...
+            $R.creator?.update
+            ...
+          }
+      - pattern-not-inside: |
+          ($...ARGS) => {
+            ...
+            $R.creator?.update
+            ...
+          }
+      - pattern-not-inside: |
+          function $F(...) {
+            ...
+            $R.creator?.delete
+            ...
+          }
+      - pattern-not-inside: |
+          ($...ARGS) => {
+            ...
+            $R.creator?.delete
+            ...
+          }
+      # An x-self-only entity has no general/creator flags: the loaded row's
+      # creator_id compared with the actor is the sole (stricter) record gate.
+      - pattern-not-inside: |
+          function $F(...) {
+            ...
+            $R.creator_id === $A
+            ...
+          }
+      - pattern-not-inside: |
+          ($...ARGS) => {
+            ...
+            $R.creator_id === $A
             ...
           }
       # resolveRecordPermissions() is the record-level resolution the generated
