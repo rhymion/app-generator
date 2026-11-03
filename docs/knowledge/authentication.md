@@ -350,11 +350,21 @@ key or a mobile token alone cannot change either:
   plain text and stored as a bcrypt hash. Wrong attempts spend the
   `auth:password:confirm` bucket (10 per user per 5 minutes, keyed by user id
   like `auth:mfa:challenge`); a spent budget answers `429` with `Retry-After`.
-- An `email` that differs from the stored address (compared without case or
-  surrounding spaces) needs `current_password` too, with the same status codes
-  and the same budget. Sending the stored address back unchanged asks for
-  nothing. The settings page does not ask for the current password when the
-  email changes: that path is not covered yet.
+- The settings screen asks for it as well: its edit form has a "Current
+  password" field posted as `current_password`, and the generated Server Action
+  (`upsertSetting`) calls the same `confirmCredentialChange()` after the
+  permission check and before the write. The form posts the new password in
+  plain text and the action stores only the hash that function returns; a value
+  that did not pass the check is never written. A refusal comes back as a
+  `VALIDATION` failure on the `current_password` field with the message keys
+  `Errors.currentPasswordRequired`, `Errors.currentPasswordIncorrect` or
+  `Errors.currentPasswordRateLimited`, not as a thrown error.
+- A changed email address needs the current password too, on the REST routes
+  and in the settings Server Action: the submitted address is compared with the
+  stored one ignoring case and surrounding spaces, and a different address is
+  handled like a password change (HTTP 400 without `current_password`, 403 when
+  wrong, 429 when the budget is spent). Sending the stored address back
+  unchanged asks for nothing. The stored password hash stays as it is.
 - `mfa_enabled: false` on an account that has MFA on needs `mfa_code`, a current
   TOTP or recovery code (HTTP 400 when missing, 403 when invalid). It runs
   `disableMfa()`, so the secret and the recovery codes are cleared exactly as on
