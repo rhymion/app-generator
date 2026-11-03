@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireDualAuth, handleApiError } from '@/lib/api-auth';
 import { readGeneratedOpenApiDocument } from '@/lib/openapi/document';
+import { filterOpenApiDocumentForUser } from '@/lib/openapi/filter';
 
 /**
  * GET /api/openapi.json (Issue #769)
@@ -14,13 +15,14 @@ import { readGeneratedOpenApiDocument } from '@/lib/openapi/document';
  * SWAGGER_UI_ENABLED.
  *
  * Auth: API key (X-API-Key / Authorization: Bearer) or a signed-in session
- * — same dual-auth resolution as the approval_request action routes. No
- * further permission check: the document reveals only the schema shape,
- * not row data, so any authenticated caller may read it.
+ * — same dual-auth resolution as the approval_request action routes. The
+ * document is limited to the entities the caller may read (an API key follows
+ * its owner's permissions); a caller who may read every entity receives the
+ * full document. See lib/openapi/filter.ts.
  */
 export async function GET(request: NextRequest) {
   try {
-    await requireDualAuth(request);
+    const { userId } = await requireDualAuth(request);
     const document = readGeneratedOpenApiDocument();
     if (!document) {
       return NextResponse.json(
@@ -28,7 +30,7 @@ export async function GET(request: NextRequest) {
         { status: 404 },
       );
     }
-    return NextResponse.json(document);
+    return NextResponse.json(await filterOpenApiDocumentForUser(document, userId));
   } catch (error) {
     return handleApiError(error);
   }

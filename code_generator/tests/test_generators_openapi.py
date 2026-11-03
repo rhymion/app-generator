@@ -413,3 +413,62 @@ def test_write_only_fields_are_marked_in_record_and_request_schemas():
 def test_no_write_only_marking_without_write_only_fields():
     schemas = build_entity_openapi(_base_ctx())['schemas']
     assert 'writeOnly' not in str(schemas)
+
+
+# ---------------------------------------------------------------------------
+# Issue #1161: GET /api/openapi.json is filtered per caller by lib/openapi/
+# filter.ts. The filter treats a tag as an entity when the collection path
+# /api/<tag> exists, and maps every other tag in NON_ENTITY_TAGS. These tests
+# lock the generator output to that contract: a new non-entity tag must be
+# added to the filter's table in the same change.
+# ---------------------------------------------------------------------------
+
+# Mirrors NON_ENTITY_TAGS in lib/openapi/filter.ts.
+FILTER_NON_ENTITY_TAGS = {'mention'}
+
+
+def test_every_tag_is_an_entity_collection_or_a_listed_non_entity_tag():
+    specs = [
+        build_entity_openapi(_base_ctx(parent='widget', parent_pascal='Widget')),
+        build_entity_openapi(_base_ctx(parent='gadget', parent_pascal='Gadget')),
+    ]
+    doc = assemble_openapi_document(specs, mention_search=True)
+    for tag in (t['name'] for t in doc['tags']):
+        assert f'/api/{tag}' in doc['paths'] or tag in FILTER_NON_ENTITY_TAGS, (
+            f'tag {tag!r} is neither an entity collection nor listed in NON_ENTITY_TAGS '
+            '(lib/openapi/filter.ts); list it there or the filter hides it from every caller'
+        )
+
+
+def test_non_entity_tags_have_no_collection_path():
+    doc = assemble_openapi_document([build_entity_openapi(_base_ctx())], mention_search=True)
+    assert '/api/mention' not in doc['paths']
+    assert '/api/mention/users' in doc['paths']
+
+
+def test_entity_schemas_do_not_reference_other_entity_schemas():
+    """The filter removes an entity's schemas without rewriting references in
+    other schemas; this holds only while no entity schema $refs another."""
+    specs = [
+        build_entity_openapi(_base_ctx(parent='widget', parent_pascal='Widget')),
+        build_entity_openapi(_base_ctx(parent='gadget', parent_pascal='Gadget')),
+    ]
+    doc = assemble_openapi_document(specs, mention_search=True)
+    shared = {'Error', 'BulkResult', 'ImportResult', 'MentionUserOption'}
+    for name, schema in doc['components']['schemas'].items():
+        refs = {r.rsplit('/', 1)[-1] for r in _collect_refs(schema)}
+        assert refs <= shared | {name}, f'{name} references {sorted(refs - shared - {name})}'
+
+
+def _collect_refs(node) -> list:
+    found: list = []
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if key == '$ref' and isinstance(value, str):
+                found.append(value)
+            else:
+                found.extend(_collect_refs(value))
+    elif isinstance(node, list):
+        for item in node:
+            found.extend(_collect_refs(item))
+    return found

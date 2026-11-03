@@ -86,6 +86,11 @@ no repository secret is used), and runs four checks. Everything is uploaded as t
 Triaged false positives are recorded with a reason in `.zap/rules.tsv` (ZAP) and
 `schemathesis.toml` (Schemathesis).
 
+`/api/openapi.json` returns only the entities the caller may read (`lib/openapi/filter.ts`).
+The ZAP API scan and Schemathesis therefore assume the seeded test admin API key holds
+read permission on every entity: with it they receive the full document. A key with fewer
+permissions would make both scans cover fewer endpoints without any failure.
+
 Criteria for making the ZAP scans fail on High findings: at least four consecutive
 weekly runs whose High alerts are all either fixed or listed in `.zap/rules.tsv` with
 a reason. Then change `-I` to a `FAIL` entry for each High rule id in `.zap/rules.tsv`

@@ -306,7 +306,7 @@ Chapter V17 (WebRTC) does not apply: the generated app has no real-time media, T
 | V13.4.2 | 2 | generator | Swagger UI gated on SWAGGER_UI_ENABLED; reset-caches route returns 404 without TEST_RESET_TOKEN; poweredByHeader false | none (no direct test of the production-off behavior) | - | - |
 | V13.4.3 | 2 | framework | Next.js serves no directory listing; only files under public/ by exact path | none | #1234 | next 16.4.2 (package-lock.json); public folder docs |
 | V13.4.4 | 2 | environment | Next.js route handlers answer only their exported methods; the platform front end filters TRACE | none | #1234 | - |
-| V13.4.5 | 2 | gap | The OpenAPI document is served to any authenticated user; the Dockerfile HEALTHCHECK probes /api/auth/csrf, which Auth.js serves without a session | code_generator/tests/test_dockerfile_generation.py | #1161 | - |
+| V13.4.5 | 2 | generator | GET /api/openapi.json and the Swagger UI that reads it return only the entities the caller may read (lib/openapi/filter.ts); the Dockerfile HEALTHCHECK probes /api/auth/csrf, which Auth.js serves without a session | lib/openapi/filter.test.ts, cypress/e2e/api/openapi_permission_filter.cy.ts, code_generator/tests/test_generators_openapi.py, code_generator/tests/test_dockerfile_generation.py | - | - |
 
 ## V14 Data Protection
 
