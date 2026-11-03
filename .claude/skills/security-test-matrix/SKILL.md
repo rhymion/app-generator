@@ -1,28 +1,43 @@
 ---
-name: org-scoped-mutation-path-idor-checklist
+name: security-test-matrix
 description: |
-  When adding or reviewing a new mutation path (create/update/delete server
-  action, API route, or import handler) on an org-scoped entity
-  (should_filter_by_org / organization_id present), read paths
-  (list/search/getDetail/export) commonly enforce the org-membership filter
-  via buildAccessWhere/findFirst, but mutation paths are easy to leave on a
-  bare findUnique/findMany fetch — organization_id passes through
-  lib/authz.ts's RecordContext index signature but resolveRecordPermissions() never
-  checks it, so general.update/general.delete=true silently lets one org
-  overwrite or delete another org's record (IDOR). Trigger when writing or
-  reviewing a new generator template/mutation path for an org-scoped entity,
-  when a task description mentions "org isolation", "organization_id filter",
-  "cross-org", "IDOR", "should_filter_by_org", or when auditing
-  create/update/delete/import code paths for multi-tenant boundary
-  enforcement.
-  Do NOT use for: read-path org filtering (list/search/getDetail/export) that
-  already routes through buildAccessWhere/findFirst — those are the CLEAN
-  reference implementation this checklist compares against, not gap
-  candidates. General authz/permission-role design unrelated to org
-  membership. Non-multi-tenant projects with no organization_id concept.
+  Use when adding or changing a route, Server Action, import/export path or other
+  mutation path, or when writing or reviewing security tests. Describes the security
+  test matrix (operation x actor/case x foreign-key shape), how to claim a cell with a
+  `security-cell:` marker, which helpers to use, the foreign-key reachability rule, and
+  that every denial must be verified by re-reading the database. Also holds the
+  org-scoped mutation-path IDOR checklist (formerly its own skill): mutation paths on an
+  organization-scoped entity must filter by organization in the initial lookup.
+  Trigger words: "security test", "permission denied", "cross-org", "IDOR",
+  "should_filter_by_org", "organization_id filter", "check:security-matrix".
+  Do NOT use for: read-path org filtering that already goes through buildAccessWhere,
+  general role design, or projects with no organization_id.
 ---
 
-# org-scoped-mutation-path-idor-checklist
+# Security test matrix
+
+Every route and Server Action is a row; every security case is a column. A cell is covered when a test claims it
+with a comment `// security-cell: entity=<e> operation=<op> case=<case> [fk_shape=<shape>]`, or is listed with a
+reason in `code_generator/security_matrix_allowlist.yaml`. `npm run check:security-matrix` fails otherwise. The matrix
+itself is data in `code_generator/security_matrix.yaml`; full description in `docs/knowledge/security-test-matrix.md`.
+
+## Rules
+
+1. **Every new route or action gets tests**: permission denied (403), another organization (404, organization-scoped
+   entities) and invalid input; add a `case` to the matrix YAML for a new kind of input rather than an ad-hoc test.
+2. **Assert the explicit status** the matrix declares (`denied_status`), never a range such as `>= 400`.
+3. **Re-read the database** after every denied write (each row of a bulk request) and assert nothing changed.
+4. **Foreign-key reachability**: a write that carries a foreign key is tested per `fk_shape` against a row the actor
+   cannot reach (other organization, no read permission, outside a creator/assignee scope).
+5. **Hand-written code** uses the shipped helpers `expectDeniedFor`, `seedActorWithoutRole`,
+   `seedActorFromOtherOrganization` (`docs/knowledge/security-test-helpers.md`); generated specs already carry markers.
+6. A test that starts failing after a cell is filled is a vulnerability candidate: triage it as one, file it as its
+   own Issue with severity, do not just patch the test.
+7. Gate: `npm run check:security-matrix`, `npm run check:generated`, `npm run check:handwritten-routes`.
+
+
+
+## Org-scoped mutation paths: IDOR checklist
 
 ## North Star
 
