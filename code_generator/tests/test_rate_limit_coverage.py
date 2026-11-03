@@ -73,7 +73,6 @@ _ACTION_UNLIMITED = {
     'lib/dashboard/readable-entities.ts': 'read-only list of entities the caller may read',
     'lib/organization/getters_associated.ts': 'read-only list of the caller own organizations',
     'lib/compliance/anonymize_user.ts': 'administrator only, one call per erased user',
-    'lib/setting/password-actions.ts': 'password change verifies the current password, which is limited by the credential bucket',
 }
 
 

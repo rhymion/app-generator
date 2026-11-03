@@ -138,10 +138,10 @@ Chapter V17 (WebRTC) does not apply: the generated app has no real-time media, T
 | V6.1.2 | 2 | gap | No context-specific word list or policy | none | #1280 | - |
 | V6.1.3 | 2 | generator | docs/knowledge/authentication.md lists the pathways (credentials, Google, mobile token, API key); required strength per pathway is not stated | code_generator/tests/test_api_route_authentication_enumeration.py (routes call an auth helper) | - | - |
 | V6.2.1 | 1 | gap | Registration checks only that a password is present; no minimum length | none | #1125 | - |
-| V6.2.2 | 1 | generator | components/setting/password.tsx, lib/setting/password-actions.ts, lib/auth/credential-confirmation.ts | lib/auth/credential-confirmation.test.ts, cypress/e2e/api/setting_credential_confirmation.cy.ts | - | - |
-| V6.2.3 | 1 | generator | Current password is verified before a change (lib/setting/password-actions.ts) | lib/auth/credential-confirmation.test.ts, cypress/e2e/api/setting_credential_confirmation.cy.ts | - | - |
+| V6.2.2 | 1 | generator | components/setting/password.tsx, lib/auth/credential-confirmation.ts | lib/auth/credential-confirmation.test.ts, cypress/e2e/api/setting_credential_confirmation.cy.ts | - | - |
+| V6.2.3 | 1 | generator | Current password is verified before a change (lib/auth/credential-confirmation.ts) | lib/auth/credential-confirmation.test.ts, cypress/e2e/api/setting_credential_confirmation.cy.ts | - | - |
 | V6.2.4 | 1 | gap | No common-password list | none | #1280 | - |
-| V6.2.5 | 1 | generator | No composition rules exist (read in register route and password-actions) | none | #1125 | - |
+| V6.2.5 | 1 | generator | No composition rules exist (read in register route and confirmCredentialChange) | none | #1125 | - |
 | V6.2.6 | 1 | generator | type=password on login, register and setting inputs | none | - | - |
 | V6.2.7 | 1 | generator | No onPaste handler and no autocomplete=off | none | - | - |
 | V6.2.8 | 1 | gap | bcrypt is applied to the raw string and reads only 72 bytes; longer passwords are truncated silently | lib/auth/password-check.test.ts | #1280 | - |
@@ -188,7 +188,7 @@ Chapter V17 (WebRTC) does not apply: the generated app has no real-time media, T
 | V7.4.3 | 2 | gap | Password change and MFA changes do not revoke other sessions | none | #1127 | - |
 | V7.4.4 | 2 | generator | signOut() is reachable from the header and sidebar slots on every authenticated page | none | - | - |
 | V7.4.5 | 2 | gap | No administrator session termination for web users | none | #1127 | - |
-| V7.5.1 | 2 | generator | Password change and MFA disable require the current credential, and so does an email change: `confirmCredentialChange()` in lib/auth/credential-confirmation.ts asks for `current_password` on PUT /api/setting/:id and PUT /api/setting/bulk. The settings page Server Action path does not ask for the current password when the email changes | lib/auth/credential-confirmation.test.ts, cypress/e2e/api/setting_credential_confirmation.cy.ts | #1285 | - |
+| V7.5.1 | 2 | generator | Password change and MFA disable require the current credential, and so does an email change: `confirmCredentialChange()` in lib/auth/credential-confirmation.ts asks for `current_password` on PUT /api/setting/:id and PUT /api/setting/bulk, and the settings screen's Server Action asks for it through the same function when the password or the email changes | lib/auth/credential-confirmation.ts, lib/auth/credential-confirmation.test.ts, cypress/e2e/api/setting_credential_confirmation.cy.ts, cypress/e2e/auth/settings_credential_change_requires_password.cy.ts, cypress/e2e/auth/settings_email_change_requires_password.cy.ts | #1285 | - |
 | V7.5.2 | 2 | gap | Only mobile sessions are listable and revocable, by their owner | cypress/e2e/api/mobile_auth.cy.ts | #1127 | - |
 | V7.6.1 | 2 | generator | Relying-party and identity-provider session behavior is documented in docs/knowledge/authentication.md: sign-out ends the app cookie only | none | - | - |
 | V7.6.2 | 2 | generator | Sessions are created only by an explicit login submit, OAuth button or mobile token request | cypress/e2e/auth.cy.ts, cypress/e2e/api/mobile_auth.cy.ts | - | - |
