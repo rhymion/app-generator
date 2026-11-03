@@ -24,10 +24,19 @@ while [ $# -gt 0 ]; do
   shift
 done
 
+# Fail closed: a missing semgrep must never look like a clean scan (or be skipped).
+if ! command -v semgrep >/dev/null 2>&1; then
+  echo "semgrep is not installed, so the project Semgrep rules cannot run. Install it (python3 -m pip install 'semgrep==1.183.0', the version CI pins) and rerun. This step is part of the update-generator Completion gate and is never skipped." >&2
+  exit 3
+fi
+
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 mkdir -p "$out_dir"
 out_dir="$(cd "$out_dir" && pwd)"
 export SEMGREP_SEND_METRICS=off
+
+# 0. The rule fixtures: every rule must hit its triggering fixtures and stay quiet on the others.
+(cd "$repo/.semgrep" && semgrep test --metrics=off .)
 
 # 1. Sources: tracked files of this repository.
 own_rc=0
