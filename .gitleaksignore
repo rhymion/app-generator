@@ -21,3 +21,5 @@ cebfd47bce04dec0846eba6955d46ad463883308:scripts/seed-its.ts:generic-api-key:28
 acae5a7a0acafe2ae0c1ba032499d23867b62513:.env.test:generic-api-key:12
 # throwaway test-environment value; removed from the tree, history only
 496a98d363485bc8d30363c516f80c073ff329b8:.env.test:generic-api-key:12
+# fixed non-production admin key seeded by db:seed-baseline when NODE_ENV is not production (dynamic scan workflow)
+32d5b3131978143275bd312dbceee82ddf78cc6f:.github/workflows/dynamic-scans.yml:generic-api-key:35

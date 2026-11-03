@@ -66,6 +66,40 @@ Scorecard API. It is report-only. Its job holds `security-events: write` and
 stays `contents: read`. A check that scores below 5 is either opened as a
 follow-up Issue or recorded as accepted, with a reason, on the tracking Issue.
 
+## Dynamic Scans workflow
+
+`.github/workflows/dynamic-scans.yml` runs weekly (Monday) and on demand. It builds
+and starts a generated app on the disposable test database, as the end-to-end job
+does, fetches `/api/openapi.json` with the seeded test admin API key (the fixed
+default of `scripts/seed-baseline-credentials.ts`, valid only under `NODE_ENV=test`;
+no repository secret is used), and runs four checks. Everything is uploaded as the
+`dynamic-scan-results` artifact and summarized in the job summary
+(`scripts/summarize_dynamic_scans.py`).
+
+| Check | Blocks? | What it does |
+|---|---|---|
+| OWASP ZAP baseline | no | Passive scan of the running app (`zap-baseline.py`, image pinned by digest). |
+| OWASP ZAP API scan | no | `zap-api-scan.py` driven by the generated OpenAPI document, sending the API key. |
+| Schemathesis | no | Fuzzes the API against the same document; the summary counts "server error" and "schema violation" failures. |
+| Nuclei | yes | Runs every template in `security/nuclei/templates`; any match fails the job. |
+
+Triaged false positives are recorded with a reason in `.zap/rules.tsv` (ZAP) and
+`schemathesis.toml` (Schemathesis).
+
+Criteria for making the ZAP scans fail on High findings: at least four consecutive
+weekly runs whose High alerts are all either fixed or listed in `.zap/rules.tsv` with
+a reason. Then change `-I` to a `FAIL` entry for each High rule id in `.zap/rules.tsv`
+and drop `-I`. Schemathesis stays report-only until the same four runs show no
+unexplained "server error" failure; then remove `continue-on-error`.
+
+### Nuclei templates
+
+`security/nuclei/README.md` explains how to add a template. Each template matches a
+condition that must not occur (a missing default security header, an authenticated route
+that answers anonymously, a reachable `.env` or source map). `security/nuclei/check_templates_fire.sh`
+starts a deliberately broken stand-in server (`security/nuclei/broken_app.py`) and fails
+unless every template reports a finding against it.
+
 ## Security Checks workflow
 
 `.github/workflows/security-checks.yml` runs on pull requests and on pushes to
@@ -94,11 +128,21 @@ They are verified with
 
 ### Semgrep
 
-- **Project rules** live in `.semgrep/rules.yml` with test cases in
-  `.semgrep/rules.ts` and `.semgrep/rules.tsx` (`cd .semgrep && semgrep test .`).
-  They are blocking from the start because the tree has no findings: raw
-  `$queryRawUnsafe` / `$executeRawUnsafe`, `dangerouslySetInnerHTML`, and
-  `eval()` / `new Function()`.
+- **Project rules** live in `.semgrep/rules.yml` and `.semgrep/use_server_rules.yml`
+  (rules that need the `'use server'` directive at the top of the file) with test
+  cases in the files of the same name (`.semgrep/rules.ts`, `.semgrep/rules.tsx`,
+  `.semgrep/use_server_rules.ts`; run `cd .semgrep && semgrep test .`). Each rule
+  has a fixture that triggers it and one that does not. They are blocking from the
+  start because the tree has no findings: raw `$queryRawUnsafe` / `$executeRawUnsafe`,
+  `dangerouslySetInnerHTML`, `eval()` / `new Function()`, an entity-only
+  `requireEntityPermission` / `canAccessEntity` check for `update` or `delete` in a
+  function with no `requireRecordPermission` / `canAccessRecord` call (test files are
+  exempt), a `'use server'` function that writes through Prisma with no
+  `getSessionUserIdOrThrow` / `requireEntityPermission` / `requireRecordPermission` /
+  `requireDualAuth` / `auth` call, public object storage (`access: 'public'`, public
+  ACLs, `allUsers`), a secret-named value compared with `==` / `===` / `!=` / `!==`,
+  and logging a request body or headers. A deliberate exception takes an inline
+  `// nosemgrep: <rule-id>` with the reason.
 - **Registry packs** (`p/typescript`, `p/nextjs`, `p/owasp-top-ten`) are
   report-only. Their SARIF files are uploaded as the `semgrep-results` artifact
   and the counts are written to the job summary. They become blocking, for

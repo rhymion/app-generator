@@ -25,6 +25,14 @@ Task: $ARGUMENTS
 6. If you discover a new rule or useful skill, update the rule/skill documentation.
 7. Read the docs before acting: at minimum CLAUDE.md, and relevant `docs/knowledge/` files.
 
+## Security tests
+
+A change that adds or alters a route, Server Action, import/export path or other mutation path needs security tests
+in the same change. Follow the `security-test-matrix` skill (`.claude/skills/security-test-matrix/SKILL.md`): cover
+permission denied (403), another organization (404) and invalid input for the new path, claim each cell with a
+`security-cell:` marker, and prove a denied write left the database unchanged. The completion gate below blocks the
+change when a cell of the matrix has neither a test nor a reasoned allowlist entry.
+
 ## Completion gate
 
 Run in this order:
@@ -55,6 +63,7 @@ Run in this order:
 15. `npm run test:e2e:build`   — docker:up:test + generate-code + db:push + db:generate + db:seed-tenant + build
 16. `npm run check:generated`  — generated code matches templates/schema
 16a. `npm run check:security-matrix` — every cell of the security matrix (`code_generator/security_matrix.yaml`) has a test marker or an allowlist entry with a reason (see `docs/knowledge/security-test-matrix.md`); runs on the generated tree right after step 16
+16b. `npm run check:handwritten-routes` — every hand-written API route that writes has a permission check and rate limiting
 17. `npm run test:e2e:cy:api`  — API Cypress specs only
 18. `npm run test:e2e:cy:ui`   — non-API Cypress specs (desktop, mobile and `cypress/e2e/auth/**`); the auth MFA spec needs `MOCK_GOOGLE_OAUTH_TEST=true` in `.env.test.local`, as the `e2e-tests` CI job sets it; keep `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` empty in the worktree's `.env.test.local` (a copied real value makes the auth specs fail with a 500 on `/api/auth/callback/google`) while leaving `MOCK_GOOGLE_OAUTH_TEST=true` set
 19. `npm audit --omit=dev --audit-level=high`

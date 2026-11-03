@@ -73,8 +73,8 @@ Chapter V17 (WebRTC) does not apply: the generated app has no real-time media, T
 | V2.2.3 | 2 | generator | docs/knowledge/same-entity-validation-socket.md (hand-written per relation, not generic) | none | #1271 | - |
 | V2.3.1 | 1 | generator | state_transitions.ts.jinja2 (assertTransitionAllowed); lib/approval_request/order-check.ts | code_generator/tests/test_state_transition_gatekeeper.py, lib/approval_request/actions.test.ts, cypress/e2e/api/multi_stage_approval_order_reached.cy.ts | #1230 | - |
 | V2.3.2 | 2 | gap | Global limits are documented (docs/knowledge/input-validation-rules-and-limits.md); no per-user business limit exists to enforce | none | #1270 | - |
-| V2.3.3 | 2 | generator | Serializable $transaction in service.ts.jinja2 and submit_for_approval.ts.jinja2 | none | #1272, #735 | - |
-| V2.3.4 | 2 | generator | x-reservation templates with Serializable isolation | none | #1272 | - |
+| V2.3.3 | 2 | generator | Serializable $transaction in service.ts.jinja2 and submit_for_approval.ts.jinja2 | generated reservation spec case (5) (code_generator/templates/test_reservation_spec.cy.ts.jinja2): a failing second line leaves no allocation and no reserved quantity; pinned by code_generator/tests/test_reservation_atomicity_concurrency_tests.py | #1272, #735 | - |
+| V2.3.4 | 2 | generator | x-reservation templates with Serializable isolation | generated reservation spec case (6): two simultaneous requests for stock that fits only one end with one 201 and one 409 and a single claim; pinned by code_generator/tests/test_reservation_atomicity_concurrency_tests.py | #1272 | - |
 | V2.4.1 | 2 | generator | lib/rate-limit/{index,redis,in-memory,client-ip,action}.ts; generated REST routes return 429; generated Server Actions share the api:write bucket | lib/rate-limit/redis.test.ts, in-memory.test.ts, client-ip.test.ts, action.test.ts, code_generator/tests/test_rate_limit_coverage.py | #1092, #1125 | - |
 
 ## V3 Web Frontend Security
@@ -174,15 +174,15 @@ Chapter V17 (WebRTC) does not apply: the generated app has no real-time media, T
 
 | ID | Level | Status | Covered by | Verified by | Gap Issue | Source and version |
 |----|-------|--------|------------|-------------|-----------|--------------------|
-| V7.1.1 | 2 | gap | No session maxAge or updateAge is set; docs cite a JWT_MAX_AGE variable that no code reads | none | #1284 | - |
-| V7.1.2 | 2 | gap | No concurrent-session policy | none | #1284, #1127 | - |
+| V7.1.1 | 2 | generator | Web session maxAge and updateAge are configurable (SESSION_MAX_AGE_SECONDS, SESSION_UPDATE_AGE_SECONDS) and documented in docs/knowledge/authentication.md; the absolute lifetime is optional (SESSION_ABSOLUTE_MAX_AGE_SECONDS, off by default; V7.3.2) | lib/session-policy.test.ts | - | - |
+| V7.1.2 | 2 | gap | No concurrent-session policy; the limitation is documented in docs/knowledge/authentication.md | none | #1284, #1127 | - |
 | V7.1.3 | 2 | n/a | The app is the only session creator; no federated session coordination | none | - | - |
 | V7.2.1 | 1 | generator | proxy.ts and auth.ts verify sessions server-side; lib/api-auth.ts for mobile JWT and API key | code_generator/tests/test_api_route_authentication_enumeration.py, auth.jwt-erased.test.ts, lib/api-auth.test.ts | - | - |
 | V7.2.2 | 1 | generator | Auth.js JWT for the web, lib/mobile-auth.ts signed access tokens (15 minutes); API keys are machine auth, stored only as a SHA-256 hash and shown once when issued (docs/knowledge/api-key-hashing.md) | cypress/e2e/api/mobile_auth.cy.ts, cypress/e2e/api/api_key_storage.cy.ts, lib/api-key.test.ts, lib/api-auth.test.ts | #1124 | - |
 | V7.2.3 | 1 | generator | lib/mobile-auth.ts refresh token is randomBytes(32) stored as HMAC-SHA256; web sessions are self-contained JWTs | cypress/e2e/api/mobile_auth.cy.ts | - | - |
 | V7.2.4 | 1 | gap | A new web JWT is minted at sign-in but the old one stays valid (stateless); mobile refresh rotation is covered | cypress/e2e/api/mobile_auth.cy.ts (rotation) | #1127 | - |
-| V7.3.1 | 2 | gap | No web inactivity timeout | none | #1284 | - |
-| V7.3.2 | 2 | gap | No configured absolute web lifetime | none | #1284 | - |
+| V7.3.1 | 2 | generator | SESSION_MAX_AGE_SECONDS is the web inactivity timeout (the cookie is refreshed only while the session is used) | lib/session-policy.test.ts | - | - |
+| V7.3.2 | 2 | generator | SESSION_ABSOLUTE_MAX_AGE_SECONDS (opt-in, unset by default) ends a web session that is older than the limit since sign-in; with it unset an active session still renews without limit (docs/knowledge/authentication.md) | lib/session-policy.test.ts, auth.jwt-erased.test.ts | - | - |
 | V7.4.1 | 1 | gap | Web sign-out clears the cookie but the JWT stays valid; mobile logout revokes the session | cypress/e2e/api/mobile_auth.cy.ts (mobile revoke) | #1127 | - |
 | V7.4.2 | 1 | gap | Only erasure ends sessions (lib/compliance/anonymize_user.ts); no user disable state | lib/compliance/anonymize_user.test.ts, auth.jwt-erased.test.ts | #1127 | - |
 | V7.4.3 | 2 | gap | Password change and MFA changes do not revoke other sessions | none | #1127 | - |
@@ -190,7 +190,7 @@ Chapter V17 (WebRTC) does not apply: the generated app has no real-time media, T
 | V7.4.5 | 2 | gap | No administrator session termination for web users | none | #1127 | - |
 | V7.5.1 | 2 | generator | Password change and MFA disable require the current credential, and so does an email change: `confirmCredentialChange()` in lib/auth/credential-confirmation.ts asks for `current_password` on PUT /api/setting/:id and PUT /api/setting/bulk. The settings page Server Action path does not ask for the current password when the email changes | lib/auth/credential-confirmation.test.ts, cypress/e2e/api/setting_credential_confirmation.cy.ts | #1285 | - |
 | V7.5.2 | 2 | gap | Only mobile sessions are listable and revocable, by their owner | cypress/e2e/api/mobile_auth.cy.ts | #1127 | - |
-| V7.6.1 | 2 | gap | Identity-provider and relying-party session behavior is not documented | none | #1284 | - |
+| V7.6.1 | 2 | generator | Relying-party and identity-provider session behavior is documented in docs/knowledge/authentication.md: sign-out ends the app cookie only | none | - | - |
 | V7.6.2 | 2 | generator | Sessions are created only by an explicit login submit, OAuth button or mobile token request | cypress/e2e/auth.cy.ts, cypress/e2e/api/mobile_auth.cy.ts | - | - |
 
 ## V8 Authorization
@@ -220,8 +220,8 @@ Chapter V17 (WebRTC) does not apply: the generated app has no real-time media, T
 | V9.1.3 | 1 | generator | The key is the fixed AUTH_SECRET; no jku, jwk or kid lookup exists | none | - | - |
 | V9.2.1 | 1 | generator | jose enforces exp; mobile access tokens expire after 15 minutes | none | - | - |
 | V9.2.2 | 2 | generator | verifyMobileAccessToken rejects payload.type other than mobile_access | cypress/e2e/api/mobile_auth.cy.ts (token without type) | - | - |
-| V9.2.3 | 2 | gap | Mobile access tokens carry no aud or iss claim | none | #1289 | - |
-| V9.2.4 | 2 | gap | One key signs web and mobile tokens, separated only by the type claim | none | #1289 | - |
+| V9.2.3 | 2 | generator | signMobileAccessToken sets iss and aud; verifyMobileAccessToken requires both (lib/mobile-auth.ts) | lib/mobile-auth.test.ts (wrong audience, wrong issuer, missing claims) | - | - |
+| V9.2.4 | 2 | generator | The mobile audience is checked on every verification, so a token minted for another audience is rejected; the web session JWT carries no mobile iss or aud. One AUTH_SECRET still signs both kinds (docs/knowledge/cryptographic-inventory-and-key-management.md) | lib/mobile-auth.test.ts (wrong audience) | - | - |
 
 ## V10 OAuth and OIDC
 
@@ -327,7 +327,7 @@ Chapter V17 (WebRTC) does not apply: the generated app has no real-time media, T
 | ID | Level | Status | Covered by | Verified by | Gap Issue | Source and version |
 |----|-------|--------|------------|-------------|-----------|--------------------|
 | V15.1.1 | 1 | gap | CI audit job gates high and critical advisories; no remediation time frames (docs/knowledge/dependency-and-resource-controls.md) | none | #1320 | - |
-| V15.1.2 | 2 | gap | package-lock.json and npm ci; trusted sources documented in docs/knowledge/dependency-and-resource-controls.md; no SBOM | none | #1320 | - |
+| V15.1.2 | 2 | generator | package-lock.json and npm ci; trusted sources documented in docs/knowledge/dependency-and-resource-controls.md; .github/workflows/sbom.yml generates a CycloneDX SBOM of the production npm dependencies (Python dependencies are not included) | code_generator/tests/test_sbom_workflow.py | - | - |
 | V15.1.3 | 2 | generator | Resource-demanding functions and their limits are listed in docs/knowledge/dependency-and-resource-controls.md | none | - | - |
 | V15.2.1 | 1 | generator | CI audit job (npm audit, pip-audit) blocks on high and critical | CI job audit (.github/workflows/ci.yml); gate steps 19 and 20 | #1074 | - |
 | V15.2.2 | 2 | generator | Rate-limit buckets, MAX_PAGE_SIZE, import limits, upload quota | lib/rate-limit/redis.test.ts, lib/rate-limit/in-memory.test.ts, lib/_pagination.test.ts, code_generator/tests/test_rate_limit_coverage.py | - | - |
@@ -350,9 +350,9 @@ Chapter V17 (WebRTC) does not apply: the generated app has no real-time media, T
 | V16.2.3 | 2 | generator | Permitted log sinks are listed in docs/knowledge/logging-inventory.md; application code has no other sink (lint, check:generated) | none | - | - |
 | V16.2.4 | 2 | gap | Console output formats are mixed | none | #1237 | - |
 | V16.2.5 | 2 | generator | Emails are kept out of audit_log metadata and auth logs; slow-query parameters are redacted | lib/auth/audit-no-pii.test.ts, lib/prisma-slow-query.test.ts | #1237 | - |
-| V16.3.1 | 2 | generator | Sign-in, sign-out, rejects and MFA events are audited. On REST routes every 401 (invalid or missing API key, failed mobile sign-in or token) writes a `[security-event]` log line. A wrong password on the web form and a failed Server Action are not yet recorded | lib/api-auth.test.ts, cypress/e2e/audit_log.cy.ts (sign-in only) | #1307 | - |
-| V16.3.2 | 2 | generator | Authorization denials on REST routes (403, `PERMISSION_DENIED`) write a `[security-event]` log line. Denials in Server Actions are not yet recorded | lib/api-auth.test.ts | #1307 | - |
-| V16.3.3 | 2 | generator | The security events are listed in docs/knowledge/logging-inventory.md (`auth.rejected`, `authz.denied`, `rate_limit.hit`); a rate-limit hit on a REST route (429) is logged. Control bypass attempts beyond these are not logged | lib/api-auth.test.ts | #1307 | - |
+| V16.3.1 | 2 | generator | Sign-in, sign-out, rejects and MFA events are audited. On REST routes every 401 (invalid or missing API key, failed mobile sign-in or token) writes a `[security-event]` log line, and a refused web sign-in (missing or wrong credentials, wrong second-factor code) writes one from `auth.ts` | lib/api-auth.test.ts, lib/security-event-web.test.ts, cypress/e2e/audit_log.cy.ts (sign-in only) | #1307 | - |
+| V16.3.2 | 2 | generator | Authorization denials on REST routes (403, `PERMISSION_DENIED`) write a `[security-event]` log line. Denials raised by `requireEntityPermission` and `requireRecordPermission` are logged for Server Actions too; denials thrown by hand in an action are not yet recorded | lib/api-auth.test.ts, lib/security-event-web.test.ts | #1307 | - |
+| V16.3.3 | 2 | generator | The security events are listed in docs/knowledge/logging-inventory.md (`auth.rejected`, `authz.denied`, `rate_limit.hit`); a rate-limit hit on a REST route (429) is logged. Control bypass attempts beyond these are not logged | lib/api-auth.test.ts, lib/security-event-web.test.ts | #1307 | - |
 | V16.3.4 | 2 | generator | handleApiError logs unexpected errors; Redis rate-limit failures and startup failures are logged | lib/api-auth.test.ts, lib/rate-limit/redis.test.ts | - | - |
 | V16.4.1 | 2 | gap | Only some log lines are JSON-encoded; others pass raw values | none | #1237 | - |
 | V16.4.2 | 2 | generator | audit_log is append-only (Prisma guard, database trigger, restricted role, digest chain) | lib/audit-log-integrity/guard.test.ts, digest.test.ts, code_generator/tests/test_audit_log_append_only_templates.py | #990, #1193 | - |

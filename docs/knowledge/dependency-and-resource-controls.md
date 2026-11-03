@@ -11,6 +11,7 @@ What the repository does today to keep dependencies trustworthy, and where the l
 | Non-blocking full-scope audit | `ci.yml`, job `audit-full-scope` | Same threshold over the whole npm tree including `devDependencies`; never fails the run. The JSON result is kept as an artifact for 30 days. |
 | Second-opinion scan | `.github/workflows/osv-scanner.yml` | OSV-Scanner over both lock files on pull requests that touch them and weekly on a schedule. Report-only; see [ci-security-workflows.md](ci-security-workflows.md) for the criteria to make it blocking. |
 | Automated update PRs | `.github/dependabot.yml` | npm, pip and GitHub Actions are scanned weekly (Monday 08:00 Asia/Tokyo). Security-advisory PRs are raised immediately, regardless of schedule. Routine updates are grouped; major bumps are split out. |
+| SBOM | `.github/workflows/sbom.yml` | `npm sbom --sbom-format cyclonedx --omit dev --package-lock-only` writes a CycloneDX file of the production npm dependencies from `package-lock.json`; the job fails if the file is empty and keeps it as the `sbom-cyclonedx` artifact for 90 days. Runs when the lock file changes and on demand. `code_generator/tests/test_sbom_workflow.py` fails if the step is removed. Python dependencies and the generated mobile app are not covered. |
 | Pinned workflow actions | every file under `.github/workflows/` | Each `uses:` is pinned to a full commit SHA. `code_generator/tests/test_own_workflows_hardened.py` fails if that is lost. |
 | Task gates | `.claude/commands/*.md`, `## Completion gate` | `npm audit --omit=dev --audit-level=high` runs in the gate of the task types that change code or only prose, so the audit also runs on changes that are not Dependabot PRs. |
 
@@ -21,9 +22,8 @@ Application dependencies come from the public npm registry and PyPI, resolved th
 ## What is not defined
 
 - **Remediation time frames.** The only enforced rule is the CI threshold: high and critical advisories in production dependencies block a merge. There is no written deadline by which an advisory must be fixed once found, and no time frame per severity. Moderate and low advisories are not gated.
-- **SBOM.** No workflow generates or publishes a software bill of materials. The lock files are the only inventory of dependencies.
 
-Both are tracked in the Issue linked from the V15.1.1 and V15.1.2 rows of the coverage table.
+This is tracked in the Issue linked from the V15.1.1 row of the coverage table. (The SBOM is generated; see the table above.)
 
 ## Resource-demanding functions and their limits
 

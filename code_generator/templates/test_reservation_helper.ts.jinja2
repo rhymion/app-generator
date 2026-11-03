@@ -145,6 +145,23 @@ export async function seedReservation{{ pascal }}Insufficient() {
   }));
 }
 
+/** (5)/(6) Scarce stock: one {{ pool_entity }} holding 5 units, so one 3-unit request fits and two cannot both fit */
+export async function seedReservation{{ pascal }}Scarce() {
+  const testUser = await getTestUser();
+  const customer = await createTestCustomer(testUser);
+  const product = await createTest{{ pool_fk_pascal }}(testUser, 'SCARCE-1');
+{% if pool_extra_deps %}
+  const extraDeps = await createPoolExtraDeps(testUser);
+{% endif %}
+  const inventory = await createPool(testUser, product.id, 5{% if pool_extra_deps %}, extraDeps{% endif %});
+  return JSON.parse(JSON.stringify({
+    userId: customer.id,
+    product,
+    inventory,
+    claimQty: 3,
+  }));
+}
+
 /** (3) criteria compliance: mix of {{ pool_entity }} with matching and non-matching {{ criteria_pool_field }} */
 export async function seedReservation{{ pascal }}Criteria() {
   const testUser = await getTestUser();

@@ -41,3 +41,28 @@ export function logSecurityEvent(e: SecurityEvent): void {
     }),
   );
 }
+
+// Errors already written as a security event. A permission check raises its
+// error where the denial happens (so Server Actions are covered); a REST route
+// then passes the same error to handleApiError, which must not write it twice.
+const logged = new WeakSet<object>();
+
+/** Logs a permission denial once and remembers the error that carries it. */
+export function logAuthzDenied(error: object, code = 'PERMISSION_DENIED'): void {
+  if (logged.has(error)) return;
+  logged.add(error);
+  logSecurityEvent({ event: 'authz.denied', status: 403, code });
+}
+
+export function wasSecurityEventLogged(error: object): boolean {
+  return logged.has(error);
+}
+
+/**
+ * A refused web sign-in (wrong or missing credentials, wrong second-factor
+ * code). The record holds a fixed reason code only: never the email that was
+ * tried, which for an unknown account is attacker-supplied text.
+ */
+export function logSignInRejected(code: 'INVALID_CREDENTIALS' | 'INVALID_MFA_CODE'): void {
+  logSecurityEvent({ event: 'auth.rejected', status: 401, code });
+}

@@ -1,0 +1,30 @@
+id: missing-security-headers
+
+info:
+  name: Default security response headers are missing
+  author: project
+  severity: medium
+  description: |
+    The app sends Strict-Transport-Security, X-Content-Type-Options, X-Frame-Options,
+    Referrer-Policy and Permissions-Policy by default (lib/security-headers.ts). Matches
+    when any of them is absent from a public route, or when X-Powered-By is present.
+  tags: headers,regression
+
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/api/auth/csrf"
+    matchers-condition: and
+    matchers:
+      - type: status
+        status:
+          - 200
+      - type: dsl
+        dsl:
+          - '!contains(tolower(header), "x-content-type-options: nosniff")'
+          - '!contains(tolower(header), "x-frame-options:")'
+          - '!contains(tolower(header), "strict-transport-security:")'
+          - '!contains(tolower(header), "referrer-policy:")'
+          - '!contains(tolower(header), "permissions-policy:")'
+          - 'contains(tolower(header), "x-powered-by:")'
+        condition: or

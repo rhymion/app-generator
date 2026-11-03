@@ -76,7 +76,7 @@ describe('x-self-only access control (setting)', () => {
           method: 'PUT',
           url: `/api/setting/${otherId}`,
           headers: { 'X-API-Key': ownerKey },
-          body: { name: 'Attempted Hijack', email: `other_${otherId}@example.com` },
+          body: { name: 'Attempted Hijack', email: 'api_other_setting@example.com' },
           failOnStatusCode: false,
         }).then((res) => {
           expect(res.status).to.eq(404);

@@ -16,6 +16,8 @@ import { MfaRateLimitedError } from "@/lib/mfa/errors";
 import { createTenantBoundUser } from "@/lib/auth/create-user";
 import { isMockGoogleOAuthTestEnabled } from "@/lib/auth/mock-oauth-gate";
 import { isDomainAllowed } from "@/lib/auth/domain-allow-list";
+import { isPastAbsoluteLifetime, resolveSessionPolicy } from "@/lib/session-policy";
+import { logSignInRejected } from "@/lib/security-event";
 
 // Custom CredentialsSignin subclasses so @auth/core re-throws them as-is
 // (plain Error gets wrapped in CallbackRouteError and the code is lost).
@@ -64,6 +66,7 @@ function buildProviders(): Provider[] {
       },
       async authorize(credentials, request) {
         if (!credentials?.email || !credentials?.password) {
+          logSignInRejected("INVALID_CREDENTIALS");
           throw new Error("Invalid credentials");
         }
 
@@ -75,6 +78,7 @@ function buildProviders(): Provider[] {
         // the lock applies to unknown emails alike, so it reveals nothing.
         if ((await getAccountLockState(email, request.headers)).locked) {
           await verifyPassword(credentials.password as string, null);
+          logSignInRejected("INVALID_CREDENTIALS");
           throw new Error("Invalid credentials");
         }
 
@@ -94,6 +98,7 @@ function buildProviders(): Provider[] {
 
         if (!user || !user.password || !isCorrectPassword) {
           await recordFailedSignIn(email, request.headers);
+          logSignInRejected("INVALID_CREDENTIALS");
           throw new Error("Invalid credentials");
         }
         await clearFailedSignIns(email, request.headers);
@@ -119,6 +124,7 @@ function buildProviders(): Provider[] {
             if (!(e instanceof MfaRateLimitedError)) throw e;
           }
           if (!ok) {
+            logSignInRejected("INVALID_MFA_CODE");
             throw new InvalidMfaError();
           }
         }
@@ -240,6 +246,9 @@ function buildAdapter(): Adapter {
 // sessions). Only the *session* row stays empty.
 const sessionStrategy = "jwt" as const;
 
+// Read once at load. The absolute lifetime is enforced in jwt() below.
+const sessionPolicy = resolveSessionPolicy();
+
 export const authConfig: NextAuthConfig = {
   secret: process.env.AUTH_SECRET,
 
@@ -248,7 +257,8 @@ export const authConfig: NextAuthConfig = {
   // adapter NextAuth defaults to JWT anyway, but pin it explicitly so adding
   // a future PrismaAdapter doesn't silently flip us to DB-backed sessions
   // (Phase 2 #9 from performance-plan-session.md).
-  session: { strategy: sessionStrategy },
+  // maxAge / updateAge come from SESSION_MAX_AGE_SECONDS / SESSION_UPDATE_AGE_SECONDS (lib/session-policy.ts).
+  session: { strategy: sessionStrategy, maxAge: sessionPolicy.maxAge, updateAge: sessionPolicy.updateAge },
   providers: buildProviders(),
   pages: {
     signIn: "/login",
@@ -408,7 +418,7 @@ export const authConfig: NextAuthConfig = {
     //
     // `mfa_token_version` closes the session-persistence gap this alone
     // would leave open: enabling MFA does not revoke an already-active JWT
-    // (JWT_MAX_AGE default 30 days). Every request re-checks the DB
+    // (SESSION_MAX_AGE_SECONDS, default 30 days). Every request re-checks the DB
     // version against the value snapshotted into the token; a mismatch
     // (someone enabled MFA after this session started) re-arms
     // `mfa_pending` immediately instead of waiting for token expiry. This
@@ -429,8 +439,16 @@ export const authConfig: NextAuthConfig = {
         return token;
       }
 
+      // Absolute session lifetime (SESSION_ABSOLUTE_MAX_AGE_SECONDS, off by default): end the session once it is
+      // older than the limit, however recently it was used. Returning null makes Auth.js clear the cookie.
+      if (!(account && user?.id) && isPastAbsoluteLifetime(token.session_started_at, sessionPolicy.absoluteMaxAge)) {
+        return null;
+      }
+
       if (account && user?.id) {
-        // Fresh sign-in (any provider). Snapshot mfa_token_version as the
+        // Fresh sign-in (any provider). Stamp the start time the absolute lifetime counts from.
+        token.session_started_at = Math.floor(Date.now() / 1000);
+        // Snapshot mfa_token_version as the
         // baseline for future drift detection below.
         const dbUser = await prisma.user.findUnique({
           where: { id: token.id },
@@ -548,5 +566,7 @@ declare module "@auth/core/jwt" {
     id: string;
     mfa_pending?: boolean;
     mfa_token_version?: number;
+    /** Unix seconds at sign-in; the absolute session lifetime counts from here. */
+    session_started_at?: number;
   }
 }
