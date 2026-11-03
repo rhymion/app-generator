@@ -754,10 +754,11 @@ describe('API: {{ title }}', () => {
 
     it('7.8 returns 403 for bulk POST when permission denied and creates nothing', () => {
       // security-cell: entity={{ parent }} operation=bulk_create case=permission_denied
-      {% if can_list %}cy.request({ url: API_BASE, headers: { 'X-API-Key': TEST_API_KEY } }).its('body.total'){% else %}cy.wrap(null){% endif %}.then((totalBefore) => {
 {% if has_deps %}
       cy.task<any>('db:populate{{ pascal }}Dependencies').then((deps) => {
 {% endif %}
+      // Baseline is read after the dependencies exist: populating them can add rows of this entity.
+      {% if can_list %}cy.request({ url: API_BASE, headers: { 'X-API-Key': TEST_API_KEY } }).its('body.total'){% else %}cy.wrap(null){% endif %}.then((totalBefore) => {
 {{ I7 }}cy.task<string>('db:createLimitedApiUser', '{{ parent }}').then((limitedKey) => {
 {{ I7 }}  cy.request({
 {{ I7 }}    method: 'POST',
@@ -779,10 +780,10 @@ describe('API: {{ title }}', () => {
 {{ I7 }}  });
 {% endif %}
 {{ I7 }}});
+      });
 {% if has_deps %}
       });
 {% endif %}
-      });
     });
 {% endif %}
 {% if can_edit %}
