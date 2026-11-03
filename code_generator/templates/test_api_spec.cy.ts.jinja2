@@ -940,11 +940,12 @@ describe('API: {{ title }}', () => {
       // security-cell: entity={{ parent }} operation=export case=cross_org
       cy.task<any>('db:populate{{ pascal }}', 1).then((records) => {
         cy.request({ url: `${API_BASE}/export`, headers: { 'X-API-Key': TEST_API_KEY } }).then((before) => {
-          const rowsBefore = (before.body as string).replace(/^\uFEFF/, '').split('\r\n').filter(Boolean).length;
+          const rowsBefore = Math.max(0, (before.body as string).replace(/^\uFEFF/, '').split('\r\n').filter(Boolean).length - 1);
           cy.task<any>('db:createCrossOrgScenario', { entityName: '{{ parent }}', entityId: records[0].id }).then(() => {
             cy.request({ url: `${API_BASE}/export`, headers: { 'X-API-Key': TEST_API_KEY } }).then((after) => {
               expect(after.status).to.eq(200);
-              const rowsAfter = (after.body as string).replace(/^\uFEFF/, '').split('\r\n').filter(Boolean).length;
+              const rowsAfter = Math.max(0, (after.body as string).replace(/^\uFEFF/, '').split('\r\n').filter(Boolean).length - 1);
+              // An export with no rows has no header line either, hence the Math.max above.
               expect(rowsAfter).to.eq(rowsBefore - 1);
             });
           });
