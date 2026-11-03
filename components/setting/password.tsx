@@ -1,56 +1,34 @@
 'use client';
 
 import { useState } from 'react';
-import { verifyAndHashPassword } from '@/lib/setting/password-actions';
-import AppButton from '@/components/ui/AppButton';
 import AppText from '@/components/ui/AppText';
 import AppFieldInput from '@/components/ui/forms/AppFieldInput';
 import AppSection from '@/components/ui/layout/AppSection';
 
+// New password + confirmation only. The current password is asked once, by the
+// "Current password" field of the settings form, and the server checks it when the
+// form is saved. Whatever is typed here is handed to the form as soon as the two
+// entries agree; while they differ the form is given an empty value and the
+// mismatch is shown, so a typed password is never dropped without a visible reason.
 export default function Password({ onChange }: { value?: string; onChange?: (val: string) => void; isEdit?: boolean }) {
-  const [current, setCurrent] = useState('');
   const [next, setNext] = useState('');
   const [confirm, setConfirm] = useState('');
-  const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState(false);
-  const [isPending, setIsPending] = useState(false);
 
-  const handleChange = async () => {
-    if (next !== confirm) {
-      setError('New passwords do not match');
-      return;
-    }
-    setError(null);
-    setSuccess(false);
-    setIsPending(true);
-    try {
-      // The server confirms the change again when the form is saved; this step only
-      // gives early feedback on the current password.
-      await verifyAndHashPassword(current, next);
-      onChange?.(next);
-      setSuccess(true);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to verify password');
-    } finally {
-      setIsPending(false);
-    }
+  const mismatch = (next !== '' || confirm !== '') && next !== confirm;
+
+  const update = (nextValue: string, confirmValue: string) => {
+    setNext(nextValue);
+    setConfirm(confirmValue);
+    onChange?.(nextValue !== '' && nextValue === confirmValue ? nextValue : '');
   };
 
   return (
     <AppSection label="Change Password" mt={2}>
       <AppFieldInput
-        label="Current Password"
-        type="password"
-        value={current}
-        onChange={(val) => setCurrent(val)}
-        fullWidth
-        margin="normal"
-      />
-      <AppFieldInput
         label="New Password"
         type="password"
         value={next}
-        onChange={(val) => setNext(val)}
+        onChange={(val) => update(val, confirm)}
         fullWidth
         margin="normal"
       />
@@ -58,20 +36,15 @@ export default function Password({ onChange }: { value?: string; onChange?: (val
         label="Confirm New Password"
         type="password"
         value={confirm}
-        onChange={(val) => setConfirm(val)}
+        onChange={(val) => update(next, val)}
         fullWidth
         margin="normal"
       />
-      {error && <AppText color="error" variant="body2">{error}</AppText>}
-      {success && <AppText color="success.main" variant="body2">Password verified — click Save to apply</AppText>}
-      <AppButton
-        variant="contained"
-        onClick={handleChange}
-        disabled={isPending || !current || !next || !confirm}
-        mt={1}
-      >
-        Verify Password
-      </AppButton>
+      {mismatch && (
+        <AppText color="error" variant="body2" className="password-mismatch">
+          The new passwords do not match. The password will not change until they match.
+        </AppText>
+      )}
     </AppSection>
   );
 }

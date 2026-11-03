@@ -138,10 +138,10 @@ Chapter V17 (WebRTC) does not apply: the generated app has no real-time media, T
 | V6.1.2 | 2 | gap | No context-specific word list or policy | none | #1280 | - |
 | V6.1.3 | 2 | generator | docs/knowledge/authentication.md lists the pathways (credentials, Google, mobile token, API key); required strength per pathway is not stated | code_generator/tests/test_api_route_authentication_enumeration.py (routes call an auth helper) | - | - |
 | V6.2.1 | 1 | gap | Registration checks only that a password is present; no minimum length | none | #1125 | - |
-| V6.2.2 | 1 | generator | components/setting/password.tsx, lib/setting/password-actions.ts, lib/auth/credential-confirmation.ts | lib/auth/credential-confirmation.test.ts, cypress/e2e/api/setting_credential_confirmation.cy.ts | - | - |
-| V6.2.3 | 1 | generator | Current password is verified before a change (lib/setting/password-actions.ts) | lib/auth/credential-confirmation.test.ts, cypress/e2e/api/setting_credential_confirmation.cy.ts | - | - |
+| V6.2.2 | 1 | generator | components/setting/password.tsx, lib/auth/credential-confirmation.ts | lib/auth/credential-confirmation.test.ts, cypress/e2e/api/setting_credential_confirmation.cy.ts | - | - |
+| V6.2.3 | 1 | generator | Current password is verified before a change (lib/auth/credential-confirmation.ts) | lib/auth/credential-confirmation.test.ts, cypress/e2e/api/setting_credential_confirmation.cy.ts | - | - |
 | V6.2.4 | 1 | gap | No common-password list | none | #1280 | - |
-| V6.2.5 | 1 | generator | No composition rules exist (read in register route and password-actions) | none | #1125 | - |
+| V6.2.5 | 1 | generator | No composition rules exist (read in register route and confirmCredentialChange) | none | #1125 | - |
 | V6.2.6 | 1 | generator | type=password on login, register and setting inputs | none | - | - |
 | V6.2.7 | 1 | generator | No onPaste handler and no autocomplete=off | none | - | - |
 | V6.2.8 | 1 | gap | bcrypt is applied to the raw string and reads only 72 bytes; longer passwords are truncated silently | lib/auth/password-check.test.ts | #1280 | - |
