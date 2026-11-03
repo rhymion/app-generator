@@ -106,11 +106,12 @@ describe('API: GET /api/openapi.json is limited to the caller\'s readable entiti
     });
   });
 
-  it('lists only declared tags that are an entity collection or the mention search in the full document', () => {
+  it('lists only declared tags that own an entity path or are the mention search in the full document', () => {
     cy.task('db:grantAllPermissions');
     fetchDocument(TEST_API_KEY).then((doc) => {
       for (const tag of tagNames(doc)) {
-        expect(`/api/${tag}` in doc.paths || tag === 'mention', `tag ${tag}`).to.eq(true);
+        const ownsPath = Object.keys(doc.paths).some((p) => p === `/api/${tag}` || p.startsWith(`/api/${tag}/`));
+        expect(ownsPath || tag === 'mention', `tag ${tag}`).to.eq(true);
       }
     });
   });

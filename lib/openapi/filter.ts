@@ -15,8 +15,10 @@ import { canAccessEntity } from '@/lib/authz';
  * describes which endpoints exist and their shapes; per-record abilities come
  * from the capabilities endpoint and writes are enforced by the route (403).
  *
- * An entity tag is a tag that has the collection path `/api/<tag>`, which the
- * generator writes for every entity it documents. A tag that is not an entity
+ * An entity tag is a tag that owns at least one path under `/api/<tag>`
+ * (the collection path `/api/<tag>` or an item / bulk / options path below it).
+ * A self-only entity such as `setting` has no bare collection path but still
+ * owns `/api/setting/{id}`, so it is an entity. A tag that is not an entity
  * is listed in {@link NON_ENTITY_TAGS} with the entity whose read permission
  * governs it. A tag that is neither is hidden from every caller, and
  * lib/openapi/filter.test.ts fails when the generated document contains one.
@@ -45,10 +47,12 @@ function documentTags(document: JsonObject): string[] {
     .filter((name): name is string => name !== null);
 }
 
-/** The tags of the document that are entities (they have the collection path `/api/<tag>`). */
+/** The tags of the document that are entities (they own a path at or below `/api/<tag>`). */
 export function entityTagsOf(document: JsonObject): string[] {
-  const paths = isObject(document.paths) ? document.paths : {};
-  return documentTags(document).filter((tag) => `/api/${tag}` in paths);
+  const paths = Object.keys(isObject(document.paths) ? document.paths : {});
+  return documentTags(document).filter(
+    (tag) => !(tag in NON_ENTITY_TAGS) && paths.some((path) => path === `/api/${tag}` || path.startsWith(`/api/${tag}/`)),
+  );
 }
 
 /**

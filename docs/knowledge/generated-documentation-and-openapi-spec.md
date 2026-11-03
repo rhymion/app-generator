@@ -254,7 +254,7 @@ source the generator writes.
   which endpoints exist and what shape they have, per-record abilities come from
   the capabilities endpoint below, and the route answers 403 to a write the
   caller may not do.
-- A tag is an entity when the document has the collection path `/api/<tag>`.
+- A tag is an entity when the document has a path at or below `/api/<tag>` (the collection path, or an item / bulk / options path; a self-only entity such as `setting` has no bare collection path).
   The one other tag, `mention` (the @-mention user search), is listed in
   `NON_ENTITY_TAGS` with the entity whose permission governs it (`user`). A tag
   that is neither is hidden from every caller; `lib/openapi/filter.test.ts` and

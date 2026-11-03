@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const { canAccessEntity } = vi.hoisted(() => ({ canAccessEntity: vi.fn() }));
@@ -123,7 +125,7 @@ describe('filterOpenApiDocument', () => {
 });
 
 describe('tag classification', () => {
-  it('treats a tag with the collection path /api/<tag> as an entity', () => {
+  it('treats a tag that owns a path at or below /api/<tag> as an entity', () => {
     expect(entityTagsOf(fixture())).toEqual(['user', 'role', 'widget']);
   });
 
@@ -131,6 +133,32 @@ describe('tag classification', () => {
     expect(NON_ENTITY_TAGS).toEqual({ mention: 'user' });
     expect(entitiesToCheck(fixture()).sort()).toEqual(['role', 'user', 'widget']);
     expect(unclassifiedTags(fixture())).toEqual([]);
+  });
+});
+
+describe('the real generated document', () => {
+  const real = JSON.parse(readFileSync(join(process.cwd(), 'docs/generated/openapi.json'), 'utf8')) as Record<string, unknown>;
+  const names = (real.tags as { name: string }[]).map((t) => t.name);
+
+  it('has no tag that is neither an entity nor listed in the exception table', () => {
+    expect(unclassifiedTags(real)).toEqual([]);
+  });
+
+  it('classifies a self-only entity without a bare collection path (setting) as an entity', () => {
+    expect(names).toContain('setting');
+    expect(Object.keys(real.paths as object)).not.toContain('/api/setting');
+    expect(entityTagsOf(real)).toContain('setting');
+  });
+
+  it('classifies every tag as an entity or an exception-table tag, with mention governed by user', () => {
+    const entities = new Set(entityTagsOf(real));
+    for (const tag of names) expect(entities.has(tag) || tag in NON_ENTITY_TAGS).toBe(true);
+    expect(entitiesToCheck(real)).not.toContain('mention');
+  });
+
+  it('returns a document identical to the source for a caller who can read every entity', () => {
+    const readable = new Set(entitiesToCheck(real));
+    expect(filterOpenApiDocument(real, readable)).toEqual(real);
   });
 });
 
