@@ -27,6 +27,7 @@ describe('API: GET /api/openapi.json is limited to the caller\'s readable entiti
   });
 
   it('gives a caller with every permission the full document, unchanged', () => {
+    cy.task('db:grantAllPermissions');
     cy.readFile('docs/generated/openapi.json').then((full: OpenApiDoc) => {
       fetchDocument(TEST_API_KEY).then((doc) => {
         expect(doc).to.deep.eq(full);
@@ -106,6 +107,7 @@ describe('API: GET /api/openapi.json is limited to the caller\'s readable entiti
   });
 
   it('lists only declared tags that are an entity collection or the mention search in the full document', () => {
+    cy.task('db:grantAllPermissions');
     fetchDocument(TEST_API_KEY).then((doc) => {
       for (const tag of tagNames(doc)) {
         expect(`/api/${tag}` in doc.paths || tag === 'mention', `tag ${tag}`).to.eq(true);
