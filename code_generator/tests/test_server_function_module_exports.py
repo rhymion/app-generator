@@ -222,8 +222,6 @@ ALLOWLIST: list[tuple[str, str, str]] = [
      'Subject is the pending-challenge session; completes the caller\'s own MFA step.'),
     (r'app/\[locale\]/setting/(?:mfa|accounts)/actions\.ts', r'\w+Action',
      'Every action derives the subject from the session and touches only that user\'s own MFA / account rows.'),
-    (r'lib/setting/password-actions\.ts', r'verifyAndHashPassword',
-     'Hashes the session user\'s own password input; reads no one else\'s data.'),
     (r'lib/setting/api-key-actions\.ts', r'(?:getApiKeyStatus|issueApiKey|setApiKeyExpiry)',
      'Subject is the session user; reads or replaces only that user\'s own API key hash and expiry; the new key is returned once.'),
     (r'lib/attachment/direct_actions\.ts', r'createDirectAttachment',
