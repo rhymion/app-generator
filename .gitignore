@@ -307,6 +307,8 @@ app/api/*/
 !app/api/notifications/**
 !app/api/test-utils/
 !app/api/test-utils/**
+!app/api/security/
+!app/api/security/**
 # app/api/upload/route.ts is a generate-code target, so it is intentionally NOT
 # negated here — it stays ignored to avoid generated-vs-VCS drift.
 !app/api/approval_request/
@@ -344,6 +346,7 @@ components/setting/form_validation.ts
 cypress/e2e/*.cy.ts
 !cypress/e2e/auth.cy.ts
 !cypress/e2e/auth_redirect.cy.ts
+!cypress/e2e/csp_report_only.cy.ts
 !cypress/e2e/search_page.cy.ts
 !cypress/e2e/audit_log.cy.ts
 !cypress/e2e/import_modal.cy.ts

@@ -121,6 +121,10 @@ const PRODUCTION_BUCKETS: Record<string, RateLimitBucketConfig> = {
   // authenticated user id: the upload route only requires a signed-in caller,
   // so the account, not the IP, is the identity that consumes storage.
   'upload:file':             { limit: 30, windowMs: 10 * 60_000 },
+  // 120 Content Security Policy violation reports per IP per minute. A page load can send one
+  // report per blocked resource, so the ceiling is well above a normal burst; the route only
+  // writes a log line.
+  'csp:report':              { limit: 120, windowMs: 60_000 },
 };
 
 // The Cypress UI suite intentionally logs in fresh for every `it()` (each

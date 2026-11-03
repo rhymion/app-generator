@@ -25,6 +25,9 @@ exemptions:
   - path: app/api/auth/register/route.ts
     skip: [permission]
     reason: Public sign-up; rate limited per IP (auth:register).
+  - path: app/api/security/csp-report/route.ts
+    skip: [permission]
+    reason: The browser posts policy violation reports without a session; rate limited per IP (csp:report) and the route only writes a log line.
   - path: app/api/mobile/auth/refresh/route.ts
     skip: [permission, rate-limit]
     reason: The refresh token is the credential and is rotated on use; no route-level rate limit.

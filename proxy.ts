@@ -6,10 +6,13 @@ import { getRateLimiter } from '@/lib/rate-limit';
 import { clientIp } from '@/lib/rate-limit/client-ip';
 import { safeRedirectPath } from '@/lib/auth/safe-redirect';
 import { resolveExternalUrl } from '@/lib/auth/external-url';
+import { CSP_NONCE_HEADER, cspReportOnlyFromEnv, generateNonce } from '@/lib/csp';
 
 const intlMiddleware = createIntlMiddleware(routing);
 
 const NO_STORE = 'no-store';
+// Report-only: the browser reports what the policy would block and blocks nothing.
+const CSP_REPORT_ONLY_HEADER = 'Content-Security-Policy-Report-Only';
 const CLEAR_SITE_DATA_ON_SIGN_OUT = '"cache", "cookies", "storage"';
 
 // Paths that do not require authentication (matched after stripping locale prefix)
@@ -163,12 +166,23 @@ export const proxy = auth(async (req) => {
     (p) => pathnameWithoutLocale === p || pathnameWithoutLocale.startsWith(`${p}/`)
   );
 
+  // Per-request nonce for the report-only Content Security Policy. Setting it on the request
+  // headers before next-intl runs makes next-intl copy it into the forwarded request headers,
+  // where the root layout reads it (and Next.js reads the nonce out of the policy header to
+  // stamp its own inline scripts). See docs/knowledge/content-security-policy.md.
+  const nonce = generateNonce();
+  const csp = cspReportOnlyFromEnv(nonce);
+  req.headers.set(CSP_NONCE_HEADER, nonce);
+  req.headers.set(CSP_REPORT_ONLY_HEADER, csp);
+
   // Always run the next-intl middleware (handles locale prefix redirects/rewrites)
   const intlResponse = intlMiddleware(req);
 
   // Public paths — no auth check needed
   if (isPublicPath) {
-    return normalizeIntlRedirect(req, intlResponse);
+    const publicResponse = normalizeIntlRedirect(req, intlResponse);
+    publicResponse.headers.set(CSP_REPORT_ONLY_HEADER, csp);
+    return publicResponse;
   }
 
   // Protected paths — require a valid session (DB-backed for OAuth, JWT
@@ -215,6 +229,7 @@ export const proxy = auth(async (req) => {
   // browser and shared caches (ASVS V14.3.2).
   const response = normalizeIntlRedirect(req, intlResponse);
   response.headers.set('Cache-Control', NO_STORE);
+  response.headers.set(CSP_REPORT_ONLY_HEADER, csp);
   return response;
 });
 

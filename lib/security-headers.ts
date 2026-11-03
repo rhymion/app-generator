@@ -1,9 +1,10 @@
 /**
  * Default security response headers for every route (wired in next.config.ts).
  *
- * A Content-Security-Policy that restricts scripts and styles is deliberately
- * not part of this set; the only CSP directive sent is `frame-ancestors`, so
- * no page can be embedded in another origin's frame. An app whose own
+ * The enforced Content-Security-Policy in this set carries only `frame-ancestors`, so
+ * no page can be embedded in another origin's frame. The script and style policy is sent
+ * separately by proxy.ts as `Content-Security-Policy-Report-Only` with a per-request nonce
+ * (lib/csp.ts, docs/knowledge/content-security-policy.md). An app whose own
  * hand-written pages must be embedded or need other headers edits this list
  * (or the `headers()` entry in next.config.ts).
  */
