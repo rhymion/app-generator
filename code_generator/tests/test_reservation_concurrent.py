@@ -8,8 +8,10 @@ B4: allocation code uses conditional-update guard (gte: _claim) so concurrent
 B5: service.ts template generates ReservationMutationError class + update/delete
     mutation guards when the entity has a reservation_config.
 
-B6 (true concurrent HTTP test): implemented in Cypress via Promise.all(fetch, fetch)
-    in cypress/e2e/api/purchase_order_reservation.cy.ts (R3-concurrent).
+B6 (true concurrent HTTP test): implemented in the generated Cypress reservation spec
+    (case (6), Promise.all of two fetch calls) from
+    code_generator/templates/test_reservation_spec.cy.ts.jinja2; pinned by
+    tests/test_reservation_atomicity_concurrency_tests.py.
     Reason: Cypress already manages DB seed/teardown and the Next.js server lifecycle;
     repeating that in pytest would require a heavyweight fixture with no extra coverage.
     Command: npm run test:e2e:cy:api -- --spec cypress/e2e/api/purchase_order_reservation.cy.ts

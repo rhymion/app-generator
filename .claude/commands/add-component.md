@@ -29,6 +29,14 @@ Task: $ARGUMENTS
 6. If you discover a new rule or useful skill, update the rule/skill documentation.
 7. Read the docs before acting: at minimum CLAUDE.md, and relevant `docs/knowledge/` files.
 
+## Security tests
+
+A change that adds or alters a route, Server Action, import/export path or other mutation path needs security tests
+in the same change. Follow the `security-test-matrix` skill (`.claude/skills/security-test-matrix/SKILL.md`): cover
+permission denied (403), another organization (404) and invalid input for the new path, claim each cell with a
+`security-cell:` marker, and prove a denied write left the database unchanged. The completion gate below blocks the
+change when a cell of the matrix has neither a test nor a reasoned allowlist entry.
+
 ## Completion gate
 
 Run in this order:
@@ -36,6 +44,9 @@ Run in this order:
 1. `npm run lint`            — **must run before any of the generate-code steps below** (see note)
 2. `npm run test:pytest`      — Python unit tests for code generator
 3. `npm run test:e2e:build`  — docker:up:test + generate-code + db:push + db:generate + db:seed-baseline + build
+3a. `npm run check:generated` — generated code matches templates/schema
+3b. `npm run check:security-matrix` — every cell of the security matrix has a test marker or a reasoned allowlist entry (`docs/knowledge/security-test-matrix.md`); needs the `.security-manifest.json` that step `test:e2e:build` writes
+3c. `npm run check:handwritten-routes` — every hand-written API route that writes has a permission check and rate limiting
 4. `npm run test:vitest`     — vitest component tests
 5. `npm run test:e2e:cy:api` — API Cypress specs only
 6. `npm audit --omit=dev --audit-level=high`
