@@ -42,7 +42,36 @@ export function createInMemoryRateLimiter(
     }
   }
 
+  const UNLIMITED = (t: number): RateLimitDecision => ({
+    allowed: true,
+    remaining: Number.POSITIVE_INFINITY,
+    retryAfterSeconds: 0,
+    resetAt: t,
+  });
+
   return {
+    async peek(bucket: string, key: string): Promise<RateLimitDecision> {
+      const cfg = buckets[bucket];
+      const t = now();
+      if (!cfg) return UNLIMITED(t);
+      const entry = store.get(`${bucket}::${key}`);
+      const live = (entry?.timestamps ?? []).filter((ts) => ts > t - cfg.windowMs);
+      if (live.length >= cfg.limit) {
+        const retryAfterMs = Math.max(0, live[0] + cfg.windowMs - t);
+        return {
+          allowed: false,
+          remaining: 0,
+          retryAfterSeconds: Math.ceil(retryAfterMs / 1000),
+          resetAt: live[0] + cfg.windowMs,
+        };
+      }
+      return { allowed: true, remaining: cfg.limit - live.length, retryAfterSeconds: 0, resetAt: t + cfg.windowMs };
+    },
+
+    async reset(bucket: string, key: string): Promise<void> {
+      store.delete(`${bucket}::${key}`);
+    },
+
     async check(bucket: string, key: string): Promise<RateLimitDecision> {
       const cfg = buckets[bucket];
       if (!cfg) {
