@@ -62,7 +62,7 @@ describe('API: GET /api/openapi.json', () => {
       });
     });
 
-    it('any authenticated caller may read it — no per-permission check', () => {
+    it('any authenticated caller gets a document; what it lists follows the caller\'s read permissions (openapi_permission_filter.cy.ts)', () => {
       cy.task<string>('db:createLimitedApiUser', 'audit_log').then((limitedKey) => {
         cy.request({
           url: OPENAPI_URL,

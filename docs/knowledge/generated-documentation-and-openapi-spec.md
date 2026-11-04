@@ -234,10 +234,43 @@ tracer ships it with the serverless function; the same treatment
 can't be traced statically). It is never rebuilt or copied a second time —
 the route reads the exact file the generator writes. Authentication is
 `requireDualAuth` (API key or session, `lib/api-auth.ts`) — no further
-permission check, since the document only reveals the schema shape, never
-row data. `info.description` states this plainly and points at both this
-route and the row-level capabilities endpoint below, instead of the old
-"not served" wording, which stopped being true once this route shipped.
+permission check beyond the filter below. `info.description` states what the
+document describes and points at both this route and the row-level
+capabilities endpoint below.
+
+**The document is limited to the caller's readable entities** (Issue #1161,
+`lib/openapi/filter.ts`). The route resolves the caller (an API key follows its
+owner's permissions) and asks `canAccessEntity(entity, 'read', userId)` once per
+entity, which reuses `getModelPermissions` and its 30-second permission cache; no
+query is added. For each entity the caller cannot read, the tag, the paths and the
+component schemas that only that entity's operations use are removed, and the
+`x-relationships` entries that name that entity are dropped (the key is removed
+when no entry is left). A caller who can read every entity receives the full
+document, equal to `docs/generated/openapi.json`, which stays the unfiltered
+source the generator writes.
+
+- Operations are not removed one by one. A caller who can read but not write an
+  entity still sees its create, update and delete operations: the document says
+  which endpoints exist and what shape they have, per-record abilities come from
+  the capabilities endpoint below, and the route answers 403 to a write the
+  caller may not do.
+- A tag is an entity when the document has a path at or below `/api/<tag>` (the collection path, or an item / bulk / options path; a self-only entity such as `setting` has no bare collection path).
+  The one other tag, `mention` (the @-mention user search), is listed in
+  `NON_ENTITY_TAGS` with the entity whose permission governs it (`user`). A tag
+  that is neither is hidden from every caller; `lib/openapi/filter.test.ts` and
+  `code_generator/tests/test_generators_openapi.py` fail when the generator
+  produces one, so a new non-entity tag is added to the table in the same change.
+- Entity schemas do not reference each other with `$ref` (a relationship is an
+  `x-relationships` entry and a plain id column), so removing an entity leaves no
+  dangling reference; a generator test fails if that stops being true. A shared
+  schema (`Error`, `BulkResult`, `ImportResult`) stays while a remaining operation
+  uses it.
+- The filter is a JSON walk of about a millisecond for the default schema and is
+  not cached; the document file is already read and parsed on each request.
+- The Swagger UI page fetches this route from the same origin with the session
+  cookie, so it shows the filtered document without any change of its own.
+- Consumers that generate client types from the production document need an API
+  key whose owner can read every entity the types should cover.
 
 (Issue #768) `GET /swagger` (`app/[locale]/swagger/`) is a separate,
 development/staging-only page: an interactive `swagger-ui-dist` explorer
