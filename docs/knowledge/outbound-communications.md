@@ -60,5 +60,5 @@ is a platform setting the operator applies to the destinations in the table abov
 - Whichever platform is used, include the token-exchange hosts when `AUDIT_LOG_GCS_AUTH=vercel-oidc` is on, and the
   Google sign-in hosts when Google sign-in is on.
 
-The per-service credential and permission contract is tracked in #1241. The coverage table row for each ASVS
+The per-service credential and permission contract is in `external-service-security-contracts.md`; a row of the first table above without a row there fails `code_generator/tests/test_external_service_contracts.py`. The coverage table row for each ASVS
 requirement is in `security-asvs-coverage.md` (V13.1.1, V13.2.4, V13.2.5).
