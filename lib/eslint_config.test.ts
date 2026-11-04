@@ -10,16 +10,20 @@ async function messagesFor(code: string): Promise<string[]> {
   return result.messages.filter((m) => m.ruleId === 'eqeqeq').map((m) => m.message);
 }
 
+// Each test spawns ESLint and loads the full project configuration, which can exceed vitest's
+// default 5s timeout on a loaded machine, so give them an explicit, generous budget.
+const ESLINT_TEST_TIMEOUT_MS = 60_000;
+
 describe('eslint.config.mjs strict equality', () => {
   it('rejects loose equality and inequality', async () => {
     expect(await messagesFor('export const a = (x: unknown, y: unknown) => x == y;')).toHaveLength(1);
     expect(await messagesFor('export const b = (x: unknown, y: unknown) => x != y;')).toHaveLength(1);
     expect(await messagesFor("export const c = (x: unknown) => x == 'a';")).toHaveLength(1);
-  });
+  }, ESLINT_TEST_TIMEOUT_MS);
 
   it('allows strict comparison and the x == null idiom for null or undefined', async () => {
     expect(await messagesFor('export const a = (x: unknown, y: unknown) => x === y;')).toEqual([]);
     expect(await messagesFor('export const b = (x: unknown) => x == null;')).toEqual([]);
     expect(await messagesFor('export const c = (x: unknown) => x != null;')).toEqual([]);
-  });
+  }, ESLINT_TEST_TIMEOUT_MS);
 });

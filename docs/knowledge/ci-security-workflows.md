@@ -135,9 +135,13 @@ They are verified with
   has a fixture that triggers it and one that does not. They are blocking from the
   start because the tree has no findings: raw `$queryRawUnsafe` / `$executeRawUnsafe`,
   `dangerouslySetInnerHTML`, `eval()` / `new Function()`, an entity-only
-  `requireEntityPermission` / `canAccessEntity` check for `update` or `delete` in a
-  function with no `requireRecordPermission` / `canAccessRecord` call (test files are
-  exempt), a `'use server'` function that writes through Prisma with no
+  `requireEntityPermission` / `canAccessEntity` / `requireApiPermission` check for
+  `update`, `delete` or `invalidate` (the generated invalidate action is gated by the
+  `delete` permission; `Operation` has no separate invalidate or action value) in a
+  function with no record-level resolution: `requireRecordPermission`,
+  `requireApiRecordPermission`, `canAccessRecord`, `resolveRecordPermissions`, an inline
+  `creator?.update` / `creator?.delete` flag check (generated bulk routes) or a
+  `creator_id ===` ownership comparison (`x-self-only`) (test files are exempt), a `'use server'` function that writes through Prisma with no
   `getSessionUserIdOrThrow` / `requireEntityPermission` / `requireRecordPermission` /
   `requireDualAuth` / `auth` call, public object storage (`access: 'public'`, public
   ACLs, `allUsers`), a secret-named value compared with `==` / `===` / `!=` / `!==`,
@@ -155,7 +159,9 @@ They are verified with
 
 Run both scans locally with `bash scripts/semgrep_scan.sh --registry`
 (needs `semgrep` and the packages in `requirements.txt`; results go to
-`semgrep-results/`).
+`semgrep-results/`). The script runs the fixture test first and exits 3 when
+`semgrep` is not installed. It is step 16c of the update-generator Completion
+gate, so the project rules run in the local gate as well as in CI.
 
 Registry baseline, measured with Semgrep 1.183.0 when this was added (10
 findings):
