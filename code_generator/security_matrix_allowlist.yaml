@@ -22,18 +22,6 @@ exempt:
   - operation: action_update
     case: permission_denied
     reason: Server Actions have no direct test yet; the audit of missing cells is tracked in Issue #1231.
-  - operation: bulk_create
-    case: cross_org
-    reason: No generated denial test for this route yet; the gap is listed in Issue #1229.
-  - operation: bulk_create
-    case: permission_denied
-    reason: No generated denial test for this route yet; the gap is listed in Issue #1229.
-  - operation: bulk_delete
-    case: permission_denied
-    reason: No generated denial test for this route yet; the gap is listed in Issue #1229.
-  - operation: bulk_update
-    case: permission_denied
-    reason: No generated denial test for this route yet; the gap is listed in Issue #1229.
   - operation: capabilities
     case: cross_org
     reason: No generated denial test for this operation yet; the audit of missing cells is tracked in Issue #1231.
@@ -48,12 +36,6 @@ exempt:
     operation: delete
     case: permission_denied
     reason: This entity's API tests are hand-written, not generated from the API spec template, and do not claim this cell yet (audit tracked in Issue #1231).
-  - operation: detail
-    case: permission_denied
-    reason: No generated denial test for this route yet; the gap is listed in Issue #1229.
-  - operation: export
-    case: cross_org
-    reason: No generated denial test for this route yet; the gap is listed in Issue #1229.
   - entity: approval_flow
     operation: export
     case: permission_denied
@@ -72,14 +54,43 @@ exempt:
     operation: list
     case: permission_denied
     reason: This entity's API tests are hand-written, not generated from the API spec template, and do not claim this cell yet (audit tracked in Issue #1231).
-  - operation: options
-    case: permission_denied
-    reason: No generated denial test for this route yet; the gap is listed in Issue #1229.
   - entity: approval_flow
     operation: update
     case: permission_denied
     reason: This entity's API tests are hand-written, not generated from the API spec template, and do not claim this cell yet (audit tracked in Issue #1231).
   - entity: setting
     operation: update
+    case: permission_denied
+    reason: This entity's API tests are hand-written, not generated from the API spec template, and do not claim this cell yet (audit tracked in Issue #1231).
+  - entity: approval_flow
+    operation: detail
+    case: permission_denied
+    reason: This entity's API tests are hand-written, not generated from the API spec template, and do not claim this cell yet (audit tracked in Issue #1231).
+  - entity: approval_flow
+    operation: bulk_create
+    case: permission_denied
+    reason: This entity's API tests are hand-written, not generated from the API spec template, and do not claim this cell yet (audit tracked in Issue #1231).
+  - entity: approval_flow
+    operation: bulk_update
+    case: permission_denied
+    reason: This entity's API tests are hand-written, not generated from the API spec template, and do not claim this cell yet (audit tracked in Issue #1231).
+  - entity: approval_flow
+    operation: bulk_delete
+    case: permission_denied
+    reason: This entity's API tests are hand-written, not generated from the API spec template, and do not claim this cell yet (audit tracked in Issue #1231).
+  - entity: approval_flow
+    operation: options
+    case: permission_denied
+    reason: This entity's API tests are hand-written, not generated from the API spec template, and do not claim this cell yet (audit tracked in Issue #1231).
+  - entity: setting
+    operation: detail
+    case: permission_denied
+    reason: This entity's API tests are hand-written, not generated from the API spec template, and do not claim this cell yet (audit tracked in Issue #1231).
+  - entity: setting
+    operation: bulk_update
+    case: permission_denied
+    reason: This entity's API tests are hand-written, not generated from the API spec template, and do not claim this cell yet (audit tracked in Issue #1231).
+  - entity: setting
+    operation: options
     case: permission_denied
     reason: This entity's API tests are hand-written, not generated from the API spec template, and do not claim this cell yet (audit tracked in Issue #1231).
