@@ -40,8 +40,8 @@ describe('auth.ts sign-in rejections', () => {
   // call sites: removing one of them makes this test fail.
   const source = readFileSync(join(__dirname, '..', 'auth.ts'), 'utf8');
 
-  it('logs missing credentials, a wrong password and a wrong second-factor code', () => {
-    expect(source.match(/logSignInRejected\("INVALID_CREDENTIALS"\)/g)).toHaveLength(2);
+  it('logs missing credentials, a locked account, a wrong password and a wrong second-factor code', () => {
+    expect(source.match(/logSignInRejected\("INVALID_CREDENTIALS"\)/g)).toHaveLength(3);
     expect(source.match(/logSignInRejected\("INVALID_MFA_CODE"\)/g)).toHaveLength(1);
   });
 
