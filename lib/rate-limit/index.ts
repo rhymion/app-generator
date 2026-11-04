@@ -129,6 +129,10 @@ const PRODUCTION_BUCKETS: Record<string, RateLimitBucketConfig> = {
   // authenticated user id: the upload route only requires a signed-in caller,
   // so the account, not the IP, is the identity that consumes storage.
   'upload:file':             { limit: 30, windowMs: 10 * 60_000 },
+  // 120 Content Security Policy violation reports per IP per minute. A page load can send one
+  // report per blocked resource, so the ceiling is well above a normal burst; the route only
+  // writes a log line.
+  'csp:report':              { limit: 120, windowMs: 60_000 },
   // Account lockout (Issue #1125), two tiers, failures only (see
   // lib/auth/account-lockout.ts). Tier 1: 10 failed password attempts per
   // (email, source address) per 15 minutes lock that email from that address.

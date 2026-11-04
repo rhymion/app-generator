@@ -89,7 +89,7 @@ Chapter V17 (WebRTC) does not apply: the generated app has no real-time media, T
 | V3.3.4 | 2 | framework | Auth.js session cookie is HttpOnly; strategy jwt in auth.ts | cypress/e2e/api/framework_guarantees.cy.ts (CSRF and session cookie) | - | next-auth 5.0.0-beta.32, @auth/core 0.41.3 (package-lock.json); cookies option defaults |
 | V3.4.1 | 1 | generator | lib/security-headers.ts Strict-Transport-Security via next.config.ts headers() | lib/security-headers.test.ts (checks max-age only) | #1123 | - |
 | V3.4.2 | 1 | framework | No Access-Control-Allow-Origin is set anywhere; Next.js sends none unless configured | cypress/e2e/api/framework_guarantees.cy.ts (no CORS headers, preflight) | - | next 16.4.2 (package-lock.json); Route Handlers docs |
-| V3.4.3 | 2 | gap | CSP carries only frame-ancestors 'none'; no script, style, object or base policy | lib/security-headers.test.ts (asserts the current value) | #1123 | - |
+| V3.4.3 | 2 | gap | proxy.ts sends a per-request-nonce Content-Security-Policy-Report-Only header (object-src 'none', base-uri 'none', nonce-based script and style sources) and violations are logged by /api/security/csp-report; the enforced CSP is still only frame-ancestors 'none', so the requirement is met once the policy is enforced | lib/csp.test.ts, lib/csp-report.test.ts, app/api/security/csp-report/route.test.ts, cypress/e2e/csp_report_only.cy.ts | #1123 | - |
 | V3.4.4 | 2 | generator | lib/security-headers.ts X-Content-Type-Options nosniff | lib/security-headers.test.ts | - | - |
 | V3.4.5 | 2 | generator | lib/security-headers.ts Referrer-Policy strict-origin-when-cross-origin | lib/security-headers.test.ts | - | - |
 | V3.4.6 | 2 | generator | lib/security-headers.ts CSP frame-ancestors 'none' and X-Frame-Options DENY | lib/security-headers.test.ts | - | - |
@@ -320,7 +320,7 @@ Chapter V17 (WebRTC) does not apply: the generated app has no real-time media, T
 | V14.2.4 | 2 | generator | Controls are traced to the classes in docs/knowledge/data-classification.md | lib/prisma-slow-query.test.ts (parameter redaction), lib/logger.test.ts | - | - |
 | V14.3.1 | 1 | generator | proxy.ts sends `Clear-Site-Data: "cache", "cookies", "storage"` on the Auth.js sign-out response (POST /api/auth/signout) | cypress/e2e/api/framework_guarantees.cy.ts (cache and client-data headers), lib/proxy-forwarded-headers.test.ts | - | - |
 | V14.3.2 | 2 | generator | next.config.ts sends `Cache-Control: no-store` on every `/api/` response except the attachment route, which sets `private, no-store` itself; proxy.ts sets `no-store` on signed-in page responses | cypress/e2e/api/framework_guarantees.cy.ts (cache and client-data headers), lib/security-headers.test.ts, lib/attachment/storage.test.ts | - | - |
-| V14.3.3 | 2 | gap | Mobile web build keeps the refresh token in localStorage; native uses SecureStore | none | #1301 | - |
+| V14.3.3 | 2 | n/a | Accepted gap: the mobile web build (expo start --web) is for development and tests and is not deployed to production, so the refresh token it keeps in localStorage is out of production scope; native builds use SecureStore (docs/knowledge/mobile-app.md) | none | - | - |
 
 ## V15 Secure Coding and Architecture
 

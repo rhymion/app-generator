@@ -668,7 +668,9 @@ such text in its own `Info.plist`, so the app stores and reads the token there w
 stored beside it (`app_refresh_token_locked`, unlocked) and every read reuses it, so enrolling or removing a device
 lock later does not log the user out. A failure of the device authentication API stores the token unlocked and logs a
 warning. A locked save that fails outside Expo Go is not retried unlocked. Face ID therefore cannot
-be verified in Expo Go; only a standalone or development build locks the token. Web uses `localStorage`.
+be verified in Expo Go; only a standalone or development build locks the token.
+
+The web build (`expo start --web`, react-native-web) is for development and tests and is not deployed to production. On web the refresh token is held in `localStorage`. ASVS V14.3.3 records this as an accepted gap with the web build out of production scope (`docs/knowledge/security-asvs-coverage.md`).
 
 Generated REST routes call `authenticate()` (`lib/api-auth.ts`), which accepts either a mobile access JWT
 or an API key (`X-API-Key` / `Authorization: Bearer`); a JWT always has three dot-separated segments and
