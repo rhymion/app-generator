@@ -245,6 +245,93 @@ jobs:
           path: audit-full-scope.json
           retention-days: 30
 
+  audit-mobile:
+    name: Mobile Dependency Audit (generated Expo app, non-blocking)
+    runs-on: ubuntu-latest
+    # The root `audit` and `audit-full-scope` jobs only see the web app's
+    # package-lock.json. The generated Expo app under mobile/ has its own
+    # package.json (code_generator/templates/mobile/package.json.jinja2) and
+    # is not covered by either, so a vulnerable mobile dependency was
+    # invisible (Issue #1074). This job generates mobile/ from the default
+    # schema with x-generator.mobile.enabled switched on, resolves its
+    # dependency tree and audits it. Like audit-full-scope it never fails the
+    # run: findings go to the job summary and a JSON artifact. Making it
+    # blocking needs a rule for which advisories matter (tooling-only
+    # packages never reach the app bundle); see docs/knowledge/mobile-app.md.
+    # Like the other audit jobs it is not gated on detect-changes.
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24.18.0'
+          cache: 'npm'
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+      - run: npm ci
+      - run: pip install -r requirements.txt
+      - name: Generate the mobile app (x-generator.mobile.enabled on, in this runner's checkout only)
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          path = "code_generator/json_schema.yaml"
+          text = open(path, encoding="utf-8").read()
+          if "x-generator:\n" not in text:
+              raise SystemExit("no top-level x-generator block to enable mobile in")
+          open(path, "w", encoding="utf-8").write(
+              text.replace("x-generator:\n", "x-generator:\n  mobile:\n    enabled: true\n", 1)
+          )
+          PY
+          npm run generate-code
+          test -f mobile/package.json
+      - name: npm audit (mobile/, full scope incl. devDependencies, non-blocking)
+        continue-on-error: true
+        working-directory: mobile
+        run: |
+          # The mobile app commits no lock file; resolve one without installing or running scripts.
+          npm install --package-lock-only --ignore-scripts --no-fund
+          npm audit --json > ../audit-mobile.json
+      - name: Summarize audit result (severity breakdown, step summary)
+        if: always()
+        run: |
+          # The ${...} below are JavaScript template literals for node, not shell expansions.
+          # shellcheck disable=SC2016
+          node -e '
+            const fs = require("fs");
+            let data = {};
+            try {
+              data = JSON.parse(fs.readFileSync("audit-mobile.json", "utf8"));
+            } catch (e) {
+              // Missing/invalid JSON (generation or lock resolution failed before
+              // npm audit could write a report) - surface as unknown, not a crash.
+            }
+            const v = (data.metadata && data.metadata.vulnerabilities) || {};
+            const lines = [
+              "## Mobile npm audit (non-blocking, generated Expo app, includes devDependencies)",
+              "",
+              "This job never fails the CI run. The tree is resolved fresh from the generated `mobile/package.json` (no lock file is committed), so the counts can change between runs without a code change. `n/a` means the audit did not produce a report.",
+              "",
+              "| severity | count |",
+              "|---|---|",
+              `| critical | ${v.critical ?? "n/a"} |`,
+              `| high | ${v.high ?? "n/a"} |`,
+              `| moderate | ${v.moderate ?? "n/a"} |`,
+              `| low | ${v.low ?? "n/a"} |`,
+              `| **total** | **${v.total ?? "n/a"}** |`,
+            ];
+            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, lines.join("\n") + "\n");
+          '
+      - name: Upload audit JSON artifact
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: npm-audit-mobile
+          path: audit-mobile.json
+          retention-days: 30
+          if-no-files-found: ignore
+
   e2e-tests:
     name: E2E Tests
     needs: detect-changes
