@@ -598,17 +598,17 @@ describe('API: {{ title }}', () => {
 {% endif %}
 
   describe('Authentication errors', () => {
-    it('6.1 returns 4xx without API key', () => {
+    it('6.1 returns 401 without API key', () => {
       cy.request({ url: API_BASE, failOnStatusCode: false })
         .then((res) => {
-          expect(res.status).to.be.gte(400);
+          expect(res.status).to.eq(401);
         });
     });
 
-    it('6.2 returns 4xx with invalid API key', () => {
+    it('6.2 returns 401 with invalid API key', () => {
       cy.request({ url: API_BASE, headers: { 'X-API-Key': 'invalid_key' }, failOnStatusCode: false })
         .then((res) => {
-          expect(res.status).to.be.gte(400);
+          expect(res.status).to.eq(401);
         });
     });
   });
@@ -652,18 +652,24 @@ describe('API: {{ title }}', () => {
 {% endif %}
 {% if can_edit %}
 
-    it('7.3 returns 403 for PUT when permission denied', () => {
+    it('7.3 returns 403 for PUT when permission denied and writes nothing', () => {
       // security-cell: entity={{ parent }} operation=update case=permission_denied
       cy.task<any>('db:populate{{ pascal }}', 1).then((records) => {
-        cy.task<string>('db:createLimitedApiUser', '{{ parent }}').then((limitedKey) => {
-          cy.request({
-            method: 'PUT',
-            url: `${API_BASE}/${records[0].id}`,
-            headers: { 'X-API-Key': limitedKey },
-            body: {},
-            failOnStatusCode: false,
-          }).then((res) => {
-            expect(res.status).to.eq(403);
+        cy.request({ url: `${API_BASE}/${records[0].id}`, headers: { 'X-API-Key': TEST_API_KEY } }).then((before) => {
+          cy.task<string>('db:createLimitedApiUser', '{{ parent }}').then((limitedKey) => {
+            cy.request({
+              method: 'PUT',
+              url: `${API_BASE}/${records[0].id}`,
+              headers: { 'X-API-Key': limitedKey },
+              body: {},
+              failOnStatusCode: false,
+            }).then((res) => {
+              expect(res.status).to.eq(403);
+            });
+            // Re-read: the record is unchanged.
+            cy.request({ url: `${API_BASE}/${records[0].id}`, headers: { 'X-API-Key': TEST_API_KEY } }).then((after) => {
+              expect(after.body).to.deep.eq(before.body);
+            });
           });
         });
       });
@@ -671,7 +677,7 @@ describe('API: {{ title }}', () => {
 {% endif %}
 {% if can_delete %}
 
-    it('7.4 returns 403 for DELETE when permission denied', () => {
+    it('7.4 returns 403 for DELETE when permission denied and keeps the record', () => {
       // security-cell: entity={{ parent }} operation=delete case=permission_denied
       cy.task<any>('db:populate{{ pascal }}', 1).then((records) => {
         cy.task<string>('db:createLimitedApiUser', '{{ parent }}').then((limitedKey) => {
@@ -683,6 +689,8 @@ describe('API: {{ title }}', () => {
           }).then((res) => {
             expect(res.status).to.eq(403);
           });
+          // Re-read: the record still exists.
+          cy.request({ url: `${API_BASE}/${records[0].id}`, headers: { 'X-API-Key': TEST_API_KEY } }).its('status').should('eq', 200);
         });
       });
     });
@@ -725,6 +733,124 @@ describe('API: {{ title }}', () => {
       });
     });
 {% endif %}
+{% if can_view %}
+
+    it('7.7 returns 403 for GET detail when permission denied', () => {
+      // security-cell: entity={{ parent }} operation=detail case=permission_denied
+      cy.task<any>('db:populate{{ pascal }}', 1).then((records) => {
+        cy.task<string>('db:createLimitedApiUser', '{{ parent }}').then((limitedKey) => {
+          cy.request({
+            url: `${API_BASE}/${records[0].id}`,
+            headers: { 'X-API-Key': limitedKey },
+            failOnStatusCode: false,
+          }).then((res) => {
+            expect(res.status).to.eq(403);
+          });
+        });
+      });
+    });
+{% endif %}
+{% if can_new %}
+
+    it('7.8 returns 403 for bulk POST when permission denied and creates nothing', () => {
+      // security-cell: entity={{ parent }} operation=bulk_create case=permission_denied
+{% if has_deps %}
+      cy.task<any>('db:populate{{ pascal }}Dependencies').then((deps) => {
+{% endif %}
+      // Baseline is read after the dependencies and the limited user exist: creating either can add rows of this entity (permission, role).
+{{ I7 }}cy.task<string>('db:createLimitedApiUser', '{{ parent }}').then((limitedKey) => {
+      {% if can_list %}cy.request({ url: API_BASE, headers: { 'X-API-Key': TEST_API_KEY } }).its('body.total'){% else %}cy.wrap(null){% endif %}.then((totalBefore) => {
+{{ I7 }}  cy.request({
+{{ I7 }}    method: 'POST',
+{{ I7 }}    url: `${API_BASE}/bulk`,
+{{ I7 }}    headers: { 'X-API-Key': limitedKey },
+{{ I7 }}    body: [{
+{% for ln in i7_post_body %}
+{{ ln }}
+{% endfor %}
+{{ I7 }}    }],
+{{ I7 }}    failOnStatusCode: false,
+{{ I7 }}  }).then((res) => {
+{{ I7 }}    expect(res.status).to.eq(403);
+{{ I7 }}  });
+{% if can_list %}
+{{ I7 }}  // Re-read: nothing was created.
+{{ I7 }}  cy.request({ url: API_BASE, headers: { 'X-API-Key': TEST_API_KEY } }).then((after) => {
+{{ I7 }}    expect(after.body.total).to.eq(totalBefore);
+{{ I7 }}  });
+{% endif %}
+{{ I7 }}});
+      });
+{% if has_deps %}
+      });
+{% endif %}
+    });
+{% endif %}
+{% if can_edit %}
+
+    it('7.9 returns 403 for bulk PUT when permission denied and writes nothing', () => {
+      // security-cell: entity={{ parent }} operation=bulk_update case=permission_denied
+      cy.task<any>('db:populate{{ pascal }}', 2).then((records) => {
+        cy.request({ url: `${API_BASE}/${records[0].id}`, headers: { 'X-API-Key': TEST_API_KEY } }).then((before0) => {
+        cy.request({ url: `${API_BASE}/${records[1].id}`, headers: { 'X-API-Key': TEST_API_KEY } }).then((before1) => {
+          cy.task<string>('db:createLimitedApiUser', '{{ parent }}').then((limitedKey) => {
+            cy.request({
+              method: 'PUT',
+              url: `${API_BASE}/bulk`,
+              headers: { 'X-API-Key': limitedKey },
+              body: [{ id: records[0].id }, { id: records[1].id }],
+              failOnStatusCode: false,
+            }).then((res) => {
+              expect(res.status).to.eq(403);
+            });
+            // Re-read every row of the bulk request: none changed.
+            cy.request({ url: `${API_BASE}/${records[0].id}`, headers: { 'X-API-Key': TEST_API_KEY } }).then((after) => {
+              expect(after.body).to.deep.eq(before0.body);
+            });
+            cy.request({ url: `${API_BASE}/${records[1].id}`, headers: { 'X-API-Key': TEST_API_KEY } }).then((after) => {
+              expect(after.body).to.deep.eq(before1.body);
+            });
+          });
+        });
+        });
+      });
+    });
+{% endif %}
+{% if can_delete %}
+
+    it('7.10 returns 403 for bulk DELETE when permission denied and deletes nothing', () => {
+      // security-cell: entity={{ parent }} operation=bulk_delete case=permission_denied
+      cy.task<any>('db:populate{{ pascal }}', 2).then((records) => {
+        cy.task<string>('db:createLimitedApiUser', '{{ parent }}').then((limitedKey) => {
+          cy.request({
+            method: 'DELETE',
+            url: `${API_BASE}/bulk`,
+            headers: { 'X-API-Key': limitedKey },
+            body: [{ id: records[0].id }, { id: records[1].id }],
+            failOnStatusCode: false,
+          }).then((res) => {
+            expect(res.status).to.eq(403);
+          });
+          // Re-read every row of the bulk request: all still exist.
+          cy.request({ url: `${API_BASE}/${records[0].id}`, headers: { 'X-API-Key': TEST_API_KEY } }).its('status').should('eq', 200);
+          cy.request({ url: `${API_BASE}/${records[1].id}`, headers: { 'X-API-Key': TEST_API_KEY } }).its('status').should('eq', 200);
+        });
+      });
+    });
+{% endif %}
+
+    it('7.11 returns 403 for GET options when permission denied', () => {
+      // security-cell: entity={{ parent }} operation=options case=permission_denied
+      cy.task<string>('db:createLimitedApiUser', '{{ parent }}').then((limitedKey) => {
+        cy.request({
+          url: `${API_BASE}/options`,
+          headers: { 'X-API-Key': limitedKey },
+          failOnStatusCode: false,
+        }).then((res) => {
+          expect(res.status).to.eq(403);
+        });
+      });
+    });
   });
 {% if should_filter_by_org %}
 
@@ -764,6 +890,68 @@ describe('API: {{ title }}', () => {
 {% if has_deps %}
       });
 {% endif %}
+    });
+{% endif %}
+{% if can_new %}
+
+    // The bulk route answers per item (207): an item naming a foreign
+    // organization fails as "Not found" and is not created.
+    it('G3.1B bulk POST with foreign organization_id reports Not found and does not create', () => {
+      // security-cell: entity={{ parent }} operation=bulk_create case=cross_org
+      {% if can_list %}cy.request({ url: API_BASE, headers: { 'X-API-Key': TEST_API_KEY } }).its('body.total'){% else %}cy.wrap(null){% endif %}.then((totalBefore) => {
+{% if has_deps %}
+      cy.task<any>('db:populate{{ pascal }}Dependencies').then((deps) => {
+{% endif %}
+{{ I7 }}cy.task<any>('db:createCrossOrgScenario', { entityName: '{{ parent }}' }).then((scenario) => {
+{{ I7 }}  cy.request({
+{{ I7 }}    method: 'POST',
+{{ I7 }}    url: `${API_BASE}/bulk`,
+{{ I7 }}    headers: { 'X-API-Key': TEST_API_KEY },
+{{ I7 }}    body: [{
+{% for ln in org_cross_post_body %}
+{{ ln }}
+{% endfor %}
+{{ I7 }}      organization_id: scenario.orgB.id,
+{{ I7 }}    }],
+{{ I7 }}    failOnStatusCode: false,
+{{ I7 }}  }).then((res) => {
+{{ I7 }}    expect(res.status).to.eq(207);
+{{ I7 }}    expect(res.body.summary.succeeded).to.eq(0);
+{{ I7 }}    expect(res.body.results[0].success).to.eq(false);
+{{ I7 }}    expect(res.body.results[0].error).to.match(/^Not found/);
+{{ I7 }}  });
+{% if can_list %}
+{{ I7 }}  // Re-read: nothing was created.
+{{ I7 }}  cy.request({ url: API_BASE, headers: { 'X-API-Key': TEST_API_KEY } }).then((after) => {
+{{ I7 }}    expect(after.body.total).to.eq(totalBefore);
+{{ I7 }}  });
+{% endif %}
+{{ I7 }}});
+{% if has_deps %}
+      });
+{% endif %}
+      });
+    });
+{% endif %}
+{% if can_list and can_export %}
+
+    // Export must leave out a record that belongs to another organization: moving
+    // a record to a foreign organization removes exactly that row from the export.
+    it('G3.16 GET export omits a record of a foreign org', () => {
+      // security-cell: entity={{ parent }} operation=export case=cross_org
+      cy.task<any>('db:populate{{ pascal }}', 1).then((records) => {
+        cy.request({ url: `${API_BASE}/export`, headers: { 'X-API-Key': TEST_API_KEY } }).then((before) => {
+          const rowsBefore = Math.max(0, (before.body as string).replace(/^\uFEFF/, '').split('\r\n').filter(Boolean).length - 1);
+          cy.task<any>('db:createCrossOrgScenario', { entityName: '{{ parent }}', entityId: records[0].id }).then(() => {
+            cy.request({ url: `${API_BASE}/export`, headers: { 'X-API-Key': TEST_API_KEY } }).then((after) => {
+              expect(after.status).to.eq(200);
+              const rowsAfter = Math.max(0, (after.body as string).replace(/^\uFEFF/, '').split('\r\n').filter(Boolean).length - 1);
+              // An export with no rows has no header line either, hence the Math.max above.
+              expect(rowsAfter).to.eq(rowsBefore - 1);
+            });
+          });
+        });
+      });
     });
 {% endif %}
 {% if can_view %}

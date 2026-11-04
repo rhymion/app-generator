@@ -904,6 +904,22 @@ The minimal set above is the base. Later steps add, in this order: list filter/s
 inline create and attachments; comments; approval and split actions; reservation, custom components, scheduled tasks, audit log.
 The Playwright specs under `mobile/e2e/` already cover each of these on the web build and are the source for the assertions.
 
+## Dependency audit in CI
+
+The generated `mobile/` has its own `package.json` and commits no lock file, so the root `audit` and
+`audit-full-scope` jobs of `.github/workflows/ci.yml` do not see it. The job `audit-mobile` covers it: it switches
+`x-generator.mobile.enabled` on in the runner's copy of the default schema, runs `npm run generate-code`, resolves
+the tree with `npm install --package-lock-only --ignore-scripts` in `mobile/` and runs `npm audit --json` over it,
+`devDependencies` included.
+
+The job is **non-blocking**. It writes a severity table to the job summary and keeps the JSON as the
+`npm-audit-mobile` artifact for 30 days. Because the tree is resolved fresh on each run, the counts can change
+without a code change, and `n/a` in the table means no report was produced (generation or resolution failed).
+Most findings sit in Expo tooling that never reaches the app bundle, which is why the job does not fail the run;
+a blocking rule would have to be limited to packages in the `expo export` bundle or use an allowlist, and neither
+exists yet. Whether the generated app should commit a lock file and whether Dependabot should watch it are also
+undecided. See [dependency-and-resource-controls.md](dependency-and-resource-controls.md).
+
 ## Not implemented yet
 
 - Entity screens for an entity that declares anything beyond plain fields, the relation pickers, direct attachment
@@ -919,3 +935,4 @@ The Playwright specs under `mobile/e2e/` already cover each of these on the web 
   `lib/api-auth.ts` dispatches a bearer token by shape), but the app has no CSV screens. Bulk import and export
   stay in the Web admin screens.
 - Translated field labels.
+- A blocking dependency audit of `mobile/` (the `audit-mobile` CI job only reports; see [Dependency audit in CI](#dependency-audit-in-ci)).

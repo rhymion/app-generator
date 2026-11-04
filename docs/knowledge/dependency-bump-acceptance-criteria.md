@@ -354,6 +354,10 @@ are captured in the corresponding design record for this task.
    in this job was run end-to-end via `nektos/act` and confirmed to still
    produce a successful job outcome.
 
+   The generated Expo app is audited the same way by a separate job,
+   `audit-mobile` (non-blocking, summary table plus the `npm-audit-mobile`
+   artifact); see `docs/knowledge/mobile-app.md`.
+
 3. **Who reviews the non-blocking job's output, and how often, is an
    operational (not code) concern** and is tracked in this project's
    internal task-management process rather than in this file — a

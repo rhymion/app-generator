@@ -5,6 +5,7 @@ import { getRateLimiter } from '@/lib/rate-limit';
 import { disableMfa } from '@/lib/mfa/enrollment';
 import { MfaRateLimitedError } from '@/lib/mfa/errors';
 import { verifyPassword } from './password-check';
+import { passwordPolicyError } from './password-policy';
 
 // Same cost factor the app uses when it stores a password hash.
 const BCRYPT_COST = 10;
@@ -70,6 +71,10 @@ export async function confirmCredentialChange(
     // SSO-provisioned accounts have no password, so they fail like a wrong password.
     if (!(await verifyPassword(input.currentPassword, user.password))) {
       throw new ApiError(403, 'Current password is incorrect');
+    }
+    if (changesPassword) {
+      const weak = passwordPolicyError(input.password);
+      if (weak) throw new ApiError(400, weak);
     }
     if (changesPassword) password = await bcrypt.hash(input.password as string, BCRYPT_COST);
   }
