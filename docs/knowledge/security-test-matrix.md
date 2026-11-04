@@ -72,6 +72,16 @@ The generated tests `G3.8`-`G3.15` claim the REST cells for the primary display 
 that field is a foreign key. To-many sets (one-to-many, many-to-many) chosen on a parent are not a shape yet; the
 behavior for an unreachable member is undecided. Untested cells are tracked in Issue #1324.
 
+## Generated denial tests
+
+The generated API spec (`test_api_spec.cy.ts.jinja2`) claims the REST cells without a foreign-key shape. Group `7.x`
+holds the no-permission cases (list, create, update, delete, export, import, detail, bulk create, bulk update, bulk
+delete, `/options`; status 403), group `G3.x` the other-organization cases. A denied write re-reads the record(s) with
+an authorised key and asserts nothing changed, including each row of a bulk request. A bulk request denied at entity
+level answers 403 for the whole request; a bulk item naming another organization is a failed `Not found` item in a 207
+answer. The authentication tests (`6.1`, `6.2`) assert `401`. Search and approve/reject denial are not matrix
+operations, so the matrix does not track them.
+
 ## Applicability
 
 A cell exists when every `requires` flag of its values is true for the entity. Cross-organization cases are dropped for
