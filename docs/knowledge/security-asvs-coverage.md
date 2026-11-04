@@ -89,7 +89,7 @@ Chapter V17 (WebRTC) does not apply: the generated app has no real-time media, T
 | V3.3.4 | 2 | framework | Auth.js session cookie is HttpOnly; strategy jwt in auth.ts | cypress/e2e/api/framework_guarantees.cy.ts (CSRF and session cookie) | - | next-auth 5.0.0-beta.32, @auth/core 0.41.3 (package-lock.json); cookies option defaults |
 | V3.4.1 | 1 | generator | lib/security-headers.ts Strict-Transport-Security via next.config.ts headers() | lib/security-headers.test.ts (checks max-age only) | #1123 | - |
 | V3.4.2 | 1 | framework | No Access-Control-Allow-Origin is set anywhere; Next.js sends none unless configured | cypress/e2e/api/framework_guarantees.cy.ts (no CORS headers, preflight) | - | next 16.4.2 (package-lock.json); Route Handlers docs |
-| V3.4.3 | 2 | gap | CSP carries only frame-ancestors 'none'; no script, style, object or base policy | lib/security-headers.test.ts (asserts the current value) | #1123 | - |
+| V3.4.3 | 2 | gap | proxy.ts sends a per-request-nonce Content-Security-Policy-Report-Only header (object-src 'none', base-uri 'none', nonce-based script and style sources) and violations are logged by /api/security/csp-report; the enforced CSP is still only frame-ancestors 'none', so the requirement is met once the policy is enforced | lib/csp.test.ts, lib/csp-report.test.ts, app/api/security/csp-report/route.test.ts, cypress/e2e/csp_report_only.cy.ts | #1123 | - |
 | V3.4.4 | 2 | generator | lib/security-headers.ts X-Content-Type-Options nosniff | lib/security-headers.test.ts | - | - |
 | V3.4.5 | 2 | generator | lib/security-headers.ts Referrer-Policy strict-origin-when-cross-origin | lib/security-headers.test.ts | - | - |
 | V3.4.6 | 2 | generator | lib/security-headers.ts CSP frame-ancestors 'none' and X-Frame-Options DENY | lib/security-headers.test.ts | - | - |
@@ -134,22 +134,22 @@ Chapter V17 (WebRTC) does not apply: the generated app has no real-time media, T
 
 | ID | Level | Status | Covered by | Verified by | Gap Issue | Source and version |
 |----|-------|--------|------------|-------------|-----------|--------------------|
-| V6.1.1 | 1 | generator | docs/knowledge/authentication.md and api-idempotency-and-rate-limiting.md describe the rate limits; lockout and credential stuffing are not discussed | none | #1125 | - |
+| V6.1.1 | 1 | generator | docs/knowledge/authentication.md (Account lockout, Password strength) and api-idempotency-and-rate-limiting.md describe the rate limits, the two-tier account lockout and the minimum length; credential stuffing beyond the lockout is not discussed | lib/auth/account-lockout.test.ts, lib/auth/password-policy.test.ts | #1245 | - |
 | V6.1.2 | 2 | gap | No context-specific word list or policy | none | #1280 | - |
 | V6.1.3 | 2 | generator | docs/knowledge/authentication.md lists the pathways (credentials, Google, mobile token, API key); required strength per pathway is not stated | code_generator/tests/test_api_route_authentication_enumeration.py (routes call an auth helper) | - | - |
-| V6.2.1 | 1 | gap | Registration checks only that a password is present; no minimum length | none | #1125 | - |
+| V6.2.1 | 1 | generator | lib/auth/password-policy.ts (minimum 8 characters) applied by the register route and lib/auth/credential-confirmation.ts | lib/auth/password-policy.test.ts, app/api/auth/register/route.test.ts, lib/auth/credential-confirmation.test.ts | - | - |
 | V6.2.2 | 1 | generator | components/setting/password.tsx, lib/auth/credential-confirmation.ts | lib/auth/credential-confirmation.test.ts, cypress/e2e/api/setting_credential_confirmation.cy.ts | - | - |
 | V6.2.3 | 1 | generator | Current password is verified before a change (lib/auth/credential-confirmation.ts) | lib/auth/credential-confirmation.test.ts, cypress/e2e/api/setting_credential_confirmation.cy.ts | - | - |
 | V6.2.4 | 1 | gap | No common-password list | none | #1280 | - |
-| V6.2.5 | 1 | generator | No composition rules exist (read in register route and confirmCredentialChange) | none | #1125 | - |
+| V6.2.5 | 1 | generator | lib/auth/password-policy.ts imposes length only, no composition rules | lib/auth/password-policy.test.ts | - | - |
 | V6.2.6 | 1 | generator | type=password on login, register and setting inputs | none | - | - |
 | V6.2.7 | 1 | generator | No onPaste handler and no autocomplete=off | none | - | - |
 | V6.2.8 | 1 | gap | bcrypt is applied to the raw string and reads only 72 bytes; longer passwords are truncated silently | lib/auth/password-check.test.ts | #1280 | - |
-| V6.2.9 | 2 | gap | No maximum or minimum length is enforced | none | #1280, #1125 | - |
+| V6.2.9 | 2 | gap | A minimum length of 8 is enforced (lib/auth/password-policy.ts); no maximum is enforced, so passwords of 65 characters or more are not guaranteed to be accepted in full | lib/auth/password-policy.test.ts | #1280 | - |
 | V6.2.10 | 2 | generator | No password expiry or rotation exists | none | - | - |
 | V6.2.11 | 2 | gap | No context-word check | none | #1280 | - |
 | V6.2.12 | 2 | gap | No breached-password check | none | #1280 | - |
-| V6.3.1 | 1 | generator | proxy.ts sign-in bucket (10 per minute per IP); register, mobile-token, MFA and API-key buckets in lib/rate-limit/index.ts | app/api/auth/register/route.test.ts, lib/mfa/verify.test.ts, lib/rate-limit/redis.test.ts, app/api/mobile/auth/token/route.test.ts | #1125 | - |
+| V6.3.1 | 1 | generator | proxy.ts sign-in bucket (10 per minute per IP); register, mobile-token, MFA and API-key buckets in lib/rate-limit/index.ts; two-tier account lockout (auth:account:lockout per email and address, auth:account:lockout:email per email) in lib/auth/account-lockout.ts | app/api/auth/register/route.test.ts, lib/mfa/verify.test.ts, lib/rate-limit/redis.test.ts, app/api/mobile/auth/token/route.test.ts, lib/auth/account-lockout.test.ts | - | - |
 | V6.3.2 | 1 | generator | scripts/seed-baseline-credentials.ts requires explicit admin credentials in production; outside production a documented default is seeded | scripts/seed-baseline-credentials.test.ts | - | - |
 | V6.3.3 | 2 | gap | MFA is opt-in per user | none | #1281 | - |
 | V6.3.4 | 2 | generator | MFA is enforced on credentials, OAuth and the mobile token route; API keys are machine access without MFA by design | cypress/e2e/auth/mfa.cy.ts, cypress/e2e/api/mobile_auth.cy.ts | - | - |
@@ -320,7 +320,7 @@ Chapter V17 (WebRTC) does not apply: the generated app has no real-time media, T
 | V14.2.4 | 2 | generator | Controls are traced to the classes in docs/knowledge/data-classification.md | lib/prisma-slow-query.test.ts (parameter redaction), lib/logger.test.ts | - | - |
 | V14.3.1 | 1 | generator | proxy.ts sends `Clear-Site-Data: "cache", "cookies", "storage"` on the Auth.js sign-out response (POST /api/auth/signout) | cypress/e2e/api/framework_guarantees.cy.ts (cache and client-data headers), lib/proxy-forwarded-headers.test.ts | - | - |
 | V14.3.2 | 2 | generator | next.config.ts sends `Cache-Control: no-store` on every `/api/` response except the attachment route, which sets `private, no-store` itself; proxy.ts sets `no-store` on signed-in page responses | cypress/e2e/api/framework_guarantees.cy.ts (cache and client-data headers), lib/security-headers.test.ts, lib/attachment/storage.test.ts | - | - |
-| V14.3.3 | 2 | gap | Mobile web build keeps the refresh token in localStorage; native uses SecureStore | none | #1301 | - |
+| V14.3.3 | 2 | n/a | Accepted gap: the mobile web build (expo start --web) is for development and tests and is not deployed to production, so the refresh token it keeps in localStorage is out of production scope; native builds use SecureStore (docs/knowledge/mobile-app.md) | none | - | - |
 
 ## V15 Secure Coding and Architecture
 

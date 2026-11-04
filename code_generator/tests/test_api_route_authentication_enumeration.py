@@ -41,6 +41,8 @@ _ALTERNATE_CREDENTIAL = {
         r'handlers', 'the sign-in handler itself (Auth.js)'),
     'app/api/auth/register/route.ts': (
         None, 'public sign-up, rate limited per IP'),
+    'app/api/security/csp-report/route.ts': (
+        None, 'the browser posts policy violation reports without a session; rate limited per IP, log line only'),
     'app/api/mobile/auth/refresh/route.ts': (
         r'refresh_token_hash', 'the refresh token is the credential'),
     'app/api/test-utils/reset-caches/route.ts': (
