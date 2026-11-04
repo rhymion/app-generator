@@ -68,6 +68,14 @@ export interface RateLimiter {
    * resulting decision. Must be safe to call concurrently.
    */
   check(bucket: string, key: string): Promise<RateLimitDecision>;
+  /**
+   * Report whether `key` is currently over the bucket's limit WITHOUT
+   * recording a request. Used by failure-counting buckets (account lockout),
+   * where a caller must be refused while locked but only failures may count.
+   */
+  peek(bucket: string, key: string): Promise<RateLimitDecision>;
+  /** Forget everything recorded for `key` in `bucket` (e.g. after a successful sign-in). */
+  reset(bucket: string, key: string): Promise<void>;
 }
 
 const PRODUCTION_BUCKETS: Record<string, RateLimitBucketConfig> = {
@@ -121,6 +129,14 @@ const PRODUCTION_BUCKETS: Record<string, RateLimitBucketConfig> = {
   // authenticated user id: the upload route only requires a signed-in caller,
   // so the account, not the IP, is the identity that consumes storage.
   'upload:file':             { limit: 30, windowMs: 10 * 60_000 },
+  // Account lockout (Issue #1125), two tiers, failures only (see
+  // lib/auth/account-lockout.ts). Tier 1: 10 failed password attempts per
+  // (email, source address) per 15 minutes lock that email from that address.
+  // Tier 2: a much higher ceiling per email across all addresses, which stops
+  // distributed guessing and a spoofed address header. Both lift by themselves
+  // when the oldest counted failure leaves the window.
+  'auth:account:lockout':       { limit: 10, windowMs: 15 * 60_000 },
+  'auth:account:lockout:email': { limit: 100, windowMs: 15 * 60_000 },
 };
 
 // The Cypress UI suite intentionally logs in fresh for every `it()` (each
@@ -155,6 +171,11 @@ const apiWriteLimitOverride = Number(process.env.RATE_LIMIT_API_WRITE_LIMIT);
 const mobileAuthTokenLimitOverride = Number(process.env.RATE_LIMIT_MOBILE_AUTH_TOKEN_LIMIT);
 
 const uploadLimitOverride = Number(process.env.RATE_LIMIT_UPLOAD_LIMIT);
+// The Cypress suites sign the same seeded identities in with wrong passwords
+// on purpose in many specs; the threshold is overridable the same way as the
+// buckets above.
+const accountLockoutLimitOverride = Number(process.env.RATE_LIMIT_ACCOUNT_LOCKOUT_LIMIT);
+const accountLockoutEmailLimitOverride = Number(process.env.RATE_LIMIT_ACCOUNT_LOCKOUT_EMAIL_LIMIT);
 
 export const DEFAULT_BUCKETS: Record<string, RateLimitBucketConfig> = {
   ...PRODUCTION_BUCKETS,
@@ -172,6 +193,12 @@ export const DEFAULT_BUCKETS: Record<string, RateLimitBucketConfig> = {
     : {}),
   ...(Number.isFinite(uploadLimitOverride) && uploadLimitOverride > 0
     ? { 'upload:file': { limit: uploadLimitOverride, windowMs: 10 * 60_000 } }
+    : {}),
+  ...(Number.isFinite(accountLockoutLimitOverride) && accountLockoutLimitOverride > 0
+    ? { 'auth:account:lockout': { limit: accountLockoutLimitOverride, windowMs: 15 * 60_000 } }
+    : {}),
+  ...(Number.isFinite(accountLockoutEmailLimitOverride) && accountLockoutEmailLimitOverride > 0
+    ? { 'auth:account:lockout:email': { limit: accountLockoutEmailLimitOverride, windowMs: 15 * 60_000 } }
     : {}),
 };
 
