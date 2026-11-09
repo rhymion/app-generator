@@ -99,7 +99,7 @@ cost factor), so identical passwords still produce different hash strings.
   exact commands and output).
 - **Vercel** (`scripts/vercel-seed.sh`): **this changed since the credential
   hardening was written.** `vercel-build`'s own npm script
-  (`"run-s prj:sync python-generate migrate:deploy db:generate build"`) no
+  (`"run-s prj:sync python-generate db:create db:generate build"`) no
   longer runs `db:seed-baseline` at all — it was pulled out of the build
   chain by a later commit (`fbf68b96`), and `build:full` is the only npm
   script that still runs it directly. Seeding for Vercel now happens via a

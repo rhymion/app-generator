@@ -79,7 +79,8 @@ The corrected flow is three separate scripts, run in order:
    it with `prisma migrate resolve --applied`. A `staging` branch created by an earlier
    version of the script keeps its copied data until it is deleted and recreated.
 2. `scripts/vercel-deploy.sh [--prod]` — first deploy; `vercel-build` creates the schema
-   via `migrate:deploy`.
+   via `db:create` (`migrate:deploy`, or `db:push` when `prisma/migrations/` has no
+   migrations — see `docs/knowledge/db-create-migrate-or-push.md`).
 3. `scripts/vercel-seed.sh [--prod]` — bootstraps tenant/admin data (`db:seed-baseline`,
    idempotent). Must run after step 2 — running it before any deploy fails because the
    target tables don't exist yet. Defaults to seeding the staging DB; `--prod` seeds
