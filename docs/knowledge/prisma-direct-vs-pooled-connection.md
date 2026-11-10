@@ -9,7 +9,7 @@ connection via `lib/prisma.ts` (`PrismaPg` adapter), which is fine: individual
 queries are short-lived and don't depend on session state surviving across
 statements.
 
-`vercel-build` also runs `migrate:deploy` through the same `DATABASE_URL`
+`vercel-build` also runs `migrate:deploy` (via `db:create`) through the same `DATABASE_URL`
 (via `prisma.config.ts`'s `datasource.url`). That's the part that isn't fine.
 Prisma's migration engine takes a `pg_advisory_lock` and applies DDL inside a
 session-scoped transaction, expecting every statement in that sequence to
