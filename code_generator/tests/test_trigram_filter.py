@@ -154,6 +154,11 @@ def test_db_init_reads_pg_indexes_before_creating(linked):
     """Issue #1213: a restricted (non-owner) role must not run CREATE INDEX for an index that exists."""
     src = (linked / 'lib' / 'db-init.ts').read_text()
     assert 'FROM pg_indexes WHERE schemaname = current_schema()' in src
+    # pg_indexes.indexname / pg_extension.extname are of type `name`, which
+    # @prisma/adapter-neon cannot deserialize: every catalog read casts to text.
+    assert 'SELECT indexname::text AS indexname FROM pg_indexes' in src
+    assert "SELECT extname::text AS extname FROM pg_extension" in src
+    assert not re.search(r'SELECT (indexname|extname)\b(?!::text)', src)
     assert 'if (missing.length === 0) return;' in src
     assert '42501' in src and 'scripts/create-gin-indexes.sql' in src
     # every index in the creation script is registered by name for the existence check

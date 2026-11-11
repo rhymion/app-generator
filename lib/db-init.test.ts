@@ -12,6 +12,14 @@ vi.mock('@/lib/prisma', () => ({
   default: {
     $queryRaw: vi.fn(async (strings: TemplateStringsArray) => {
       const sql = strings.join('');
+      // Like @prisma/adapter-neon: a column of PostgreSQL's `name` type (indexname,
+      // extname) that is not cast to text fails to deserialize.
+      if (/SELECT (indexname|extname)\b(?!::text)/.test(sql)) {
+        throw Object.assign(
+          new Error("Raw query failed. Code: `N/A`. Message: `Failed to deserialize column of type 'name'.`"),
+          { code: 'P2010', meta: { driverAdapterError: { message: 'UnsupportedNativeDataType' } } },
+        );
+      }
       if (sql.includes('pg_indexes')) return state.indexes.map((indexname) => ({ indexname }));
       if (sql.includes('pg_extension')) return state.extensions.map((extname) => ({ extname }));
       throw new Error(`unexpected query: ${sql}`);
