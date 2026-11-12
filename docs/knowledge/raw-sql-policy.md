@@ -72,11 +72,20 @@ from.
    or `Prisma.sql`), never `$queryRawUnsafe`/`$executeRawUnsafe`/`Prisma.raw`.
 3. Bind every runtime-supplied value through `${}`/`Prisma.sql` — never
    `+`-concatenate a value into the query text, even one that "looks" safe.
-4. Add a comment at the call site: why the query builder doesn't cover this,
+4. Cast each returned column to a type every Prisma driver adapter can read.
+   In particular, the system catalogs return
+   identifiers as `name` (`pg_indexes.indexname`, `pg_extension.extname`,
+   `pg_class.relname`, ...): `@prisma/adapter-pg` reads it, but
+   `@prisma/adapter-neon` (used with `USE_NEON_ADAPTER=true`) fails with
+   `UnsupportedNativeDataType` / `Failed to deserialize column of type 'name'`.
+   Write `SELECT indexname::text AS indexname ...`. The local and CI gates run
+   on `adapter-pg` only, so they do not catch a missing cast; a unit test mock
+   that refuses the uncast column does (see `lib/db-init.test.ts`).
+5. Add a comment at the call site: why the query builder doesn't cover this,
    and (if any part of the SQL text is not a bound runtime value) where that
    text actually comes from — a generate-time schema field, a fixed literal,
    etc.
-5. Add an entry to `code_generator/check_generated_allowlist.yaml` with a
+6. Add an entry to `code_generator/check_generated_allowlist.yaml` with a
    `reason` — `npm run check:generated` (gate step 15) fails closed on any
    `$queryRaw`/`$executeRaw`/`*Unsafe`/`Prisma.raw` use it isn't told about.
 

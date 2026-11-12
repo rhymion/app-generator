@@ -86,13 +86,17 @@ const SEARCH_INDEXES: SearchIndex[] = [
   { name: 'idx_dashboard_tsv_gin', create: () => prisma.$executeRaw`CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_dashboard_tsv_gin" ON "dashboard" USING GIN (to_tsvector('simple', COALESCE(COALESCE(name, ''), '')))` },
 ];
 
+// Catalog columns such as pg_indexes.indexname and pg_extension.extname are of
+// PostgreSQL's `name` type, which @prisma/adapter-neon cannot deserialize
+// (UnsupportedNativeDataType; @prisma/adapter-pg can). Cast them to text so the
+// reads work with every driver adapter.
 export async function ensureSearchIndexes(): Promise<void> {
-  const present = await prisma.$queryRaw<{ indexname: string }[]>`SELECT indexname FROM pg_indexes WHERE schemaname = current_schema()`;
+  const present = await prisma.$queryRaw<{ indexname: string }[]>`SELECT indexname::text AS indexname FROM pg_indexes WHERE schemaname = current_schema()`;
   const existing = new Set(present.map((row) => row.indexname));
   const missing = SEARCH_INDEXES.filter((index) => !existing.has(pgIdentifier(index.name)));
   if (missing.length === 0) return;
 
-  const extensions = await prisma.$queryRaw<{ extname: string }[]>`SELECT extname FROM pg_extension WHERE extname = 'pg_trgm'`;
+  const extensions = await prisma.$queryRaw<{ extname: string }[]>`SELECT extname::text AS extname FROM pg_extension WHERE extname = 'pg_trgm'`;
   if (extensions.length === 0) {
     await prisma.$executeRaw`CREATE EXTENSION IF NOT EXISTS pg_trgm`;
   }
