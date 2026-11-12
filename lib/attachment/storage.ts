@@ -55,9 +55,19 @@ export function storageBackend(env: Record<string, string | undefined> = process
   return 'local';
 }
 
+// The local backend's paths are built at runtime from process.cwd(), ATTACHMENT_LOCAL_DIR and the storage
+// key. Turbopack's file tracer cannot scope such a path and would otherwise include the whole project in the
+// server output of every route importing this module (Issue #1378). The directory holds user uploads, not
+// build inputs, so the `turbopackIgnore` comments below opt these calls out of tracing.
+
 /** Root directory of the local backend. It is deliberately outside `public/`. */
 export function localStorageRoot(env: Record<string, string | undefined> = process.env): string {
-  return path.resolve(process.cwd(), env.ATTACHMENT_LOCAL_DIR || '.uploads');
+  return path.resolve(/*turbopackIgnore: true*/ process.cwd(), env.ATTACHMENT_LOCAL_DIR || '.uploads');
+}
+
+/** Path of the object `key` on the local backend (`key` must already be checked with assertKey()). */
+function localObjectPath(key: string): string {
+  return path.join(/*turbopackIgnore: true*/ localStorageRoot(), key);
 }
 
 function assertKey(key: string): void {
@@ -102,7 +112,7 @@ export async function putStoredObject(key: string, body: Buffer, contentType: st
     default: {
       const root = localStorageRoot();
       await mkdir(root, { recursive: true });
-      await writeFile(path.join(root, key), body);
+      await writeFile(localObjectPath(key), body);
     }
   }
 }
@@ -121,7 +131,7 @@ export async function deleteStoredObject(key: string): Promise<void> {
       return;
     }
     default:
-      await rm(path.join(localStorageRoot(), key), { force: true });
+      await rm(localObjectPath(key), { force: true });
   }
 }
 
@@ -162,7 +172,7 @@ export async function serveStoredObject(key: string, options: ServeOptions): Pro
       return new Response(result.stream, { status: 200, headers });
     }
     default: {
-      const target = path.join(localStorageRoot(), key);
+      const target = localObjectPath(key);
       let size: number;
       try {
         const stats = await stat(target);
