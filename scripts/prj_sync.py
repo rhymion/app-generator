@@ -356,7 +356,7 @@ def _run_npm_install(dst_dir: Path) -> int:
     print("prj:sync: running npm install (package.json dependencies changed)")
     try:
         return subprocess.run(
-            ["npm", "install", "--no-audit", "--no-fund"], cwd=dst_dir, check=False
+            ["npm", "install", "--include=dev", "--no-audit", "--no-fund"], cwd=dst_dir, check=False
         ).returncode
     except OSError as e:
         print(f"prj:sync: ERROR could not run npm: {e}", file=sys.stderr)
