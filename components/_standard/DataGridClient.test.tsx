@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import DataGridClient from './DataGridClient';
+import { CspNonceProvider } from './CspNonceProvider';
 import { TickTestUtils } from '../../cypress/support/tick';
 import { renderWithIntl } from '../../vitest/i18n';
 
@@ -32,6 +33,42 @@ describe('DataGridClient', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  describe('Content Security Policy nonce (#1382)', () => {
+    it('stamps the DataGrid inline <style> with the nonce from CspNonceProvider', async () => {
+      const { container } = renderWithIntl(
+        <CspNonceProvider nonce="test-nonce">
+          <DataGridClient
+            primaryField="name"
+            src={createMockData(3)}
+            basePath="/test"
+            removeAction={mockRemoveAction}
+            entityLabel="Test"
+          />
+        </CspNonceProvider>
+      );
+      await waitFor(() => expect(container.querySelectorAll('style').length).toBeGreaterThan(0));
+      for (const style of Array.from(container.querySelectorAll('style'))) {
+        expect(style.getAttribute('nonce')).toBe('test-nonce');
+      }
+    });
+
+    it('renders the DataGrid inline <style> without a nonce outside CspNonceProvider', async () => {
+      const { container } = renderWithIntl(
+        <DataGridClient
+          primaryField="name"
+          src={createMockData(3)}
+          basePath="/test"
+          removeAction={mockRemoveAction}
+          entityLabel="Test"
+        />
+      );
+      await waitFor(() => expect(container.querySelectorAll('style').length).toBeGreaterThan(0));
+      for (const style of Array.from(container.querySelectorAll('style'))) {
+        expect(style.hasAttribute('nonce')).toBe(false);
+      }
+    });
   });
 
   describe('Pagination', () => {

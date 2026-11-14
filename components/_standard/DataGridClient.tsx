@@ -32,6 +32,7 @@ import { errorMessageKey } from '@/lib/_errors';
 import { AppAlert } from '@/components/ui';
 import ListQueryPanel from './ListQueryPanel';
 import { dateColumnProps } from './DataGridDatePickers';
+import { useCspNonce } from './CspNonceProvider';
 import { EMPTY_LIST_QUERY, toListQuery, type ListQuerySpec, type ListQueryState, type SortItem } from '@/lib/_list_query';
 
 interface BaseEntity {
@@ -143,6 +144,8 @@ export default function DataGridClient<T extends BaseEntity>({
   const [pendingInvalidateId, setPendingInvalidateId] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const apiRef = useGridApiRef();
+  // MUI X DataGrid renders its own inline <style>; it needs the CSP nonce (#1382).
+  const cspNonce = useCspNonce();
   const tc = useTranslations('Common');
   const tf = useTranslations('Fields');
   const terr = useTranslations('Errors');
@@ -424,6 +427,7 @@ export default function DataGridClient<T extends BaseEntity>({
       )}
       <Paper sx={{ height: 500, width: '100%' }}>
         <DataGrid
+          nonce={cspNonce}
           apiRef={apiRef}
           rows={items}
           columns={columns}
