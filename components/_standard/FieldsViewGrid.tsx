@@ -8,6 +8,7 @@ import Box from '@mui/material/Box';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
 import Typography from '@mui/material/Typography';
+import { useCspNonce } from './CspNonceProvider';
 
 interface FieldsViewGridProps {
   fields: GridRowsProp;
@@ -35,6 +36,8 @@ function getDisplayValue(col: GridColDef, row: GridValidRowModel): string {
 }
 
 export default function FieldsViewGrid({ fields, columns }: FieldsViewGridProps) {
+  // MUI X DataGrid renders its own inline <style>; it needs the CSP nonce (#1382).
+  const cspNonce = useCspNonce();
   const [paginationModel, setPaginationModel] = useState({
     pageSize: 10,
     page: 0,
@@ -80,6 +83,7 @@ export default function FieldsViewGrid({ fields, columns }: FieldsViewGridProps)
   return (
     <Paper sx={{ height: 400, width: '100%' }}>
       <DataGrid
+        nonce={cspNonce}
         rows={fields}
         columns={columns}
         paginationModel={paginationModel}

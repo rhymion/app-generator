@@ -1,5 +1,5 @@
 'use client';
-import { useState, useTransition, useCallback, useRef } from 'react';
+import { useState, useTransition, useCallback, useRef, useMemo } from 'react';
 import { useTranslations } from 'next-intl';
 import { formatLabelValue } from '@/lib/_format';
 import {
@@ -32,6 +32,7 @@ import { errorMessageKey } from '@/lib/_errors';
 import { AppAlert } from '@/components/ui';
 import ListQueryPanel from './ListQueryPanel';
 import { dateColumnProps } from './DataGridDatePickers';
+import { useCspNonce } from './CspNonceProvider';
 import { EMPTY_LIST_QUERY, toListQuery, type ListQuerySpec, type ListQueryState, type SortItem } from '@/lib/_list_query';
 
 interface BaseEntity {
@@ -143,6 +144,8 @@ export default function DataGridClient<T extends BaseEntity>({
   const [pendingInvalidateId, setPendingInvalidateId] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const apiRef = useGridApiRef();
+  // MUI X DataGrid renders its own inline <style>; it needs the CSP nonce (#1382).
+  const cspNonce = useCspNonce();
   const tc = useTranslations('Common');
   const tf = useTranslations('Fields');
   const terr = useTranslations('Errors');
@@ -377,10 +380,16 @@ export default function DataGridClient<T extends BaseEntity>({
 
   // The grid shows one sort column. With the panel, that is the first of the panel's sort columns
   // the grid has a column for (the grid drops a sort model entry it cannot match to a column).
-  const gridColumnFields = new Set(columns.map(column => column.field));
-  const gridSortModel: GridSortModel = listQuery
-    ? query.sort.filter(item => gridColumnFields.has(item.field)).slice(0, 1).map(item => ({ field: item.field, sort: item.dir }))
-    : sortModel;
+  //
+  // The model must keep its identity across renders while nothing it depends on changed: the grid
+  // treats every new sortModel array as a sort change and answers it by jumping back to the first
+  // page, so a fresh array on each render undid every page change (app-generator#1381).
+  const gridColumnFieldsKey = columns.map(column => column.field).join('\u0000');
+  const gridSortModel: GridSortModel = useMemo(() => {
+    if (!listQuery) return sortModel;
+    const gridColumnFields = new Set(gridColumnFieldsKey.split('\u0000'));
+    return query.sort.filter(item => gridColumnFields.has(item.field)).slice(0, 1).map(item => ({ field: item.field, sort: item.dir }));
+  }, [listQuery, query.sort, sortModel, gridColumnFieldsKey]);
 
   return (
     <div>
@@ -418,6 +427,7 @@ export default function DataGridClient<T extends BaseEntity>({
       )}
       <Paper sx={{ height: 500, width: '100%' }}>
         <DataGrid
+          nonce={cspNonce}
           apiRef={apiRef}
           rows={items}
           columns={columns}

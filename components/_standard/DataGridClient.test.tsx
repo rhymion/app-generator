@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import DataGridClient from './DataGridClient';
+import { CspNonceProvider } from './CspNonceProvider';
 import { TickTestUtils } from '../../cypress/support/tick';
 import { renderWithIntl } from '../../vitest/i18n';
 
@@ -32,6 +33,42 @@ describe('DataGridClient', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  describe('Content Security Policy nonce (#1382)', () => {
+    it('stamps the DataGrid inline <style> with the nonce from CspNonceProvider', async () => {
+      const { container } = renderWithIntl(
+        <CspNonceProvider nonce="test-nonce">
+          <DataGridClient
+            primaryField="name"
+            src={createMockData(3)}
+            basePath="/test"
+            removeAction={mockRemoveAction}
+            entityLabel="Test"
+          />
+        </CspNonceProvider>
+      );
+      await waitFor(() => expect(container.querySelectorAll('style').length).toBeGreaterThan(0));
+      for (const style of Array.from(container.querySelectorAll('style'))) {
+        expect(style.getAttribute('nonce')).toBe('test-nonce');
+      }
+    });
+
+    it('renders the DataGrid inline <style> without a nonce outside CspNonceProvider', async () => {
+      const { container } = renderWithIntl(
+        <DataGridClient
+          primaryField="name"
+          src={createMockData(3)}
+          basePath="/test"
+          removeAction={mockRemoveAction}
+          entityLabel="Test"
+        />
+      );
+      await waitFor(() => expect(container.querySelectorAll('style').length).toBeGreaterThan(0));
+      for (const style of Array.from(container.querySelectorAll('style'))) {
+        expect(style.hasAttribute('nonce')).toBe(false);
+      }
+    });
   });
 
   describe('Pagination', () => {
@@ -144,6 +181,73 @@ describe('DataGridClient', () => {
         expect(prevButton).not.toBeDisabled();
         expect(nextButtonUpdated).not.toBeDisabled();
       });
+    });
+  });
+
+  // app-generator#1381: in server mode the next / previous buttons fetched the
+  // requested page and then snapped back to page 0, so the same rows stayed on
+  // screen. With the list query panel the grid's sortModel was a new array on
+  // every render, which the grid takes as a sort change and answers by
+  // navigating to the first page.
+  describe('Server-mode pagination (#1381)', () => {
+    const TOTAL = 25;
+    const PAGE_SIZE = 10;
+    const all = createMockData(TOTAL);
+    const makeFetchPage = () =>
+      vi.fn(async (opts: { page?: number; pageSize?: number }) => {
+        const page = opts.page ?? 0;
+        const size = opts.pageSize ?? PAGE_SIZE;
+        return { rows: all.slice(page * size, (page + 1) * size), total: TOTAL, page, pageSize: size };
+      });
+    const listQuery = {
+      fields: [
+        { key: 'name', label: 'Name', kind: 'text' as const },
+        { key: 'description', label: 'Description', kind: 'text' as const },
+      ],
+      sortKeys: ['name', 'description'],
+      filterKeys: ['name', 'description'],
+      searchKeys: ['name', 'description'],
+    };
+
+    it.each([
+      ['without the list query panel', undefined],
+      ['with the list query panel', listQuery],
+    ])('moves to the next page and back %s', async (_label, spec) => {
+      const fetchPage = makeFetchPage();
+      renderWithIntl(
+        <DataGridClient
+          primaryField="name"
+          initialRows={all.slice(0, PAGE_SIZE)}
+          initialRowCount={TOTAL}
+          initialPage={0}
+          initialPageSize={PAGE_SIZE}
+          fetchPage={fetchPage}
+          basePath="/test"
+          entityLabel="Test"
+          listQuery={spec}
+        />
+      );
+
+      expect(await screen.findByText('Item 1')).toBeInTheDocument();
+
+      await userEvent.click(screen.getByLabelText(/next page/i));
+      expect(await screen.findByText('Item 11')).toBeInTheDocument();
+      // Let any deferred page reset (the grid debounces it) run before asserting it did not happen.
+      await new Promise(resolve => setTimeout(resolve, 50));
+      await waitFor(() => {
+        expect(screen.getByText('Item 11')).toBeInTheDocument();
+        expect(screen.queryByText('Item 1')).not.toBeInTheDocument();
+        expect(screen.getByLabelText(/previous page/i)).not.toBeDisabled();
+      });
+      expect(fetchPage).toHaveBeenLastCalledWith(expect.objectContaining({ page: 1, pageSize: PAGE_SIZE }));
+
+      await userEvent.click(screen.getByLabelText(/previous page/i));
+      expect(await screen.findByText('Item 1')).toBeInTheDocument();
+      await waitFor(() => {
+        expect(screen.queryByText('Item 11')).not.toBeInTheDocument();
+        expect(screen.getByLabelText(/previous page/i)).toBeDisabled();
+      });
+      expect(fetchPage).toHaveBeenLastCalledWith(expect.objectContaining({ page: 0, pageSize: PAGE_SIZE }));
     });
   });
 
