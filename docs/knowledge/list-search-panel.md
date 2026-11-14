@@ -89,6 +89,11 @@ server-paged (`fetchPage`); a list without it behaves as before.
   the grid shows the first panel sort column it has a column for, and a click on a column header
   replaces the whole sort with that one column. Filters from the panel and from the grid's menu apply
   together; on a field both filter, the grid's filter wins.
+  The `sortModel` handed to the grid is derived from the panel state and **must be memoized**
+  (`useMemo` in `DataGridClient`): MUI DataGrid calls `setSortModel` whenever the prop's identity
+  changes, publishes `sortModelChange`, and its pagination hook answers that by navigating to page 0.
+  A fresh array on every render therefore reset every next/previous page click back to the first
+  page (app-generator#1381). Any other controlled grid model derived during render needs the same care.
 - **Cards.** The cards have no header, so the panel is the only way to sort and filter them.
 
 ## Tests
@@ -98,6 +103,8 @@ server-paged (`fetchPage`); a list without it behaves as before.
   several filtered fields, enum labels, clearing, debounced typing.
 - `components/_standard/ResponsiveListClient.listQuery.test.tsx` — the request each layout sends
   (desktop and phone-sized viewport), and a header click replacing the panel sort.
+- `components/_standard/DataGridClient.test.tsx` (`Server-mode pagination (#1381)`) — next/previous
+  page in server mode, with and without the panel, staying on the requested page.
 - `code_generator/tests/test_trigram_filter.py` — the search columns (search target default,
   `true` / `false` overrides), the shared `_v2` indexes, validation and the `fields:` round trip.
 - `code_generator/tests/test_list_query_panel.py` — the generated spec, the clients' wiring and the

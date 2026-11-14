@@ -147,6 +147,73 @@ describe('DataGridClient', () => {
     });
   });
 
+  // app-generator#1381: in server mode the next / previous buttons fetched the
+  // requested page and then snapped back to page 0, so the same rows stayed on
+  // screen. With the list query panel the grid's sortModel was a new array on
+  // every render, which the grid takes as a sort change and answers by
+  // navigating to the first page.
+  describe('Server-mode pagination (#1381)', () => {
+    const TOTAL = 25;
+    const PAGE_SIZE = 10;
+    const all = createMockData(TOTAL);
+    const makeFetchPage = () =>
+      vi.fn(async (opts: { page?: number; pageSize?: number }) => {
+        const page = opts.page ?? 0;
+        const size = opts.pageSize ?? PAGE_SIZE;
+        return { rows: all.slice(page * size, (page + 1) * size), total: TOTAL, page, pageSize: size };
+      });
+    const listQuery = {
+      fields: [
+        { key: 'name', label: 'Name', kind: 'text' as const },
+        { key: 'description', label: 'Description', kind: 'text' as const },
+      ],
+      sortKeys: ['name', 'description'],
+      filterKeys: ['name', 'description'],
+      searchKeys: ['name', 'description'],
+    };
+
+    it.each([
+      ['without the list query panel', undefined],
+      ['with the list query panel', listQuery],
+    ])('moves to the next page and back %s', async (_label, spec) => {
+      const fetchPage = makeFetchPage();
+      renderWithIntl(
+        <DataGridClient
+          primaryField="name"
+          initialRows={all.slice(0, PAGE_SIZE)}
+          initialRowCount={TOTAL}
+          initialPage={0}
+          initialPageSize={PAGE_SIZE}
+          fetchPage={fetchPage}
+          basePath="/test"
+          entityLabel="Test"
+          listQuery={spec}
+        />
+      );
+
+      expect(await screen.findByText('Item 1')).toBeInTheDocument();
+
+      await userEvent.click(screen.getByLabelText(/next page/i));
+      expect(await screen.findByText('Item 11')).toBeInTheDocument();
+      // Let any deferred page reset (the grid debounces it) run before asserting it did not happen.
+      await new Promise(resolve => setTimeout(resolve, 50));
+      await waitFor(() => {
+        expect(screen.getByText('Item 11')).toBeInTheDocument();
+        expect(screen.queryByText('Item 1')).not.toBeInTheDocument();
+        expect(screen.getByLabelText(/previous page/i)).not.toBeDisabled();
+      });
+      expect(fetchPage).toHaveBeenLastCalledWith(expect.objectContaining({ page: 1, pageSize: PAGE_SIZE }));
+
+      await userEvent.click(screen.getByLabelText(/previous page/i));
+      expect(await screen.findByText('Item 1')).toBeInTheDocument();
+      await waitFor(() => {
+        expect(screen.queryByText('Item 11')).not.toBeInTheDocument();
+        expect(screen.getByLabelText(/previous page/i)).toBeDisabled();
+      });
+      expect(fetchPage).toHaveBeenLastCalledWith(expect.objectContaining({ page: 0, pageSize: PAGE_SIZE }));
+    });
+  });
+
   describe('Filtering and Sorting', () => {
     it('allows filtering by name', async () => {
       const mockData = createMockData(5);
