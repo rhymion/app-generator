@@ -38,6 +38,12 @@ orphan cleanup.
   restart or scale-down. When `K_SERVICE` (Cloud Run) or `VERCEL` is set, `NODE_ENV` is not `development`, and neither a
   bucket, a Blob credential nor `ATTACHMENT_LOCAL_DIR` is configured, `storageBackend()` throws with a message naming the
   variables to set. `ATTACHMENT_LOCAL_DIR` set explicitly (for example to a mounted persistent volume) opts in to local disk.
+- **Local-disk paths are excluded from build tracing.** The local backend's paths are built at runtime from
+  `process.cwd()`, `ATTACHMENT_LOCAL_DIR` and the storage key. Turbopack's file tracer cannot scope such a path, so it
+  warns "Dynamic filesystem access causes tracing of the whole project" and copies the entire project (source, `public/`)
+  into the server output of every route importing the module (Issue #1378). `localStorageRoot()` and `localObjectPath()`
+  mark these calls with `/*turbopackIgnore: true*/`. Any new local-disk access in `lib/attachment/storage.ts` goes through
+  `localObjectPath()`, so it does not bring the warning back; check that `next build` reports no warning for this file.
 - **The GCP scripts match the storage code.** `scripts/gcp-deploy.sh` maps the `app-gcs-bucket-name` secret to
   `GCS_BUCKET_NAME`, the variable the storage code reads. `scripts/gcp-setup.sh` creates the bucket with uniform
   bucket-level access and Public Access Prevention, grants the Cloud Run service account `roles/storage.objectUser` on it
