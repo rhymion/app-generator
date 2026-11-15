@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import FieldsDataGrid from './FieldsDataGrid';
+import { CspNonceProvider } from './CspNonceProvider';
 import { DeleteTestUtils } from '@/cypress/support/delete';
 import { TickTestUtils } from '@/cypress/support/tick';
 import { GridColDef } from '@mui/x-data-grid';
@@ -45,6 +46,17 @@ describe('FieldsDataGrid', () => {
       />
     );
     expect(screen.getByRole('button', { name: /add custom field/i })).toBeInTheDocument();
+  });
+
+  it('stamps the DataGrid inline <style> with the CSP nonce from CspNonceProvider (#1382)', () => {
+    const { container } = render(
+      <CspNonceProvider nonce="test-nonce">
+        <FieldsDataGrid initialFields={mockFields} columns={mockColumns} createNewRow={mockCreateNewRow} />
+      </CspNonceProvider>
+    );
+    const styles = Array.from(container.querySelectorAll('style'));
+    expect(styles.length).toBeGreaterThan(0);
+    for (const style of styles) expect(style.getAttribute('nonce')).toBe('test-nonce');
   });
 
   it('renders add button with default label', () => {

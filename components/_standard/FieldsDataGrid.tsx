@@ -28,6 +28,7 @@ import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
 import DateTimeWrapper from './DateTimeWrapper';
+import { useCspNonce } from './CspNonceProvider';
 import dayjs from 'dayjs';
 
 interface FieldsDataGridProps {
@@ -128,6 +129,8 @@ const FieldsDataGrid = forwardRef<FieldsDataGridHandle, FieldsDataGridProps>(
     title = 'Fields',
   }, ref) => {
     const apiRef = useGridApiRef();
+    // MUI X DataGrid renders its own inline <style>; it needs the CSP nonce (#1382).
+    const cspNonce = useCspNonce();
     const [fields, setFields] = useState<GridRowsProp>(initialFields);
     const [paginationModel, setPaginationModel] = useState({
       pageSize: 10,
@@ -314,6 +317,7 @@ const FieldsDataGrid = forwardRef<FieldsDataGridHandle, FieldsDataGridProps>(
         </Tooltip>
         <Paper sx={{ height: 400, width: '100%' }}>
           <DataGrid
+            nonce={cspNonce}
             apiRef={apiRef}
             rows={fields}
             columns={columns}

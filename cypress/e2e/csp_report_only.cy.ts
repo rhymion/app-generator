@@ -46,6 +46,29 @@ describe('Content Security Policy (report-only)', () => {
     });
   });
 
+  it('stamps the DataGrid inline <style> on a list page with the document nonce (#1382)', () => {
+    // MUI X DataGrid renders nothing on the server (GridRoot returns null during SSR); its
+    // CSS-variables <style> is inserted in the browser and is checked against the policy of the
+    // first document load. Without the nonce the browser reports `style-src-elem` / `inline`.
+    // Cypress strips CSP headers from pages it visits, so a securitypolicyviolation listener
+    // never fires here; compare the grid's nonce with the one Next.js stamped on its own scripts
+    // from the same response instead.
+    cy.task('db:grantAllPermissions');
+    cy.login(TEST_CREDENTIALS.email, TEST_CREDENTIALS.password);
+    cy.visit('/en/user');
+    cy.get('.MuiDataGrid-root').should('be.visible');
+    cy.document().then((doc) => {
+      // The `nonce` property keeps the value even where the browser hides the attribute.
+      const documentNonce = doc.querySelector<HTMLScriptElement>('script[nonce]')?.nonce ?? '';
+      expect(documentNonce, 'Next.js stamped its scripts with the request nonce').to.have.length.greaterThan(10);
+      const gridStyles = Array.from(doc.querySelectorAll<HTMLStyleElement>('style[href^="/MuiDataGridVariables"]'));
+      expect(gridStyles, 'DataGrid <style> rendered').to.have.length.greaterThan(0);
+      for (const style of gridStyles) {
+        expect(style.nonce, 'DataGrid <style> carries the document nonce').to.equal(documentNonce);
+      }
+    });
+  });
+
   it('keeps the page usable: report-only never blocks', () => {
     // Report-only never blocks: the page still renders and the form is usable.
     cy.visit('/en/login');

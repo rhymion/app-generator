@@ -27,6 +27,7 @@ import Button from '@mui/material/Button';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
+import { useCspNonce } from './CspNonceProvider';
 
 interface OrderedFieldsDataGridProps {
   initialFields?: GridRowsProp;
@@ -102,6 +103,8 @@ const OrderedFieldsDataGrid = forwardRef<OrderedFieldsDataGridHandle, OrderedFie
     title = 'Fields',
   }, ref) => {
     const apiRef = useGridApiRef();
+    // MUI X DataGrid renders its own inline <style>; it needs the CSP nonce (#1382).
+    const cspNonce = useCspNonce();
     const [fields, setFields] = useState<GridRowsProp>(() => {
       const sorted = [...initialFields].sort((a, b) => {
         const orderA = typeof a.order === 'number' ? a.order : 0;
@@ -373,6 +376,7 @@ const OrderedFieldsDataGrid = forwardRef<OrderedFieldsDataGridHandle, OrderedFie
         </Tooltip>
         <Paper sx={{ height: 400, width: '100%' }}>
           <DataGrid
+            nonce={cspNonce}
             apiRef={apiRef}
             rows={fields}
             columns={columnsWithActions}

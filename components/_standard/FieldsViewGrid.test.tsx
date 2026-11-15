@@ -3,12 +3,13 @@ import { render, screen } from '@testing-library/react';
 import { vi, describe, it, expect, beforeEach } from 'vitest';
 import useMediaQuery from '@mui/material/useMediaQuery';
 import FieldsViewGrid from './FieldsViewGrid';
+import { CspNonceProvider } from './CspNonceProvider';
 import type { GridColDef } from '@mui/x-data-grid';
 
 // Mock DataGrid — testing FieldsViewGrid logic, not MUI DataGrid internals
 vi.mock('@mui/x-data-grid', () => ({
-  DataGrid: ({ rows, columns }: { rows: Record<string, unknown>[]; columns: { field: string; headerName?: string }[] }) => (
-    <div data-testid="data-grid">
+  DataGrid: ({ rows, columns, nonce }: { rows: Record<string, unknown>[]; columns: { field: string; headerName?: string }[]; nonce?: string }) => (
+    <div data-testid="data-grid" data-nonce={nonce ?? ''}>
       {rows.map((row) => (
         <div key={String(row.id)} data-testid="data-grid-row">
           {columns.map((col) => (
@@ -40,6 +41,20 @@ describe('FieldsViewGrid', () => {
   describe('Desktop view (wide screen)', () => {
     beforeEach(() => {
       vi.mocked(useMediaQuery).mockReturnValue(false);
+    });
+
+    it('passes the CSP nonce from CspNonceProvider to DataGrid (#1382)', () => {
+      render(
+        <CspNonceProvider nonce="test-nonce">
+          <FieldsViewGrid fields={[row1]} columns={columns} />
+        </CspNonceProvider>
+      );
+      expect(screen.getByTestId('data-grid')).toHaveAttribute('data-nonce', 'test-nonce');
+    });
+
+    it('passes no nonce to DataGrid outside CspNonceProvider', () => {
+      render(<FieldsViewGrid fields={[row1]} columns={columns} />);
+      expect(screen.getByTestId('data-grid')).toHaveAttribute('data-nonce', '');
     });
 
     it('renders DataGrid with 0 rows', () => {
