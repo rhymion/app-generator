@@ -47,6 +47,9 @@ import MentionText from '@/components/_standard/MentionText';
 {% endif %}
 import AuditInfo from '@/components/_standard/AuditInfo';
 import { AppDetailShell, AppDetailHeader, AppFieldText{% if uses_app_field_boolean %}, AppFieldBoolean{% endif %}{% if has_rel_links %}, AppFieldRelation{% endif %}{% if needs_accordion %}, AppSection{% endif %} } from '@/components/ui';
+{% if has_box_import %}
+import { AppFormFieldWrapper } from '@/components/ui';
+{% endif %}
 {% if custom_view_imports %}
 {{ custom_view_imports }}
 {% endif %}
