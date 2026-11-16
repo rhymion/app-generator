@@ -712,16 +712,23 @@ for a concrete example.
 
 ### 4.6 Field UI Hints (`x-ui`)
 
-Place `x-ui` on a `string` column's entry in `properties:` to control how the form input is rendered.
+Place `x-ui` on a column's entry in `properties:` to control how the field is laid out.
+Both hints apply to the **new/edit page** (`FormUpsert.tsx`) and to the **detail (view)
+page** (`FormView.tsx`), so a field keeps the same shape on every page.
 
 | Sub-key | Type | Default | Effect |
 |---|---|---|---|
-| `rows` | integer | — | Renders the field as a multiline textarea with the given row count |
-| `width` | integer \| string | — | Controls form-field wrapper width on desktop (md+); mobile always 100% |
+| `rows` | integer | — | Renders a string field as a multi-line textarea with the given row count |
+| `width` | integer (1–12) | — | Field width in 12-column grid units on desktop (md+); mobile always 100% |
 
-**`rows`** — When set, the generator emits `multiline={true} rows={N}` on the `AppFieldText`
-component. Without `x-ui.rows`, only `description` fields receive `rows={4}` by convention;
-all other string fields render as single-line inputs.
+**`rows`** — When set, the generator emits `multiline rows={N}` on the `AppFieldText`
+component — the editable input on new/edit, and the read-only display on the view page
+(and for an `x-readonly-fields` / `x-readonly` field on the edit page). Without
+`x-ui.rows`, `description` fields and `x-mention: true` fields get 4 rows by convention;
+all other string fields render single-line. Only plain string fields are affected on the
+view page: a relation, enum, date, decimal, number or boolean field ignores `rows`.
+A flattened (`x-flatten`) section honours `rows` declared on the target entity's own column
+on both pages.
 
 ```yaml
 properties:
@@ -738,15 +745,21 @@ Omitting `x-ui` (or omitting `x-ui.rows`) preserves existing behaviour:
 
 #### x-ui.width
 
-Controls the form-field wrapper width on desktop (md+). On mobile (xs), the field always expands to 100%.
+Controls the field wrapper width on desktop (md+). On mobile (xs), the field always expands to 100%.
 
 | Value type | Behaviour |
 |------------|-----------|
 | integer (1–12) | Grid-column units: `val / 12 × 100%` — e.g. `width: 8` → `66.667%` on md+ |
-| string | Literal CSS value passed to the `md` breakpoint — e.g. `width: '400px'` |
-| omitted | No Box wrapper; field uses full container width |
+| omitted, or not a number | No wrapper; field uses full container width (a string such as `'400px'` is ignored) |
 
-The generator wraps the field in `<Box sx={{ width: { xs: '100%', md: '<value>' } }}>`.
+The generator wraps the field in `<AppFormFieldWrapper cols={N}>`
+(`components/ui/forms/AppFormFieldWrapper.tsx`), which sets
+`width: { xs: '100%', md: '<N/12 × 100>%' }`.
+
+- **View page**: every rendered field that declares `x-ui.width` is wrapped, whatever its type.
+- **New/edit page**: text, decimal, mention, relation, link-URI, enum, timezone and
+  read-only (`x-readonly-fields`) fields are wrapped; number, date, boolean, image/file,
+  direct-attachment, entity-select and custom-component inputs currently ignore `width`.
 
 **Examples:**
 
@@ -761,7 +774,7 @@ properties:
       width: 6      # half-width; combine with rows if needed
 ```
 
-`x-ui.rows` and `x-ui.width` can be combined: the generator applies the Box wrapper first, then the multiline attribute.
+`x-ui.rows` and `x-ui.width` can be combined: the wrapper goes outside, the multiline attribute on the field inside it.
 
 ### 4.7 Readonly Fields (`x-readonly` / `x-readonly-fields`)
 

@@ -173,6 +173,39 @@ def _int_enum_option(v, i: int, disabled: bool = False) -> str:
         return f"{{ value: {i}, label: '{v}'{_suffix} }}"
 
 
+def _ui_width_cols(prop: dict) -> int | None:
+    """x-ui.width as 12-column grid units, or None when unset / not numeric.
+    Shared by FormUpsert and FormView so both pages size a field the same."""
+    val = ((prop or {}).get('x-ui') or {}).get('width')
+    if val is None or not isinstance(val, (int, float)):
+        return None
+    return int(val)
+
+
+def _maybe_box_wrap(jsx: str, cols: int | None) -> str:
+    """Wrap a field's JSX in <AppFormFieldWrapper cols={N}> when x-ui.width is set."""
+    if not cols:
+        return jsx
+    reindented = '\n'.join('  ' + line if line.strip() else line for line in jsx.splitlines())
+    return (
+        f"      <AppFormFieldWrapper cols={{{cols}}}>\n"
+        f"{reindented}\n"
+        f"      </AppFormFieldWrapper>"
+    )
+
+
+def _ui_text_rows(field_name: str, prop: dict) -> int | None:
+    """Row count for a multi-line text field, or None for a single-line one.
+    Mirrors FormUpsert: x-ui.rows wins; otherwise `description` and
+    x-mention fields default to 4 rows; every other string is single-line."""
+    _rows = ((prop or {}).get('x-ui') or {}).get('rows')
+    if _rows is not None:
+        return int(_rows)
+    if field_name == 'description' or (prop or {}).get('x-mention') is True:
+        return 4
+    return None
+
+
 def _readonly_display_field(
     p: str,
     filtered_props: dict,
@@ -340,9 +373,14 @@ def _readonly_display_field(
         return result
 
     fallback_op = '??' if actual in ('integer', 'number') else '||'
+    # x-ui.rows (and the description / x-mention 4-row default) make a
+    # string field multi-line here exactly as FormUpsert does for the input.
+    _rows = _ui_text_rows(p, prop) if actual == 'string' else None
+    _rows_attrs = f"{indent}  multiline\n{indent}  rows={{{_rows}}}\n" if _rows else ''
     result['jsx'] = (
         f"{indent}<AppFieldText\n{indent}  label={{tf('{fk}')}}\n"
         f"{indent}  value={{src.{p} {fallback_op} ''}}\n"
+        f"{_rows_attrs}"
         f"{indent}  readOnly\n{indent}/>"
     )
     return result
@@ -4754,7 +4792,17 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
         _ordered_fields = [f for f in _x_display_form if f in jsx_by_field]
     else:
         _ordered_fields = [f for f in parent_props if f in jsx_by_field]
-    all_parent_fields = '\n'.join(jsx_by_field[f] for f in _ordered_fields)
+    # x-ui.width: same AppFormFieldWrapper sizing FormUpsert applies, so a
+    # field keeps its width between the view and the new/edit pages. Applied
+    # to every rendered field (whatever its type) that declares it.
+    has_box_import = False
+    _sized_jsx: dict[str, str] = {}
+    for f in _ordered_fields:
+        _cols = _ui_width_cols(filtered_props.get(f, {}))
+        if _cols:
+            has_box_import = True
+        _sized_jsx[f] = _maybe_box_wrap(jsx_by_field[f], _cols)
+    all_parent_fields = '\n'.join(_sized_jsx[f] for f in _ordered_fields)
 
     # Reverse OTO rels (FK in target): display as labeled fields with view links
     reverse_oto_rels = ctx.get('reverse_oto_rels', [])
@@ -4874,9 +4922,17 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
                     f"          readOnly\n        />"
                 )
             else:
+                # x-ui.rows on the flattened target's own column: multi-line
+                # here too, mirroring the FormUpsert accordion text input.
+                _flat_rows = None
+                if _field.get('prop_type') == 'string':
+                    _flat_target_props = _raw_def(_fr.get('target', ''), schema).get('properties', {}) if schema else {}
+                    _flat_rows = _ui_text_rows(_fname, _flat_target_props.get(_fname, {}))
+                _flat_rows_attrs = f"          multiline\n          rows={{{_flat_rows}}}\n" if _flat_rows else ''
                 _inner.append(
                     f"        <AppFieldText\n          label={{tf('{_fcamel}')}}\n"
                     f"          value={{src.{_prop}?.{_fname}?.toString() ?? ''}}\n"
+                    f"{_flat_rows_attrs}"
                     f"          readOnly\n        />"
                 )
 
@@ -5052,6 +5108,7 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
         'needs_single_attachment_display': needs_single_attachment_display,
         'has_rel_links':          has_rel_links,
         'needs_accordion':        needs_accordion,
+        'has_box_import':         has_box_import,
         'has_comment_children':   has_comment_children,
         'comment_has_mention':    comment_has_mention,
         'has_list_children':      has_list_children or has_flatten_array,
@@ -5258,22 +5315,6 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
 
     def _setter(var_name: str) -> str:
         return to_pascal_case_from_var(var_name)
-
-    def _ui_width_cols(prop: dict) -> int | None:
-        val = (prop.get('x-ui') or {}).get('width')
-        if val is None or not isinstance(val, (int, float)):
-            return None
-        return int(val)
-
-    def _maybe_box_wrap(jsx: str, cols: int | None) -> str:
-        if not cols:
-            return jsx
-        reindented = '\n'.join('  ' + line if line.strip() else line for line in jsx.splitlines())
-        return (
-            f"      <AppFormFieldWrapper cols={{{cols}}}>\n"
-            f"{reindented}\n"
-            f"      </AppFormFieldWrapper>"
-        )
 
     has_box_import = False
 
@@ -6016,9 +6057,12 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             uses_format_label_value = True
         if _ro_built['uses_decimal_format']:
             uses_decimal_format = True
+        _ro_field_width_cols = _ui_width_cols(filtered_props.get(_ro_fn, {}))
+        if _ro_field_width_cols:
+            has_box_import = True
         jsx_by_field[_ro_fn] = (
             f"      {{isEdit && (\n"
-            f"{_ro_built['jsx']}\n"
+            f"{_maybe_box_wrap(_ro_built['jsx'], _ro_field_width_cols)}\n"
             f"      )}}"
         )
 
