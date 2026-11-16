@@ -265,6 +265,15 @@ describe('buildFilter', () => {
       ).toEqual([{ assignee: { name: { contains: 'Ann', mode: 'insensitive' } } }]);
     });
 
+    it('drops a field named after an inherited Object.prototype member (not an own relation key)', () => {
+      const relations = { assignee: { field: 'name' } };
+      for (const field of ['constructor', 'toString', '__proto__', 'hasOwnProperty']) {
+        const filter: Record<string, string> = {};
+        Object.defineProperty(filter, field, { value: 'x', enumerable: true });
+        expect(buildFilter(filter, new Set(['name']), {}, relations)).toEqual([]);
+      }
+    });
+
     it('returns an empty array when filter is undefined', () => {
       expect(buildFilter(undefined, new Set(['name']))).toEqual([]);
     });
@@ -309,6 +318,15 @@ describe('buildOrderBy', () => {
         relations,
       ),
     ).toEqual([{ name: 'desc' }, { assignee: { name: 'asc' } }]);
+  });
+});
+
+describe('buildOrderBy inherited-property names', () => {
+  it('drops a sort field named after an inherited Object.prototype member', () => {
+    const relations = { assignee: { field: 'name' } };
+    for (const field of ['constructor', 'toString', '__proto__', 'hasOwnProperty']) {
+      expect(buildOrderBy([{ field, dir: 'asc' }], new Set(['name']), relations)).toEqual([{ id: 'asc' }]);
+    }
   });
 });
 
