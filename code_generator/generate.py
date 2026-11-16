@@ -1501,19 +1501,29 @@ def _resolve_search_columns(entity: dict, schema: dict, search_default_scope: st
     }
 
 
-def _security_fk_shape_flags(model: str, entity: dict, schema: dict, filters_by_org: bool) -> dict[str, bool]:
+def _security_fk_shape_flags(model: str, entity: dict, schema: dict, filters_by_org: bool,
+                             set_checks: list[dict] | None = None) -> dict[str, bool]:
     """Flags for the security matrix's `fk_shape` axis: which kinds of reference to an
-    organization-scoped entity `model` holds, directly or in an inline child grid.
+    organization-scoped entity `model` holds, directly, in an inline child grid, or as a
+    member of a to-many set chosen on it.
 
     Shapes come from helpers.schema_helpers.fk_reference_shapes. A child's foreign key
     back to its parent is the ownership link, not a reference the user picks, so it is
-    left out. Without an organization column nothing is unreachable, so every flag is false.
+    left out. The to-many sets are the ones service.ts checks (`set_fk_checks` of the
+    build context), counted when their member entity has an organization column.
+    Without an organization column nothing is unreachable, so every flag is false.
     """
     kinds = ('many_to_one', 'one_to_one')
     flags = {f'fk_{kind}_{need}': False for kind in kinds for need in ('required', 'optional')}
     flags.update({'fk_inline_required': False, 'fk_inline_optional': False})
+    flags.update({'fk_set_many_to_many': False, 'fk_set_one_to_many': False})
     if not filters_by_org:
         return flags
+    defs = schema.get('definitions') or {}
+    for check in set_checks or []:
+        target_def = defs.get(f"__{check['target']}") or defs.get(check['target']) or {}
+        if 'organization_id' in (target_def.get('properties') or {}):
+            flags[f"fk_set_{check['kind']}"] = True
     for shape in fk_reference_shapes(model, schema).values():
         flags[f'fk_{shape}'] = True
     for child in entity.get('children') or []:
@@ -2122,7 +2132,8 @@ def generate(schema_path: str, output_dir: str) -> None:
             'can_export': bool(can_export), 'can_invalidate': bool(can_invalidate),
             'import_eligible': bool(ctx.get('import_eligible')),
             'should_filter_by_org': bool(ctx.get('should_filter_by_org')),
-            **_security_fk_shape_flags(parent, entity, schema, bool(ctx.get('should_filter_by_org'))),
+            **_security_fk_shape_flags(parent, entity, schema, bool(ctx.get('should_filter_by_org')),
+                                       ctx.get('set_fk_checks')),
         }
 
         # --- Invalidate action route (independent of can_api) ---

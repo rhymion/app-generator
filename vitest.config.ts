@@ -91,6 +91,11 @@ export default defineConfig({
       // .generated-attachment-bridge-test/).
       "code_generator/tests/fixtures/attachment_bridge_actions/**",
       ".generated-attachment-bridge-test/**",
+      // Security-matrix gate fixture: its Server Action flows import generated fixture entities, so
+      // scripts/check_security_matrix_e2e_gate_fixture.sh runs them inside the copy it stages under
+      // .generated-security-matrix-e2e-gate/ (that copy is never part of this repository's own suite).
+      "code_generator/tests/fixtures/security_matrix_e2e_gate/**",
+      ".generated-security-matrix-e2e-gate/**",
       // Generator tests of a script the consumer's prj/ replaces (written by prj:sync).
       ...prjSyncExcludedTests(),
     ],

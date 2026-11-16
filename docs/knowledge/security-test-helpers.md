@@ -44,6 +44,18 @@ The manifest is written by `npm run generate-code`.
 | `seedActorWithoutRole(entity)` | A user whose role has the entity's permission row with every flag false. |
 | `seedActorFromOtherOrganization(entity, id)` | Moves row `id` into an organization the main test user does not belong to; returns that user as `actor` and the row's `targetId`. |
 
+For reference-shape tests (a write that points at a row the actor cannot reach), three more Cypress helpers place
+rows directly in the database:
+
+| Helper | Use |
+|--------|-----|
+| `seedRow(model, data)` | Creates a row of any model with exactly `data` (audit columns included), e.g. a row of another organization. |
+| `updateRow(model, id, data)` | Changes a stored row, e.g. moves a referenced row into another organization after the record points at it. |
+| `seedScopedActor(label, organizationIds, grants)` | An actor in those organizations holding exactly `grants`; a grant's `scope` is `general`, `Creator` or `Assignee`, so some rows of one entity are reachable and others are not. |
+
+`persistence` (and the `security:snapshot` task) also takes an optional `include` (Prisma `include`), so the re-read
+covers the members of a to-many set or the rows of an inline child grid, not only the record's own columns.
+
 ## Claiming the cell
 
 A test that calls `expectDeniedFor` carries the `security-cell:` marker for the cell it claims, next to the call.

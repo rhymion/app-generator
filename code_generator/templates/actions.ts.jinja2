@@ -98,7 +98,7 @@ export async function remove{{ parent_pascal }}(ids: string[]) {
     if (filtered{{ parent_pascal }}s.length === 0) {
       throw new AppError('PERMISSION_DENIED', 'No permission to delete');
     }
-{% if fk_write_checks %}
+{% if delete_reference_check %}
     if (!userId) throw new AppError('PERMISSION_DENIED', 'No permission to delete');
     await assertDeleteReferencesReachable{{ parent_pascal }}(userId, filtered{{ parent_pascal }}s.map(item => item.id));
 {% endif %}

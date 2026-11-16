@@ -167,7 +167,8 @@ definitions:
 
   # --- Foreign-reference shapes (one entry per structure the FK-reference rule has to cover) ---
   #   sx_profile      one-to-one: a required, unique foreign key to sx_account, which is also its
-#                   primary display field (so the generated reference tests G3.8-G3.15 run on it).
+  #                   primary display field (so the generated reference tests G3.8-G3.15 run on it),
+  #                   and an optional, unique foreign key to sx_split (the optional one-to-one shape).
   #   sx_ticket       many-to-one: a required (sx_account_id) and an optional (sx_backup_account_id)
   #                   foreign key to sx_account; a many-to-many set of sx_tag (tags); an
   #                   optional-foreign-key list of sx_note (a one-to-many set chosen on the parent);
@@ -175,6 +176,13 @@ definitions:
   #   sx_ticket_line  inline child (no pages of its own) whose rows carry a required and an optional
   #                   foreign key to sx_account.
   #   sx_note         independent child of sx_ticket, held by a nullable foreign key.
+  #   sx_tag          member of sx_ticket's many-to-many set.
+  #   sx_entry        CSV-importable (x-import-key: code) with a required (sx_account_id) and an
+  #                   optional (sx_backup_account_id) many-to-one reference to sx_account, so the
+  #                   import route's reference cells exist.
+  # The hand-written spec cypress/e2e/fk_reference_shapes.cy.ts tests every reference shape of
+  # sx_ticket and sx_profile against a row in another organization and a row outside the actor's
+  # Creator / Assignee read scope.
   sx_profile:
     x-generate:
       list: true
@@ -199,6 +207,11 @@ definitions:
           type: one-to-one
           target: sx_account
           labelField: name
+      sx_split_id:
+        x-relationship:
+          type: one-to-one
+          target: sx_split
+          labelField: title
 
   sx_ticket:
     x-generate:
@@ -304,4 +317,35 @@ definitions:
       name: {}
       organization_id:
         x-relationship:
+          labelField: name
+
+  sx_entry:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: true
+    x-import-key: [code]
+    x-display:
+      table:
+        - code:
+            primary: true
+    properties:
+      code: {}
+      organization_id:
+        x-relationship:
+          labelField: name
+      sx_account_id:
+        x-relationship:
+          type: many-to-one
+          target: sx_account
+          labelField: name
+      sx_backup_account_id:
+        x-relationship:
+          type: many-to-one
+          target: sx_account
           labelField: name

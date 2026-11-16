@@ -58,19 +58,45 @@ an entity that holds such a reference to an organization-scoped entity (not `org
 | `many_to_one_required`, `many_to_one_optional` | the entity itself, many-to-one |
 | `one_to_one_required`, `one_to_one_optional` | the entity itself, one-to-one |
 | `inline_child_required`, `inline_child_optional` | a row of an inline-edited child grid (the key back to the parent is not counted) |
+| `many_to_many` | a member of a many-to-many set chosen on the entity |
+| `one_to_many` | a member of a one-to-many list chosen on the entity (attached through the member's nullable foreign key) |
 
-Four cases combine with these shapes only, each limited to the operations that can perform it:
+The set shapes come from the same checks `service.ts` generates (`set_fk_checks` in `build_context.py`), counted when
+the member entity has an organization column. Five cases combine with these shapes only, each limited to the operations
+that can perform it and to the shapes it makes sense for:
 
-| `case` | Meaning |
-|---|---|
-| `fk_to_unreachable` | write a reference to an unreachable row (create, update, bulk, import, Server Action) |
-| `fk_away_unreachable` | re-point a reference that already holds an unreachable row |
-| `fk_null_unreachable` | clear an optional reference that holds an unreachable row (optional shapes only) |
-| `fk_delete_unreachable` | delete a record whose reference holds an unreachable row |
+| `case` | Meaning | `denied_status` |
+|---|---|---|
+| `fk_to_unreachable` | write a reference to an unreachable row, or add one to a set (create, update, bulk, import, Server Action) | 404 |
+| `fk_away_unreachable` | re-point a single reference that holds an unreachable row | 403 |
+| `fk_null_unreachable` | clear an optional single reference that holds an unreachable row | 403 |
+| `fk_drop_unreachable` | remove a set member, or drop an inline child row, that holds an unreachable row (inline and set shapes) | 403 |
+| `fk_delete_unreachable` | delete a record whose reference, set member or inline row holds an unreachable row | 403 |
 
-The generated tests `G3.8`-`G3.15` claim the REST cells for the primary display field, and are generated only when
-that field is a foreign key. To-many sets (one-to-many, many-to-many) chosen on a parent are not a shape yet; the
-behavior for an unreachable member is undecided. Untested cells are tracked in Issue #1324.
+The behavior behind the cells is described in
+[multi-tenancy-and-permissions.md](multi-tenancy-and-permissions.md) ("Foreign keys: a write may only point at a row
+the actor can reach"): one rule for every shape, to-many sets included.
+
+Who claims the cells:
+
+- the generated tests `G3.8`-`G3.15` claim the REST cells of the primary display field, generated only when that
+  field is a foreign key;
+- the security fixture's hand-written spec `cypress/e2e/fk_reference_shapes.cy.ts`
+  (`code_generator/tests/fixtures/security_matrix_e2e_gate/`, run by `npm run test:security-matrix-e2e-gate`) claims
+  the REST single and bulk cells of every other shape the fixture holds (`sx_ticket`: many-to-one required and
+  optional, inline child required and optional, many-to-many, one-to-many; `sx_profile`: one-to-one optional;
+  `sx_task`: a required many-to-one that is not the primary field; `sx_entry`: a required and an optional many-to-one
+  on an importable entity, through REST and through CSV import), against a row of another organization and against
+  rows outside the actor's Creator / Assignee read scope;
+- the fixture's Server Action flow `flows/fk_reference_actions.test.ts` claims the `action_add`, `action_update` and
+  `action_delete` cells of every shape. The gate copies it to `test/flows/security_matrix_e2e_gate/` after the
+  build, scans it for markers (`check:security-matrix --tests cypress test/flows/security_matrix_e2e_gate`) and runs
+  it with vitest after the Cypress specs, against the same database. It calls the generated `upsert<Entity>` /
+  `remove<Entity>` as a given user through `runAsActor()` (`lib/_request_scope.ts`); `lib/authz`, the services and
+  the database are real, and only next-auth, the Next.js `redirect` / `revalidatePath` helpers and the rate limiter's
+  Redis backend (the shipped in-memory limiter is used) are replaced. A
+  refusal is the action's `{ ok: false, errorCode }` (`NOT_FOUND` for 404, `PERMISSION_DENIED` for 403), followed by
+  a re-read of the rows.
 
 ## Generated denial tests
 

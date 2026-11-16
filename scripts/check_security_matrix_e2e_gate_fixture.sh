@@ -14,7 +14,9 @@
 #   * the security manifest lists the fixture entities with the operations that prove each feature
 #     is generated (so the fixture cannot silently stop exercising a feature), then
 #   * `npm run check:security-matrix` passes on the merged schema, then
-#   * the generated API specs of the fixture entities pass against the running app.
+#   * the generated API specs of the fixture entities pass against the running app, then
+#   * the fixture's Server Action flows (flows/*.test.ts, vitest against the same database) pass:
+#     the generated actions called as a given user, with authz, services and database real.
 #
 # Isolation (the repository's own schema, generated output, database and other
 # fixtures are never touched):
@@ -155,6 +157,7 @@ expected = {
     "sx_task": {"update", "delete", "bulk_delete", "action_update"},
     "sx_split": {"update", "bulk_update"},
     "sx_open_task": {"list", "detail"},
+    "sx_entry": {"import", "action_add"},
 }
 problems = []
 for entity, operations in expected.items():
@@ -172,8 +175,14 @@ if problems:
     sys.exit(1)
 PY
 
+# The Server Action flows, copied after `next build` (which type-checks every tracked .ts file) so the
+# build never depends on them; check:security-matrix reads their security-cell markers too.
+FLOWS_DIR="test/flows/security_matrix_e2e_gate"
+mkdir -p "$FLOWS_DIR"
+cp "$REPO_ROOT/$FIXTURE_DIR/flows/"*.test.ts "$FLOWS_DIR/"
+
 echo "-- check:security-matrix on the merged schema (default allowlist plus the fixture's) --"
-python3 code_generator/security_matrix.py check --manifest .security-manifest.json --tests cypress \
+python3 code_generator/security_matrix.py check --manifest .security-manifest.json --tests cypress "$FLOWS_DIR" \
   --allowlist code_generator/security_matrix_allowlist.yaml "code_generator/tests/fixtures/security_matrix_e2e_gate/allowlist.yaml"
 
 DEFAULT_SPEC="cypress/e2e/api/sx_*.cy.ts,cypress/e2e/security_matrix_e2e_gate/**/*.cy.ts"
@@ -185,6 +194,13 @@ NODE_ENV=test PAYMENT_FAKE_STRIPE=1 node scripts/run-e2e.js test:e2e:start \
 status=$?
 set -e
 
+echo "-- vitest: Server Action flows (the app server is stopped; the database and Redis are still up) --"
+set +e
+NODE_ENV=test npx vitest run --config vitest.flows.config.ts "$FLOWS_DIR"
+flows_status=$?
+set -e
+
 t1=$(date +%s)
-echo "== security-matrix-e2e-gate: $((t1 - t0))s, cypress exit=$status =="
-exit "$status"
+echo "== security-matrix-e2e-gate: $((t1 - t0))s, cypress exit=$status, flows exit=$flows_status =="
+if [ "$status" -ne 0 ]; then exit "$status"; fi
+exit "$flows_status"

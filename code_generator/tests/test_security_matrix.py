@@ -15,7 +15,8 @@ ALL_FLAGS = dict.fromkeys(
     ['can_api', 'can_list', 'can_view', 'can_new', 'can_edit', 'can_delete', 'can_export',
      'can_invalidate', 'import_eligible', 'should_filter_by_org'], True)
 FK_FLAGS = ['fk_many_to_one_required', 'fk_many_to_one_optional', 'fk_one_to_one_required',
-            'fk_one_to_one_optional', 'fk_inline_required', 'fk_inline_optional']
+            'fk_one_to_one_optional', 'fk_inline_required', 'fk_inline_optional',
+            'fk_set_many_to_many', 'fk_set_one_to_many']
 # An entity that holds no reference to an organization-scoped entity: the fk_shape axis adds nothing.
 ALL_FLAGS.update(dict.fromkeys(FK_FLAGS, False))
 
@@ -200,6 +201,24 @@ def test_clearing_a_reference_only_applies_to_an_optional_shape(matrix):
         ('action_update', 'many_to_one_optional')}
 
 
+def test_a_to_many_set_is_added_to_removed_from_and_deleted_with_but_never_re_pointed(matrix):
+    for flag, shape in (('fk_set_many_to_many', 'many_to_many'), ('fk_set_one_to_many', 'one_to_many')):
+        cells = [c for c in _fk_cells(matrix, **{flag: True}) if c['fk_shape'] != 'none']
+        assert {c['fk_shape'] for c in cells} == {shape}
+        assert {c['case'] for c in cells} == {'fk_to_unreachable', 'fk_drop_unreachable', 'fk_delete_unreachable'}
+        assert {c['operation'] for c in cells if c['case'] == 'fk_drop_unreachable'} == {
+            'update', 'bulk_update', 'action_update'}
+
+
+def test_dropping_applies_to_inline_rows_and_sets_only(matrix):
+    single = _fk_cells(matrix, fk_many_to_one_optional=True, fk_one_to_one_optional=True)
+    assert not any(c['case'] == 'fk_drop_unreachable' for c in single)
+    inline = _fk_cells(matrix, fk_inline_required=True)
+    assert {(c['operation'], c['fk_shape']) for c in inline if c['case'] == 'fk_drop_unreachable'} == {
+        ('update', 'inline_child_required'), ('bulk_update', 'inline_child_required'),
+        ('action_update', 'inline_child_required')}
+
+
 def test_reference_cells_follow_the_operation_flags(matrix):
     cells = _fk_cells(matrix, fk_many_to_one_required=True, can_delete=False, can_new=False, import_eligible=False)
     ops = {c['operation'] for c in cells if c['case'].startswith('fk_')}
@@ -213,7 +232,12 @@ def test_reference_cells_need_an_organization_column(matrix):
 
 def test_manifest_carries_the_denied_status_the_helpers_assert(matrix):
     manifest = sm.build_manifest(matrix, {'widget': ALL_FLAGS})
-    assert manifest['denied_status'] == {'case': {'permission_denied': 403, 'cross_org': 404}}
+    assert manifest['denied_status'] == {'case': {
+        'permission_denied': 403, 'cross_org': 404,
+        # a reference to an unreachable row is answered like a missing row; leaving one is refused
+        'fk_to_unreachable': 404, 'fk_away_unreachable': 403, 'fk_null_unreachable': 403,
+        'fk_drop_unreachable': 403, 'fk_delete_unreachable': 403,
+    }}
 
 
 def test_manifest_carries_the_axis_defaults_the_helpers_fill_in(matrix):

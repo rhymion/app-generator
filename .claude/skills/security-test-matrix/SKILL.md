@@ -28,7 +28,11 @@ itself is data in `code_generator/security_matrix.yaml`; full description in `do
 2. **Assert the explicit status** the matrix declares (`denied_status`), never a range such as `>= 400`.
 3. **Re-read the database** after every denied write (each row of a bulk request) and assert nothing changed.
 4. **Foreign-key reachability**: a write that carries a foreign key is tested per `fk_shape` against a row the actor
-   cannot reach (other organization, no read permission, outside a creator/assignee scope).
+   cannot reach (other organization, no read permission, outside a creator/assignee scope). To-many sets
+   (`many_to_many`, `one_to_many`) and inline child rows are references too: adding an unreachable member is 404,
+   removing one (or dropping the inline row holding one) is 403 (`fk_drop_unreachable`), as is deleting the record.
+   Seed such rows with `seedRow` / `updateRow` / `seedScopedActor`; worked example
+   `code_generator/tests/fixtures/security_matrix_e2e_gate/cypress/e2e/fk_reference_shapes.cy.ts`.
 5. **Hand-written code** uses the shipped helpers `expectDeniedFor`, `seedActorWithoutRole`,
    `seedActorFromOtherOrganization` (`docs/knowledge/security-test-helpers.md`); generated specs already carry markers.
 6. A test that starts failing after a cell is filled is a vulnerability candidate: triage it as one, file it as its

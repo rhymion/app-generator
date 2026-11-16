@@ -59,33 +59,46 @@ axes:
       # Foreign-key references to a row the actor cannot reach (another organization, no read
       # permission, outside a creator/assignee scope, someone else's x-self-only row). The shape
       # of the reference is the `fk_shape` axis; the cases below only combine with a shape.
-      #   fk_to_unreachable        write a reference to an unreachable row
+      #   fk_to_unreachable        write a reference to an unreachable row (for a set: add a member)
       #   fk_away_unreachable      re-point a reference that already holds an unreachable row
       #   fk_null_unreachable      clear an optional reference that holds an unreachable row
+      #   fk_drop_unreachable      remove a set member, or drop an inline child row, that holds
+      #                            an unreachable row
       #   fk_delete_unreachable    delete a record whose reference holds an unreachable row
       fk_to_unreachable:
         requires: [should_filter_by_org]
+        denied_status: 404
         combine:
           operation: [create, bulk_create, update, bulk_update, import, action_add, action_update]
-          fk_shape: &fk_shapes [many_to_one_required, many_to_one_optional, one_to_one_required, one_to_one_optional, inline_child_required, inline_child_optional]
+          fk_shape: [many_to_one_required, many_to_one_optional, one_to_one_required, one_to_one_optional, inline_child_required, inline_child_optional, many_to_many, one_to_many]
       fk_away_unreachable:
         requires: [should_filter_by_org]
+        denied_status: 403
         combine:
           operation: [update, bulk_update, action_update]
-          fk_shape: *fk_shapes
+          fk_shape: [many_to_one_required, many_to_one_optional, one_to_one_required, one_to_one_optional, inline_child_required, inline_child_optional]
       fk_null_unreachable:
         requires: [should_filter_by_org]
+        denied_status: 403
         combine:
           operation: [update, bulk_update, action_update]
           fk_shape: [many_to_one_optional, one_to_one_optional, inline_child_optional]
+      fk_drop_unreachable:
+        requires: [should_filter_by_org]
+        denied_status: 403
+        combine:
+          operation: [update, bulk_update, action_update]
+          fk_shape: [inline_child_required, inline_child_optional, many_to_many, one_to_many]
       fk_delete_unreachable:
         requires: [should_filter_by_org]
+        denied_status: 403
         combine:
           operation: [delete, bulk_delete, action_delete]
-          fk_shape: *fk_shapes
+          fk_shape: [many_to_one_required, many_to_one_optional, one_to_one_required, one_to_one_optional, inline_child_required, inline_child_optional, many_to_many, one_to_many]
   # The kind of foreign-key reference an entity holds to an organization-scoped entity
-  # (directly, or in a row of an inline child grid). `none` is the cell of every test that
-  # is not about a reference, so existing markers keep their meaning.
+  # (directly, in a row of an inline child grid, or as a member of a to-many set chosen on the
+  # entity). `none` is the cell of every test that is not about a reference, so existing markers
+  # keep their meaning.
   fk_shape:
     default: none
     values:
@@ -97,6 +110,8 @@ axes:
       one_to_one_optional:   {requires: [fk_one_to_one_optional]}
       inline_child_required: {requires: [fk_inline_required]}
       inline_child_optional: {requires: [fk_inline_optional]}
+      many_to_many:          {requires: [fk_set_many_to_many]}
+      one_to_many:           {requires: [fk_set_one_to_many]}
 
 # Route templates the generator renders under app/api/ for a single entity that
 # are not (yet) an `operation` above, with the reason.
