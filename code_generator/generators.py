@@ -1278,12 +1278,19 @@ def actions_context(ctx: dict) -> dict:
         field-less 'CONFLICT' is exactly what a real assertNotStale
         snapshot mismatch also produces, so collapsing them together made
         a reservation-allocation rejection display as a stale-update
-        warning. See docs/knowledge/error-message-framework.md."""
+        warning. See docs/knowledge/error-message-framework.md.
+
+        logSecurityEventForError(e) runs first: a denial, expired session or
+        rate-limit hit returned as an ActionFailure writes the same
+        [security-event] line handleApiError writes for it on REST, including
+        one thrown by hand in consumer code (Issue #1307,
+        docs/knowledge/logging-inventory.md)."""
         lines = [
             f"{indent}try {{",
             f"{indent}  await enforceActionRateLimit(actorId);",
             f"{indent}  {call_stmt}",
             f"{indent}}} catch (e) {{",
+            f"{indent}  logSecurityEventForError(e);",
             f"{indent}  if (e instanceof AppError) {{",
             f"{indent}    return {{ ok: false, errorCode: e.code, field: e.field, reason: e.reason, ...((m: {{ messageKey?: string; messageArgs?: Record<string, string | number> }}) => (m.messageKey ? {{ messageKey: m.messageKey, messageArgs: m.messageArgs }} : {{}}))(e) }} satisfies ActionFailure;",
             f"{indent}  }}",
@@ -1316,6 +1323,7 @@ def actions_context(ctx: dict) -> dict:
             f"{indent}try {{\n"
             f"{block}"
             f"{indent}}} catch (e) {{\n"
+            f"{indent}  logSecurityEventForError(e);\n"
             f"{indent}  if (e instanceof AppError) {{\n"
             f"{indent}    return {{ ok: false, errorCode: e.code, field: e.field, reason: e.reason, ...((m: {{ messageKey?: string; messageArgs?: Record<string, string | number> }}) => (m.messageKey ? {{ messageKey: m.messageKey, messageArgs: m.messageArgs }} : {{}}))(e) }} satisfies ActionFailure;\n"
             f"{indent}  }}\n"
@@ -1372,6 +1380,7 @@ def actions_context(ctx: dict) -> dict:
             f"{indent}    currentPassword: data.get('current_password'),\n"
             f"{indent}  }});\n"
             f"{indent}}} catch (e) {{\n"
+            f"{indent}  logSecurityEventForError(e);\n"
             f"{indent}  if (e instanceof ApiError) {{\n"
             f"{indent}    return {{\n"
             f"{indent}      ok: false,\n"

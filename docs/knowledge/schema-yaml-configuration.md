@@ -202,6 +202,25 @@ exist in `prisma/schema.prisma` with `id`, `name`, and the other columns referen
 
 ---
 
+## 1.2 Top-level `x-generator` switches
+
+`x-generator` at the top of `code_generator/json_schema.yaml` holds feature switches that are not
+tied to one entity. Each opt-in block takes a boolean `enabled` and nothing else; `validate.py`
+rejects another key or a non-boolean value. An absent block means off.
+
+| Block | Default | Effect |
+|---|---|---|
+| `mobile` | off | Generates the Expo app under `mobile/` (see `mobile-app.md`) |
+| `audit-log-storage` | off | Generates the audit-log object-storage copy and its jobs (see `audit-log-append-only.md`) |
+| `email-verification` | off | Self-registration confirms the address by email before an account exists (Issue #1092). generate-code writes the value into `siteConfig.auth.registration.emailVerification` in the tracked `lib/site-config.ts`, which the hand-written register routes and pages read; edit the schema, not that line. Needs `SMTP_URL` in production. See `authentication.md` ("Self-registration") |
+| `search` | - | `default_scope` for the search index (see `search.md`) |
+
+```yaml
+x-generator:
+  email-verification:
+    enabled: true
+```
+
 ## 2. Single-File Entity Format
 
 Declare an entity as a single top-level key under `definitions:`. Generation flags, relationship

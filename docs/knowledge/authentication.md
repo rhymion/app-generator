@@ -501,6 +501,56 @@ header, every caller can choose its own key, so the per-IP buckets are no
 barrier there; keep the per-user buckets (`api:read`, `api:write`) in mind
 as the real ceiling.
 
+**Self-registration.** `/register` and `POST /api/auth/register` (hand-written)
+work in one of two modes, chosen by `x-generator.email-verification.enabled` in
+the schema (default off). generate-code copies the value into
+`siteConfig.auth.registration.emailVerification` (`lib/site-config.ts`); the
+routes and the page read only that line.
+
+| | Verification off (default) | Verification on |
+|---|---|---|
+| `/register` asks for | name, email, password | email only |
+| `POST /api/auth/register` | creates the account, `201`; an address that already has an account gets `409` | creates nothing; `202 { ok: true }` for every well-formed address, so the answer says nothing about which addresses are registered |
+| Mail | none | a new address gets a sign-up link `/{locale}/register/complete?token=…`; an address with an account gets a notice with a sign-in link and no token |
+| Account created | at once | when the link is used: `/register/complete` asks for name and password and posts to `POST /api/auth/register/complete`, which creates the user with `emailVerified` set and answers `201 { ok, email }`; the page then signs the user in |
+
+Link tokens (`lib/auth/registration-token.ts`): 32 random bytes, base64url in the
+link. The Auth.js `VerificationToken` table stores `identifier =
+registration:<email>`, `token = sha256(token)` and `expires = now + 24 h`. A new
+request for the same address deletes its earlier token, so only the newest link
+works. Consumption is a conditional delete inside the transaction that creates
+the user, so a link works once even under concurrent use. An unknown, expired,
+used or replaced token, and a token whose address got an account in the
+meantime, all answer `400 INVALID_TOKEN`. A weak password is refused (`400
+WEAK_PASSWORD`) before the token is used, so it does not burn the link.
+`POST /api/auth/register/complete` answers `404` while verification is off.
+
+Limits: `auth:register` (5 / 10 min per IP) on the first step;
+`auth:register:email` (3 / hour per address, keyed by its SHA-256): past it the
+route still answers `202` and sends nothing, so a caller with many addresses
+cannot flood one inbox; `auth:register:complete` (10 / 10 min per IP) on the
+second step.
+
+The link's host comes from `resolveExternalUrl()` (`lib/auth/external-url.ts`):
+a forwarded or `Host` header is believed only for a configured host, otherwise
+`AUTH_URL` / `NEXTAUTH_URL` is used, so a forged header cannot put another host
+in the mail. `/register/complete` sends `Referrer-Policy: no-referrer` and
+removes the token from the address bar once read.
+
+Mail goes through `lib/mail.ts`: SMTP via `nodemailer` when `SMTP_URL` is
+set (sender `MAIL_FROM`); otherwise, outside production, a JSON file per message
+in `MAIL_OUTBOX_DIR` (default `.mail-outbox/`). In production with verification on
+and no `SMTP_URL`, the first step answers `500` and logs
+`[register] email verification is on but no mail transport is configured`,
+instead of answering `202` for mail that is never sent. The mail text is the
+`RegistrationMail` messages of the locale the page sent.
+
+What verification does not change: email case is kept as typed, as in sign-in;
+one person with several addresses can still register one account per address
+(Issue #1092 leaves this as expected behavior); the existing-account case skips
+issuing a token, so the two cases differ by two small database writes in
+response time, while the mail send, done in both, dominates.
+
 **Password strength.** `lib/auth/password-policy.ts` requires at least 8
 characters (ASVS V6.2.1) and no composition rules (V6.2.5). Registration, the
 settings password form and the REST and bulk credential change all apply it, so no
@@ -509,7 +559,9 @@ tracked in #1280.
 
 **Self-registration and API keys.** `POST /api/auth/register` is limited per
 client IP by the `auth:register` bucket (5 requests / 10 min) and answers
-`429` with `Retry-After` when it is spent. `authenticateApiKey`
+`429` with `Retry-After` when it is spent. With email verification on (see
+"Self-registration" below) the address is also limited by `auth:register:email`
+and the second step by `auth:register:complete`. `authenticateApiKey`
 (`lib/api-auth.ts`) spends the `auth:apikey` bucket (10 failures / min) each
 time a presented key matches no user; the limiter key is the SHA-256 of the
 presented key, never the key itself. Only failures are counted, so a valid

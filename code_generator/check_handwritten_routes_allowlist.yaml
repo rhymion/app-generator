@@ -24,7 +24,10 @@ exemptions:
     reason: Only the requester may withdraw their own request; no route-level rate limit.
   - path: app/api/auth/register/route.ts
     skip: [permission]
-    reason: Public sign-up; rate limited per IP (auth:register).
+    reason: Public sign-up; rate limited per IP (auth:register) and, with email verification on, per address (auth:register:email).
+  - path: app/api/auth/register/complete/route.ts
+    skip: [permission]
+    reason: Second step of public sign-up with email verification; the single-use emailed token is the credential; rate limited per IP (auth:register:complete); 404 while verification is off.
   - path: app/api/security/csp-report/route.ts
     skip: [permission]
     reason: The browser posts policy violation reports without a session; rate limited per IP (csp:report) and the route only writes a log line.

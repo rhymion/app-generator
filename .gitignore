@@ -90,6 +90,8 @@ next-env.d.ts
 /prisma/migrations/
 # Uploaded files
 /.uploads/
+# lib/mail.ts outbox (development and tests, no SMTP_URL)
+/.mail-outbox/
 
 # non-technical docs
 /docs/slides

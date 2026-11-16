@@ -80,6 +80,9 @@ HANDWRITTEN_ALLOWLIST: frozenset[str] = frozenset([
     # register pages (handwritten auth flow)
     "app/[locale]/register/page.tsx",
     "app/[locale]/register/page.test.tsx",
+    "app/[locale]/register/complete/page.tsx",
+    "app/[locale]/register/complete/RegisterCompleteForm.tsx",
+    "app/[locale]/register/complete/RegisterCompleteForm.test.tsx",
     # mobile layout test (handwritten e2e)
     "cypress/e2e/mobile/layout.cy.ts",
     # setting page (handwritten; coexists with generated edit/view)

@@ -133,6 +133,7 @@
     "next": "^16.4.6",
     "next-auth": "^5.0.0-beta.32",
     "next-intl": "^4.15.1",
+    "nodemailer": "~10.3.1",
     "otplib": "^13.6.0",
     "papaparse": "^5.7.1",
     "qrcode": "^1.5.4",
@@ -163,7 +164,8 @@
     "postcss-selector-parser": "^7.1.6",
     "@vercel/cli-config": {
       "zod": "^4.6.6"
-    }
+    },
+    "nodemailer": "$nodemailer"
   },
   "devDependencies": {
     "@fontsource/noto-sans-jp": "^5.3.1",

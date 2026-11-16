@@ -1,6 +1,6 @@
 /**
  * Security-event log: failed authentication, authorization denials and
- * rate-limit hits on the REST surface.
+ * rate-limit hits, on REST routes and in Server Actions.
  *
  * One fixed vocabulary, one line per event, written through `logger` (process
  * output). It deliberately does not write to `audit_log`: these events are
@@ -13,6 +13,8 @@
  * path or the error message (messages can name entities or roles).
  */
 import { logger } from '@/lib/logger';
+import { AppError, type ErrorCode } from '@/lib/_errors';
+import { ApiError } from '@/lib/api-error';
 
 export type SecurityEventName = 'auth.rejected' | 'authz.denied' | 'rate_limit.hit';
 
@@ -42,20 +44,63 @@ export function logSecurityEvent(e: SecurityEvent): void {
   );
 }
 
-// Errors already written as a security event. A permission check raises its
-// error where the denial happens (so Server Actions are covered); a REST route
-// then passes the same error to handleApiError, which must not write it twice.
+// Errors already written as a security event. One error can pass several
+// places that log: a permission check raises it where the denial happens, then
+// a Server Action catch, handleApiError or onRequestError sees the same object.
+// Only the first one writes.
 const logged = new WeakSet<object>();
+
+/** Logs the event for an error once and remembers the error that carried it. */
+export function logSecurityEventOnce(error: object, e: SecurityEvent): void {
+  if (logged.has(error)) return;
+  logged.add(error);
+  logSecurityEvent(e);
+}
 
 /** Logs a permission denial once and remembers the error that carries it. */
 export function logAuthzDenied(error: object, code = 'PERMISSION_DENIED'): void {
-  if (logged.has(error)) return;
-  logged.add(error);
-  logSecurityEvent({ event: 'authz.denied', status: 403, code });
+  logSecurityEventOnce(error, { event: 'authz.denied', status: 403, code });
 }
 
 export function wasSecurityEventLogged(error: object): boolean {
   return logged.has(error);
+}
+
+/** HTTP status a REST route answers for each AppError code (handleApiError). */
+export const APP_ERROR_STATUS_MAP: Record<ErrorCode, number> = {
+  SESSION_EXPIRED: 401,
+  PERMISSION_DENIED: 403,
+  NOT_FOUND: 404,
+  VALIDATION: 422,
+  CONFLICT: 409,
+  RESERVATION_LOCKED: 409,
+  RELATED_RECORD_INVALID: 422,
+  CAPACITY: 409,
+  RATE_LIMITED: 429,
+  UNKNOWN: 500,
+};
+
+/**
+ * Writes the security event an error stands for (401, 403, 429), once per error
+ * object. handleApiError calls it for REST routes; a Server Action calls it in
+ * the catch that turns an error into an ActionFailure, and onRequestError
+ * (lib/request-error.ts) calls it for an error that left the action uncaught. A
+ * denial therefore logs the same event whichever surface refused it, including
+ * one thrown by hand as `new AppError('PERMISSION_DENIED', ...)` (Issue #1307).
+ * Any other value (a NOT_FOUND or VALIDATION AppError, a plain Error) writes
+ * nothing.
+ */
+export function logSecurityEventForError(error: unknown): void {
+  if (error instanceof ApiError) {
+    const event = securityEventForStatus(error.statusCode);
+    if (event) logSecurityEventOnce(error, { event, status: error.statusCode });
+    return;
+  }
+  if (error instanceof AppError) {
+    const status = APP_ERROR_STATUS_MAP[error.code] ?? 500;
+    const event = securityEventForStatus(status);
+    if (event) logSecurityEventOnce(error, { event, status, code: error.code });
+  }
 }
 
 /**

@@ -7,7 +7,12 @@
 // report can be matched to a log line) and where it happened. It deliberately leaves out the error
 // message and stack: library and database errors can carry SQL fragments, column names or file
 // paths. The query string is dropped from the path because it can carry tokens.
+//
+// An error that stands for a security event (a permission denial thrown by hand inside a Server
+// Action and not caught there, an expired session, a rate-limit hit) also writes that event once
+// through logSecurityEventForError, the function handleApiError uses for REST routes (Issue #1307).
 import { logger } from './logger';
+import { logSecurityEventForError } from './security-event';
 
 export type RequestErrorRequest = { path: string; method: string };
 export type RequestErrorContext = {
@@ -26,6 +31,7 @@ export function logRequestError(
   request: RequestErrorRequest,
   context: RequestErrorContext,
 ): void {
+  logSecurityEventForError(error);
   const err = error as { name?: unknown; digest?: unknown } | null;
   logger.error('[request-error] unhandled error', {
     name: typeof err?.name === 'string' ? err.name : 'Error',

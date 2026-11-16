@@ -4,7 +4,8 @@ import { useState } from "react";
 import { useRouter } from "@/i18n/navigation";
 import { Link } from "@/i18n/navigation";
 import { signIn } from "next-auth/react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
+import { siteConfig } from "@/lib/site-config";
 import AppBox from "@/components/ui/AppBox";
 import AppButton from "@/components/ui/AppButton";
 import AppFieldInput from "@/components/ui/forms/AppFieldInput";
@@ -12,10 +13,37 @@ import AppText from "@/components/ui/AppText";
 import AppSurface from "@/components/ui/AppSurface";
 import AppAlert from "@/components/ui/AppAlert";
 
+// With email verification on (siteConfig.auth.registration.emailVerification,
+// Issue #1092) the page asks for the address only and then says to check the
+// inbox, whatever the address; the name and password are chosen on
+// /register/complete, opened from the emailed link.
 export default function RegisterPage() {
   const router = useRouter();
   const t = useTranslations("Auth");
+  const locale = useLocale();
   const [error, setError] = useState<string | null>(null);
+  const [linkSent, setLinkSent] = useState(false);
+  const emailVerification = Boolean(siteConfig.auth.registration?.emailVerification);
+
+  async function handleRequestLink(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError(null);
+    try {
+      const formData = new FormData(event.currentTarget);
+      const res = await fetch("/api/auth/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: formData.get("email"), locale }),
+      });
+      if (!res.ok) {
+        setError(t("registrationFailed"));
+        return;
+      }
+      setLinkSent(true);
+    } catch {
+      setError(t("registrationFailed"));
+    }
+  }
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     try {
@@ -57,6 +85,50 @@ export default function RegisterPage() {
     } catch (error) {
       setError(error instanceof Error ? error.message : t("registrationFailed"));
     }
+  }
+
+  const legalNotice = (
+    <AppText variant="body2" textAlign="center" color="text.secondary">
+      {t.rich("legalAgreementNotice", {
+        terms: (chunks) => <Link href="/legal/terms">{chunks}</Link>,
+        privacy: (chunks) => <Link href="/legal/privacy">{chunks}</Link>,
+      })}
+    </AppText>
+  );
+
+  if (emailVerification) {
+    return (
+      <AppBox display="flex" justifyContent="center" alignItems="center" minHeight="80vh">
+        <AppSurface elevation={3} p={4} width="100%" maxWidth={400}>
+          <AppText variant="h5" fontWeight="bold" textAlign="center" mb={3}>
+            {linkSent ? t("registerCheckEmailTitle") : t("registerTitle")}
+          </AppText>
+          {linkSent ? (
+            <AppAlert severity="info">{t("registerCheckEmailBody")}</AppAlert>
+          ) : (
+            <AppBox component="form" onSubmit={handleRequestLink} display="flex" flexDirection="column" gap={2}>
+              <AppText variant="body2" color="text.secondary">{t("registerEmailOnlyNotice")}</AppText>
+              <AppFieldInput
+                id="email"
+                name="email"
+                type="email"
+                label={t("emailPlaceholder")}
+                required
+                fullWidth
+              />
+              {error && <AppAlert severity="error">{error}</AppAlert>}
+              {legalNotice}
+              <AppButton type="submit" variant="contained" fullWidth>
+                {t("registerSendLink")}
+              </AppButton>
+            </AppBox>
+          )}
+          <AppText textAlign="center" mt={2} variant="body2">
+            <Link href="/login">{t("haveAccount")}</Link>
+          </AppText>
+        </AppSurface>
+      </AppBox>
+    );
   }
 
   return (
@@ -101,12 +173,7 @@ export default function RegisterPage() {
             fullWidth
           />
           {error && <AppAlert severity="error">{error}</AppAlert>}
-          <AppText variant="body2" textAlign="center" color="text.secondary">
-            {t.rich("legalAgreementNotice", {
-              terms: (chunks) => <Link href="/legal/terms">{chunks}</Link>,
-              privacy: (chunks) => <Link href="/legal/privacy">{chunks}</Link>,
-            })}
-          </AppText>
+          {legalNotice}
           <AppButton type="submit" variant="contained" fullWidth>
             {t("registerButton")}
           </AppButton>

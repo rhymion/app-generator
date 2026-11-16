@@ -121,6 +121,14 @@ const PRODUCTION_BUCKETS: Record<string, RateLimitBucketConfig> = {
   // is tighter than `auth:signin:credentials` while still letting a
   // household create a few real accounts in one sitting.
   'auth:register':           { limit: 5, windowMs: 10 * 60_000 },
+  // Email verification on (Issue #1092): 3 sign-up mails per address per hour,
+  // keyed by a hash of the address. Stops one caller with many IPs from
+  // flooding a stranger's inbox through the register route. Past the ceiling
+  // the route still answers 202 and simply sends nothing.
+  'auth:register:email':     { limit: 3, windowMs: 60 * 60_000 },
+  // 10 attempts to finish a sign-up per IP per 10 minutes. The link token has
+  // 256 bits, so this is defence in depth against guessing.
+  'auth:register:complete':  { limit: 10, windowMs: 10 * 60_000 },
   // 10 failed API-key lookups per presented key per minute, keyed by a hash
   // of the key (never the raw secret). Only failures are counted, so a valid
   // key is never throttled by this bucket.

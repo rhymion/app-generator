@@ -84,6 +84,10 @@ canaries:
     kind: env
     name: TEST_RESET_TOKEN
     description: token of the test-only reset endpoint
+  env_smtp_url:
+    kind: env
+    name: SMTP_URL
+    description: SMTP connection URL, carries the mail password
 
 surfaces:
   response_body: {recorder: proxy}

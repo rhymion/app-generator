@@ -26,6 +26,7 @@ CONTRACT_ROW = {
     'Amazon S3 (audit-log copies)': 'Amazon S3 (audit-log copies',
     'Google sign-in': 'Google OAuth',
     'Stripe': 'Stripe',
+    'SMTP server (mail)': 'SMTP server (mail',
 }
 
 

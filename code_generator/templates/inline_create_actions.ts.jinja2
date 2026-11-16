@@ -6,6 +6,7 @@
 // the form's own selection fields. Saving goes through the same
 // upsert{{ parent_pascal }} action as the page (with __return_id), so
 // permission, validation and organisation checks are not repeated here.
+import { getModelPermissions } from '@/lib/authz';
 import { get{{ parent_pascal }}NewPageAccessCheck{% for oto in selector_oto_rels %}, getAvailable{{ oto.target | pascal_case }}sFor{{ parent_pascal }}{% endfor %} } from './getters';
 {% for target in selection_targets %}
 {% if target == 'organization' %}
@@ -29,12 +30,12 @@ import { search{{ oto.target | pascal_case }}Options } from '@/lib/{{ oto.target
  * stays the authority on whether a record is actually created.
  */
 export async function can{{ parent_pascal }}BeCreatedInline(): Promise<boolean> {
-  try {
-    await get{{ parent_pascal }}NewPageAccessCheck();
-    return true;
-  } catch {
-    return false;
-  }
+  // Reads the flag the /new page's access check tests instead of calling that
+  // check and catching its denial: the check writes an authz.denied security
+  // event, and asking whether to show a button is not a refused request
+  // (Issue #1307).
+  const { permissions } = await getModelPermissions('{{ parent }}');
+  return Boolean(permissions.general.create);
 }
 
 /**

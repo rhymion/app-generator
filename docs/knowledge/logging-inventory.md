@@ -36,15 +36,26 @@ A failed audit write outside a transaction is logged and does not fail the reque
 
 ### Security-event log
 
-`lib/security-event.ts` writes one `[security-event]` line through the application log for each failed authentication, authorization denial and rate-limit hit that a REST route answers through `handleApiError`. It does not write to `audit_log`: unauthenticated callers produce these events, and a database row per probe would let a caller grow an append-only table.
+`lib/security-event.ts` writes one `[security-event]` line through the application log for each failed authentication, authorization denial and rate-limit hit, whether a REST route or a Server Action refused the request. It does not write to `audit_log`: unauthenticated callers produce these events, and a database row per probe would let a caller grow an append-only table.
 
 | Event | Status | When |
 |---|---|---|
 | `auth.rejected` | 401 | Missing or invalid API key, expired key, invalid mobile access token, failed mobile sign-in, expired session (`SESSION_EXPIRED`); a refused web sign-in (code `INVALID_CREDENTIALS` or `INVALID_MFA_CODE`) |
-| `authz.denied` | 403 | The caller is known but may not perform the operation (`PERMISSION_DENIED`, cross-site write refused), including a denial raised for a Server Action by `requireEntityPermission` or `requireRecordPermission` |
+| `authz.denied` | 403 | The caller is known but may not perform the operation (`PERMISSION_DENIED`, cross-site write refused, a wrong current password when changing a credential), on a REST route or in a Server Action |
 | `rate_limit.hit` | 429 | A rate-limit bucket is spent, including the repeated-invalid-API-key bucket |
 
-A line is JSON with `at`, `event`, `status` and, for an `AppError`, `code`. It carries no user id, email, address, credential, request path or error message. A refused web sign-in is logged from `authorize()` in `auth.ts`, and a permission check logs its denial where it raises it; an error already logged is not written again when a REST route passes it to `handleApiError`. Not yet covered: a denial thrown by hand inside an action (for example `No permission to delete`), a sign-in refused by the domain allow-list (audited as `auth:signIn.reject`), and a sign-in through a provider other than the credentials form; tracked in Issue #1307.
+A line is JSON with `at`, `event`, `status` and, for an `AppError`, `code`. It carries no user id, email, address, credential, request path or error message.
+
+Where the line is written:
+
+- A refused web sign-in: `authorize()` in `auth.ts`.
+- A permission check (`requireEntityPermission`, `requireRecordPermission`, `assertPermission` in `lib/authz.ts`): where it raises the denial.
+- Any other error that stands for one of these events, including a denial thrown by hand as `new AppError('PERMISSION_DENIED', ...)` in a generated guard, in `lib/_fk_reference.ts` or in a consumer's `service_validation_custom.ts`: `logSecurityEventForError()` in `lib/security-event.ts` decides from the error, with the same status mapping on both surfaces. A REST route reaches it through `handleApiError`. A generated Server Action calls it first in every `catch` that turns an error into an `ActionFailure` (pinned by `code_generator/tests/test_server_action_security_event.py`). An error that leaves an action or a page render uncaught reaches it through `onRequestError` (`lib/request-error.ts`).
+- Each error object is written once, however many of these places it passes.
+
+A hand-written Server Action that catches an error and returns its own result should call `logSecurityEventForError(e)` in that catch. A catch that hides a denial on purpose (a dashboard widget the user cannot read, the inline-create button probe, which reads the permission flag instead of calling a check) writes nothing, on REST and in actions alike, because no request was refused.
+
+Not covered: a sign-in refused by the domain allow-list (audited as `auth:signIn.reject`) and a sign-in through a provider other than the credentials form.
 
 ### Application log
 

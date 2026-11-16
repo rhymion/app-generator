@@ -202,7 +202,15 @@
     "mfaChallengeTitle": "本人確認",
     "mfaInvalid": "コードが一致しません。新しい 6 桁コードを入力するか、リカバリーコードを使用してください。",
     "mfaRateLimited": "試行回数が上限に達しました。数分待ってから再度お試しください。",
-    "legalAgreementNotice": "アカウントを作成すると、<terms>利用規約</terms>および<privacy>プライバシーポリシー</privacy>に同意したものとみなされます。"
+    "legalAgreementNotice": "アカウントを作成すると、<terms>利用規約</terms>および<privacy>プライバシーポリシー</privacy>に同意したものとみなされます。",
+    "registerSendLink": "登録用リンクを送信",
+    "registerEmailOnlyNotice": "入力したアドレスにリンクを送ります。リンクを開いて名前とパスワードを設定すると登録が完了します。",
+    "registerCheckEmailTitle": "メールを確認してください",
+    "registerCheckEmailBody": "このアドレスで登録できる場合は、リンクを記載したメールを送信しました。24時間以内にリンクを開いて登録を完了してください。",
+    "registerCompleteTitle": "登録の完了",
+    "registerCompleteButton": "アカウントを作成",
+    "registerLinkInvalid": "この登録用リンクは使用できません。有効期限が切れたか、すでに使用された可能性があります。",
+    "registerStartAgain": "もう一度登録する"
   },
   "Legal": {
     "termsTitle": "利用規約",
@@ -447,5 +455,11 @@
     "csvLabel": "ラベル",
     "csvCount": "件数",
     "csvCategory": "カテゴリ"
+  },
+  "RegistrationMail": {
+    "newSubject": "{app} の登録を完了してください",
+    "newBody": "このメールアドレスで {app} のアカウント作成が申請されました。\n\n24時間以内に次のリンクを開いて登録を完了してください。\n{link}\n\n心当たりがない場合は、このメールを無視してください。アカウントは作成されません。",
+    "existingSubject": "{app} への登録申請について",
+    "existingBody": "このメールアドレスで {app} のアカウント作成が申請されましたが、このアドレスのアカウントはすでに存在します。\n\nご本人の場合は、次のリンクからサインインしてください。\n{loginLink}\n\n心当たりがない場合は、このメールを無視してください。何も変更されていません。"
   }
 }

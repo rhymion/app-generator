@@ -202,7 +202,15 @@
     "mfaChallengeTitle": "Verify it's you",
     "mfaInvalid": "That code did not match. Try again with a fresh 6-digit code, or use a recovery code.",
     "mfaRateLimited": "Too many attempts. Wait a few minutes before trying again.",
-    "legalAgreementNotice": "By creating an account, you agree to our <terms>Terms of Service</terms> and <privacy>Privacy Policy</privacy>."
+    "legalAgreementNotice": "By creating an account, you agree to our <terms>Terms of Service</terms> and <privacy>Privacy Policy</privacy>.",
+    "registerSendLink": "Send sign-up link",
+    "registerEmailOnlyNotice": "We will email you a link. Open it to choose your name and password and finish signing up.",
+    "registerCheckEmailTitle": "Check your email",
+    "registerCheckEmailBody": "If this address can be used to sign up, a message with a link is on its way. Open the link within 24 hours to finish signing up.",
+    "registerCompleteTitle": "Finish signing up",
+    "registerCompleteButton": "Create account",
+    "registerLinkInvalid": "This sign-up link cannot be used. It may have expired or been used already.",
+    "registerStartAgain": "Sign up again"
   },
   "Legal": {
     "termsTitle": "Terms of Service",
@@ -447,5 +455,11 @@
     "csvLabel": "label",
     "csvCount": "count",
     "csvCategory": "category"
+  },
+  "RegistrationMail": {
+    "newSubject": "Finish signing up for {app}",
+    "newBody": "Someone asked to create an account on {app} with this email address.\n\nTo finish signing up, open this link within 24 hours:\n{link}\n\nIf this was not you, ignore this message. No account is created.",
+    "existingSubject": "Sign-up request for {app}",
+    "existingBody": "Someone asked to create an account on {app} with this email address, but an account already exists for it.\n\nIf this was you, sign in instead:\n{loginLink}\n\nIf this was not you, ignore this message. Nothing has changed."
   }
 }

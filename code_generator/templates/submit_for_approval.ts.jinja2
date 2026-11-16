@@ -36,6 +36,7 @@ import { createId } from '@paralleldrive/cuid2';
 import { canSubmitForApproval } from '@/lib/approval_request/submit_predicate';
 import { revalidatePath } from 'next/cache';
 import { AppError, type ActionFailure } from '@/lib/_errors';
+import { logSecurityEventForError } from '@/lib/security-event';
 // cmd_923b: same convergence-point/absolute-path convention as
 // service.ts.jinja2's afterCreate import -- see generators.py's
 // service_context() utility_code for the full rationale.
@@ -54,6 +55,10 @@ export async function submitForApproval{{ parent_pascal }}(id: string): Promise<
 {{ submit_for_approval_action_code }}
     }, { isolationLevel: 'Serializable' });
   } catch (e) {
+    // Issue #1307: a denial (including one thrown by hand in
+    // validateCustomRules or afterSubmit) logs the same [security-event] line
+    // as on REST before it is returned as an ActionFailure.
+    logSecurityEventForError(e);
     if (e instanceof AppError) {
       return { ok: false, errorCode: e.code, field: e.field, reason: e.reason, ...((m: { messageKey?: string; messageArgs?: Record<string, string | number> }) => (m.messageKey ? { messageKey: m.messageKey, messageArgs: m.messageArgs } : {}))(e) } satisfies ActionFailure;
     }
