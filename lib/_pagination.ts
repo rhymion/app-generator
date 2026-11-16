@@ -95,6 +95,18 @@ export function clampPage(opts: PageOpts | undefined): {
 }
 
 /**
+ * Look up a relation display column by its own key only. The relation maps
+ * are plain object literals, so a bare `relations[name]` / `name in
+ * relations` also matches inherited Object.prototype members
+ * (`constructor`, `toString`, `__proto__`, ...) -- a client-supplied sort or
+ * filter field with one of those names would slip past the allow-list and
+ * reach Prisma as an invalid clause (CodeQL js/remote-property-injection).
+ */
+function ownRelation(relations: RelationFilterMap, name: string): { field: string } | undefined {
+  return Object.prototype.hasOwnProperty.call(relations, name) ? relations[name] : undefined;
+}
+
+/**
  * Build a Prisma orderBy[] from sort items. Caller passes the allow-list of
  * field names; entries outside the allow-list (and not a key of `relations`)
  * are silently dropped to avoid accepting arbitrary column names from
@@ -109,10 +121,10 @@ export function buildOrderBy(
 ): Record<string, unknown>[] {
   if (!sort?.length) return [{ id: 'asc' }];
   const out = sort
-    .filter(s => allowed.has(s.field) || s.field in relations)
+    .filter(s => allowed.has(s.field) || ownRelation(relations, s.field) !== undefined)
     .map(s => {
       const dir = s.dir === 'desc' ? ('desc' as const) : ('asc' as const);
-      const rel = relations[s.field];
+      const rel = ownRelation(relations, s.field);
       return rel ? { [s.field]: { [rel.field]: dir } } : { [s.field]: dir };
     });
   return out.length > 0 ? out : [{ id: 'asc' }];
@@ -269,7 +281,7 @@ export function buildFilter(
   for (const [field, raw] of Object.entries(filter)) {
     const { operator, value } = normalizeFilterEntry(raw);
     if (isEmptyFilterValue(value)) continue;
-    const rel = relations[field];
+    const rel = ownRelation(relations, field);
     if (rel) {
       const relValue = Array.isArray(value) ? value[0] : value;
       clauses.push({ [field]: { [rel.field]: { contains: String(relValue), mode: 'insensitive' } } });
