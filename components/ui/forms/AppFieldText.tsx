@@ -34,6 +34,8 @@ export default function AppFieldText({
         value={value ?? ''}
         fullWidth
         margin="normal"
+        multiline={multiline}
+        rows={rows}
         aria-readonly
       />
     );

@@ -173,6 +173,39 @@ def _int_enum_option(v, i: int, disabled: bool = False) -> str:
         return f"{{ value: {i}, label: '{v}'{_suffix} }}"
 
 
+def _ui_width_cols(prop: dict) -> int | None:
+    """x-ui.width as 12-column grid units, or None when unset / not numeric.
+    Shared by FormUpsert and FormView so both pages size a field the same."""
+    val = ((prop or {}).get('x-ui') or {}).get('width')
+    if val is None or not isinstance(val, (int, float)):
+        return None
+    return int(val)
+
+
+def _maybe_box_wrap(jsx: str, cols: int | None) -> str:
+    """Wrap a field's JSX in <AppFormFieldWrapper cols={N}> when x-ui.width is set."""
+    if not cols:
+        return jsx
+    reindented = '\n'.join('  ' + line if line.strip() else line for line in jsx.splitlines())
+    return (
+        f"      <AppFormFieldWrapper cols={{{cols}}}>\n"
+        f"{reindented}\n"
+        f"      </AppFormFieldWrapper>"
+    )
+
+
+def _ui_text_rows(field_name: str, prop: dict) -> int | None:
+    """Row count for a multi-line text field, or None for a single-line one.
+    Mirrors FormUpsert: x-ui.rows wins; otherwise `description` and
+    x-mention fields default to 4 rows; every other string is single-line."""
+    _rows = ((prop or {}).get('x-ui') or {}).get('rows')
+    if _rows is not None:
+        return int(_rows)
+    if field_name == 'description' or (prop or {}).get('x-mention') is True:
+        return 4
+    return None
+
+
 def _readonly_display_field(
     p: str,
     filtered_props: dict,
@@ -340,9 +373,14 @@ def _readonly_display_field(
         return result
 
     fallback_op = '??' if actual in ('integer', 'number') else '||'
+    # x-ui.rows (and the description / x-mention 4-row default) make a
+    # string field multi-line here exactly as FormUpsert does for the input.
+    _rows = _ui_text_rows(p, prop) if actual == 'string' else None
+    _rows_attrs = f"{indent}  multiline\n{indent}  rows={{{_rows}}}\n" if _rows else ''
     result['jsx'] = (
         f"{indent}<AppFieldText\n{indent}  label={{tf('{fk}')}}\n"
         f"{indent}  value={{src.{p} {fallback_op} ''}}\n"
+        f"{_rows_attrs}"
         f"{indent}  readOnly\n{indent}/>"
     )
     return result
@@ -1155,7 +1193,7 @@ def actions_context(ctx: dict) -> dict:
         # GAP-2 fix (cmd_452): org-scoped entities must retrieve actorId before the
         # existence check (needed by getAssociatedOrganizations) and re-fetch the
         # target row through an org-filtered findFirst, not a global findUnique —
-        # otherwise requirePermission() can only see creator_id/assignee_id and a
+        # otherwise requireRecordPermission() can only see creator_id/assignee_id and a
         # user with general.update can edit any org's record by id. Applied to
         # every findUnique-before-update site in this function (not only the
         # audited line) since they share the identical gap. should_filter_by_org
@@ -1164,14 +1202,13 @@ def actions_context(ctx: dict) -> dict:
         # byte-identical to the pre-fix output (see the `else` arm below and its
         # callers) — confirmed via cmd_452's golden-diff forward check.
         #
-        # The explicit `if (!existing) throw` below is NOT optional: requirePermission()
-        # falls back to the top-level (general | creator | assignee) union whenever its
-        # item argument is falsy (lib/authz.ts requirePermission — `item && resolvedUserId
-        # ? resolvePermissions(...) : permissions`), so a general.update=true caller would
-        # still pass the check on a null `existing`, and the subsequent update<Parent>()
-        # call would then write to `id` unconditionally — the org-scoped findFirst above
-        # would filter the *read* but have zero effect on the *write*. Denying immediately
-        # on a null `existing` is what actually stops the cross-org mutation.
+        # The explicit `if (!existing) throw` below is NOT optional: requireRecordPermission()
+        # needs a record, and a null `existing` cannot be passed to it (the type has no
+        # null). Without the throw, the code would have to fall back to an entity-only check,
+        # which passes for any caller holding a general.update grant, and the subsequent
+        # update<Parent>() call would then write to `id` unconditionally — the org-scoped
+        # findFirst above would filter the *read* but have zero effect on the *write*.
+        # Denying immediately on a null `existing` is what actually stops the cross-org mutation.
         # actorId must already be declared in the enclosing function scope (before
         # the if/else this is nested in) — every should_filter_by_org call site
         # below declares it up front, precisely so it's still in scope for the
@@ -1241,11 +1278,19 @@ def actions_context(ctx: dict) -> dict:
         field-less 'CONFLICT' is exactly what a real assertNotStale
         snapshot mismatch also produces, so collapsing them together made
         a reservation-allocation rejection display as a stale-update
-        warning. See docs/knowledge/error-message-framework.md."""
+        warning. See docs/knowledge/error-message-framework.md.
+
+        logSecurityEventForError(e) runs first: a denial, expired session or
+        rate-limit hit returned as an ActionFailure writes the same
+        [security-event] line handleApiError writes for it on REST, including
+        one thrown by hand in consumer code (Issue #1307,
+        docs/knowledge/logging-inventory.md)."""
         lines = [
             f"{indent}try {{",
+            f"{indent}  await enforceActionRateLimit(actorId);",
             f"{indent}  {call_stmt}",
             f"{indent}}} catch (e) {{",
+            f"{indent}  logSecurityEventForError(e);",
             f"{indent}  if (e instanceof AppError) {{",
             f"{indent}    return {{ ok: false, errorCode: e.code, field: e.field, reason: e.reason, ...((m: {{ messageKey?: string; messageArgs?: Record<string, string | number> }}) => (m.messageKey ? {{ messageKey: m.messageKey, messageArgs: m.messageArgs }} : {{}}))(e) }} satisfies ActionFailure;",
             f"{indent}  }}",
@@ -1268,9 +1313,9 @@ def actions_context(ctx: dict) -> dict:
     def _wrap_block_with_catch(block: str, indent: str) -> str:
         """Same as _wrap_call_with_catch, but for a multi-line statement
         block (already newline-terminated) instead of a single call —
-        used to wrap the requirePermission()/existence-check section of
+        used to wrap the requireRecordPermission()/existence-check section of
         upsertXxx, which throws AppError('PERMISSION_DENIED' | 'NOT_FOUND',
-        ...) via lib/authz.ts's requirePermission and _actor_and_existing_block
+        ...) via lib/authz.ts's requireRecordPermission and _actor_and_existing_block
         above. Never needs the reservation-specific branches: those errors
         only originate from the create/update service call, not a
         permission check."""
@@ -1278,6 +1323,7 @@ def actions_context(ctx: dict) -> dict:
             f"{indent}try {{\n"
             f"{block}"
             f"{indent}}} catch (e) {{\n"
+            f"{indent}  logSecurityEventForError(e);\n"
             f"{indent}  if (e instanceof AppError) {{\n"
             f"{indent}    return {{ ok: false, errorCode: e.code, field: e.field, reason: e.reason, ...((m: {{ messageKey?: string; messageArgs?: Record<string, string | number> }}) => (m.messageKey ? {{ messageKey: m.messageKey, messageArgs: m.messageArgs }} : {{}}))(e) }} satisfies ActionFailure;\n"
             f"{indent}  }}\n"
@@ -1334,6 +1380,7 @@ def actions_context(ctx: dict) -> dict:
             f"{indent}    currentPassword: data.get('current_password'),\n"
             f"{indent}  }});\n"
             f"{indent}}} catch (e) {{\n"
+            f"{indent}  logSecurityEventForError(e);\n"
             f"{indent}  if (e instanceof ApiError) {{\n"
             f"{indent}    return {{\n"
             f"{indent}      ok: false,\n"
@@ -1357,9 +1404,9 @@ def actions_context(ctx: dict) -> dict:
                     _perm_block = (
                         f"  if (id) {{\n"
                         + _actor_and_existing_block("    ") +
-                        f"    await requirePermission('{parent}', 'update', existing);\n"
+                        f"    await requireRecordPermission('{parent}', 'update', existing);\n"
                         f"  }} else {{\n"
-                        f"    await requirePermission('{parent}', 'create');\n"
+                        f"    await requireEntityPermission('{parent}', 'create');\n"
                         f"  }}\n"
                     )
                     return (
@@ -1380,9 +1427,10 @@ def actions_context(ctx: dict) -> dict:
                 _perm_block = (
                     f"  if (id) {{\n"
                     f"    const existing = await prisma.{model}.findUnique({{ where: {{ id }}, select: {item_context_select} }});\n"
-                    f"    await requirePermission('{parent}', 'update', existing);\n"
+                    f"    if (!existing) throw new AppError('NOT_FOUND', 'Not found');\n"
+                    f"    await requireRecordPermission('{parent}', 'update', existing);\n"
                     f"  }} else {{\n"
-                    f"    await requirePermission('{parent}', 'create');\n"
+                    f"    await requireEntityPermission('{parent}', 'create');\n"
                     f"  }}\n"
                 )
                 return (
@@ -1404,9 +1452,9 @@ def actions_context(ctx: dict) -> dict:
                 _perm_block = (
                     f"  if (id) {{\n"
                     + _actor_and_existing_block("    ") +
-                    f"    await requirePermission('{parent}', 'update', existing);\n"
+                    f"    await requireRecordPermission('{parent}', 'update', existing);\n"
                     f"  }} else {{\n"
-                    f"    await requirePermission('{parent}', 'create');\n"
+                    f"    await requireEntityPermission('{parent}', 'create');\n"
                     f"  }}\n"
                 )
                 return (
@@ -1427,9 +1475,10 @@ def actions_context(ctx: dict) -> dict:
             _perm_block = (
                 f"  if (id) {{\n"
                 f"    const existing = await prisma.{model}.findUnique({{ where: {{ id }}, select: {item_context_select} }});\n"
-                f"    await requirePermission('{parent}', 'update', existing);\n"
+                f"    if (!existing) throw new AppError('NOT_FOUND', 'Not found');\n"
+                f"    await requireRecordPermission('{parent}', 'update', existing);\n"
                 f"  }} else {{\n"
-                f"    await requirePermission('{parent}', 'create');\n"
+                f"    await requireEntityPermission('{parent}', 'create');\n"
                 f"  }}\n"
             )
             return (
@@ -1451,7 +1500,7 @@ def actions_context(ctx: dict) -> dict:
             if should_filter_by_org:
                 _perm_block = (
                     _actor_and_existing_block("  ") +
-                    f"  await requirePermission('{parent}', 'update', existing);\n"
+                    f"  await requireRecordPermission('{parent}', 'update', existing);\n"
                 )
                 return (
                     f"  const id = data.get('id') as string | null;\n"
@@ -1469,7 +1518,8 @@ def actions_context(ctx: dict) -> dict:
                 )
             _perm_block = (
                 f"  const existing = await prisma.{model}.findUnique({{ where: {{ id }}, select: {item_context_select} }});\n"
-                f"  await requirePermission('{parent}', 'update', existing);\n"
+                f"  if (!existing) throw new AppError('NOT_FOUND', 'Not found');\n"
+                f"  await requireRecordPermission('{parent}', 'update', existing);\n"
             )
             return (
                 f"  const id = data.get('id') as string | null;\n"
@@ -1499,7 +1549,7 @@ def actions_context(ctx: dict) -> dict:
             # duplicate row instead of surfacing the mismatch. `src.id` is
             # `''` for a genuine new-entity form (page_new.tsx), so this
             # never fires on the normal create path.
-            _perm_block = f"  await requirePermission('{parent}', 'create');\n"
+            _perm_block = f"  await requireEntityPermission('{parent}', 'create');\n"
             return (
                 f"  const id = data.get('id') as string | null;\n"
                 f"  if (id) throw new Error('Update not supported');\n"
@@ -1515,6 +1565,7 @@ def actions_context(ctx: dict) -> dict:
         f'add{parent_pascal}'    if can_create else '',
         f'update{parent_pascal}' if can_update else '',
         f'delete{parent_pascal}' if can_delete else '',
+        f'assertDeleteReferencesReachable{parent_pascal}' if can_delete and ctx.get('delete_reference_check') else '',
     ]
     error_imports = ', InsufficientPoolCapacityError, ReservationMutationError' if has_reservation else ''
     service_imports = ', '.join(f for f in service_fns if f) + error_imports
@@ -3377,7 +3428,7 @@ def _build_submit_for_approval_authz_code(
     return (
         _lookup
         + f"    if (!_existing) throw new AppError('NOT_FOUND', 'Not found');\n"
-        + f"    await requirePermission('{parent}', '{permission_op}', _existing, actorId);\n"
+        + f"    await requireRecordPermission('{parent}', '{permission_op}', _existing, actorId);\n"
     )
 
 
@@ -3492,6 +3543,7 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
     has_delete_guard        = bool(ctx.get('has_delete_guard'))
     lockdown_field          = ctx.get('lockdown_field')
     is_audited              = ctx.get('is_audited', False)
+    invalidates_permission_cache = bool(ctx.get('invalidates_permission_cache'))
     should_filter_by_org    = bool(ctx.get('should_filter_by_org'))
     org_id_client_writable  = bool(ctx.get('org_id_client_writable'))
     fk_write_checks         = ctx.get('fk_write_checks') or []
@@ -4112,7 +4164,7 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
         # as service_validation.ts's validateCustomRules import above.
         + (f"\nimport {{ afterCreate }} from '@/lib/{model}/service_after_create';" if can_create else '')
         # x-payment (Issue #775): add{Parent}() opens the Checkout Session.
-        + ("\nimport { startPaymentCheckout } from '@/lib/payment/checkout';" if (is_payment and can_create) else '')
+        + ("\nimport { startPaymentCheckout } from '@/lib/payment/checkout';\nimport { logger } from '@/lib/logger';" if (is_payment and can_create) else '')
         # Idempotency-key support (ai-agent-integration-design.md) -- every
         # create-capable entity's add{{Entity}}() can be called with an
         # idempotency key from the route template; the check/record calls
@@ -4148,9 +4200,12 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
                or reservation_self_case_notifies or approval_edge_trigger_create_code
                or approval_edge_trigger_update_code) else '')
         + (f"\nimport {{ recordAuditEvent }} from '@/lib/audit-log';" if is_audited else '')
+        + ("\nimport { invalidatePermissionCache } from '@/lib/authz';" if invalidates_permission_cache else '')
         + (f"\nimport {{ getAssociatedOrganizations }} from '@/lib/organization/associated_internal';" if org_id_client_writable and (can_create or can_update) else '')
         + ("\nimport { assertFkReferencesUsable } from '@/lib/_fk_reference';" if (fk_write_checks or child_fk_check_create or child_fk_check_update) and (can_create or can_update) else '')
+        + ("\nimport { assertStoredFkReferencesReachable } from '@/lib/_fk_reference';" if ctx.get('delete_reference_check') and can_delete else '')
         + (f"\nimport {{ AppError, p2002Field }} from '@/lib/_errors';" if can_create or can_update else '')
+        + ("\nimport { p2000Field, p2000Message } from '@/lib/_prisma_value_too_long';" if can_create or can_update else '')
         + (ctx.get('child_exclusive_imports', '') if can_create or can_update else '')
         + (f"\nimport {{ getModelPermissions }} from '@/lib/authz';" if server_value_override_fields and can_create else '')
         + (f"\nimport {{ assertEditAllowed }} from './edit_guard';" if has_edit_guard else '')
@@ -4747,7 +4802,17 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
         _ordered_fields = [f for f in _x_display_form if f in jsx_by_field]
     else:
         _ordered_fields = [f for f in parent_props if f in jsx_by_field]
-    all_parent_fields = '\n'.join(jsx_by_field[f] for f in _ordered_fields)
+    # x-ui.width: same AppFormFieldWrapper sizing FormUpsert applies, so a
+    # field keeps its width between the view and the new/edit pages. Applied
+    # to every rendered field (whatever its type) that declares it.
+    has_box_import = False
+    _sized_jsx: dict[str, str] = {}
+    for f in _ordered_fields:
+        _cols = _ui_width_cols(filtered_props.get(f, {}))
+        if _cols:
+            has_box_import = True
+        _sized_jsx[f] = _maybe_box_wrap(jsx_by_field[f], _cols)
+    all_parent_fields = '\n'.join(_sized_jsx[f] for f in _ordered_fields)
 
     # Reverse OTO rels (FK in target): display as labeled fields with view links
     reverse_oto_rels = ctx.get('reverse_oto_rels', [])
@@ -4867,9 +4932,17 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
                     f"          readOnly\n        />"
                 )
             else:
+                # x-ui.rows on the flattened target's own column: multi-line
+                # here too, mirroring the FormUpsert accordion text input.
+                _flat_rows = None
+                if _field.get('prop_type') == 'string':
+                    _flat_target_props = _raw_def(_fr.get('target', ''), schema).get('properties', {}) if schema else {}
+                    _flat_rows = _ui_text_rows(_fname, _flat_target_props.get(_fname, {}))
+                _flat_rows_attrs = f"          multiline\n          rows={{{_flat_rows}}}\n" if _flat_rows else ''
                 _inner.append(
                     f"        <AppFieldText\n          label={{tf('{_fcamel}')}}\n"
                     f"          value={{src.{_prop}?.{_fname}?.toString() ?? ''}}\n"
+                    f"{_flat_rows_attrs}"
                     f"          readOnly\n        />"
                 )
 
@@ -5045,6 +5118,7 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
         'needs_single_attachment_display': needs_single_attachment_display,
         'has_rel_links':          has_rel_links,
         'needs_accordion':        needs_accordion,
+        'has_box_import':         has_box_import,
         'has_comment_children':   has_comment_children,
         'comment_has_mention':    comment_has_mention,
         'has_list_children':      has_list_children or has_flatten_array,
@@ -5251,22 +5325,6 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
 
     def _setter(var_name: str) -> str:
         return to_pascal_case_from_var(var_name)
-
-    def _ui_width_cols(prop: dict) -> int | None:
-        val = (prop.get('x-ui') or {}).get('width')
-        if val is None or not isinstance(val, (int, float)):
-            return None
-        return int(val)
-
-    def _maybe_box_wrap(jsx: str, cols: int | None) -> str:
-        if not cols:
-            return jsx
-        reindented = '\n'.join('  ' + line if line.strip() else line for line in jsx.splitlines())
-        return (
-            f"      <AppFormFieldWrapper cols={{{cols}}}>\n"
-            f"{reindented}\n"
-            f"      </AppFormFieldWrapper>"
-        )
 
     has_box_import = False
 
@@ -6009,9 +6067,12 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             uses_format_label_value = True
         if _ro_built['uses_decimal_format']:
             uses_decimal_format = True
+        _ro_field_width_cols = _ui_width_cols(filtered_props.get(_ro_fn, {}))
+        if _ro_field_width_cols:
+            has_box_import = True
         jsx_by_field[_ro_fn] = (
             f"      {{isEdit && (\n"
-            f"{_ro_built['jsx']}\n"
+            f"{_maybe_box_wrap(_ro_built['jsx'], _ro_field_width_cols)}\n"
             f"      )}}"
         )
 
@@ -7816,7 +7877,7 @@ def seed_entities_context(schema: dict) -> dict:
     permissions.ts` (a development / verification tool, NOT the production
     seed) grants Administrator CRUD on -- and, per entity, WHICH of
     create/read/update/delete/import that grant may actually include
-    (`seed_entity_grants`, see `_seed_entity_grant_flags`). requirePermission()
+    (`seed_entity_grants`, see `_seed_entity_grant_flags`). requireRecordPermission()
     (lib/authz.ts, called from actions.ts.jinja2) checks permissions keyed to
     each entity's own VIEW/route name (`parent`), not the underlying
     Prisma model — so a proxy view sharing a model with other views (e.g.

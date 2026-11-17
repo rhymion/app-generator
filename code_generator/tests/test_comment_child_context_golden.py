@@ -18,6 +18,11 @@ worktree, copy this file into its `code_generator/tests/` and run
 
 there. Do not regenerate it on the branch: it pins existing behaviour.
 
+One deliberate change since the capture: `fk_write_checks` now lists a foreign key to a
+generated entity that has no organization column (its write is checked for read
+permission, see `_fk_reference_check` in build_context.py). That entry is the only
+difference from the captured output.
+
 Three shapes of comments child are built: a plain one, one with a second FK to
 the parent's model (the shape of #801), and one whose structural FK to the
 parent is nullable (the shape of #805).

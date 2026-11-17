@@ -54,7 +54,7 @@ first, the same way `PUT /api/{entity}/{id}` does:
 2. The record is read with `get{Entity}Detail()`, the getter behind `GET /api/{entity}/{id}`. A record
    outside the caller's organizations, or not the caller's own for an `x-self-only` entity, is not found
    (`404`).
-3. `resolvePermissions()` on that record: Creator and Assignee grants count, and a caller who cannot update
+3. `resolveRecordPermissions()` on that record: Creator and Assignee grants count, and a caller who cannot update
    this record gets `403` (`Access denied: {entity}.update`).
 
 `update` is the permission the web form requires before it shows the comment box. Reading a record does
@@ -83,7 +83,7 @@ independent of the UI, so each one applies the checks `upsert{Entity}()` applies
    admitting organization-less rows only when the entity's organization relation is optional), narrowed to
    the caller's own records for an `x-self-only` entity and to the `x-filter-values` view when declared. A
    record outside that scope, or missing, is `NOT_FOUND`.
-2. `requirePermission('{entity}', 'update', parentRow, userId)` resolves the caller's permission on that
+2. `requireRecordPermission('{entity}', 'update', parentRow, userId)` resolves the caller's permission on that
    concrete record (Creator and Assignee grants count); without it the action throws `PERMISSION_DENIED`.
 3. Then the comment's own rule: edit is author-only; delete is the author, or a caller who also has
    `delete` on the record.
@@ -121,7 +121,7 @@ includes `/api/mention/users` and the `MentionUserOption` schema when the search
 
 - `code_generator/tests/test_comment_write_action_access.py`: both comment shapes (the shared commentable
   bridge and a per-entity comment table) read the parent through the organization, `x-self-only` and
-  `x-filter-values` scope and call `requirePermission()` before writing; the checks precede the write.
+  `x-filter-values` scope and call `requireRecordPermission()` before writing; the checks precede the write.
 - `code_generator/tests/test_comment_mention_rest_routes.py`: the routes are written for a commentable
   entity and not otherwise, run the Server Actions after the permission and record checks, hold no write
   of their own, validate the message; the OpenAPI paths.

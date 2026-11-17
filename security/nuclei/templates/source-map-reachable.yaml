@@ -1,0 +1,36 @@
+id: source-map-reachable
+
+info:
+  name: A client JavaScript source map is reachable
+  author: project
+  severity: medium
+  description: |
+    Production builds must not publish source maps (productionBrowserSourceMaps is off).
+    Reads a script URL from the home page and requests its .map file.
+  tags: exposure,debug,regression
+
+http:
+  - raw:
+      - |
+        GET / HTTP/1.1
+        Host: {{Hostname}}
+      - |
+        GET {{chunk}}.map HTTP/1.1
+        Host: {{Hostname}}
+    extractors:
+      - type: regex
+        name: chunk
+        internal: true
+        part: body
+        group: 1
+        regex:
+          - '(/_next/static/[^"\s]+?\.js)'
+    matchers-condition: and
+    matchers:
+      - type: dsl
+        dsl:
+          - 'status_code_2 == 200'
+      - type: word
+        part: body_2
+        words:
+          - '"mappings"'

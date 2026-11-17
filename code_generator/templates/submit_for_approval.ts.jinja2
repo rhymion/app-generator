@@ -25,8 +25,10 @@
 
 'use server';
 
+import { logger } from '@/lib/logger';
 import prisma from '@/lib/prisma';
-import { getSessionUserIdOrThrow, requirePermission } from '@/lib/authz';{% if should_filter_by_org %}
+import { getSessionUserIdOrThrow, requireRecordPermission } from '@/lib/authz';
+import { enforceActionRateLimit } from '@/lib/rate-limit/action';{% if should_filter_by_org %}
 import { getAssociatedOrganizations } from '@/lib/organization/associated_internal';{% endif %}
 import { notifyApprovalRequestCreated } from '@/lib/_notifyApprovalRequest';
 import { resolveApprovableOrganization } from '@/lib/approval_request/resolve_target';
@@ -34,6 +36,7 @@ import { createId } from '@paralleldrive/cuid2';
 import { canSubmitForApproval } from '@/lib/approval_request/submit_predicate';
 import { revalidatePath } from 'next/cache';
 import { AppError, type ActionFailure } from '@/lib/_errors';
+import { logSecurityEventForError } from '@/lib/security-event';
 // cmd_923b: same convergence-point/absolute-path convention as
 // service.ts.jinja2's afterCreate import -- see generators.py's
 // service_context() utility_code for the full rationale.
@@ -46,11 +49,16 @@ import { InsufficientPoolCapacityError } from '@/lib/{{ reservation_error_import
 export async function submitForApproval{{ parent_pascal }}(id: string): Promise<ActionFailure | void> {
   const actorId = await getSessionUserIdOrThrow();
   try {
+    await enforceActionRateLimit(actorId);
 {{ submit_for_approval_authz_code }}
     await prisma.$transaction(async (tx) => {
 {{ submit_for_approval_action_code }}
     }, { isolationLevel: 'Serializable' });
   } catch (e) {
+    // Issue #1307: a denial (including one thrown by hand in
+    // validateCustomRules or afterSubmit) logs the same [security-event] line
+    // as on REST before it is returned as an ActionFailure.
+    logSecurityEventForError(e);
     if (e instanceof AppError) {
       return { ok: false, errorCode: e.code, field: e.field, reason: e.reason, ...((m: { messageKey?: string; messageArgs?: Record<string, string | number> }) => (m.messageKey ? { messageKey: m.messageKey, messageArgs: m.messageArgs } : {}))(e) } satisfies ActionFailure;
     }
@@ -63,7 +71,7 @@ export async function submitForApproval{{ parent_pascal }}(id: string): Promise<
     // never a named class here -- still surfaces inline instead of
     // crashing to error.tsx. Logged server-side only; the client only ever
     // sees the field-less, detail-free 'UNKNOWN' code.
-    console.error('submitForApproval{{ parent_pascal }} error:', e);
+    logger.error('submitForApproval{{ parent_pascal }} error:', e);
     return { ok: false, errorCode: 'UNKNOWN' } satisfies ActionFailure;
   }
   revalidatePath('/{{ parent }}/' + id);

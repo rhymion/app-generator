@@ -12,7 +12,7 @@ export async function add{{ parent_pascal }}(actorId: string{% if parent_params_
 {% if fk_write_checks %}
   await assertFkReferencesUsable(actorId, [
 {% for c in fk_write_checks %}
-    { model: '{{ c.target }}', id: {{ c.var }}, load: (_id) => prisma.{{ c.target }}.findUnique({ where: { id: _id } }) as Promise<Record<string, unknown> | null> },
+    { model: '{{ c.target }}',{% if c.self_only %} selfOnly: true,{% endif %} id: {{ c.var }}, load: (_id) => prisma.{{ c.target }}.findUnique({ where: { id: _id } }) as Promise<Record<string, unknown> | null> },
 {% endfor %}
   ]);
 {% endif %}
@@ -186,11 +186,24 @@ export async function add{{ parent_pascal }}(actorId: string{% if parent_params_
     // past the browser). P2002, P2028, P2034, P2037 and P2025 are handled above; every other
     // PrismaClientKnownRequestError code below is likewise a bad-input
     // shape (FK/type/constraint), not a server bug.
+    // P2000: a value longer than its @db.VarChar(n) column, though within the
+    // field's maxLength (Issue #1393). A field-level VALIDATION error, not the
+    // generic invalid-value one below.
+    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2000') {
+      const field = p2000Field(e.meta);
+      throw new AppError('VALIDATION', p2000Message(field), field, 'invalid');
+    }
     if (e instanceof Prisma.PrismaClientValidationError || e instanceof Prisma.PrismaClientKnownRequestError) {
       throw new AppError('VALIDATION', 'One or more fields have an invalid value');
     }
     throw e;
   }
+{% if invalidates_permission_cache %}
+  // The write is committed: drop the per-process permission cache so a role,
+  // permission or role-membership change applies on this instance at once
+  // instead of after the cache TTL.
+  await invalidatePermissionCache();
+{% endif %}
 {% if has_assignee_id or child_assignee_notify_create_code %}
   // Idempotent replay (see the check at the top of the transaction above)
   // means these notifications already fired on the original request --
@@ -235,7 +248,7 @@ export async function add{{ parent_pascal }}(actorId: string{% if parent_params_
       // Nothing can be paid for. Remove the unpaid record through this
       // entity's own delete function (so x-reservation and any hand-written
       // afterDelete hook still run), then the payable row.
-      console.error('[x-payment] could not start checkout for {{ parent }}', result.id, e);
+      logger.error('[x-payment] could not start checkout for {{ parent }}', result.id, e);
       await delete{{ parent_pascal }}({% if is_audited %}actorId, {% endif %}[result.id]);
       await prisma.payable.deleteMany({ where: { entity_name: '{{ parent }}', record_id: result.id } });
       throw new AppError('UNKNOWN', 'Payment checkout could not be started');
@@ -265,7 +278,7 @@ export async function update{{ parent_pascal }}(actorId: string, id: string{% if
   const _fkPrevious = await prisma.{{ model }}.findUnique({ where: { id }, select: { {% for c in fk_write_checks %}{{ c.prop }}: true, {% endfor %}} });
   await assertFkReferencesUsable(actorId, [
 {% for c in fk_write_checks %}
-    { model: '{{ c.target }}', id: {{ c.var }}, previousId: _fkPrevious?.{{ c.prop }}, load: (_id) => prisma.{{ c.target }}.findUnique({ where: { id: _id } }) as Promise<Record<string, unknown> | null> },
+    { model: '{{ c.target }}',{% if c.self_only %} selfOnly: true,{% endif %} id: {{ c.var }}, previousId: _fkPrevious?.{{ c.prop }},{% if c.required %} required: true,{% endif %} load: (_id) => prisma.{{ c.target }}.findUnique({ where: { id: _id } }) as Promise<Record<string, unknown> | null> },
 {% endfor %}
   ]);
 {% endif %}
@@ -457,11 +470,24 @@ export async function update{{ parent_pascal }}(actorId: string, id: string{% if
     // past the browser). P2002, P2028, P2034, P2037 and P2025 are handled above; every other
     // PrismaClientKnownRequestError code below is likewise a bad-input
     // shape (FK/type/constraint), not a server bug.
+    // P2000: a value longer than its @db.VarChar(n) column, though within the
+    // field's maxLength (Issue #1393). A field-level VALIDATION error, not the
+    // generic invalid-value one below.
+    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2000') {
+      const field = p2000Field(e.meta);
+      throw new AppError('VALIDATION', p2000Message(field), field, 'invalid');
+    }
     if (e instanceof Prisma.PrismaClientValidationError || e instanceof Prisma.PrismaClientKnownRequestError) {
       throw new AppError('VALIDATION', 'One or more fields have an invalid value');
     }
     throw e;
   }
+{% if invalidates_permission_cache %}
+  // The write is committed: drop the per-process permission cache so a role,
+  // permission or role-membership change applies on this instance at once
+  // instead of after the cache TTL.
+  await invalidatePermissionCache();
+{% endif %}
 {% if has_assignee_id %}
   if (_newAssigneeId && _newAssigneeId !== _prevAssigneeId && _newAssigneeId !== actorId) {
     notify(_newAssigneeId, 'assigned', {
@@ -479,6 +505,37 @@ export async function update{{ parent_pascal }}(actorId: string, id: string{% if
 }
 {% endif %}
 {% if can_delete %}
+{% if delete_reference_check %}
+// A record whose stored reference points at a row the actor cannot reach is not
+// deletable by that actor (the same reachability that refuses to re-point or
+// clear that reference in update{{ parent_pascal }}). Called by every
+// user-facing delete entrance before delete{{ parent_pascal }}.
+{% if set_fk_checks or child_fk_delete_checks %}
+// The members of a to-many set and the references held by inline child rows
+// count too: deleting the record removes them as well.
+{% endif %}
+export async function assertDeleteReferencesReachable{{ parent_pascal }}(actorId: string, ids: string[]): Promise<void> {
+  const _rows = await prisma.{{ model }}.findMany({ where: { id: { in: ids } }, select: { {% for c in fk_write_checks %}{{ c.prop }}: true, {% endfor %}{% for s in set_fk_checks %}{{ s.prop }}: { select: { id: true } }, {% endfor %}{% for c in child_fk_delete_checks %}{{ c.prop }}: { select: { {% for k in c.checks %}{{ k.prop }}: true, {% endfor %}} }, {% endfor %}} });
+  for (const _row of _rows) {
+    await assertStoredFkReferencesReachable(actorId, [
+{% for c in fk_write_checks %}
+      { model: '{{ c.target }}',{% if c.self_only %} selfOnly: true,{% endif %} id: _row.{{ c.prop }}, load: (_id) => prisma.{{ c.target }}.findUnique({ where: { id: _id } }) as Promise<Record<string, unknown> | null> },
+{% endfor %}
+{% for s in set_fk_checks %}
+      ..._row.{{ s.prop }}.map((_m) => ({ model: '{{ s.target }}',{% if s.self_only %} selfOnly: true,{% endif %} id: _m.id, load: (_id: string) => prisma.{{ s.target }}.findUnique({ where: { id: _id } }) as Promise<Record<string, unknown> | null> })),
+{% endfor %}
+{% for c in child_fk_delete_checks %}
+      ..._row.{{ c.prop }}.flatMap((_c) => [
+{% for k in c.checks %}
+        { model: '{{ k.target }}',{% if k.self_only %} selfOnly: true,{% endif %} id: _c.{{ k.prop }}, load: (_id: string) => prisma.{{ k.target }}.findUnique({ where: { id: _id } }) as Promise<Record<string, unknown> | null> },
+{% endfor %}
+      ]),
+{% endfor %}
+    ]);
+  }
+}
+
+{% endif %}
 {% if is_audited %}
 export async function delete{{ parent_pascal }}(actorId: string | null, ids: string[]): Promise<void> {
 {% if reservation_mutation_guard_delete %}
@@ -531,6 +588,12 @@ export async function delete{{ parent_pascal }}(actorId: string | null, ids: str
       await afterDelete(tx, id);
     }
   });
+{% if invalidates_permission_cache %}
+  // The write is committed: drop the per-process permission cache so a role,
+  // permission or role-membership change applies on this instance at once
+  // instead of after the cache TTL.
+  await invalidatePermissionCache();
+{% endif %}
 {% if bridge_attachment_cleanup %}
   // The rows are gone and the delete committed; remove the stored files too.
   await removeStoredObjects(_removedAttachmentKeys);
@@ -582,6 +645,12 @@ export async function delete{{ parent_pascal }}(ids: string[]): Promise<void> {
       await afterDelete(tx, id);
     }
   });
+{% if invalidates_permission_cache %}
+  // The write is committed: drop the per-process permission cache so a role,
+  // permission or role-membership change applies on this instance at once
+  // instead of after the cache TTL.
+  await invalidatePermissionCache();
+{% endif %}
 {% if bridge_attachment_cleanup %}
   // The rows are gone and the delete committed; remove the stored files too.
   await removeStoredObjects(_removedAttachmentKeys);
@@ -608,7 +677,7 @@ async function reserve{{ parent_pascal }}Core(
     const _startMs = new Date(dateRange.{{ reservation_config.dateRange.startField }} as unknown as string).getTime();
     const _endMs = new Date(dateRange.{{ reservation_config.dateRange.endField }} as unknown as string).getTime();
     if (_startMs >= _endMs) {
-      throw new Error('Start date must be before end date');
+      throw new AppError('VALIDATION', 'Start date must be before end date');
     }
     const candidates = await (tx as unknown as typeof prisma).{{ reservation_config.pool.entity }}.findMany({
       where: {

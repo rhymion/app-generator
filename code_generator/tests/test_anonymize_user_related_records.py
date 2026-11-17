@@ -87,7 +87,7 @@ def test_x_pii_none_is_left_untouched(prisma_user_model) -> None:
 def test_default_schema_scrub_is_unchanged(prisma_user_model) -> None:
     block = _data_block(_default_schema())
     assert "name: '[deleted]'," in block and 'email: placeholderEmail,' in block
-    assert 'password: null,' in block and 'api_key: null,' in block
+    assert 'password: null,' in block and 'api_key_hash: null,' in block and 'api_key_issued_at: null,' in block
     assert 'mfa_enabled: false,' in block and 'image_id: null,' in block
 
 

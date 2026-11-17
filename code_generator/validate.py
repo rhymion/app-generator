@@ -1045,6 +1045,21 @@ def audit_log_storage_enabled(schema: dict) -> bool:
     return isinstance(block, dict) and block.get('enabled') is True
 
 
+_EMAIL_VERIFICATION_GENERATOR_KEYS = frozenset({'enabled'})
+
+
+def email_verification_enabled(schema: dict) -> bool:
+    """True when the schema opts in to email verification for self-registration (Issue #1092).
+
+    Reads `x-generator.email-verification.enabled`; absent means false (opt-in, default off).
+    generate-code writes the value into `siteConfig.auth.registration.emailVerification`
+    (lib/site-config.ts), which the hand-written register routes and pages read.
+    """
+    gen = schema.get('x-generator')
+    block = gen.get('email-verification') if isinstance(gen, dict) else None
+    return isinstance(block, dict) and block.get('enabled') is True
+
+
 def _validate_enabled_only_block(gen: dict, name: str, allowed: frozenset) -> list[str]:
     """Errors for an `x-generator.<name>` block that accepts a boolean `enabled` and nothing else."""
     if name not in gen:
@@ -1063,12 +1078,14 @@ def _validate_enabled_only_block(gen: dict, name: str, allowed: frozenset) -> li
 
 
 def validate_generator_config(schema: dict) -> None:
-    """Validate the `x-generator.mobile` and `x-generator.audit-log-storage` blocks (bool `enabled` only, no unknown keys)."""
+    """Validate the `x-generator.mobile`, `x-generator.audit-log-storage` and
+    `x-generator.email-verification` blocks (bool `enabled` only, no unknown keys)."""
     gen = schema.get('x-generator')
     if not isinstance(gen, dict):
         return
     errors = _validate_enabled_only_block(gen, 'mobile', _MOBILE_GENERATOR_KEYS)
     errors += _validate_enabled_only_block(gen, 'audit-log-storage', _AUDIT_LOG_STORAGE_GENERATOR_KEYS)
+    errors += _validate_enabled_only_block(gen, 'email-verification', _EMAIL_VERIFICATION_GENERATOR_KEYS)
     if errors:
         raise SchemaValidationError("\n".join(errors))
 

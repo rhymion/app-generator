@@ -1,3 +1,4 @@
+import { logger } from '@/lib/logger';
 import { randomUUID } from 'node:crypto';
 import prisma from '@/lib/prisma';
 import type { Prisma } from '@/app/generated/prisma/client';
@@ -89,7 +90,7 @@ async function writeToDb(entry: Notification): Promise<void> {
       },
     });
   } catch (err) {
-    console.warn(
+    logger.warn(
       '[_notifier:write_failed]',
       JSON.stringify({
         at: new Date().toISOString(),

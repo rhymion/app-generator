@@ -122,8 +122,12 @@ if [ "$content_status" -eq 0 ]; then
   grep -q "await updateApprovalLockdownGateItem(actorId, action.id," "$_IMPORT_ROUTE" || { echo "FAILED: $_IMPORT_ROUTE does not call updateApprovalLockdownGateItem (service.ts convergence, cmd_996)" >&2; content_status=1; }
   grep -q "disabled: true" "$_FORM" || { echo "FAILED: $_FORM missing disabled: true option" >&2; content_status=1; }
 
+  # The locked values are read from the WRITE_LOCKED_FIELDS block only: the same enum
+  # values also appear in FIELD_RULES (the field's runtime enum rule, Issue #1271).
+  wl_block() { awk '/const WRITE_LOCKED_FIELDS/{f=1} f{print} f && /^\] ;/{exit}' "$1"; }
+
   grep -q "WRITE_LOCKED_FIELDS" "$_WL_SV" || { echo "FAILED: $_WL_SV missing WRITE_LOCKED_FIELDS (x-write-locked-values without x-approval)" >&2; content_status=1; }
-  grep -q '"in_underwriting"' "$_WL_SV" || { echo "FAILED: $_WL_SV missing locked value 'in_underwriting'" >&2; content_status=1; }
+  wl_block "$_WL_SV" | grep -q '"in_underwriting"' || { echo "FAILED: $_WL_SV missing locked value 'in_underwriting'" >&2; content_status=1; }
   grep -q "findLockedViolation" "$_WL_IMPORT_ROUTE" && { echo "FAILED: $_WL_IMPORT_ROUTE still has its own findLockedViolation duplicate (should delegate to add/updateWriteLockdownGateItem instead, cmd_996)" >&2; content_status=1; }
   grep -q "await addWriteLockdownGateItem(actorId," "$_WL_IMPORT_ROUTE" || { echo "FAILED: $_WL_IMPORT_ROUTE does not call addWriteLockdownGateItem (service.ts convergence, cmd_996)" >&2; content_status=1; }
   grep -q "disabled: true" "$_WL_FORM" || { echo "FAILED: $_WL_FORM missing disabled: true option" >&2; content_status=1; }
@@ -131,11 +135,11 @@ if [ "$content_status" -eq 0 ]; then
   # cmd_1032: view-scoping, both directions in one file.
   grep -q "WRITE_LOCKED_FIELDS" "$_WLV_SV" || { echo "FAILED: $_WLV_SV missing WRITE_LOCKED_FIELDS (proxy view's own x-write-locked-values)" >&2; content_status=1; }
   # (a) opt-in: the view's own declared value must be locked.
-  grep -q '"submitted"' "$_WLV_SV" || { echo "FAILED: $_WLV_SV missing its own locked value 'submitted' -- proxy view's own x-write-locked-values declaration was not applied" >&2; content_status=1; }
+  wl_block "$_WLV_SV" | grep -q '"submitted"' || { echo "FAILED: $_WLV_SV missing its own locked value 'submitted' -- proxy view's own x-write-locked-values declaration was not applied" >&2; content_status=1; }
   # (b) default-unlock: the raw entity's declared values must NOT leak
   # into a proxy view that never declared them itself.
-  grep -q "in_underwriting" "$_WLV_SV" && { echo "FAILED: $_WLV_SV contains 'in_underwriting' -- raw entity's own x-write-locked-values leaked into a proxy view that never declared it" >&2; content_status=1; }
-  grep -q '"issued"' "$_WLV_SV" && { echo "FAILED: $_WLV_SV contains 'issued' -- raw entity's own x-write-locked-values leaked into a proxy view that never declared it" >&2; content_status=1; }
+  wl_block "$_WLV_SV" | grep -q "in_underwriting" && { echo "FAILED: $_WLV_SV contains 'in_underwriting' -- raw entity's own x-write-locked-values leaked into a proxy view that never declared it" >&2; content_status=1; }
+  wl_block "$_WLV_SV" | grep -q '"issued"' && { echo "FAILED: $_WLV_SV contains 'issued' -- raw entity's own x-write-locked-values leaked into a proxy view that never declared it" >&2; content_status=1; }
 fi
 
 t1=$(date +%s.%N)

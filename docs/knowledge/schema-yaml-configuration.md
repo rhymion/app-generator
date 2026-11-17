@@ -202,6 +202,25 @@ exist in `prisma/schema.prisma` with `id`, `name`, and the other columns referen
 
 ---
 
+## 1.2 Top-level `x-generator` switches
+
+`x-generator` at the top of `code_generator/json_schema.yaml` holds feature switches that are not
+tied to one entity. Each opt-in block takes a boolean `enabled` and nothing else; `validate.py`
+rejects another key or a non-boolean value. An absent block means off.
+
+| Block | Default | Effect |
+|---|---|---|
+| `mobile` | off | Generates the Expo app under `mobile/` (see `mobile-app.md`) |
+| `audit-log-storage` | off | Generates the audit-log object-storage copy and its jobs (see `audit-log-append-only.md`) |
+| `email-verification` | off | Self-registration confirms the address by email before an account exists (Issue #1092). generate-code writes the value into `siteConfig.auth.registration.emailVerification` in the tracked `lib/site-config.ts`, which the hand-written register routes and pages read; edit the schema, not that line. Needs `SMTP_URL` in production. See `authentication.md` ("Self-registration") |
+| `search` | - | `default_scope` for the search index (see `search.md`) |
+
+```yaml
+x-generator:
+  email-verification:
+    enabled: true
+```
+
 ## 2. Single-File Entity Format
 
 Declare an entity as a single top-level key under `definitions:`. Generation flags, relationship
@@ -542,15 +561,30 @@ handful of pre-existing fields.
 
 ### 4.2 Validation constraints
 
-These are enforced only in the frontend form; the generator does not add Prisma-level
-constraints beyond what the Prisma schema already defines. All are Category C — write them
-under the column's entry in `properties:`.
+The generated form enforces these, and so does the server: the generated `service_validation.ts`
+checks every supplied value against the column's JSON type and against `enum`, `minimum`,
+`maximum`, `exclusiveMinimum`, `exclusiveMaximum`, `minLength`, `pattern` (not on foreign-key
+columns) and `format: uri` / `format: email` where declared (Issue #1271), with a `VALIDATION`
+error (HTTP 422 on REST). The generator does not add Prisma-level constraints beyond what the
+Prisma schema already defines. All are Category C — write them under the column's entry in
+`properties:`.
+
+Every writable string field has a server-side maximum length (Issue #1273): the declared
+`maxLength`, or 65535 characters when none is declared. The generated `service_validation.ts`
+rejects a longer value with a `VALIDATION` error (HTTP 422 on REST), and CSV import refuses the
+row. There is no opt-out; declare a larger `maxLength` for a field that needs one (no upper cap; a
+plain Prisma `String` is PostgreSQL `text`). The generator does not read `@db.VarChar(n)`, and `maxLength`
+may be larger than `n` by design (`maxLength` is the security limit, `n` follows the product spec):
+a value between `n` and `maxLength` passes the check, the database refuses it, and the caller gets a
+`VALIDATION` error saying the value is too long, naming the field when PostgreSQL reports the column
+(Issue #1393). Declare `maxLength: n` when the form should stop the user earlier. See
+[input-validation-rules-and-limits.md](input-validation-rules-and-limits.md).
 
 | Keyword | Effect in generated form |
 |---|---|
 | `minLength` | Input required to be at least N characters |
-| `maxLength` | Input capped at N characters |
-| `minimum` / `maximum` | Number field min/max (also used by legacy int-enum, §4.3) |
+| `maxLength` | Input capped at N characters; also enforced on the server (default 65535 when absent) |
+| `minimum` / `maximum` | Number field min/max (also used by legacy int-enum, §4.3); also enforced on the server |
 | `pattern` | Regex pattern (mainly used for CUID id fields — not shown in form; auto-added for FK columns, see §2) |
 | `format: date-time` | Renders MUI X DateTimePicker |
 | `format: date` | Renders MUI X DatePicker |
@@ -712,16 +746,23 @@ for a concrete example.
 
 ### 4.6 Field UI Hints (`x-ui`)
 
-Place `x-ui` on a `string` column's entry in `properties:` to control how the form input is rendered.
+Place `x-ui` on a column's entry in `properties:` to control how the field is laid out.
+Both hints apply to the **new/edit page** (`FormUpsert.tsx`) and to the **detail (view)
+page** (`FormView.tsx`), so a field keeps the same shape on every page.
 
 | Sub-key | Type | Default | Effect |
 |---|---|---|---|
-| `rows` | integer | — | Renders the field as a multiline textarea with the given row count |
-| `width` | integer \| string | — | Controls form-field wrapper width on desktop (md+); mobile always 100% |
+| `rows` | integer | — | Renders a string field as a multi-line textarea with the given row count |
+| `width` | integer (1–12) | — | Field width in 12-column grid units on desktop (md+); mobile always 100% |
 
-**`rows`** — When set, the generator emits `multiline={true} rows={N}` on the `AppFieldText`
-component. Without `x-ui.rows`, only `description` fields receive `rows={4}` by convention;
-all other string fields render as single-line inputs.
+**`rows`** — When set, the generator emits `multiline rows={N}` on the `AppFieldText`
+component — the editable input on new/edit, and the read-only display on the view page
+(and for an `x-readonly-fields` / `x-readonly` field on the edit page). Without
+`x-ui.rows`, `description` fields and `x-mention: true` fields get 4 rows by convention;
+all other string fields render single-line. Only plain string fields are affected on the
+view page: a relation, enum, date, decimal, number or boolean field ignores `rows`.
+A flattened (`x-flatten`) section honours `rows` declared on the target entity's own column
+on both pages.
 
 ```yaml
 properties:
@@ -738,15 +779,21 @@ Omitting `x-ui` (or omitting `x-ui.rows`) preserves existing behaviour:
 
 #### x-ui.width
 
-Controls the form-field wrapper width on desktop (md+). On mobile (xs), the field always expands to 100%.
+Controls the field wrapper width on desktop (md+). On mobile (xs), the field always expands to 100%.
 
 | Value type | Behaviour |
 |------------|-----------|
 | integer (1–12) | Grid-column units: `val / 12 × 100%` — e.g. `width: 8` → `66.667%` on md+ |
-| string | Literal CSS value passed to the `md` breakpoint — e.g. `width: '400px'` |
-| omitted | No Box wrapper; field uses full container width |
+| omitted, or not a number | No wrapper; field uses full container width (a string such as `'400px'` is ignored) |
 
-The generator wraps the field in `<Box sx={{ width: { xs: '100%', md: '<value>' } }}>`.
+The generator wraps the field in `<AppFormFieldWrapper cols={N}>`
+(`components/ui/forms/AppFormFieldWrapper.tsx`), which sets
+`width: { xs: '100%', md: '<N/12 × 100>%' }`.
+
+- **View page**: every rendered field that declares `x-ui.width` is wrapped, whatever its type.
+- **New/edit page**: text, decimal, mention, relation, link-URI, enum, timezone and
+  read-only (`x-readonly-fields`) fields are wrapped; number, date, boolean, image/file,
+  direct-attachment, entity-select and custom-component inputs currently ignore `width`.
 
 **Examples:**
 
@@ -761,7 +808,7 @@ properties:
       width: 6      # half-width; combine with rows if needed
 ```
 
-`x-ui.rows` and `x-ui.width` can be combined: the generator applies the Box wrapper first, then the multiline attribute.
+`x-ui.rows` and `x-ui.width` can be combined: the wrapper goes outside, the multiline attribute on the field inside it.
 
 ### 4.7 Readonly Fields (`x-readonly` / `x-readonly-fields`)
 

@@ -1,3 +1,4 @@
+import { logger } from '@/lib/logger';
 import NextAuth, { CredentialsSignin } from "next-auth";
 import type { NextAuthConfig } from "next-auth";
 import type { Adapter, AdapterUser } from "@auth/core/adapters";
@@ -7,6 +8,9 @@ import GoogleProvider from "next-auth/providers/google";
 import { PrismaAdapter } from "@auth/prisma-adapter";
 import prisma from "@/lib/prisma";
 import { verifyPassword } from "@/lib/auth/password-check";
+import { rehashPasswordIfNeeded } from "@/lib/auth/password-rehash";
+import { secretsEqual } from "@/lib/_secret_compare";
+import { clearFailedSignIns, getAccountLockState, recordFailedSignIn } from "@/lib/auth/account-lockout";
 import { siteConfig } from "@/lib/site-config";
 import { recordAuditEvent } from "@/lib/audit-log";
 import { verifyMfaCode } from "@/lib/mfa/verify";
@@ -14,6 +18,9 @@ import { MfaRateLimitedError } from "@/lib/mfa/errors";
 import { createTenantBoundUser } from "@/lib/auth/create-user";
 import { isMockGoogleOAuthTestEnabled } from "@/lib/auth/mock-oauth-gate";
 import { isDomainAllowed } from "@/lib/auth/domain-allow-list";
+import { isPastAbsoluteLifetime, resolveSessionPolicy } from "@/lib/session-policy";
+import { logSignInRejected } from "@/lib/security-event";
+import { isMfaEnrollmentRequired } from "@/lib/auth/mfa-required";
 
 // Custom CredentialsSignin subclasses so @auth/core re-throws them as-is
 // (plain Error gets wrapped in CallbackRouteError and the code is lost).
@@ -60,13 +67,26 @@ function buildProviders(): Provider[] {
         // sentinel error string "MFA_REQUIRED" (see app/[locale]/login).
         mfa_code: { label: "MFA Code", type: "text" },
       },
-      async authorize(credentials) {
+      async authorize(credentials, request) {
         if (!credentials?.email || !credentials?.password) {
+          logSignInRejected("INVALID_CREDENTIALS");
+          throw new Error("Invalid credentials");
+        }
+
+        const email = credentials.email as string;
+
+        // Account lockout (Issue #1125, two tiers): while the failure budget of
+        // this email from this address, or the higher email-wide budget, is
+        // spent no password is accepted. The reply and the work done match a wrong password, and
+        // the lock applies to unknown emails alike, so it reveals nothing.
+        if ((await getAccountLockState(email, request.headers)).locked) {
+          await verifyPassword(credentials.password as string, null);
+          logSignInRejected("INVALID_CREDENTIALS");
           throw new Error("Invalid credentials");
         }
 
         const user = await prisma.user.findUnique({
-          where: { email: credentials.email as string },
+          where: { email },
         });
 
         // SSO-provisioned users have password === null and must not be allowed
@@ -80,8 +100,13 @@ function buildProviders(): Provider[] {
         );
 
         if (!user || !user.password || !isCorrectPassword) {
+          await recordFailedSignIn(email, request.headers);
+          logSignInRejected("INVALID_CREDENTIALS");
           throw new Error("Invalid credentials");
         }
+        await clearFailedSignIns(email, request.headers);
+        // A hash at another bcrypt cost than BCRYPT_COST is replaced (Issue #1291).
+        await rehashPasswordIfNeeded(user.id, credentials.password as string, user.password);
 
         // MFA gate. The cast covers the case where the generated Prisma
         // client in the current checkout predates the user.mfa_enabled
@@ -104,6 +129,7 @@ function buildProviders(): Provider[] {
             if (!(e instanceof MfaRateLimitedError)) throw e;
           }
           if (!ok) {
+            logSignInRejected("INVALID_MFA_CODE");
             throw new InvalidMfaError();
           }
         }
@@ -123,19 +149,16 @@ function buildProviders(): Provider[] {
       GoogleProvider({
         clientId: process.env.GOOGLE_CLIENT_ID!,
         clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
-        // Account-linking flow (S7): when an OAuth sign-in arrives whose
-        // email matches an existing user row, the adapter links the new
-        // Account row to that user instead of throwing
-        // OAuthAccountNotLinked. The risk this normally carries — an
-        // attacker creating a Google account with the victim's email and
-        // taking over the credentials account — is mitigated by the
-        // signIn() callback below, which (a) keeps the explicit
-        // email_verified gate and (b) rejects an OAuth sign-in for a
-        // credentials-holding email unless the request comes from an
-        // active session for that same user. So `dangerous` here means
-        // "linkable to existing user once the signIn callback authorises";
-        // the unauthenticated take-over path stays blocked.
-        allowDangerousEmailAccountLinking: true,
+        // No `allowDangerousEmailAccountLinking`: a Google account is
+        // identified by its `sub` (the Account row) and never by its email
+        // address. A sign-in whose `sub` is not linked yet, from a browser
+        // with no session, is refused with OAuthAccountNotLinked when a user
+        // row with the same email exists, so a person who re-created a
+        // Google account under an old address cannot take over that row's
+        // roles and data. Linking happens only from a signed-in session
+        // (/setting/accounts); the signIn() callback below checks that the
+        // emails match, and @auth/core links to the session's user without
+        // needing the flag.
         authorization: {
           params: { prompt: "select_account" },
         },
@@ -228,15 +251,28 @@ function buildAdapter(): Adapter {
 // sessions). Only the *session* row stays empty.
 const sessionStrategy = "jwt" as const;
 
+// Read once at load. The absolute lifetime is enforced in jwt() below.
+const sessionPolicy = resolveSessionPolicy();
+
+// While AUTH_SECRET is being rotated, AUTH_SECRET_PREVIOUS holds the old value: sessions issued
+// under it stay valid and are re-issued under the new one (Auth.js tries each secret in turn and
+// signs with the first). See docs/knowledge/authentication.md "Rotating AUTH_SECRET" (#1291).
+function sessionSecrets(): string | string[] | undefined {
+  const current = process.env.AUTH_SECRET;
+  const previous = (process.env.AUTH_SECRET_PREVIOUS ?? "").trim();
+  return current && previous && !secretsEqual(previous, current) ? [current, previous] : current;
+}
+
 export const authConfig: NextAuthConfig = {
-  secret: process.env.AUTH_SECRET,
+  secret: sessionSecrets(),
 
   adapter: buildAdapter(),
   // JWT strategy keeps session reads off the DB on every request. Without an
   // adapter NextAuth defaults to JWT anyway, but pin it explicitly so adding
   // a future PrismaAdapter doesn't silently flip us to DB-backed sessions
   // (Phase 2 #9 from performance-plan-session.md).
-  session: { strategy: sessionStrategy },
+  // maxAge / updateAge come from SESSION_MAX_AGE_SECONDS / SESSION_UPDATE_AGE_SECONDS (lib/session-policy.ts).
+  session: { strategy: sessionStrategy, maxAge: sessionPolicy.maxAge, updateAge: sessionPolicy.updateAge },
   providers: buildProviders(),
   pages: {
     signIn: "/login",
@@ -270,7 +306,7 @@ export const authConfig: NextAuthConfig = {
       const allowed = siteConfig.auth?.allowedDomains ?? [];
       if (allowed.length > 0) {
         if (!isDomainAllowed(account.provider, email, profile as { hd?: unknown } | undefined, allowed)) {
-          console.info(
+          logger.info(
             "[auth:signIn:reject]",
             JSON.stringify({
               at: new Date().toISOString(),
@@ -303,7 +339,7 @@ export const authConfig: NextAuthConfig = {
           select: { email: true },
         });
         if (current?.email !== email) {
-          console.info(
+          logger.info(
             "[auth:signIn:reject]",
             JSON.stringify({
               at: new Date().toISOString(),
@@ -320,9 +356,9 @@ export const authConfig: NextAuthConfig = {
         }
         // Same-email linking. Skip the credentials/OAuth collision
         // rejection below — the signed-in user is provably the owner of
-        // the credentials account. PrismaAdapter then writes the new
-        // Account row via allowDangerousEmailAccountLinking + email
-        // match.
+        // the credentials account. @auth/core then writes the new Account
+        // row for the session's user (handle-login.js links to the signed-in
+        // user when the provider account is not yet linked to anyone).
         await recordAuditEvent({
           action: "auth:account.link",
           actor_user_id: currentUserId,
@@ -349,7 +385,7 @@ export const authConfig: NextAuthConfig = {
         select: { id: true, password: true },
       });
       if (existing && existing.password !== null) {
-        console.info(
+        logger.info(
           "[auth:signIn:reject]",
           JSON.stringify({
             at: new Date().toISOString(),
@@ -378,7 +414,10 @@ export const authConfig: NextAuthConfig = {
     async session({ session, user, token }) {
       const id = (user?.id ?? (token as { id?: string } | undefined)?.id) ?? "";
       const mfa_pending = (token as { mfa_pending?: boolean } | undefined)?.mfa_pending ?? false;
-      return { ...session, user: { ...session.user, id }, mfa_pending };
+      // Issue #1281: the user must enrol in MFA before using the app (MFA_REQUIRED_ROLES).
+      const mfa_enrollment_required =
+        (token as { mfa_enrollment_required?: boolean } | undefined)?.mfa_enrollment_required ?? false;
+      return { ...session, user: { ...session.user, id }, mfa_pending, mfa_enrollment_required };
     },
     // Runs on every sign-in AND on every subsequent session read (JWT
     // strategy calls back into this on each `auth()` resolution — see
@@ -396,7 +435,7 @@ export const authConfig: NextAuthConfig = {
     //
     // `mfa_token_version` closes the session-persistence gap this alone
     // would leave open: enabling MFA does not revoke an already-active JWT
-    // (JWT_MAX_AGE default 30 days). Every request re-checks the DB
+    // (SESSION_MAX_AGE_SECONDS, default 30 days). Every request re-checks the DB
     // version against the value snapshotted into the token; a mismatch
     // (someone enabled MFA after this session started) re-arms
     // `mfa_pending` immediately instead of waiting for token expiry. This
@@ -417,8 +456,16 @@ export const authConfig: NextAuthConfig = {
         return token;
       }
 
+      // Absolute session lifetime (SESSION_ABSOLUTE_MAX_AGE_SECONDS, off by default): end the session once it is
+      // older than the limit, however recently it was used. Returning null makes Auth.js clear the cookie.
+      if (!(account && user?.id) && isPastAbsoluteLifetime(token.session_started_at, sessionPolicy.absoluteMaxAge)) {
+        return null;
+      }
+
       if (account && user?.id) {
-        // Fresh sign-in (any provider). Snapshot mfa_token_version as the
+        // Fresh sign-in (any provider). Stamp the start time the absolute lifetime counts from.
+        token.session_started_at = Math.floor(Date.now() / 1000);
+        // Snapshot mfa_token_version as the
         // baseline for future drift detection below.
         const dbUser = await prisma.user.findUnique({
           where: { id: token.id },
@@ -430,6 +477,9 @@ export const authConfig: NextAuthConfig = {
         if (account.provider !== "credentials" && dbUser?.mfa_enabled) {
           token.mfa_pending = true;
         }
+        // Issue #1281: any sign-in method. A role listed in MFA_REQUIRED_ROLES
+        // without enrolment restricts the session to the MFA settings page.
+        token.mfa_enrollment_required = await isMfaEnrollmentRequired(token.id, dbUser?.mfa_enabled ?? false);
         return token;
       }
 
@@ -449,6 +499,10 @@ export const authConfig: NextAuthConfig = {
           token.mfa_pending = true;
         }
         token.mfa_token_version = dbVersion;
+        // Issue #1281: re-evaluated on every request, so enrolling (or a role or
+        // MFA_REQUIRED_ROLES change) takes effect on the next one. No query for an
+        // enrolled user or while the policy is off.
+        token.mfa_enrollment_required = await isMfaEnrollmentRequired(token.id, dbUser?.mfa_enabled ?? false);
       }
 
       return token;
@@ -461,7 +515,7 @@ export const authConfig: NextAuthConfig = {
     // auditing lands.
     async signIn({ user, account, isNewUser }) {
       const provider = account?.provider ?? "unknown";
-      console.info(
+      logger.info(
         "[auth:signIn]",
         JSON.stringify({
           at: new Date().toISOString(),
@@ -487,7 +541,7 @@ export const authConfig: NextAuthConfig = {
         (token as { id?: string } | null)?.id ??
         (session as { userId?: string } | null)?.userId ??
         null;
-      console.info(
+      logger.info(
         "[auth:signOut]",
         JSON.stringify({
           at: new Date().toISOString(),
@@ -528,6 +582,9 @@ declare module "next-auth" {
      *  required MFA code has not yet been verified this session. See the
      *  jwt() callback above and proxy.ts. */
     mfa_pending?: boolean;
+    /** True while MFA_REQUIRED_ROLES requires this user to enrol in MFA and
+     *  they have not (Issue #1281): only the MFA settings page is usable. */
+    mfa_enrollment_required?: boolean;
   }
 }
 
@@ -535,6 +592,9 @@ declare module "@auth/core/jwt" {
   interface JWT {
     id: string;
     mfa_pending?: boolean;
+    mfa_enrollment_required?: boolean;
     mfa_token_version?: number;
+    /** Unix seconds at sign-in; the absolute session lifetime counts from here. */
+    session_started_at?: number;
   }
 }

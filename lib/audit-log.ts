@@ -14,7 +14,7 @@
  *     primary action. Callers from inside a Prisma `$transaction` pass the
  *     transaction client so the row enrolls in that transaction; everyone
  *     else uses the top-level prisma client and we swallow errors with a
- *     `console.warn` so the request continues. The trade-off: a DB hiccup
+ *     `logger.warn` so the request continues. The trade-off: a DB hiccup
  *     can drop audit rows. That's the right call for auth events (we'd
  *     rather let the user in than 500), and for service-layer events the
  *     transactional path keeps audit + primary action consistent.
@@ -28,11 +28,18 @@
  *     New surfaces should follow the same pattern so query filters stay
  *     ergonomic.
  *
+ *   - **Request id.** `request_id` is the server-generated id of the request
+ *     that caused the event (lib/request-id.ts), so the rows written by one
+ *     request can be found together. It is null for events written outside a
+ *     request (scripts, scheduled jobs).
+ *
  *   - **No FK on `actor_user_id`.** The audit row must outlive the user it
  *     references. `actor_user_id` is also nullable — some auth-side events
  *     (rejected sign-in with an unknown email) have no resolved actor.
  */
+import { logger } from '@/lib/logger';
 import prisma from '@/lib/prisma';
+import { getRequestId } from '@/lib/request-id';
 
 /**
  * Transaction client passed by callers from inside `prisma.$transaction`.
@@ -74,9 +81,13 @@ type AuditLogClient = { audit_log: { create: (args: { data: Record<string, unkno
 export async function recordAuditEvent(event: AuditEvent): Promise<void> {
   const client = (event.tx ?? prisma) as unknown as AuditLogClient;
   try {
+    // Issue #1306: the server-generated id of the request that caused the event
+    // (null outside a request). No source address is stored: see lib/request-id.ts.
+    const request_id = await getRequestId();
     await client.audit_log.create({
       data: {
         action: event.action,
+        request_id,
         actor_user_id: event.actor_user_id ?? null,
         target_table: event.target_table ?? null,
         target_id: event.target_id ?? null,
@@ -89,7 +100,7 @@ export async function recordAuditEvent(event: AuditEvent): Promise<void> {
     // and we still want the error visible — rethrow so the transaction
     // rolls back.
     if (event.tx) throw err;
-    console.warn(
+    logger.warn(
       '[audit_log:write_failed]',
       JSON.stringify({
         at: new Date().toISOString(),

@@ -74,8 +74,31 @@ export const siteConfig = {
    * would be defence-in-depth at best.
    */
   auth: {
+    /**
+     * Self-registration. Set by generate-code from
+     * `x-generator.email-verification.enabled` in json_schema.yaml; edit the
+     * schema, not this line. See docs/knowledge/authentication.md.
+     */
+    registration: {
+      emailVerification: false,
+    },
     providers: ['credentials', 'google'] as AuthProviderId[],
     allowedDomains: [] as string[],
+    /**
+     * Self-registration domain allow-list (Issue #1093). Empty = anyone may
+     * register. Otherwise the email's domain must equal one entry
+     * (case-insensitive, no subdomain wildcard); other addresses get 403 before
+     * any mail is sent. Independent of `allowedDomains` (OAuth only).
+     */
+    registrationAllowedDomains: [] as string[],
+    /**
+     * Days until a newly issued API key expires, counted from the moment it is
+     * issued. `null` makes new keys never expire. Removing this property applies
+     * the generator default (90 days). The key's owner can pick another expiry,
+     * or none, when issuing; keys issued before this setting existed keep the
+     * expiry they have.
+     */
+    apiKeyDefaultExpiryDays: 90 as number | null,
   },
 
   /** Links listed in the sidebar navigation */

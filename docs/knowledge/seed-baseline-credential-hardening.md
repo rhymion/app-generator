@@ -35,8 +35,11 @@ every test/dev entry point does not, so no call site needed to change:
   to stdout after the upsert completes (never written to a log file or
   collector) so the operator can capture it. Because `update: {}` means a
   re-run against an already-seeded database doesn't change the stored
-  api_key, the script prints whatever the post-upsert row actually holds —
-  never a value it merely *intended* to write.
+  api_key, the script prints the key only when the post-upsert row carries
+  the hash of the key generated in this run; otherwise it says the account
+  already exists. The database holds only the key's SHA-256 hash
+  (`api-key-hashing.md`), so a key that was not printed in the run that
+  created it cannot be recovered.
 - **Anything else** (`test`, `development`, unset): unchanged —
   `admin@example.com` / `password123` / the fixed `api_key` literal, exactly
   as before. Cypress specs (`cypress/e2e/auth.cy.ts`,
@@ -96,7 +99,7 @@ cost factor), so identical passwords still produce different hash strings.
   exact commands and output).
 - **Vercel** (`scripts/vercel-seed.sh`): **this changed since the credential
   hardening was written.** `vercel-build`'s own npm script
-  (`"run-s prj:sync python-generate migrate:deploy db:generate build"`) no
+  (`"run-s prj:sync python-generate db:create db:generate build"`) no
   longer runs `db:seed-baseline` at all — it was pulled out of the build
   chain by a later commit (`fbf68b96`), and `build:full` is the only npm
   script that still runs it directly. Seeding for Vercel now happens via a
@@ -136,11 +139,14 @@ immediately:
    (`lib/api-auth.ts`) without a password. Generate a new value and replace
    it:
    ```sql
-   UPDATE "user" SET api_key = 'mk_' || encode(gen_random_bytes(32), 'hex')
+   UPDATE "user"
+   SET api_key_hash = encode(sha256(convert_to('<new-key>', 'UTF8')), 'hex'),
+       api_key_issued_at = now()
    WHERE email = 'admin@example.com';
    ```
-   (requires the `pgcrypto` extension for `gen_random_bytes`; alternatively
-   generate the value application-side and `UPDATE` with a literal.)
+   (generate `<new-key>` out-of-band as `mk_` followed by 64 random hex
+   characters; only its hash is stored. Alternatively sign in and issue a key
+   from the account settings page.)
 3. **Prefer creating a fresh admin and disabling the default one** over just
    rotating in place — this also removes `admin@example.com` as a
    guessable, publicly-known login name, and matches the operational
@@ -148,7 +154,7 @@ immediately:
    - Sign in with the rotated credentials from step 1.
    - Create a new user, assign the `Administrator` role (Permissions page).
    - Sign in as the new admin, then either delete the `admin@example.com`
-     user or clear its `password`/`api_key` columns (`NULL`) to disable
+     user or clear its `password`/`api_key_hash` columns (`NULL`) to disable
      credential-based sign-in for that account without breaking any
      `creator_id`/`updater_id`/`actor_user_id` foreign keys still pointing
      at it.
@@ -247,7 +253,7 @@ not made today.
 in `lib/authz.ts` (`SPECIAL_ROLE_NAMES`). Neither requires an explicit
 per-user role *connection* — every user implicitly qualifies for whichever
 applies to a given row (`creator_id === userId` / `assignee_id === userId`),
-evaluated per item by `resolvePermissions()`.
+evaluated per item by `resolveRecordPermissions()`.
 
 - **`Creator`**: granted exactly `setting.read` + `setting.update` and
   nothing else. This is the mechanism by which a non-admin user reaches

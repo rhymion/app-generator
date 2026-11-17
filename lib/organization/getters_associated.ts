@@ -3,7 +3,7 @@
 import prisma from '@/lib/prisma';
 import type { Organization } from '@/lib/organization/types';
 import { getAssociatedOrganizationDetail } from '@/lib/organization/associated_internal';
-import { assertPermission, getModelPermissions, getSessionUserIdOrThrow, Operation, resolvePermissions, toPermissions } from '../authz';
+import { assertPermission, getModelPermissions, getSessionUserIdOrThrow, Operation, resolveEntityPermissions, resolveRecordPermissions, toPermissions } from '../authz';
 
 /**
  * Lightweight search for the organization autocomplete picker. Restricted to
@@ -54,7 +54,9 @@ export async function getAssociatedOrganizationDetailPageData(id: string, operat
     getAssociatedOrganizationDetail(id, userId),
     getModelPermissions('organization', userId),
   ]);
-  const resolved = await resolvePermissions(basePermissions, organization, userId ?? '');
+  const resolved = organization
+    ? await resolveRecordPermissions(basePermissions, organization, userId)
+    : await resolveEntityPermissions(basePermissions);
   await assertPermission(resolved, operation, 'organization');
   return { organization, userPermissions: await toPermissions(resolved) };
 }

@@ -3,7 +3,7 @@
 import prisma from '@/lib/prisma';
 import type { AuditLog } from '@/lib/audit_log/types';
 import { buildAuditLogAccessWhere, getAuditLogDetail, getAuditLogPage } from '@/lib/audit_log/getters_internal';
-import { assertPermission, getModelPermissions, resolvePermissions, toPermissions } from '@/lib/authz';
+import { assertPermission, getModelPermissions, resolveEntityPermissions, resolveRecordPermissions, toPermissions } from '@/lib/authz';
 import type { Operation } from '@/lib/authz';
 import {
   type PageOpts, type PageResult,
@@ -17,7 +17,9 @@ export async function getAuditLogDetailPageData(id: string, operation: Operation
     getAuditLogDetail(id),
     getModelPermissions('audit_log'),
   ]);
-  const resolved = await resolvePermissions(basePermissions, auditLog, userId ?? '');
+  const resolved = auditLog
+    ? await resolveRecordPermissions(basePermissions, auditLog, userId ?? '')
+    : await resolveEntityPermissions(basePermissions);
   await assertPermission(resolved, operation, 'audit_log');
   return { auditLog, userPermissions: await toPermissions(resolved) };
 }
@@ -92,6 +94,7 @@ export async function searchAuditLogOptions(
     action: auditLog.action,
     actor_user_id: auditLog.actor_user_id,
     metadata: auditLog.metadata as Record<string, unknown> | null,
+    request_id: auditLog.request_id,
     created_at: auditLog.created_at,
   }));
 }

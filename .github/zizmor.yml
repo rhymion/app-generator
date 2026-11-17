@@ -1,0 +1,14 @@
+# zizmor configuration. Every action must be pinned to a commit SHA (this also
+# matches code_generator/tests/test_own_workflows_hardened.py), and
+# pull_request_target stays unused.
+rules:
+  unpinned-uses:
+    config:
+      policies:
+        "*": hash-pin
+  # Suppressed: a Dependabot cooldown would delay routine version bumps, which
+  # are already batched into one weekly grouped PR per ecosystem (see
+  # .github/dependabot.yml). Security updates ignore cooldown either way. Adding
+  # a cooldown is a separate cadence decision, not a workflow-safety fix.
+  dependabot-cooldown:
+    disable: true

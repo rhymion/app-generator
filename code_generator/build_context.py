@@ -11,6 +11,7 @@ from helpers.naming import (
     to_title_case, safe_var_name, singularize,
 )
 from helpers.type_mapping import get_ts_type
+from helpers.string_limits import is_length_checked_string, string_max_length
 from helpers.schema_helpers import (
     filter_fields, get_parent_relationships, get_detail_relation_name,
     is_optional_fk_to_parent, get_parent_fk_props, resolve_parent_fk_props, get_one_to_one_rels,
@@ -48,6 +49,10 @@ import warnings
 # ---------------------------------------------------------------------------
 
 _EXCLUDE_FIELDS = {'created_at', 'updated_at'}
+# Entities whose writes change what getModelPermissions() returns: roles, the
+# permission rows, and the user's role membership. The generated service layer
+# drops the per-process permission cache after each of their writes commit.
+PERMISSION_CACHE_MODELS = frozenset({'role', 'permission', 'user'})
 _EXCLUDE_ID_TS  = {'id', 'created_at', 'updated_at', 'creator_id'}
 _SCALAR_TYPES   = {'string', 'integer', 'number', 'boolean'}
 
@@ -923,10 +928,10 @@ def _build_child_data(children_raw: list[dict], model: str, schema: dict,
                 _t = _r['target']
                 if _r['prop_name'] not in _written_cols or _t in ('organization', 'user'):
                     continue
-                _t_def = schema['definitions'].get(f'__{_t}', {}) or schema['definitions'].get(_t, {})
-                if _t_def.get('properties', {}).get('organization_id') is None:
+                _check = _fk_reference_check(schema, _t)
+                if _check is None:
                     continue
-                child_fk_write_checks.append({'prop': _r['prop_name'], 'target': _t})
+                child_fk_write_checks.append({'prop': _r['prop_name'], 'target': _t, 'self_only': _check['self_only']})
 
         child_var    = safe_var_name(prop_name)
         child_pascal = to_pascal_case(prop_name)
@@ -1145,11 +1150,81 @@ def _build_child_nested_update(children_data: list[dict]) -> str:
     return '\n'.join(lines)
 
 
-def _build_child_fk_check(children_data: list[dict], for_update: bool) -> str:
+def _fk_reference_check(schema: dict, target: str) -> dict | None:
+    """How a write that points a foreign key at `target` must check the row it
+    names, or None when the reference is not one the client chooses.
+
+    Organization and user targets are excluded: the organization column has its
+    own membership rule, and foreign keys to user (creator, assignee) belong to
+    the server-value rules. Every other target is checked for reachability by
+    the actor (lib/_reachability.ts) -- the same conditions the target's own
+    list and detail reads apply: organization (when the target has the column),
+    x-self-only, and read permission. A target that is not a generated entity
+    has no permission rows to check and is skipped.
+    """
+    if target in ('organization', 'user'):
+        return None
+    defs = schema['definitions']
+    t_def = defs.get(f'__{target}', {}) or defs.get(target, {})
+    view_def = defs.get(target, {}) or {}
+    if t_def.get('properties', {}).get('organization_id') is None and not view_def.get('x-generate'):
+        return None
+    is_self_only, _bypass = get_self_only_flags(view_def)
+    if not is_self_only:
+        is_self_only, _bypass = get_self_only_flags(t_def)
+    return {'target': target, 'self_only': is_self_only}
+
+
+def _fk_load_expr(target: str) -> str:
+    return (f"load: (_id: string) => prisma.{target}.findUnique({{ where: {{ id: _id }} }}) "
+            f"as Promise<Record<string, unknown> | null>")
+
+
+def _set_fk_checks(children_data: list[dict], schema: dict) -> list[dict]:
+    """To-many sets chosen on the parent (a many-to-many set, or a one-to-many
+    list attached through the child's nullable foreign key): each member is a
+    reference to a row of the child entity, checked like a single foreign key
+    (lib/_fk_reference.ts)."""
+    checks = []
+    for c in children_data:
+        if not c['use_connect']:
+            continue
+        check = _fk_reference_check(schema, c['name'])
+        if check is None:
+            continue
+        checks.append({
+            'prop': c['property_name'],
+            'ids_var': f"{c['child_var']}Ids",
+            'target': c['name'],
+            'self_only': check['self_only'],
+            'kind': 'many_to_many' if c.get('is_many_to_many') else 'one_to_many',
+        })
+    return checks
+
+
+def _child_fk_delete_checks(children_data: list[dict]) -> list[dict]:
+    """Inline child rows written by the parent whose own foreign keys are checked:
+    deleting the parent deletes them, so their stored references are checked too."""
+    return [
+        {'prop': c['property_name'], 'checks': c['fk_write_checks']}
+        for c in children_data
+        if not c['use_connect'] and c.get('fk_write_checks')
+    ]
+
+
+def _build_child_fk_check(children_data: list[dict], for_update: bool,
+                          schema: dict | None = None, model: str | None = None) -> str:
     """Service-layer check for the foreign keys carried by nested child rows:
     each one that points at an organization-scoped entity must reference a row
     the actor may use, exactly like the parent's own foreign keys. On update an
-    existing row's unchanged value is not checked again."""
+    existing row's unchanged value is not checked again, and a row the update
+    drops is checked like a cleared reference (its stored target must be
+    reachable).
+
+    With `schema` and `model`, the members of a to-many set chosen on the parent
+    are checked the same way: an added member must be reachable (else NOT_FOUND),
+    a removed member must be reachable (else PERMISSION_DENIED), and a member
+    kept unchanged is not checked again."""
     blocks = []
     for c in children_data:
         checks = c.get('fk_write_checks') or []
@@ -1157,6 +1232,7 @@ def _build_child_fk_check(children_data: list[dict], for_update: bool) -> str:
             continue
         cv, cm = c['child_var'], c['name']
         prev = f"_{cv}FkPrev"
+        dropped = f"_{cv}Dropped"
         if for_update:
             sel = ', '.join(f"{k['prop']}: true" for k in checks)
             blocks.append(
@@ -1165,15 +1241,51 @@ def _build_child_fk_check(children_data: list[dict], for_update: bool) -> str:
                 f"    select: {{ id: true, {sel} }},\n"
                 f"  }})).map((r) => [r.id, r] as const));\n"
             )
+            if model:
+                # Rows of this parent that the nested update's deleteMany removes.
+                blocks.append(
+                    f"  const {dropped} = (await prisma.{model}.findUnique({{\n"
+                    f"    where: {{ id }},\n"
+                    f"    select: {{ {c['property_name']}: {{ where: {{ id: {{ notIn: {cv}Items.map((f) => f.id).filter((x): x is string => Boolean(x)) }} }}, select: {{ {sel} }} }} }},\n"
+                    f"  }}))?.{c['property_name']} ?? [];\n"
+                )
         entries = []
         for k in checks:
             p, t = k['prop'], k['target']
+            so_expr = ", selfOnly: true" if k.get('self_only') else ''
             prev_expr = f", previousId: f.id ? {prev}.get(f.id)?.{p} : undefined" if for_update else ''
             entries.append(
-                f"    ...{cv}Items.map((f) => ({{ model: '{t}', id: f.{p}{prev_expr}, "
-                f"load: (_id: string) => prisma.{t}.findUnique({{ where: {{ id: _id }} }}) as Promise<Record<string, unknown> | null> }})),"
+                f"    ...{cv}Items.map((f) => ({{ model: '{t}'{so_expr}, id: f.{p}{prev_expr}, "
+                f"{_fk_load_expr(t)} }})),"
             )
+        if for_update and model:
+            for k in checks:
+                p, t = k['prop'], k['target']
+                so_expr = ", selfOnly: true" if k.get('self_only') else ''
+                entries.append(
+                    f"    ...{dropped}.map((f) => ({{ model: '{t}'{so_expr}, id: null, previousId: f.{p}, "
+                    f"{_fk_load_expr(t)} }})),"
+                )
         blocks.append("  await assertFkReferencesUsable(actorId, [\n" + '\n'.join(entries) + "\n  ]);")
+    if schema is not None:
+        for s in _set_fk_checks(children_data, schema):
+            pn, ids, t = s['prop'], s['ids_var'], s['target']
+            so_expr = ", selfOnly: true" if s['self_only'] else ''
+            if not for_update:
+                blocks.append(
+                    "  await assertFkReferencesUsable(actorId, [\n"
+                    f"    ...{ids}.map((_m) => ({{ model: '{t}'{so_expr}, id: _m, {_fk_load_expr(t)} }})),\n"
+                    "  ]);"
+                )
+                continue
+            prev = f"_{ids}Prev"
+            blocks.append(
+                f"  const {prev} = ((await prisma.{model}.findUnique({{ where: {{ id }}, select: {{ {pn}: {{ select: {{ id: true }} }} }} }}))?.{pn} ?? []).map((r) => r.id);\n"
+                "  await assertFkReferencesUsable(actorId, [\n"
+                f"    ...{ids}.filter((_m) => !{prev}.includes(_m)).map((_m) => ({{ model: '{t}'{so_expr}, id: _m, {_fk_load_expr(t)} }})),\n"
+                f"    ...{prev}.filter((_m) => !{ids}.includes(_m)).map((_m) => ({{ model: '{t}'{so_expr}, id: null, previousId: _m, {_fk_load_expr(t)} }})),\n"
+                "  ]);"
+            )
     return '\n'.join(blocks)
 
 
@@ -1359,7 +1471,7 @@ def _comment_parent_access_block(parent: str, model: str, key_where: str, op: st
     A comment write is a write on its parent record, so it runs the same gates the parent's own
     update action runs: the parent row is read through the caller's organization scope (and the
     x-self-only / x-filter-values scope, when declared), an out-of-scope or missing row is
-    NOT_FOUND, and requirePermission() then resolves the caller's permission for ``op`` against
+    NOT_FOUND, and requireRecordPermission() then resolves the caller's permission for ``op`` against
     that concrete row. Hiding the composer in the UI is not an enforcement boundary -- a Server
     Action is callable on its own. Assumes ``userId`` is already declared in the enclosing scope.
     """
@@ -1386,7 +1498,7 @@ def _comment_parent_access_block(parent: str, model: str, key_where: str, op: st
         f"    select: {item_select},\n"
         f"  }});\n"
         f"  if (!parentRow) throw new AppError('NOT_FOUND', 'Not found');\n"
-        f"  await requirePermission('{parent}', '{op}', parentRow, userId);\n"
+        f"  await requireRecordPermission('{parent}', '{op}', parentRow, userId);\n"
     )
 
 
@@ -1409,7 +1521,7 @@ def _build_mention_record_resolver(parent: str, model: str, item_select: str, sc
     """One entity's entry of the mention candidate search's record lookup.
 
     Runs the same read gates the entity's own detail page runs (organization scope,
-    x-self-only, x-filter-values, then requirePermission) on the record id the client sent, and
+    x-self-only, x-filter-values, then requireRecordPermission) on the record id the client sent, and
     returns the record's organization. A missing or unreadable record resolves to ``null``
     so the search can answer with no candidates instead of leaking any. An entity without an
     organization column resolves to ``{ organizationId: null }``: its mentions are not scoped.
@@ -1482,6 +1594,7 @@ def _build_comment_actions(comment_children: list[dict], parent: str, model: str
         lines.append(f"""
 export async function add{parent_pascal}Comment({parent_id_prop}: string, message: string): Promise<{{ id: string }}> {{
   const userId = await getSessionUserIdOrThrow();
+  await enforceActionRateLimit(userId);
 {add_access}  const created = await prisma.{child_model}.create({{
     data: {{ message, {parent_id_prop}, creator_id: userId }},
     select: {{ id: true }},
@@ -1504,6 +1617,7 @@ export async function add{parent_pascal}Comment({parent_id_prop}: string, messag
 
 export async function update{parent_pascal}Comment(commentId: string, message: string): Promise<void> {{
   const userId = await getSessionUserIdOrThrow();
+  await enforceActionRateLimit(userId);
   const comment = await prisma.{child_model}.findUnique({{ where: {{ id: commentId }}, select: {update_select} }});
   if (!comment || comment.creator_id !== userId) {{
     throw new Error('Not authorized to edit this comment');
@@ -1514,10 +1628,11 @@ export async function update{parent_pascal}Comment(commentId: string, message: s
 
 export async function delete{parent_pascal}Comment(commentId: string): Promise<void> {{
   const userId = await getSessionUserIdOrThrow();
+  await enforceActionRateLimit(userId);
   const comment = await prisma.{child_model}.findUnique({{ where: {{ id: commentId }}, select: {{ creator_id: true, {parent_id_prop}: true }} }});
   if (!comment) return;
 {comment_access}  if (comment.creator_id !== userId) {{
-    await requirePermission('{parent}', 'delete', parentRow, userId);
+    await requireRecordPermission('{parent}', 'delete', parentRow, userId);
   }}
   await prisma.{child_model}.delete({{ where: {{ id: commentId }} }});
   revalidatePath('/{parent}');
@@ -1571,6 +1686,7 @@ def _build_comment_actions_bridge(parent: str, model: str, has_assignee_id: bool
     return f"""
 export async function add{parent_pascal}Comment(commentable_id: string, message: string): Promise<{{ id: string }}> {{
   const userId = await getSessionUserIdOrThrow();
+  await enforceActionRateLimit(userId);
 {add_access}  const created = await createComment({{ message, commentable_id, creator_id: userId }});
   // Trigger #4 (notification design 2026-05-11): notify the entity creator
   // and (if present) assignee; never the commenter themselves.
@@ -1590,6 +1706,7 @@ export async function add{parent_pascal}Comment(commentable_id: string, message:
 
 export async function update{parent_pascal}Comment(commentId: string, message: string): Promise<void> {{
   const userId = await getSessionUserIdOrThrow();
+  await enforceActionRateLimit(userId);
   const comment = await prisma.comment.findUnique({{ where: {{ id: commentId }}, select: {update_select} }});
   if (!comment || comment.creator_id !== userId) {{
     throw new Error('Not authorized to edit this comment');
@@ -1600,10 +1717,11 @@ export async function update{parent_pascal}Comment(commentId: string, message: s
 
 export async function delete{parent_pascal}Comment(commentId: string): Promise<void> {{
   const userId = await getSessionUserIdOrThrow();
+  await enforceActionRateLimit(userId);
   const comment = await prisma.comment.findUnique({{ where: {{ id: commentId }}, select: {{ creator_id: true, commentable_id: true }} }});
   if (!comment) return;
 {comment_access}  if (comment.creator_id !== userId) {{
-    await requirePermission('{parent}', 'delete', parentRow, userId);
+    await requireRecordPermission('{parent}', 'delete', parentRow, userId);
   }}
   await deleteComment(commentId);
   revalidatePath('/{parent}');
@@ -1896,8 +2014,8 @@ def build_anonymize_user_context(schema: dict) -> dict:
     Extracts x-pii annotated fields from the user entity definition and computes
     the pii_data_block string (pre-formatted TypeScript lines for the data: {} block).
 
-    Fields not in json_schema but present in schema.prisma (emailVerified, mfa_secret)
-    are hardcoded after 'image_id' to match the canonical scrub order.
+    Fields not in json_schema but present in schema.prisma (emailVerified, mfa_secret,
+    api_key_hash, api_key_issued_at) are hardcoded after 'image_id' to match the canonical scrub order.
 
     Returns:
         has_pii_user: bool — True when the user entity has at least one x-pii field.
@@ -1942,18 +2060,24 @@ def build_anonymize_user_context(schema: dict) -> dict:
     # FK, or this insertion point silently falls through to the
     # end-of-loop fallback below instead).
     INDENT = '          '
+    # The API key columns are server-managed (Prisma only, not in json_schema), so
+    # no x-pii annotation can reach them; they are always cleared with the account.
+    _ANONYMIZE_PRISMA_ONLY_SCRUBS = [
+        f"{INDENT}emailVerified: null,",
+        f"{INDENT}mfa_secret: null,",
+        f"{INDENT}api_key_hash: null,",
+        f"{INDENT}api_key_issued_at: null,",
+    ]
     lines = []
     prisma_only_inserted = False
     for f in pii_fields:
         lines.append(f"{INDENT}{f['name']}: {f['scrub_value']},")
         if f['name'] == 'image_id' and not prisma_only_inserted:
-            lines.append(f"{INDENT}emailVerified: null,")
-            lines.append(f"{INDENT}mfa_secret: null,")
+            lines.extend(_ANONYMIZE_PRISMA_ONLY_SCRUBS)
             prisma_only_inserted = True
 
     if not prisma_only_inserted:
-        lines.append(f"{INDENT}emailVerified: null,")
-        lines.append(f"{INDENT}mfa_secret: null,")
+        lines.extend(_ANONYMIZE_PRISMA_ONLY_SCRUBS)
 
     lines.append(f"{INDENT}anonymized_at: anonymizedAt,")
     lines.append(f"{INDENT}invalidated_at: invalidatedAt,")
@@ -3116,6 +3240,8 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
             'nullable':  _nullable,
             'is_key':    _f in import_key_fields,
             'is_update': _f not in import_key_fields,
+            # Issue #1273: the same server-side length limit as service_validation.ts.
+            'max_length': string_max_length(_prop) if _ts_type == 'string' and is_length_checked_string(_prop) else None,
         })
 
     has_assignee_id   = 'assignee_id' in filtered_props
@@ -3371,26 +3497,26 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     org_id_client_writable = bool(
         should_filter_by_org and _org_fk_prop and _org_fk_prop not in _ro_client_exclude
     )
-    # fk_write_checks: every client-writable FK whose target is an
-    # organization-scoped entity. service.ts verifies, before the value is
-    # written, that the referenced row sits in an organization the actor
-    # belongs to and that the actor may read it (lib/_fk_reference.ts).
-    # Targets without an organization_id column (and organization/user
-    # themselves) are system-global and are not checked here.
+    # fk_write_checks: every client-writable FK except those to organization
+    # and user (see _fk_reference_check). service.ts verifies, before the value
+    # is written, that the referenced row is reachable by the actor -- the
+    # target's organization, x-self-only and read permission, the conditions its
+    # own list and detail reads apply (lib/_reachability.ts, lib/_fk_reference.ts).
     fk_write_checks = []
     _client_var_by_prop = {p['prop']: p['var_name'] for p in client_prop_infos}
     for _r in _all_parent_rels_raw:
         _t = _r['target']
-        if _r['prop_name'] not in _client_var_by_prop or _t in ('organization', 'user'):
+        if _r['prop_name'] not in _client_var_by_prop:
             continue
-        _t_def = schema['definitions'].get(f'__{_t}', {}) or schema['definitions'].get(_t, {})
-        _t_org = _t_def.get('properties', {}).get('organization_id')
-        if _t_org is None:
+        _check = _fk_reference_check(schema, _t)
+        if _check is None:
             continue
         fk_write_checks.append({
             'prop': _r['prop_name'],
             'var': _client_var_by_prop[_r['prop_name']],
             'target': _t,
+            'self_only': _check['self_only'],
+            'required': bool(_r.get('required')),
         })
     # x-server-value fields never go through the generic "just write the client
     # value" line below — server_value_data_lines (built further down) supplies
@@ -3663,8 +3789,14 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     # search below narrows its options to records that are not attached yet.
     list_child_attach_callers = _list_child_attach_callers(schema, parent)
     child_attach_guard_create = _build_child_attach_guard(write_ch, model, for_update=False)
-    child_fk_check_create = _build_child_fk_check(write_ch, for_update=False)
-    child_fk_check_update = _build_child_fk_check(write_ch, for_update=True)
+    child_fk_check_create = _build_child_fk_check(write_ch, for_update=False, schema=schema, model=model)
+    child_fk_check_update = _build_child_fk_check(write_ch, for_update=True, schema=schema, model=model)
+    # The delete side of the same rule: a record whose own foreign key, set
+    # member or inline child row points at a row the actor cannot reach is not
+    # deletable by that actor (assertDeleteReferencesReachable<Entity>).
+    set_fk_checks = _set_fk_checks(write_ch, schema)
+    child_fk_delete_checks = _child_fk_delete_checks(write_ch)
+    delete_reference_check = bool(fk_write_checks or set_fk_checks or child_fk_delete_checks)
     child_attach_guard_update = _build_child_attach_guard(write_ch, model, for_update=True)
     child_exclusive_create_check = _build_child_exclusive_create_check(write_ch)
     child_exclusive_update_check = _build_child_exclusive_update_check(write_ch)
@@ -3688,7 +3820,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     )
 
     # Comment actions code. The write actions run the parent entity's own access gates
-    # (organization scope, x-self-only, x-filter-values, requirePermission) -- see
+    # (organization scope, x-self-only, x-filter-values, requireRecordPermission) -- see
     # _comment_parent_access_block.
     _comment_scope = {
         'should_filter_by_org': should_filter_by_org,
@@ -4774,6 +4906,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     # MFA off); the REST update routes ask for the same proof through
     # confirmCredentialChange() (lib/auth/credential-confirmation.ts), and the
     # service receives the confirmed values instead of the raw request ones.
+    # Changing the email address (Issue #1285) needs the current password too.
     _cred_vars = {p['prop']: p['var_name'] for p in client_prop_infos}
     credential_confirmation = (
         is_self_only
@@ -4783,8 +4916,8 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     )
     credential_password_var = _cred_vars.get('password', 'password')
     credential_mfa_var = _cred_vars.get('mfa_enabled', 'mfaEnabled')
-    # The email address is an authentication attribute too: the view exposes it,
-    # and changing it needs the current password as well.
+    # The email address is an authentication attribute too (Issue #1285): the
+    # view exposes it, and changing it needs the current password as well.
     credential_email_var = _cred_vars.get('email')
     if credential_confirmation:
         service_args_for_update = re.sub(
@@ -4912,6 +5045,9 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         fk_write_checks=fk_write_checks,
         child_fk_check_create=child_fk_check_create,
         child_fk_check_update=child_fk_check_update,
+        set_fk_checks=set_fk_checks,
+        child_fk_delete_checks=child_fk_delete_checks,
+        delete_reference_check=delete_reference_check,
         org_relationship_optional=org_relationship_optional,
         is_self_only=is_self_only,
         self_only_admin_bypass=self_only_admin_bypass,
@@ -4938,6 +5074,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         import_field_specs=import_field_specs,
         has_assignee_id=has_assignee_id,
         is_audited=is_audited,
+        invalidates_permission_cache=model in PERMISSION_CACHE_MODELS,
         item_context_select=item_context_select,
         sortable_fields_quoted=sortable_fields_quoted,
         filterable_fields_quoted=filterable_fields_quoted,

@@ -1,0 +1,31 @@
+id: exposed-sensitive-files
+
+info:
+  name: Environment, repository or build metadata files are reachable
+  author: project
+  severity: high
+  description: Dot files and build manifests must not be served by the app.
+  tags: exposure,regression
+
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/.env"
+      - "{{BaseURL}}/.env.local"
+      - "{{BaseURL}}/.git/config"
+      - "{{BaseURL}}/package.json"
+      - "{{BaseURL}}/prisma/schema.prisma"
+    matchers-condition: and
+    matchers:
+      - type: status
+        status:
+          - 200
+      - type: word
+        part: body
+        condition: or
+        words:
+          - "AUTH_SECRET="
+          - "DATABASE_URL="
+          - "[core]"
+          - "\"dependencies\""
+          - "datasource db"

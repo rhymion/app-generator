@@ -1,0 +1,351 @@
+# Fixture entities for the security-matrix-e2e-gate. ONLY what this gate needs:
+# scripts/check_security_matrix_e2e_gate_fixture.sh merges them into a COPY of the default
+# code_generator/json_schema.yaml inside a disposable build directory. The default schema, its
+# generated output and every other fixture stay untouched.
+#
+# The default schema has no entity that combines organization scope, a foreign key to another
+# organization-scoped entity, Creator / Assignee grants and the opt-in features. Each opt-in
+# feature is otherwise exercised only by its own fixture gate, so the generated security tests
+# (permission denied, cross-organization) never ran against an entity that mixes them. Every
+# entity here is generated with `api: true` and `test: true`, so the generated API spec and its
+# security-cell markers cover it, and the gate runs `check:security-matrix` on the result.
+#
+#   sx_account   organization-scoped, with an assignee, invalidation and a comment thread.
+#   sx_task      organization-scoped, with a foreign key to sx_account (two organization-scoped
+#                entities referring to each other's rows), an assignee, approval and attachments.
+#   sx_split     organization-scoped and splittable.
+#   sx_open_task a proxy view of sx_task restricted by `x-filter-values` (status).
+definitions:
+  sx_account:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: true
+      api: true
+      test: true
+    x-display:
+      table:
+        - name:
+            primary: true
+    properties:
+      name: {}
+      organization_id:
+        x-relationship:
+          labelField: name
+      assignee_id:
+        x-relationship:
+          type: many-to-one
+          target: user
+          labelField: name
+      commentable_id:
+        x-relationship:
+          type: one-to-one_bridge
+          target: commentable
+          labelField: id
+      commentable:
+        $ref: "#/definitions/commentable"
+
+  sx_task:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: true
+    x-display:
+      table:
+        - title:
+            primary: true
+        - status: {}
+    x-approval:
+      submit_on:
+        status: pending
+      on_approved:
+        set_fields:
+          status: approved
+      on_rejected:
+        set_fields:
+          status: rejected
+      on_withdrawn:
+        set_fields:
+          status: draft
+    x-custom-components:
+      - name: ApprovalSection
+        path: '@/components/_standard/ApprovalSection'
+        target: [view]
+      - name: AttachmentSection
+        path: "@/components/_standard/AttachmentSection"
+        target:
+          - view
+          - edit
+    properties:
+      title: {}
+      status:
+        enum:
+          - draft
+          - pending
+          - approved
+          - rejected
+        default: draft
+      organization_id:
+        x-relationship:
+          labelField: name
+      sx_account_id:
+        x-relationship:
+          type: many-to-one
+          target: sx_account
+          labelField: name
+      assignee_id:
+        x-relationship:
+          type: many-to-one
+          target: user
+          labelField: name
+      approvable_id:
+        x-relationship:
+          type: one-to-one_bridge
+          target: approvable
+          labelField: id
+      attachable_id:
+        x-relationship:
+          type: one-to-one_bridge
+          target: attachable
+          labelField: id
+      approvable:
+        $ref: "#/definitions/approvable"
+      attachable:
+        $ref: "#/definitions/attachable"
+
+  sx_split:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: true
+    x-splittable: true
+    x-display:
+      table:
+        - title:
+            primary: true
+        - status: {}
+    properties:
+      title: {}
+      status:
+        enum: ["pending", "split", "rejected"]
+        _required: true
+      organization_id:
+        x-relationship:
+          labelField: name
+
+  sx_open_task:
+    x-generate:
+      list: true
+      view: true
+      new: false
+      edit: false
+      delete: false
+      invalidate: false
+      api: true
+      test: false
+    x-view-of: sx_task
+    x-filter-values:
+      status: [draft, pending]
+    x-display:
+      table:
+        - title:
+            primary: true
+        - status: {}
+
+  # --- Foreign-reference shapes (one entry per structure the FK-reference rule has to cover) ---
+  #   sx_profile      one-to-one: a required, unique foreign key to sx_account, which is also its
+  #                   primary display field (so the generated reference tests G3.8-G3.15 run on it),
+  #                   and an optional, unique foreign key to sx_split (the optional one-to-one shape).
+  #   sx_ticket       many-to-one: a required (sx_account_id) and an optional (sx_backup_account_id)
+  #                   foreign key to sx_account; a many-to-many set of sx_tag (tags); an
+  #                   optional-foreign-key list of sx_note (a one-to-many set chosen on the parent);
+  #                   and an inline-editable child, sx_ticket_line.
+  #   sx_ticket_line  inline child (no pages of its own) whose rows carry a required and an optional
+  #                   foreign key to sx_account.
+  #   sx_note         independent child of sx_ticket, held by a nullable foreign key.
+  #   sx_tag          member of sx_ticket's many-to-many set.
+  #   sx_entry        CSV-importable (x-import-key: code) with a required (sx_account_id) and an
+  #                   optional (sx_backup_account_id) many-to-one reference to sx_account, so the
+  #                   import route's reference cells exist.
+  # The hand-written spec cypress/e2e/fk_reference_shapes.cy.ts tests every reference shape of
+  # sx_ticket and sx_profile against a row in another organization and a row outside the actor's
+  # Creator / Assignee read scope.
+  sx_profile:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: true
+    x-display:
+      table:
+        - sx_account:
+            primary: true
+    properties:
+      title: {}
+      organization_id:
+        x-relationship:
+          labelField: name
+      sx_account_id:
+        x-relationship:
+          type: one-to-one
+          target: sx_account
+          labelField: name
+      sx_split_id:
+        x-relationship:
+          type: one-to-one
+          target: sx_split
+          labelField: title
+
+  sx_ticket:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: true
+    x-display:
+      table:
+        - title:
+            primary: true
+    x-relationships:
+      tags:
+        type: many-to-many
+        target: sx_tag
+    properties:
+      title: {}
+      organization_id:
+        x-relationship:
+          labelField: name
+      sx_account_id:
+        x-relationship:
+          type: many-to-one
+          target: sx_account
+          labelField: name
+      sx_backup_account_id:
+        x-relationship:
+          type: many-to-one
+          target: sx_account
+          labelField: name
+      tags:
+        type: array
+        x-outputType: list
+        items:
+          $ref: "#/definitions/sx_tag"
+      sx_notes:
+        type: array
+        x-outputType: list
+        items:
+          $ref: "#/definitions/sx_note"
+      sx_ticket_lines:
+        type: array
+        items:
+          $ref: "#/definitions/sx_ticket_line"
+    required:
+      - sx_ticket_lines
+
+  sx_ticket_line:
+    properties:
+      sx_ticket_id:
+        pattern: "^c[a-z0-9]{24,}$"
+      label: {}
+      sx_account_id:
+        pattern: "^c[a-z0-9]{24,}$"
+        x-relationship: {}
+      sx_backup_account_id:
+        pattern: "^c[a-z0-9]{24,}$"
+        x-relationship: {}
+
+  sx_note:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: false
+      test: false
+    x-display:
+      table:
+        - name:
+            primary: true
+    properties:
+      name: {}
+      organization_id:
+        x-relationship:
+          labelField: name
+      sx_ticket_id:
+        pattern: "^c[a-z0-9]{24,}$"
+        x-relationship:
+          labelField: title
+
+  sx_tag:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: false
+      test: false
+    x-display:
+      table:
+        - name:
+            primary: true
+    properties:
+      name: {}
+      organization_id:
+        x-relationship:
+          labelField: name
+
+  sx_entry:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: true
+    x-import-key: [code]
+    x-display:
+      table:
+        - code:
+            primary: true
+    properties:
+      code: {}
+      organization_id:
+        x-relationship:
+          labelField: name
+      sx_account_id:
+        x-relationship:
+          type: many-to-one
+          target: sx_account
+          labelField: name
+      sx_backup_account_id:
+        x-relationship:
+          type: many-to-one
+          target: sx_account
+          labelField: name

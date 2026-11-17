@@ -1,18 +1,51 @@
-'use server';
+// Deliberately NOT a 'use server' module. Every export of a 'use server' file is a
+// Server Action that a signed-in browser can invoke with arguments of its choosing;
+// several helpers here take a caller-supplied user id (API key and mobile token
+// paths pass the authenticated actor), so as actions they would disclose another
+// user's roles and permission flags. Keep this file a plain server-side module
+// (lib/authz_not_server_action.test.ts enforces it).
 
 import { auth } from '@/auth';
 import prisma from '@/lib/prisma';
 import { cache } from 'react';
 import { TtlLruCache } from '@/lib/_ttl_lru';
+import { cacheOnGlobal } from '@/lib/global-singleton';
 import { SELF_ONLY_ADMIN_BYPASS_ENTITIES } from '@/lib/self_only_admin_bypass_entities';
 import { AppError } from '@/lib/_errors';
+import { logAuthzDenied } from '@/lib/security-event';
 import { enterRequestScope, getActorOverride, memoizeInRequestScope } from '@/lib/_request_scope';
 
-const getCookieSessionUserId = cache(async function getCookieSessionUserId(): Promise<string | null> {
+const getCookieSession = cache(async function getCookieSession() {
   enterRequestScope();
-  const session = await auth();
+  return auth();
+});
+
+const getCookieSessionUserId = cache(async function getCookieSessionUserId(): Promise<string | null> {
+  const session = await getCookieSession();
+  // Issue #1281: a user who must enrol in MFA (MFA_REQUIRED_ROLES) and has not
+  // is treated as signed out everywhere except the MFA settings page.
+  if (session?.mfa_enrollment_required) return null;
   return session?.user?.id ?? null;
 });
+
+/**
+ * The session user for the MFA settings page and its Server Actions only. Unlike
+ * getSessionUserId(), it also answers for a session restricted by required MFA
+ * enrolment (Issue #1281), so that user can enrol. Never use it elsewhere.
+ */
+export async function getSessionUserIdForMfaSetup(): Promise<string | null> {
+  const session = await getCookieSession();
+  return session?.user?.id ?? null;
+}
+
+/** getSessionUserIdForMfaSetup(), throwing SESSION_EXPIRED when nobody is signed in. */
+export async function requireMfaSetupUserId(): Promise<string> {
+  const userId = await getSessionUserIdForMfaSetup();
+  if (!userId) {
+    throw new AppError('SESSION_EXPIRED', 'User not authenticated');
+  }
+  return userId;
+}
 
 /**
  * The signed-in user's id. Inside `runAsActor()` (lib/_request_scope.ts) this is
@@ -40,7 +73,7 @@ export type ModelPermissions = OperationFlags;
 
 /**
  * Rich permissions carrying sub-objects for deferred item-level resolution.
- * Returned by getModelPermissions and resolvePermissions.
+ * Returned by getModelPermissions, resolveEntityPermissions and resolveRecordPermissions.
  * Stripped to ModelPermissions via toPermissions() before passing to components.
  *
  *   general  — from global permissions + user's non-special roles
@@ -49,7 +82,7 @@ export type ModelPermissions = OperationFlags;
  *
  * Top-level create/read/update/delete without item context: general | creator | assignee,
  * so assertPermission on list pages passes for Creator/Assignee-only users.
- * After resolvePermissions: accurately reflects the specific item.
+ * After resolveRecordPermissions: accurately reflects the specific record.
  */
 export interface RichPermissions extends OperationFlags {
   general: OperationFlags;
@@ -57,11 +90,12 @@ export interface RichPermissions extends OperationFlags {
   assignee: OperationFlags | null;
 }
 
-export type ItemContext = {
+/** The record a record-scoped check is about. Never null: a call site without a record must use an entity-only function. */
+export type RecordContext = {
   creator_id?: string | null;
   assignee_id?: string | null;
   [key: string]: unknown;
-} | null | undefined;
+};
 
 const EMPTY_FLAGS: OperationFlags = { create: false, read: false, update: false, delete: false, import: false };
 const READ_ONLY_FLAGS: OperationFlags = { create: false, read: true, update: false, delete: false, import: false };
@@ -83,18 +117,37 @@ export async function toPermissions(p: RichPermissions): Promise<ModelPermission
 }
 
 /**
- * Apply item-level context to compute final effective permissions.
- * Creator/Assignee roles can grant read/update/delete on items the user owns/is assigned to,
- * but never grant create (which is a model-level operation, not item-level).
+ * Entity-only check: what the user may do to this entity in general, without
+ * looking at any record. read/update/delete are the broadest answer
+ * (general | creator | assignee), so it fits list pages and "may this user
+ * ever do X" questions. It never resolves Creator/Assignee-scoped flags for a
+ * specific record and must not be used to authorize an operation on one.
+ * Use {@link resolveRecordPermissions} when a record is in hand.
  */
-export async function resolvePermissions(
+export async function resolveEntityPermissions(perms: RichPermissions): Promise<RichPermissions> {
+  return perms;
+}
+
+/**
+ * Record-scoped check: apply the record's creator/assignee to compute the
+ * effective permissions for that one record. Creator/Assignee roles can grant
+ * read/update/delete on records the user owns/is assigned to, but never grant
+ * create (which is an entity-level operation).
+ *
+ * The record is required (the type has no null/undefined), so a call site that
+ * has no record cannot reach the Creator/Assignee-scoped flags by accident --
+ * it has to call {@link resolveEntityPermissions} and say so. The returned
+ * read/update/delete are the record's own flags: general, plus the Creator
+ * and Assignee grants that actually match this record.
+ */
+export async function resolveRecordPermissions(
   perms: RichPermissions,
-  item: ItemContext,
+  item: RecordContext,
   userId: string,
 ): Promise<RichPermissions> {
   let { read, update, delete: del } = perms.general;
 
-  if (item && userId) {
+  if (userId) {
     if (item.creator_id === userId && perms.creator) {
       read = read || perms.creator.read;
       update = update || perms.creator.update;
@@ -150,7 +203,14 @@ const PERMISSION_TTL_MS = 30 * 1000;
 const PERMISSION_MAX_ENTRIES = 1000;
 const permissionCacheEnabled = process.env.NODE_ENV === 'production';
 type PermissionEntry = { permissions: RichPermissions; userId: string };
-const permissionCache = new TtlLruCache<string, PermissionEntry>(PERMISSION_MAX_ENTRIES, PERMISSION_TTL_MS);
+// Held on globalThis so the Server Actions and route handlers that clear the
+// caches share one instance even when the build bundles this module separately
+// for each of them (same reason as the api-key cache in lib/api-auth.ts).
+const permissionCache = cacheOnGlobal(
+  globalThis as unknown as Record<string, unknown>,
+  '__permissionCache',
+  () => new TtlLruCache<string, PermissionEntry>(PERMISSION_MAX_ENTRIES, PERMISSION_TTL_MS),
+);
 
 type PermissionRow = {
   name: string;
@@ -168,7 +228,11 @@ type PermissionRow = {
  * Same TTL/size bounds as `permissionCache`; both are cleared together by
  * `invalidatePermissionCache()`.
  */
-const permissionRowsCache = new TtlLruCache<string, PermissionRow[]>(PERMISSION_MAX_ENTRIES, PERMISSION_TTL_MS);
+const permissionRowsCache = cacheOnGlobal(
+  globalThis as unknown as Record<string, unknown>,
+  '__permissionRowsCache',
+  () => new TtlLruCache<string, PermissionRow[]>(PERMISSION_MAX_ENTRIES, PERMISSION_TTL_MS),
+);
 
 /**
  * Fetch every permission row relevant to a user in a single query, instead of
@@ -235,10 +299,9 @@ export async function invalidatePermissionCache(): Promise<void> {
  * Pure (no DB access) grouping of a set of permission rows (already filtered
  * to one model, e.g. via
  * `getPermissionRowsForUser(userId).filter(row => row.name === model)`) into
- * the general/creator/assignee RichPermissions shape. `async` only because
- * this file is a `'use server'` module, where every exported function is a
- * Server Action and Server Actions must be async — there is no actual
- * asynchronous work inside.
+ * the general/creator/assignee RichPermissions shape. `async` only to keep
+ * the signature stable for its callers — there is no actual asynchronous work
+ * inside.
  *
  * Shared by `getModelPermissions` below and by `buildSearchQuery`
  * (search_helpers.ts.jinja2) so the merge rule (general OR creator OR
@@ -305,8 +368,8 @@ export async function deriveRichPermissionsFromRows(rows: PermissionRow[]): Prom
  * model a request asks about — see `getPermissionRowsForUser`.
  *
  * This is the ONLY place in the generated app that queries the DB for a
- * user's permissions — `requireApiPermission`/`requirePermission`/
- * `canAccess` all resolve through this one function (see their own doc
+ * user's permissions — `requireApiPermission`/`requireEntityPermission`/
+ * `requireRecordPermission`/`canAccessEntity`/`canAccessRecord` all resolve through this one function (see their own doc
  * comments), so a request that asks about the same (model, userId) more
  * than once (e.g. a capabilities endpoint checking read, then update, then
  * delete on one item) issues at most one `permission.findMany` for it,
@@ -390,41 +453,81 @@ export const getModelPermissions = cache(async (
   });
 });
 
-export async function canAccess(
+/** Entity-only: may the user ever perform `operation` on this entity (any record)? */
+export async function canAccessEntity(
   model: ModelName,
   operation: Operation,
   userId?: string | null,
-  item?: ItemContext,
+): Promise<boolean> {
+  const { permissions } = await getModelPermissions(model, userId);
+  return Boolean((await resolveEntityPermissions(permissions))[operation]);
+}
+
+/** Record-scoped: may the user perform `operation` on this specific record? */
+export async function canAccessRecord(
+  model: ModelName,
+  operation: Operation,
+  item: RecordContext,
+  userId?: string | null,
 ): Promise<boolean> {
   const { permissions, userId: resolvedUserId } = await getModelPermissions(model, userId);
-  if (!item || !resolvedUserId) return Boolean(permissions[operation]);
-  return Boolean((await resolvePermissions(permissions, item, resolvedUserId))[operation]);
+  if (!resolvedUserId) return false;
+  return Boolean((await resolveRecordPermissions(permissions, item, resolvedUserId))[operation]);
+}
+
+/** Builds the denial error and writes the security-event line for it. */
+function permissionDenied(model: ModelName, operation: Operation): AppError {
+  const error = new AppError('PERMISSION_DENIED', `Access denied: ${model}.${operation}`);
+  logAuthzDenied(error);
+  return error;
 }
 
 /**
- * Assert permission, fetching it internally. Accepts an optional explicit userId
- * (for API key auth) or falls back to the session user.
- * Returns the resolved RichPermissions for use in filtering.
+ * Entity-only assertion, fetching permissions internally. Accepts an optional
+ * explicit userId (for API key auth) or falls back to the session user.
+ * Returns the RichPermissions for use in filtering.
  */
-export async function requirePermission(
+export async function requireEntityPermission(
   model: ModelName,
   operation: Operation,
-  item?: ItemContext,
+  userId?: string | null,
+): Promise<RichPermissions> {
+  const { permissions } = await getModelPermissions(model, userId);
+  const resolved = await resolveEntityPermissions(permissions);
+  if (!resolved[operation]) {
+    throw permissionDenied(model, operation);
+  }
+  return resolved;
+}
+
+/**
+ * Record-scoped assertion: the permission is resolved against the given
+ * record, so Creator/Assignee grants count only for records the user owns or
+ * is assigned to. Returns the record-resolved RichPermissions.
+ */
+export async function requireRecordPermission(
+  model: ModelName,
+  operation: Operation,
+  item: RecordContext,
   userId?: string | null,
 ): Promise<RichPermissions> {
   const { permissions, userId: resolvedUserId } = await getModelPermissions(model, userId);
-  const resolved = item && resolvedUserId
-    ? await resolvePermissions(permissions, item, resolvedUserId)
-    : permissions;
+  const resolved = resolvedUserId
+    ? await resolveRecordPermissions(permissions, item, resolvedUserId)
+    : await resolveEntityPermissions(permissions);
   if (!resolved[operation]) {
-    throw new AppError('PERMISSION_DENIED', `Access denied: ${model}.${operation}`);
+    throw permissionDenied(model, operation);
   }
   return resolved;
 }
 
 export async function assertPermission(permissions: OperationFlags, operation: Operation, model?: ModelName): Promise<void> {
   if (!permissions[operation]) {
-    throw new Error(`Access denied: ${model ?? 'model'}.${operation}`);
+    // A plain Error, as callers have always received; the denial is still
+    // written to the security-event log once (Issue #1307).
+    const error = new Error(`Access denied: ${model ?? 'model'}.${operation}`);
+    logAuthzDenied(error);
+    throw error;
   }
 }
 

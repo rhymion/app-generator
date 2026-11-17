@@ -1,4 +1,5 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
+import { ApiError, assertSameSiteCookieWrite, handleApiError } from '@/lib/api-auth';
 import { getSessionUserId } from '@/lib/authz';
 import prisma from '@/lib/prisma';
 
@@ -12,7 +13,13 @@ import prisma from '@/lib/prisma';
  * Updates the `notification` table directly — see `lib/_notifier.ts` module
  * doc for why the DB (not the in-process store) is the source of truth.
  */
-export async function POST() {
+export async function POST(request: NextRequest) {
+  try {
+    assertSameSiteCookieWrite(request);
+  } catch (error) {
+    if (error instanceof ApiError) return handleApiError(error);
+    throw error;
+  }
   const userId = await getSessionUserId();
   if (!userId) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });

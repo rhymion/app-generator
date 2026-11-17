@@ -69,6 +69,12 @@ should_filter_by_org = has_org_rel and model not in ('organization', 'user')
 
 The `should_filter_by_org` flag is threaded into every generated getter and API route for that entity.
 
+### `audit_log` is exempt from org-scoped filtering
+
+`audit_log` is not a schema-defined entity (it has no `code_generator/json_schema.yaml` `definitions` entry) and carries no `organization_id` column, so the `should_filter_by_org` mechanism above never applies to it. Reading it is gated purely by role: `lib/authz.ts`'s `getModelPermissions()` grants users holding the `Administrator` role a read-only shortcut for this model with no organization restriction, before it ever consults the `permission` table (see "Default deny" below). No other role has a permission row for `audit_log`, so every other user is denied outright -- there is no partial, per-organization view.
+
+This is a deliberate design choice, not an oversight: audit records exist to let an administrator review activity across the whole deployment. If per-organization narrowing is ever added, it must be keyed on the organization of the *target record* each entry is about (the same basis mentions and approval-flow notifications already use), which would require a column copied at write time -- not the viewer's own organization membership, which is unrelated to what a given audit entry concerns.
+
 ### How filtering is applied in Prisma where clauses
 
 For an entity with `should_filter_by_org = True`, the generated `lib/{entity}/getters_internal.ts` (from `code_generator/templates/getters_internal.ts.jinja2`) inserts an `organization_id` filter into every query:
@@ -179,13 +185,23 @@ These roles grant item-level access — they apply only to records the user crea
 
 Top-level flags on `RichPermissions` (without item context) include these roles so that `assertPermission` passes on list pages for Creator/Assignee-only users. This is by design — a user who can only see their own records still needs `read: true` to reach the list page.
 
-### `resolvePermissions()` — item-level resolution
+### Record-scoped and entity-only checks
+
+`lib/authz.ts` has two families of permission functions. The record is part of the name and of the type, so a call site that has a record cannot silently fall back to the broader entity-level answer:
+
+| Question | Record-scoped (a record is required) | Entity-only (no record) |
+|---|---|---|
+| Effective flags | `resolveRecordPermissions(perms, item, userId)` | `resolveEntityPermissions(perms)` |
+| Assert, fetching permissions | `requireRecordPermission(model, op, item, userId?)` | `requireEntityPermission(model, op, userId?)` |
+| Boolean | `canAccessRecord(model, op, item, userId?)` | `canAccessEntity(model, op, userId?)` |
+| REST (`lib/api-auth.ts`) | `requireApiRecordPermission(userId, model, op, item)` | `requireApiPermission(userId, model, op)` |
+
+Only the record-scoped functions resolve Creator/Assignee grants. The entity-only functions answer "may this user ever do X on this entity" with the broad (general | creator | assignee) union, which is right for list pages and for the coarse gate in front of a record lookup, and wrong for authorizing an operation on a specific record. `RecordContext` (`{ creator_id?, assignee_id?, ... }`) has no `null` or `undefined` member: a call site whose record may be missing has to branch and say which question it is asking, as the detail-page getters do (record found: `resolveRecordPermissions`; not found: `resolveEntityPermissions`, then the page 404s).
 
 ```typescript
-// lib/authz.ts:79 (line shifted since this doc was written; was 72)
-export async function resolvePermissions(
+export async function resolveRecordPermissions(
   perms: RichPermissions,
-  item: ItemContext,   // { creator_id?, assignee_id?, ... } | null
+  item: RecordContext,   // { creator_id?, assignee_id?, ... }
   userId: string,
 ): Promise<RichPermissions>
 ```
@@ -207,21 +223,48 @@ if (item.assignee_id === userId && perms.assignee) {
 
 `create` is never granted by Creator/Assignee roles — creation is a model-level operation, not item-level.
 
-### `requirePermission()` and `assertPermission()`
+`code_generator/tests/test_authz_call_site_enumeration.py` enumerates every source that can put a call into a generated app (the templates, the Python that emits call text, the hand-written `lib/`, `app/`, `components/` and `cypress/` files) and fails on a removed name, an import that `lib/authz.ts` or `lib/api-auth.ts` does not export, or a record-scoped call that passes `undefined`/`null` as its record.
+
+### `assertPermission()`
 
 ```typescript
-// lib/authz.ts:296 — throws Error("Access denied: model.operation") (line shifted; was 245)
-export async function requirePermission(
-  model, operation, item?, userId?,
-): Promise<RichPermissions>
-
-// lib/authz.ts:312 — same but takes pre-fetched permissions (line shifted; was 261)
+// takes pre-fetched permissions
 export async function assertPermission(
   permissions: OperationFlags, operation, model?,
 ): Promise<void>
 ```
 
-Both throw `Error("Access denied: {model}.{operation}")`. API routes catch this via `requireApiPermission()` in `lib/api-auth.ts:132` (line shifted since this doc was written; was 86) and convert it to a 403 response.
+`requireEntityPermission`, `requireRecordPermission` and `assertPermission` throw "Access denied: {model}.{operation}". API routes catch this via `requireApiPermission()` / `requireApiRecordPermission()` in `lib/api-auth.ts` and convert it to a 403 response.
+
+### Foreign keys: a write may only point at a row the actor can reach
+
+A client-written foreign key is checked before the value is stored (`assertFkReferencesUsable`, `lib/_fk_reference.ts`, called from `add<Entity>`/`update<Entity>` in `service.ts`). Because REST routes, Server Actions, bulk create/update and CSV import all converge on those two functions, one check covers every entry point, for the entity's own foreign keys, for the foreign keys of nested child rows, and for the members of a to-many set chosen on the entity (a many-to-many set, or a one-to-many list attached through the child's nullable foreign key).
+
+The referenced row must be *reachable* by the actor (`isRowReachable`, `lib/_reachability.ts`) — the in-memory form of the read-scope filter the target's own list and detail reads apply:
+
+1. its organization is one the actor belongs to (a row with no organization is reachable);
+2. for an `x-self-only` target, the actor created it (or holds the audited admin bypass); no permission widens this;
+3. otherwise the actor holds read permission on that row: a general grant, or a Creator/Assignee grant on a row they created / are assigned to.
+
+The decision is made on the model's own entity, not on a proxy view of it: read permission, organization and `x-self-only` are those of the model, and neither a proxy view's permission, its `x-filter-values` nor an `x-self-only` declared only on a view is consulted. An actor who holds permission only on a proxy view therefore cannot reference the model's rows (the safe side; `lib/_reachability.test.ts` pins this). An unreachable row is reported exactly like a missing one (`NOT_FOUND`, "Not found"), so a write cannot be used to probe which ids exist.
+
+Which foreign keys are checked is decided at generation time (`_fk_reference_check` in `build_context.py`): every client-writable foreign key except those to `organization` (own membership rule) and `user` (creator/assignee, covered by the server-value rules). Columns the server sets or that are read-only are not client writes and are not checked. A target that is not a generated entity has no permission rows to check and is skipped. An update compares against the stored value, so an unchanged reference is not re-checked.
+
+A to-many set is a set of references to rows of the member entity (`_set_fk_checks` in `build_context.py`; the member entity is checked by the same `_fk_reference_check`). Each member is treated like a single foreign key: a member *added* by the write must be reachable (`NOT_FOUND` otherwise, including an id that does not exist), and a member the write keeps is not re-checked. With a Creator or Assignee grant on the member entity, some members of one set can be reachable and others not; only the members the write adds or removes are judged.
+
+#### Records that already point at a row the actor cannot reach
+
+The same reachability test is applied to the value a record *currently* stores. A record whose foreign key points at a row the actor cannot reach (another organization, no read permission, outside their Creator/Assignee scope, or someone else's `x-self-only` row) is still visible to the actor, but its reference is not theirs to take away:
+
+- **Re-pointing** that foreign key to another row, or **clearing** it (setting an optional foreign key to `null`, or omitting it), is refused with `PERMISSION_DENIED` (HTTP 403; the record itself is visible to the actor, so nothing is masked as `NOT_FOUND`). Nothing is written.
+- **Deleting** the record is refused the same way ("if you cannot update it, you cannot delete it"). `assertDeleteReferencesReachable<Entity>` in `service.ts` runs in the single-record route, the bulk route and the Server Action before `delete<Entity>`; the bulk route reports the item as `Access denied` and deletes the rest.
+- **Removing a member** of a to-many set that the actor cannot reach, or **dropping an inline child row** whose foreign key points at such a row (the parent update's nested `deleteMany` of the rows not sent back), is refused the same way (`PERMISSION_DENIED`, 403). Removing a reachable member, or dropping a row whose references are reachable, is allowed even when another member of the same set is not.
+- Updating *other* fields is unchanged, as long as the foreign key is sent back unchanged. An omitted **required** foreign key keeps its stored value (as before), so it is not a clearing. A to-many set left out of a REST `PUT` keeps its stored members (the route reads them back), so it is not a removal; an omitted **optional** foreign key is a clearing.
+- A stored id with no row behind it protects nothing and does not block the write or the delete.
+
+Both directions use the same predicate (`isRowReachable`), so the rule for "may point at" and "may leave" cannot drift apart. The system-driven deletes (payment rollback, the payment webhook) have no acting user and are not subject to it. The delete check (`assertDeleteReferencesReachable<Entity>`) reads the record's own foreign keys, the members of its to-many sets and the foreign keys of its inline child rows, because deleting the record removes all of them (a set's join rows, a one-to-many list's link column set to `null`, the inline rows by cascade). It is generated whenever any of the three exists (`delete_reference_check`).
+
+Tests: `lib/_fk_reference.test.ts` (the predicate), `code_generator/tests/test_fk_write_reference_check.py`, `test_fk_write_nested_child_check.py` and `test_fk_set_reference_check.py` (what is generated), the generated API specs G3.8–G3.15 (the primary display field), and the security fixture's `cypress/e2e/fk_reference_shapes.cy.ts` and `flows/fk_reference_actions.test.ts` (`npm run test:security-matrix-e2e-gate`), which cover every reference shape (many-to-one and one-to-one, required and optional; inline child rows; many-to-many and one-to-many sets) on the REST single and bulk routes, CSV import and the Server Actions, against a row of another organization and against rows outside the actor's Creator / Assignee read scope. Each refusal names the expected status code and re-reads the record, its set members, its inline rows and the referenced row to prove nothing was written or deleted.
 
 ### Permission cache
 
@@ -232,7 +275,7 @@ Two layers of caching are in place (production-only, gated by `process.env.NODE_
 | React `cache()` | Per request | Deduplicates concurrent calls within one render |
 | `TtlLruCache` (`lib/_ttl_lru.ts`) | 30 seconds, 1000 entries | Per-process; spans multiple requests |
 
-The cache can be manually invalidated via `invalidatePermissionCache()` from `lib/authz.ts`. Role-mutation endpoints should call this to avoid stale grants within the TTL window.
+The cache is held on `globalThis`, so every bundle of `lib/authz.ts` in a process shares it. `invalidatePermissionCache()` from `lib/authz.ts` clears it. The generated `service.ts` of `role`, `permission` and `user` (whose `roles` field sets role membership) calls it after each create, update or delete commits, so these writes apply at once on the instance that handled them (`PERMISSION_CACHE_MODELS` in `code_generator/build_context.py` lists the entities). Code that changes permissions, roles or role membership outside those service functions must call it too.
 
 ---
 
@@ -272,7 +315,7 @@ and in routes that accept both a token and a session (`/api/notifications`):
 `X-API-Key` first, then `Authorization: Bearer` (a mobile access token if it
 has three dot-separated segments, otherwise an API key), then the session cookie.
 
-The API key is looked up against `user.api_key` in the DB. A TTL LRU cache (5 min, 1000 entries) reduces DB load. The cache is gated to production (`process.env.NODE_ENV === 'production'`) so Cypress test resets do not encounter stale entries.
+The SHA-256 of the presented key is looked up against `user.api_key_hash` in the DB (see `api-key-hashing.md`). A TTL LRU cache keyed by that hash (5 min, 1000 entries) reduces DB load. The cache is gated to production (`process.env.NODE_ENV === 'production'`) so Cypress test resets do not encounter stale entries.
 
 ### Dual authentication (session OR API key)
 
@@ -348,7 +391,7 @@ export async function GET(request: NextRequest) {
 }
 ```
 
-`requireApiPermission` (`lib/api-auth.ts:132`, line shifted since this doc was written; was 82) calls `requirePermission` with the resolved `userId` and wraps any `Error("Access denied: ...")` into `ApiError(403, ...)`.
+`requireApiPermission` (`lib/api-auth.ts`) calls `requireEntityPermission` with the resolved `userId` and wraps any `Error("Access denied: ...")` into `ApiError(403, ...)`.
 
 ### Middleware protection
 
@@ -360,11 +403,11 @@ The project does **not** have a `middleware.ts` at the project root. Route-level
 
 - **Which routes**: every `route.ts` under `app/api/` that is not a regenerated file (not listed in `.generated-manifest.json` as an overwritten file, and without the `AUTO-GENERATED` marker). A write-once stub counts as hand-written once generated.
 - **What counts as a write**: an exported `POST`, `PUT`, `PATCH` or `DELETE` handler, or a direct `prisma.<model>.create/update/delete/upsert/...Many(` call.
-- **What is flagged**: a writing route whose source (comments stripped) has no call to `requireApiPermission(`, `requirePermission(` or `requireScheduledTaskRole(` (permission check), or no call to `getRateLimiter(` (rate limiting). Each missing guard is reported separately. Authentication alone (`authenticate(`, `requireSession(`, ...) is not a permission check.
+- **What is flagged**: a writing route whose source (comments stripped) has no call to `requireApiPermission(`, `requireApiRecordPermission(`, `requireEntityPermission(`, `requireRecordPermission(` or `requireScheduledTaskRole(` (permission check), or no call to `getRateLimiter(` (rate limiting). Each missing guard is reported separately. Authentication alone (`authenticate(`, `requireSession(`, ...) is not a permission check.
 - **Limits**: it is a per-file text match and does not follow imports. A route that delegates both guards to a shared wrapper in another file must call the helper itself or be listed in the allowlist. A match shows the call is present, not that it guards the right operation or checks the right organization; review still decides that.
 - **Exemptions**: `code_generator/check_handwritten_routes_allowlist.yaml` (or a file passed with `--allowlist`). An entry names the route `path`, the guards it skips (`permission`, `rate-limit`) and a required `reason`. An entry that no longer matches a flagged route is reported as stale. The shipped list covers the routes this repository writes by hand; a consumer keeps its own list.
 
-Run it from the project root after `npm run generate-code` (the manifest is written then). Exit status: 0 clean, 1 violations or stale entries, 2 configuration error. The generator's own pytest (`test_check_handwritten_routes.py`) runs it against this repository's routes with the shipped allowlist. It is not part of the CI workflow or the generator's completion gate.
+Run it from the project root after `npm run generate-code` (the manifest is written then). Exit status: 0 clean, 1 violations or stale entries, 2 configuration error. The generator's own pytest (`test_check_handwritten_routes.py`) runs it against this repository's routes with the shipped allowlist. It runs in CI as the `Hand-written Route Guards` job; it is not part of the generator's completion gate.
 
 ---
 
@@ -395,8 +438,8 @@ At runtime the filter fires on every list and detail read for that entity. There
 
 Read paths (list/search/detail-GET/export) scope by `organization_id` via `buildAccessWhere()`/`getDetail()`, as described above. Every mutation-path lookup applies the same org-scoped `findFirst`/`findMany` pattern instead of a global `findUnique`/`findMany` by id, so a caller with a general `update`/`delete`/`import` permission cannot act on another organization's record just by supplying its id:
 
-- **API detail routes** (`api_detail_route.ts.jinja2` `PUT`/`DELETE`): re-fetch the target row with `prisma.{model}.findFirst({ where: { id, organization_id: { in: associatedOrganizationIds } } })` before calling `requirePermission()`.
-- **Session upsert actions** (`generators.py`'s `_upsert_body`, used by `actions.ts.jinja2`): the same org-scoped `findFirst` replaces the pre-update `findUnique` in all three upsert code shapes (reservation, combined create+update, update-only). The generated code also throws immediately (`if (!existing) throw ...`) when the lookup misses, rather than falling through — `requirePermission()` treats a missing item as "no item context" and falls back to the top-level `general` permission, so without the explicit throw the org filter would gate only the permission check's input and not the actual write.
+- **API detail routes** (`api_detail_route.ts.jinja2` `PUT`/`DELETE`): re-fetch the target row with `prisma.{model}.findFirst({ where: { id, organization_id: { in: associatedOrganizationIds } } })` before calling `requireRecordPermission()`.
+- **Session upsert actions** (`generators.py`'s `_upsert_body`, used by `actions.ts.jinja2`): the same org-scoped `findFirst` replaces the pre-update `findUnique` in all three upsert code shapes (reservation, combined create+update, update-only). The generated code also throws immediately (`if (!existing) throw ...`) when the lookup misses, rather than falling through — `requireRecordPermission()` treats a missing item as "no item context" and falls back to the top-level `general` permission, so without the explicit throw the org filter would gate only the permission check's input and not the actual write.
 - **Session delete action** (`removeX` in `actions.ts.jinja2`): fetches associated organizations first, guards against a null `userId` (unauthenticated session) by throwing before the lookup, then filters the batch `findMany` by `organization_id`.
 - **CSV import update path** (`api_import_route.ts.jinja2`): the actor's associated organization ids are fetched once before the per-row loop (not per row, to avoid N+1), and every existing-row lookup adds the `organization_id` filter.
 
@@ -404,7 +447,7 @@ A cross-organization id resolves to a null/empty lookup result instead of succee
 
 ### Foreign-key writes are checked too
 
-A foreign key is a reference, so writing one is checked as well. In the generated `add{Entity}` / `update{Entity}` functions in `service.ts` (shared by the REST routes, the Server Actions and both bulk routes), every client-writable many-to-one or selector one-to-one foreign key whose target entity has an `organization_id` column (`fk_write_checks` in `build_context.py`) goes through `assertFkReferencesUsable` (`lib/_fk_reference.ts`) before the write. The referenced row must belong to an organization the actor is a member of (or have no organization) and the actor must be allowed to read it, with creator/assignee item rules applied. A row that fails either condition, or does not exist, is answered with the same 404 `Not found`. On update, a value equal to the one already stored is not re-checked, so editing other fields of a record whose reference the actor can no longer read keeps working. Read-only foreign keys, `organization` and `user` targets, and targets without an `organization_id` column are not checked. The foreign keys of nested child rows written through the parent (`child_fk_check_create` / `child_fk_check_update`) follow the same rule, with the stored value looked up per existing child row on update. CSV import resolves foreign keys through its own organization-scoped lookups.
+A foreign key is a reference, so writing one is checked as well. In the generated `add{Entity}` / `update{Entity}` functions in `service.ts` (shared by the REST routes, the Server Actions and both bulk routes), every client-writable many-to-one or selector one-to-one foreign key whose target entity has an `organization_id` column (`fk_write_checks` in `build_context.py`) goes through `assertFkReferencesUsable` (`lib/_fk_reference.ts`) before the write. The referenced row must belong to an organization the actor is a member of (or have no organization) and the actor must be allowed to read it, with creator/assignee item rules applied. A row that fails either condition, or does not exist, is answered with the same 404 `Not found`. On update, a value equal to the one already stored is not re-checked, so editing other fields of a record whose reference the actor can no longer read keeps working. Read-only foreign keys, `organization` and `user` targets, and targets without an `organization_id` column are not checked. The foreign keys of nested child rows written through the parent (`child_fk_check_create` / `child_fk_check_update`) follow the same rule, with the stored value looked up per existing child row on update; the members of a to-many set chosen on the entity, and the rows an update drops, are checked in the same blocks (see "Foreign keys: a write may only point at a row the actor can reach" above). CSV import resolves foreign keys through its own organization-scoped lookups.
 
 ---
 
@@ -424,13 +467,13 @@ See `docs/multi-tenancy.md` § "Decisions" for the rationale (app-layer for v1, 
 
 `getModelPermissions('my_entity', userId)` grants or denies CRUD at the model level. There is no mechanism to restrict which fields a user may read or write within a model.
 
-### Permission cache does not invalidate on role change
+### Permission cache lag on other instances
 
-When an admin modifies a user's roles, the permission cache entry for that user persists until its 30-second TTL expires. During this window, the user may still see stale permissions. Call `invalidatePermissionCache()` from `lib/authz.ts` in role-mutation endpoints to tighten this bound.
+A role, permission or role-membership write clears the permission cache of the process that handled it (see the caching table above). Another server process keeps its cached answer until the 30-second TTL expires, so a revoked grant can stay usable there for up to 30 seconds.
 
 ### API key cache has a 5-minute lag
 
-Rotating a user's `api_key` does not immediately invalidate the old key in the cache. The old key remains valid for up to 5 minutes in production. `invalidateApiKeyCache(oldKey)` from `lib/api-auth.ts` should be called in account-update endpoints.
+Issuing a new key through the settings page (`issueApiKey()` in `lib/setting/api-key-actions.ts`) calls `invalidateApiKeyCache(oldHash)` in the same process, so the old key stops working there at once. Another server process keeps accepting the old key until its own cache entry ages out, up to 5 minutes in production. Erasing a user (`anonymizeUser()`) drops the cached entry for the removed key the same way. Any other code that replaces or clears `user.api_key_hash` must call `invalidateApiKeyCache()` with the old hash.
 
 ### No approval-flow permission integration
 

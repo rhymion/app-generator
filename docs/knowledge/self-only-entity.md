@@ -162,6 +162,17 @@ distinction; there is no special-case code required for this — it fell out of 
 generator architecture, but is easy to get wrong when adding a new proxy-view self-only entity by
 hand, so watch for it.
 
+`setting` also writes the caller's own `roles` set (`x-relationships.roles`, many-to-many to `role`).
+Ownership is the only gate on the settings write, so what keeps a user from changing their own roles is
+the reference rule for to-many sets (`multi-tenancy-and-permissions.md`, "Foreign keys: a write may only
+point at a row the actor can reach"): adding a role the caller cannot read is refused like a missing row
+(404) and removing one is refused with 403; roles sent back unchanged are not checked
+(`cypress/e2e/api/setting_roles_reachability.cy.ts`). A caller who **can** read `role` can still change
+their own roles here. In the seeded roles only the Administrator reads `role`, and they can change any
+user's roles on the `user` screen anyway; an app that grants `role` read permission to other users
+widens this, and the generator has no way yet to make a to-many set read-only on one view
+(`x-readonly-fields` covers an entity's own columns only).
+
 ## `user.creator_id === user.id`: a structural invariant, not a habit
 
 Since `setting` is a proxied view of `user` and uses `creator_id` as its self-only filter (see

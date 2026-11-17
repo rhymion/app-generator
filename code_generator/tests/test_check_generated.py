@@ -487,3 +487,32 @@ def test_api_disabled_entity_has_no_login_spec_to_scan(tmp_path: Path) -> None:
         (tmp_path / sub).mkdir(parents=True, exist_ok=True)
     _api_test_dir(tmp_path)  # dir exists, but no widget.cy.ts written into it
     assert check(schema_path, tmp_path, _empty_allowlist(tmp_path)) == []
+
+
+# ---------------------------------------------------------------------------
+# Direct console output (Issue #1237)
+# ---------------------------------------------------------------------------
+
+def test_console_call_in_generated_route_is_flagged(tmp_path: Path) -> None:
+    schema = _make_tree(tmp_path)
+    (tmp_path / 'app/api/widget/route.ts').write_text(
+        "export async function GET() {\n"
+        "  console.error('failed', new Error('x'));\n"
+        "  console.log(`n=${1}`);\n"
+        "}\n"
+    )
+    vs = check(schema, tmp_path, _empty_allowlist(tmp_path))
+    assert [(v.rule, v.line) for v in vs] == [('console:direct', 2), ('console:direct', 3)]
+
+
+def test_logger_call_and_console_mention_in_comment_are_not_flagged(tmp_path: Path) -> None:
+    schema = _make_tree(tmp_path)
+    (tmp_path / 'app/api/widget/route.ts').write_text(
+        "import { logger } from '@/lib/logger';\n"
+        "// do not call console.error( here\n"
+        " * console.warn( is also only a comment\n"
+        "export async function GET() {\n"
+        "  logger.error('failed', new Error('x'));\n"
+        "}\n"
+    )
+    assert check(schema, tmp_path, _empty_allowlist(tmp_path)) == []

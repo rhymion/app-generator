@@ -65,7 +65,7 @@ def test_direct_prisma_write_in_a_get_handler_is_a_write(tmp_path):
 def test_guard_names_in_comments_do_not_count(tmp_path):
     _route(tmp_path, 'app/api/custom/route.ts',
            "// requireApiPermission( getRateLimiter(\n"
-           "/* requirePermission( */\n"
+           "/* requireEntityPermission( */\n"
            "export async function POST() {}")
     assert len(_flags(tmp_path)[0]) == 2
 

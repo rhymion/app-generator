@@ -3,6 +3,7 @@ import { requireScheduledTaskRole, handleApiError, ApiError } from '@/lib/api-au
 import { TASK_REGISTRY } from '@/lib/scheduled-tasks/registry';
 import { runScheduledTask } from '@/lib/scheduled-tasks/run-guard';
 import { SCHEDULED_TASK_ACTOR_EMAIL } from '@/lib/scheduled-tasks/system-actor';
+import { secretsEqual } from '@/lib/_secret_compare';
 import prisma from '@/lib/prisma';
 
 // GENERATED — do not edit. One route for every x-scheduled-task entry
@@ -46,7 +47,7 @@ async function handleScheduledTask(
   try {
     const cronSecret = process.env.CRON_SECRET;
     const authHeader = req.headers.get('Authorization');
-    const isCronAuth = !!cronSecret && authHeader === `Bearer ${cronSecret}`;
+    const isCronAuth = !!cronSecret && secretsEqual(authHeader, `Bearer ${cronSecret}`);
     if (!isCronAuth) {
       await requireScheduledTaskRole(req);
     }

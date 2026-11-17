@@ -55,7 +55,7 @@ class TestDetailRoutePermissionOrder:
         rendered = _rendered(_entity('gizmo', 'gizmo'), _plain_schema())
         coarse_check = "const basePerms = await requireApiPermission(actorId, 'gizmo', 'read');"
         item_fetch = 'const item = await getGizmoDetail(id);'
-        resolve_call = 'const resolved = await resolvePermissions(basePerms, item, actorId);'
+        resolve_call = 'const resolved = await resolveRecordPermissions(basePerms, item, actorId);'
         assert coarse_check in rendered
         assert item_fetch in rendered
         assert resolve_call in rendered
@@ -68,7 +68,7 @@ class TestDetailRoutePermissionOrder:
         rendered = _rendered(_entity('gizmo', 'gizmo'), _plain_schema())
         coarse_check = "const basePerms = await requireApiPermission(actorId, 'gizmo', 'update');"
         item_fetch = 'const existing = await prisma.gizmo.findUnique({ where: { id }, select:'
-        resolve_call = 'const resolved = await resolvePermissions(basePerms, existing, actorId);'
+        resolve_call = 'const resolved = await resolveRecordPermissions(basePerms, existing, actorId);'
         assert coarse_check in rendered
         assert item_fetch in rendered
         assert resolve_call in rendered
@@ -79,7 +79,7 @@ class TestDetailRoutePermissionOrder:
     def test_delete_checks_permission_before_fetching_existing(self):
         rendered = _rendered(_entity('gizmo', 'gizmo'), _plain_schema())
         coarse_check = "const basePerms = await requireApiPermission(actorId, 'gizmo', 'delete');"
-        resolve_call = 'const resolved = await resolvePermissions(basePerms, existing, actorId);'
+        resolve_call = 'const resolved = await resolveRecordPermissions(basePerms, existing, actorId);'
         assert coarse_check in rendered
         assert resolve_call in rendered
         # Two DELETE-scoped occurrences of the fetch line exist in the file

@@ -1,0 +1,375 @@
+# OWASP ASVS 5.0 coverage
+
+This table maps each requirement of the [OWASP Application Security Verification Standard 5.0.0](https://github.com/OWASP/ASVS/tree/v5.0.0_release) at Level 2 to how this generator and the apps it generates cover it. Requirements are identified by their ASVS identifier; read the requirement text in the standard. Audit logging (chapter V16) and authorization (chapter V8, which holds the organization-isolation requirements) are assessed up to Level 3. The tracking Issue is #1233.
+
+The table describes what is verified in this repository today. A row never claims more than its "Verified by" column shows: `none` means the behavior was read in code or a document but no test proves it.
+
+## Status values
+
+| Status | Meaning |
+|--------|---------|
+| generator | Generated code or generator code implements it. "Covered by" names the code path. |
+| framework | Next.js, React, Prisma or Auth.js guarantees it. "Source and version" names the package and the version checked; re-check the row when that package is upgraded. |
+| environment | A deployment or platform setting provides it. "Covered by" names the script or document, or states that the platform decides. |
+| n/a | The requirement does not apply. "Covered by" gives the reason. |
+| gap | Not covered. "Gap Issue" links the Issue that tracks it. |
+
+A `generator`, `framework` or `environment` row can also list a Gap Issue when the coverage is partial; the Issue tracks the missing part.
+
+## Maintaining the table
+
+- One row per requirement; keep the column order so rows can be sorted, filtered and extended.
+- When an Issue in the "Gap Issue" column is closed, change the row to the status it now has and fill "Verified by".
+- When a package in "Source and version" is upgraded, re-check its rows against the package documentation and update the version.
+- `code_generator/tests/test_asvs_coverage_table.py` checks this file: every in-scope requirement appears exactly once, every `gap` row links an Issue, every `framework` row names a source and a version, and no cell is empty.
+- Tests that prove the framework-guaranteed rows live in `cypress/e2e/api/framework_guarantees.cy.ts` and run in the mandatory API gate (`npm run test:e2e:cy:api`). The Auth.js OAuth `state` and PKCE checks cannot be exercised there, because the end-to-end stack replaces the Google provider with a mock (`lib/auth/mock-oauth-gate.ts`); #1234 tracks them.
+
+Related documents: [security-test-matrix.md](security-test-matrix.md), [authentication.md](authentication.md), [authorization-default-deny.md](authorization-default-deny.md), [api-idempotency-and-rate-limiting.md](api-idempotency-and-rate-limiting.md), [ci-security-workflows.md](ci-security-workflows.md), [input-validation-rules-and-limits.md](input-validation-rules-and-limits.md), [upload-limits-and-malicious-file-handling.md](upload-limits-and-malicious-file-handling.md), [field-level-authorization-rules.md](field-level-authorization-rules.md), [cryptographic-inventory-and-key-management.md](cryptographic-inventory-and-key-management.md), [outbound-communications.md](outbound-communications.md), [data-classification.md](data-classification.md).
+
+Chapter V17 (WebRTC) does not apply: the generated app has no real-time media, TURN, signaling or DTLS/SRTP code or dependency.
+
+
+## V1 Encoding and Sanitization
+
+| ID | Level | Status | Covered by | Verified by | Gap Issue | Source and version |
+|----|-------|--------|------------|-------------|-----------|--------------------|
+| V1.1.1 | 2 | framework | Routes read the body once with request.json(); no decode after validation found | none | - | next 16.4.2 (package-lock.json); Route Handlers docs |
+| V1.1.2 | 2 | framework | React JSX escaping, Prisma parameter binding, escapeCSV in lib/_csv.ts | lib/_output_encoding.test.tsx (JSX text and attribute escaping), lib/_csv.test.ts (CSV quoting and formula neutralization), cypress/e2e/api/sql_parameter_binding.cy.ts (SQL syntax in values stored and read back unchanged through create, list filter, trigram search and global search) | - | react 19.3.1 (package-lock.json); JSX escaping docs |
+| V1.2.1 | 1 | framework | React JSX escaping; no dangerouslySetInnerHTML in app, components or templates | components/_standard/ListWrapper.test.tsx, EditableListWrapper.test.tsx | - | react 19.3.1 (package-lock.json); JSX escaping docs |
+| V1.2.2 | 1 | generator | lib/_safe_url.ts isSafeUrl; lib/auth/safe-redirect.ts | lib/_safe_url.test.ts, lib/auth/safe-redirect.test.ts | - | - |
+| V1.2.3 | 1 | framework | React JSX escaping; NextResponse.json serializes JSON; no inline script construction found | none | - | next 16.4.2 (package-lock.json); NextResponse.json |
+| V1.2.4 | 1 | generator | Prisma query builder; docs/knowledge/raw-sql-policy.md; check_generated.py raw:* rules | code_generator/tests/test_sql_safety.py (skips in CI), gate step 16 check:generated | - | - |
+| V1.2.5 | 1 | n/a | The app runtime executes no OS commands (no child_process use in lib or templates) | none | - | - |
+| V1.2.6 | 2 | n/a | No LDAP usage | none | - | - |
+| V1.2.7 | 2 | n/a | No XPath or XML querying in the app | none | - | - |
+| V1.2.8 | 2 | n/a | No LaTeX processing | none | - | - |
+| V1.2.9 | 2 | generator | lib/mention/parser.ts escapeRegExp before new RegExp; one other dynamic RegExp in lib/legal/content.ts was not traced to its input | none | #1273 | - |
+| V1.3.1 | 1 | n/a | No WYSIWYG or user HTML input; comments are plain text | none | - | - |
+| V1.3.2 | 1 | gap | No gate rule forbids eval or new Function; the only eval hit is a Redis Lua call in lib/rate-limit/redis.ts | none | #1247 | - |
+| V1.3.3 | 2 | generator | lib/_upload_validation.ts allow-list; lib/_safe_url.ts; CSV import checks; every writable string field has a server-side maximum length (declared maxLength, default 65535) in the generated service_validation.ts and the CSV import route | lib/_upload_validation.test.ts, cypress/e2e/api/upload_path_safety.cy.ts, code_generator/tests/test_string_max_length.py | - | - |
+| V1.3.4 | 2 | n/a | SVG is not in the upload allow-list | none | - | - |
+| V1.3.5 | 2 | framework | components/legal/LegalDocumentView.tsx renders repository-owned Markdown with react-markdown (no rehype-raw) | lib/legal/content.test.ts (loading only) | - | react-markdown 10.1.0 (package-lock.json) |
+| V1.3.6 | 2 | n/a | No server-side fetch of a user-supplied URL; outbound calls use fixed SDK endpoints (see #1241) | none | - | - |
+| V1.3.7 | 2 | n/a | Jinja2 runs at generation time on developer-supplied schema only | none | - | - |
+| V1.3.8 | 2 | n/a | Not a Java stack | none | - | - |
+| V1.3.9 | 2 | n/a | No memcache; Redis calls are parameterized | none | - | - |
+| V1.3.10 | 2 | n/a | No format-string interpreter on user input | none | - | - |
+| V1.3.11 | 2 | n/a | No SMTP or IMAP transport in the app | none | - | - |
+| V1.4.1 | 2 | n/a | Memory-safe runtime (Node.js) | none | - | - |
+| V1.4.2 | 2 | framework | Prisma column types and lib/_decimal.ts | none | - | prisma 7.10.1 (package-lock.json); Int is 32-bit, out-of-range values are rejected |
+| V1.4.3 | 2 | n/a | Managed-memory runtime (Node.js) | none | - | - |
+| V1.5.1 | 1 | n/a | No XML parsing in application code | none | - | - |
+| V1.5.2 | 2 | framework | Only JSON.parse of data; no native object deserialization | none | - | Node.js 24.19.0 (version used for this check); JSON.parse returns plain data only |
+
+## V2 Validation and Business Logic
+
+| ID | Level | Status | Covered by | Verified by | Gap Issue | Source and version |
+|----|-------|--------|------------|-------------|-----------|--------------------|
+| V2.1.1 | 1 | generator | Validation rules per layer and the generated rules are in docs/knowledge/input-validation-rules-and-limits.md; schema keywords such as minimum and pattern are form-only; maxLength is also enforced on the server | none | - | - |
+| V2.1.2 | 2 | generator | Generated cross-field rules and the validateCustomRules hook contract are in docs/knowledge/input-validation-rules-and-limits.md; application rules live in the hand-written hook | none | - | - |
+| V2.1.3 | 2 | n/a | Accepted gap: business limits (per user, per organization, per period) are application-specific, so the generator ships none; docs/knowledge/input-validation-rules-and-limits.md ("Business limits are application-specific") says where an application documents and enforces its own (validateCustomRules), with a worked example and a test pattern. Global rate and size limits are listed in the same document | none | - | - |
+| V2.2.1 | 1 | generator | Generated service_validation.ts checks every supplied value against its JSON schema rule on every write path (lib/_field_rules.ts): the JSON type always; enum, minimum/maximum (inclusive and exclusive), minLength, pattern and format (uri, email) where declared; maxLength (default 65535); plus Prisma column types, nativeEnum mapping and read-only field rejection | lib/_field_rules.test.ts, code_generator/tests/test_field_runtime_rules.py, cypress/e2e/api/runtime_field_rules.cy.ts | - | - |
+| V2.2.2 | 1 | generator | service.ts.jinja2 runs validateOn* hooks server-side inside the transaction | none | #1230 | - |
+| V2.2.3 | 2 | generator | Cross-field consistency is per entity in hand-written validateCustomRules (docs/knowledge/same-entity-validation-socket.md, docs/knowledge/input-validation-rules-and-limits.md); REST routes read only the entity's declared fields, so undeclared keys never reach the service | none | - | - |
+| V2.3.1 | 1 | generator | state_transitions.ts.jinja2 (assertTransitionAllowed); lib/approval_request/order-check.ts | code_generator/tests/test_state_transition_gatekeeper.py, lib/approval_request/actions.test.ts, cypress/e2e/api/multi_stage_approval_order_reached.cy.ts | #1230 | - |
+| V2.3.2 | 2 | n/a | Accepted gap: the generator defines no business limit to enforce; an application enforces its own in validateCustomRules inside the write transaction, as docs/knowledge/input-validation-rules-and-limits.md ("Business limits are application-specific") shows, including the concurrency caveat and the unit and API test pattern | none | - | - |
+| V2.3.3 | 2 | generator | Serializable $transaction in service.ts.jinja2 and submit_for_approval.ts.jinja2 | generated reservation spec case (5) (code_generator/templates/test_reservation_spec.cy.ts.jinja2): a failing second line leaves no allocation and no reserved quantity; pinned by code_generator/tests/test_reservation_atomicity_concurrency_tests.py | #1272, #735 | - |
+| V2.3.4 | 2 | generator | x-reservation templates with Serializable isolation | generated reservation spec case (6): two simultaneous requests for stock that fits only one end with one 201 and one 409 and a single claim; pinned by code_generator/tests/test_reservation_atomicity_concurrency_tests.py | #1272 | - |
+| V2.4.1 | 2 | generator | lib/rate-limit/{index,redis,in-memory,client-ip,action}.ts; generated REST routes return 429; generated Server Actions share the api:write bucket | lib/rate-limit/redis.test.ts, in-memory.test.ts, client-ip.test.ts, action.test.ts, code_generator/tests/test_rate_limit_coverage.py | #1092, #1125 | - |
+
+## V3 Web Frontend Security
+
+| ID | Level | Status | Covered by | Verified by | Gap Issue | Source and version |
+|----|-------|--------|------------|-------------|-----------|--------------------|
+| V3.2.1 | 1 | generator | lib/attachment/storage.ts serveStoredObject (nosniff, no-store, Content-Disposition); attachment_serve_route.ts.jinja2 serves inline only for jpeg, png, gif and webp | cypress/e2e/api/upload_path_safety.cy.ts, lib/attachment/storage.test.ts | - | - |
+| V3.2.2 | 1 | framework | React text escaping; no dangerouslySetInnerHTML or innerHTML in app, components or templates | none | #1234 | react 19.3.1 (package-lock.json); JSX escaping docs |
+| V3.3.1 | 1 | framework | auth.ts does not override cookie settings; Auth.js sets Secure and the __Secure- prefix on https | none | #1234 | next-auth 5.0.0-beta.32, @auth/core 0.41.3 (package-lock.json); cookies option defaults |
+| V3.3.2 | 2 | framework | auth.ts does not override cookie settings; Auth.js default SameSite=Lax | cypress/e2e/api/framework_guarantees.cy.ts (CSRF and session cookie) | - | next-auth 5.0.0-beta.32, @auth/core 0.41.3 (package-lock.json); cookies option defaults |
+| V3.3.3 | 2 | gap | Session cookie is __Secure-authjs.session-token, not __Host- | none | #1274 | - |
+| V3.3.4 | 2 | framework | Auth.js session cookie is HttpOnly; strategy jwt in auth.ts | cypress/e2e/api/framework_guarantees.cy.ts (CSRF and session cookie) | - | next-auth 5.0.0-beta.32, @auth/core 0.41.3 (package-lock.json); cookies option defaults |
+| V3.4.1 | 1 | generator | lib/security-headers.ts Strict-Transport-Security via next.config.ts headers() | lib/security-headers.test.ts (checks max-age only) | #1123 | - |
+| V3.4.2 | 1 | framework | No Access-Control-Allow-Origin is set anywhere; Next.js sends none unless configured | cypress/e2e/api/framework_guarantees.cy.ts (no CORS headers, preflight) | - | next 16.4.2 (package-lock.json); Route Handlers docs |
+| V3.4.3 | 2 | gap | proxy.ts sends a per-request-nonce Content-Security-Policy-Report-Only header (object-src 'none', base-uri 'none', nonce-based script and style sources) and violations are logged by /api/security/csp-report; the enforced CSP is still only frame-ancestors 'none', so the requirement is met once the policy is enforced | lib/csp.test.ts, lib/csp-report.test.ts, app/api/security/csp-report/route.test.ts, cypress/e2e/csp_report_only.cy.ts | #1123 | - |
+| V3.4.4 | 2 | generator | lib/security-headers.ts X-Content-Type-Options nosniff | lib/security-headers.test.ts | - | - |
+| V3.4.5 | 2 | generator | lib/security-headers.ts Referrer-Policy strict-origin-when-cross-origin | lib/security-headers.test.ts | - | - |
+| V3.4.6 | 2 | generator | lib/security-headers.ts CSP frame-ancestors 'none' and X-Frame-Options DENY | lib/security-headers.test.ts | - | - |
+| V3.5.1 | 1 | generator | `assertSameSiteCookieWrite()` in lib/api-auth.ts refuses a state-changing request whose `Sec-Fetch-Site` is not `same-origin` or `none` (or, without it, whose `Origin` is not a served host) when the caller is identified only by the session cookie; `requireCaller`, `resolveActorId` (so `requireDualAuth`) and the notifications mark-read route call it. The generated CRUD routes accept only an API key or a mobile token, which a browser never attaches by itself. Server Actions are checked by Next.js | cypress/e2e/api/framework_guarantees.cy.ts (cookie-authenticated REST writes, Server Action Origin), lib/api-auth.test.ts, code_generator/tests/test_cookie_write_cross_site_enumeration.py | - | - |
+| V3.5.2 | 1 | generator | A cross-site request cannot reach a cookie-authenticated handler with a `text/plain` body, because the origin check runs before the body is read (see V3.5.1). Routes that take an API key or mobile token are not driven by the browser's cookie jar | cypress/e2e/api/framework_guarantees.cy.ts (text/plain write and import refused), lib/api-auth.test.ts | - | - |
+| V3.5.3 | 1 | generator | Mutating handlers are POST, PUT, PATCH and DELETE; GET handlers only read | none | #1228 | - |
+| V3.5.4 | 2 | environment | One generated app per deployment; hostnames are chosen by the deploy scripts (scripts/gcp-deploy.sh, scripts/vercel-setup.sh) | none | - | - |
+| V3.5.5 | 2 | n/a | No postMessage usage | none | - | - |
+| V3.7.1 | 2 | n/a | No plugin technologies (React, MUI and Next.js only) | none | - | - |
+| V3.7.2 | 2 | generator | lib/auth/safe-redirect.ts safeRedirectPath; Stripe checkout redirects use a server-provided URL | lib/auth/safe-redirect.test.ts, app/[locale]/login/page.test.tsx | - | - |
+
+## V4 API and Web Service
+
+| ID | Level | Status | Covered by | Verified by | Gap Issue | Source and version |
+|----|-------|--------|------------|-------------|-----------|--------------------|
+| V4.1.1 | 1 | framework | NextResponse.json sets application/json; CSV export sets text/csv; charset=utf-8 | none | #1234 | next 16.4.2 (package-lock.json); Route Handlers docs |
+| V4.1.2 | 2 | environment | TLS is terminated by Cloud Run or Vercel; no application redirect code | none | - | - |
+| V4.1.3 | 2 | generator | lib/auth/external-url.ts `resolveExternalUrl()` builds the redirect host and scheme in proxy.ts; `x-forwarded-host`, `Host` and `x-forwarded-proto` count only when the host is the one in `AUTH_URL` / `NEXTAUTH_URL`, a Vercel deployment host or an `AUTH_ALLOWED_HOSTS` entry; anything else redirects to the configured application URL | lib/auth/external-url.test.ts, lib/proxy-forwarded-headers.test.ts | - | - |
+| V4.2.1 | 2 | environment | Request-smuggling defense belongs to the platform edge and the Next.js server | none | #1244 | - |
+| V4.3.1 | 2 | generator | lib/_pagination.ts MAX_PAGE_SIZE=200 (clampPage); the `include` of every generated getter is rendered from the schema, never from request input, and its nesting is bounded; sort and filter column allow-lists; import row and byte limits; no GraphQL | lib/_pagination.test.ts, code_generator/tests/test_getter_include_depth_bounded.py | - | - |
+| V4.3.2 | 2 | n/a | No GraphQL endpoint | none | - | - |
+| V4.4.1 | 1 | n/a | No WebSocket usage | none | - | - |
+| V4.4.2 | 2 | n/a | No WebSocket usage | none | - | - |
+| V4.4.3 | 2 | n/a | No WebSocket usage | none | - | - |
+| V4.4.4 | 2 | n/a | No WebSocket usage | none | - | - |
+
+## V5 File Handling
+
+| ID | Level | Status | Covered by | Verified by | Gap Issue | Source and version |
+|----|-------|--------|------------|-------------|-----------|--------------------|
+| V5.1.1 | 2 | generator | docs/knowledge/upload-limits-and-malicious-file-handling.md states the one global size limit, that archives are never unpacked and the handling of a hostile file; docs/knowledge/upload-format-allowlist-deferral.md lists types and extensions | none | - | - |
+| V5.2.1 | 1 | generator | upload_route.ts.jinja2 refuses an upload over UPLOAD_MAX_BYTES (default 10MB) before the body is parsed: a declared Content-Length over the limit is refused unread and a body without one is counted while it streams (lib/_upload_validation.ts readBodyWithLimit); per-user upload rate limit | lib/_upload_validation.test.ts, cypress/e2e/api/upload_path_safety.cy.ts, code_generator/tests/test_upload_route_content_type.py | - | - |
+| V5.2.2 | 1 | generator | lib/_upload_validation.ts checks the declared MIME type, the extension and the leading bytes against the format the extension names (images, PDF, Office and archive formats; text formats must hold no NUL byte); an extension added through UPLOAD_ALLOWED_EXTENSIONS that has no signature is accepted on the allow-lists alone; images are not re-encoded | lib/_upload_validation.test.ts, cypress/e2e/api/upload_path_safety.cy.ts, code_generator/tests/test_upload_route_content_type.py | - | - |
+| V5.2.3 | 2 | n/a | Uploaded archives are stored and served untouched; the app never decompresses them | none | - | - |
+| V5.3.1 | 1 | generator | lib/attachment/storage.ts opaque random key, storage root outside public/ | cypress/e2e/api/upload_path_safety.cy.ts, lib/attachment/storage.test.ts | - | - |
+| V5.3.2 | 1 | generator | lib/attachment/upload_core.ts newStorageKey; the original name is stored encrypted for display only | cypress/e2e/api/upload_path_safety.cy.ts, lib/attachment/storage.test.ts | - | - |
+| V5.4.1 | 2 | generator | lib/attachment/content-disposition.ts contentDisposition(), imported by attachment_serve_route.ts.jinja2; the name comes from the stored record, not the URL | cypress/e2e/api/upload_path_safety.cy.ts, lib/attachment/content-disposition.test.ts | - | - |
+| V5.4.2 | 2 | generator | lib/attachment/content-disposition.ts contentDisposition() sends an ASCII fallback plus filename*=UTF-8''; quotes, backslashes, CR, LF and non-ASCII characters are replaced in the fallback and percent-encoded in filename* | lib/attachment/content-disposition.test.ts | - | - |
+| V5.4.3 | 2 | generator | POST /api/upload calls the scan hook lib/upload-scan.ts (through lib/attachment/upload-scan-gate.ts) before storing; the default accepts every file and a deployment replaces it through prj/ to plug in its scanner; a refusal is 422, a scanner error 503 (fail closed); docs/knowledge/upload-limits-and-malicious-file-handling.md | lib/attachment/upload-scan-gate.test.ts, code_generator/tests/test_upload_route_content_type.py | - | - |
+
+## V6 Authentication
+
+| ID | Level | Status | Covered by | Verified by | Gap Issue | Source and version |
+|----|-------|--------|------------|-------------|-----------|--------------------|
+| V6.1.1 | 1 | generator | docs/knowledge/authentication.md (Account lockout, Password strength) and api-idempotency-and-rate-limiting.md describe the rate limits, the two-tier account lockout and the minimum length; credential stuffing beyond the lockout is not discussed | lib/auth/account-lockout.test.ts, lib/auth/password-policy.test.ts | #1245 | - |
+| V6.1.2 | 2 | gap | No context-specific word list or policy | none | #1280 | - |
+| V6.1.3 | 2 | generator | docs/knowledge/authentication.md lists the pathways (credentials, Google, mobile token, API key); required strength per pathway is not stated | code_generator/tests/test_api_route_authentication_enumeration.py (routes call an auth helper) | - | - |
+| V6.2.1 | 1 | generator | lib/auth/password-policy.ts (minimum 8 characters) applied by the register route and lib/auth/credential-confirmation.ts | lib/auth/password-policy.test.ts, app/api/auth/register/route.test.ts, lib/auth/credential-confirmation.test.ts | - | - |
+| V6.2.2 | 1 | generator | components/setting/password.tsx, lib/auth/credential-confirmation.ts | lib/auth/credential-confirmation.test.ts, cypress/e2e/api/setting_credential_confirmation.cy.ts | - | - |
+| V6.2.3 | 1 | generator | Current password is verified before a change (lib/auth/credential-confirmation.ts) | lib/auth/credential-confirmation.test.ts, cypress/e2e/api/setting_credential_confirmation.cy.ts | - | - |
+| V6.2.4 | 1 | gap | No common-password list | none | #1280 | - |
+| V6.2.5 | 1 | generator | lib/auth/password-policy.ts imposes length only, no composition rules | lib/auth/password-policy.test.ts | - | - |
+| V6.2.6 | 1 | generator | type=password on login, register and setting inputs | none | - | - |
+| V6.2.7 | 1 | generator | No onPaste handler and no autocomplete=off | none | - | - |
+| V6.2.8 | 1 | gap | bcrypt is applied to the raw string and reads only 72 bytes; longer passwords are truncated silently | lib/auth/password-check.test.ts | #1280 | - |
+| V6.2.9 | 2 | gap | A minimum length of 8 is enforced (lib/auth/password-policy.ts); no maximum is enforced, so passwords of 65 characters or more are not guaranteed to be accepted in full | lib/auth/password-policy.test.ts | #1280 | - |
+| V6.2.10 | 2 | generator | No password expiry or rotation exists | none | - | - |
+| V6.2.11 | 2 | gap | No context-word check | none | #1280 | - |
+| V6.2.12 | 2 | gap | No breached-password check | none | #1280 | - |
+| V6.3.1 | 1 | generator | proxy.ts sign-in bucket (10 per minute per IP); register (per IP, and with email verification on per address and on the completion step), mobile-token, MFA and API-key buckets in lib/rate-limit/index.ts; two-tier account lockout (auth:account:lockout per email and address, auth:account:lockout:email per email) in lib/auth/account-lockout.ts | app/api/auth/register/route.test.ts, app/api/auth/register/complete/route.test.ts, lib/mfa/verify.test.ts, lib/rate-limit/redis.test.ts, app/api/mobile/auth/token/route.test.ts, lib/auth/account-lockout.test.ts | - | - |
+| V6.3.2 | 1 | generator | scripts/seed-baseline-credentials.ts requires explicit admin credentials in production; outside production a documented default is seeded | scripts/seed-baseline-credentials.test.ts | - | - |
+| V6.3.3 | 2 | generator | MFA_REQUIRED_ROLES (lib/auth/mfa-required.ts) requires MFA enrolment for every user (`*`) or for named roles; a required user who has not enrolled can only use /setting/mfa (auth.ts jwt(), proxy.ts, getSessionUserId in lib/authz.ts). Unset by default, so MFA stays opt-in until a deployment sets it | lib/auth/mfa-required.test.ts, auth.mfa-required.test.ts, lib/authz_mfa_enrollment.test.ts | - | - |
+| V6.3.4 | 2 | generator | MFA is enforced on credentials, OAuth and the mobile token route; API keys are machine access without MFA by design | cypress/e2e/auth/mfa.cy.ts, cypress/e2e/api/mobile_auth.cy.ts | - | - |
+| V6.4.1 | 1 | generator | No initial passwords are issued. With `x-generator.email-verification.enabled`, self-registration mails a sign-up link: 256 random bits, stored as a SHA-256 hash, valid 24 hours, single use, replaced by a newer request (lib/auth/registration-token.ts) | app/api/auth/register/route.test.ts, app/api/auth/register/complete/route.test.ts | - | - |
+| V6.4.2 | 1 | generator | No password hints or knowledge-based questions exist | none | - | - |
+| V6.4.3 | 2 | generator | Self-service password reset by a single-use, one-hour emailed link (POST /api/auth/password-reset, /complete), available with email verification on; an MFA user must also give a TOTP or recovery code, so the reset does not bypass MFA; without email verification an operator procedure applies (docs/knowledge/authentication.md "Password reset") | app/api/auth/password-reset/route.test.ts, app/api/auth/password-reset/complete/route.test.ts | - | - |
+| V6.4.4 | 2 | environment | Lost second factor: recovery codes, then re-enrolment; when none is left, the operator procedure in docs/knowledge/authentication.md ("Lost password without email verification, and a lost second factor") with identity proofing decided by the deployment | none | - | - |
+| V6.5.1 | 2 | generator | lib/mfa/verify.ts records the last accepted TOTP time step per user (user.mfa_last_totp_step) with a conditional write and refuses a code from that step or an earlier one; a recovery code is stamped used with a conditional write, so it works once | lib/mfa/verify.test.ts, lib/mfa/totp.test.ts | - | - |
+| V6.5.2 | 2 | generator | Recovery codes are stored as bcrypt hashes; the TOTP secret is encrypted with AES-256-GCM (lib/mfa/crypto.ts) | lib/mfa/recovery.test.ts, lib/mfa/crypto.test.ts | - | - |
+| V6.5.3 | 2 | generator | lib/mfa/recovery.ts uses crypto.randomInt; the otplib random source was not verified | lib/mfa/recovery.test.ts, lib/mfa/totp.test.ts | - | - |
+| V6.5.4 | 2 | generator | Recovery codes have 8 characters from 31 symbols; TOTP has 6 digits | lib/mfa/recovery.test.ts | #1292 | - |
+| V6.5.5 | 2 | generator | TOTP step tolerance is 30 seconds; recovery codes are single-use | none | - | - |
+| V6.6.1 | 2 | n/a | No SMS or PSTN OTP delivery | none | - | - |
+| V6.6.2 | 2 | n/a | No out-of-band codes or requests | none | - | - |
+| V6.6.3 | 2 | n/a | No out-of-band code mechanism; TOTP and recovery codes are rate limited by auth:mfa:challenge | none | - | - |
+| V6.8.1 | 2 | generator | auth.ts signIn callback: verified-email check, domain allow-list, credentials-account collision guard | lib/auth/domain-allow-list.test.ts, cypress/e2e/auth/mfa.cy.ts | - | - |
+| V6.8.2 | 2 | framework | Auth.js validates the Google ID token and callback state; the mobile JWT is verified with jose and algorithms HS256 | cypress/e2e/api/mobile_auth.cy.ts (mobile); none for the OAuth signature | #1234 | next-auth 5.0.0-beta.32, @auth/core 0.41.3 (package-lock.json); oauth4webapi 3.8.6, jose 6.2.13 |
+| V6.8.3 | 2 | n/a | No SAML | none | - | - |
+| V6.8.4 | 2 | n/a | The app never requires a specific authentication strength or recentness from the identity provider | none | - | - |
+
+## V7 Session Management
+
+| ID | Level | Status | Covered by | Verified by | Gap Issue | Source and version |
+|----|-------|--------|------------|-------------|-----------|--------------------|
+| V7.1.1 | 2 | generator | Web session maxAge and updateAge are configurable (SESSION_MAX_AGE_SECONDS, SESSION_UPDATE_AGE_SECONDS) and documented in docs/knowledge/authentication.md; the absolute lifetime is optional (SESSION_ABSOLUTE_MAX_AGE_SECONDS, off by default; V7.3.2) | lib/session-policy.test.ts | - | - |
+| V7.1.2 | 2 | gap | No concurrent-session policy; the limitation is documented in docs/knowledge/authentication.md | none | #1284, #1127 | - |
+| V7.1.3 | 2 | n/a | The app is the only session creator; no federated session coordination | none | - | - |
+| V7.2.1 | 1 | generator | proxy.ts and auth.ts verify sessions server-side; lib/api-auth.ts for mobile JWT and API key | code_generator/tests/test_api_route_authentication_enumeration.py, auth.jwt-erased.test.ts, lib/api-auth.test.ts | - | - |
+| V7.2.2 | 1 | generator | Auth.js JWT for the web, lib/mobile-auth.ts signed access tokens (15 minutes); API keys are machine auth, stored only as a SHA-256 hash and shown once when issued (docs/knowledge/api-key-hashing.md) | cypress/e2e/api/mobile_auth.cy.ts, cypress/e2e/api/api_key_storage.cy.ts, lib/api-key.test.ts, lib/api-auth.test.ts | #1124 | - |
+| V7.2.3 | 1 | generator | lib/mobile-auth.ts refresh token is randomBytes(32) stored as HMAC-SHA256; web sessions are self-contained JWTs | cypress/e2e/api/mobile_auth.cy.ts | - | - |
+| V7.2.4 | 1 | gap | A new web JWT is minted at sign-in but the old one stays valid (stateless); mobile refresh rotation is covered | cypress/e2e/api/mobile_auth.cy.ts (rotation) | #1127 | - |
+| V7.3.1 | 2 | generator | SESSION_MAX_AGE_SECONDS is the web inactivity timeout (the cookie is refreshed only while the session is used) | lib/session-policy.test.ts | - | - |
+| V7.3.2 | 2 | generator | SESSION_ABSOLUTE_MAX_AGE_SECONDS (opt-in, unset by default) ends a web session that is older than the limit since sign-in; with it unset an active session still renews without limit (docs/knowledge/authentication.md) | lib/session-policy.test.ts, auth.jwt-erased.test.ts | - | - |
+| V7.4.1 | 1 | gap | Web sign-out clears the cookie but the JWT stays valid; mobile logout revokes the session | cypress/e2e/api/mobile_auth.cy.ts (mobile revoke) | #1127 | - |
+| V7.4.2 | 1 | gap | Only erasure ends sessions (lib/compliance/anonymize_user.ts); no user disable state | lib/compliance/anonymize_user.test.ts, auth.jwt-erased.test.ts | #1127 | - |
+| V7.4.3 | 2 | gap | Password change and MFA changes do not revoke other sessions | none | #1127 | - |
+| V7.4.4 | 2 | generator | signOut() is reachable from the header and sidebar slots on every authenticated page | none | - | - |
+| V7.4.5 | 2 | gap | No administrator session termination for web users | none | #1127 | - |
+| V7.5.1 | 2 | generator | Password change and MFA disable require the current credential, and so does an email change: `confirmCredentialChange()` in lib/auth/credential-confirmation.ts asks for `current_password` on PUT /api/setting/:id and PUT /api/setting/bulk, and the settings screen's Server Action asks for it through the same function when the password or the email changes | lib/auth/credential-confirmation.ts, lib/auth/credential-confirmation.test.ts, cypress/e2e/api/setting_credential_confirmation.cy.ts, cypress/e2e/auth/settings_credential_change_requires_password.cy.ts, cypress/e2e/auth/settings_email_change_requires_password.cy.ts | #1285 | - |
+| V7.5.2 | 2 | gap | Only mobile sessions are listable and revocable, by their owner | cypress/e2e/api/mobile_auth.cy.ts | #1127 | - |
+| V7.6.1 | 2 | generator | Relying-party and identity-provider session behavior is documented in docs/knowledge/authentication.md: sign-out ends the app cookie only | none | - | - |
+| V7.6.2 | 2 | generator | Sessions are created only by an explicit login submit, OAuth button or mobile token request | cypress/e2e/auth.cy.ts, cypress/e2e/api/mobile_auth.cy.ts | - | - |
+
+## V8 Authorization
+
+| ID | Level | Status | Covered by | Verified by | Gap Issue | Source and version |
+|----|-------|--------|------------|-------------|-----------|--------------------|
+| V8.1.1 | 1 | generator | docs/knowledge/authorization-default-deny.md and multi-tenancy-and-permissions.md | none | - | - |
+| V8.1.2 | 2 | generator | Field rules (write-only, readonly, x-write-locked-values, state-dependent) are in docs/knowledge/field-level-authorization-rules.md; DataGrid child fields are not protected by x-readonly | none | - | - |
+| V8.1.3 | 3 | generator | docs/knowledge/field-level-authorization-rules.md states that the only environmental attribute used is the client IP, for rate-limit keys; no decision depends on device or time of day | none | - | - |
+| V8.1.4 | 3 | generator | docs/knowledge/field-level-authorization-rules.md lists the contextual attributes and what each is used for; none drives an access decision | none | - | - |
+| V8.2.1 | 1 | generator | lib/authz.ts requireEntityPermission (default deny), lib/api-auth.ts requireApiPermission, actions.ts.jinja2 | code_generator/tests/test_api_route_authentication_enumeration.py, test_authz_call_site_enumeration.py, lib/authz_not_server_action.test.ts (no helper taking a caller-supplied user id is a Server Action), security matrix permission_denied cell (check:security-matrix) | #1214 | - |
+| V8.2.2 | 1 | generator | lib/authz.ts record scope (Creator, Assignee) and organization row filtering | lib/authz_record_scope.test.ts, security matrix cross_org cell, security matrix fk_shape axis (references to an unreachable row, REST create/update), code_generator/tests/test_bulk_route_self_only_richperms.py, code_generator/tests/test_fk_reference_shapes.py | #1121, #1257, #1324 | - |
+| V8.2.3 | 2 | gap | Write-only fields are stripped from reads and x-write-locked-values locks values after approval; no per-role field permission model | code_generator/tests/test_rest_update_write_only_omitted_unchanged.py, cypress/e2e/api/setting_write_only_omitted.cy.ts | #1287, #1230, #1235 | - |
+| V8.2.4 | 3 | n/a | Out of scope (Level 3): the generated app has no IP, device, time or location based control; a deployment adds one in front of the app (firewall, identity-aware proxy, identity provider) or in an entity's hand-written validation. docs/knowledge/field-level-authorization-rules.md ("Contextual attributes in security decisions", "Out of scope: contextual controls and step-up") | none | - | - |
+| V8.3.1 | 1 | generator | Enforcement is in route handlers, actions and the service layer; client permission flags are display only | code_generator/tests/test_api_route_authentication_enumeration.py, security matrix permission_denied cell | - | - |
+| V8.3.2 | 3 | gap | The generated service functions of `role`, `permission` and `user` (role membership) clear the permission cache after each write commits, and erasing a user (`anonymizeUser`) drops the cached API key, so a change applies at once on the instance that handled it. Another instance keeps a cached answer until its TTL ends (30 seconds for permissions, 5 minutes for API keys); web sessions cannot be revoked | code_generator/tests/test_permission_cache_invalidation.py, lib/authz_cache_invalidation.test.ts, lib/compliance/anonymize_user.test.ts | #1224, #1127 | - |
+| V8.3.3 | 3 | generator | lib/api-auth.ts withActor and lib/_request_scope.ts resolve permissions for the originating user | lib/api-auth.test.ts, cypress/e2e/api/mobile_auth.cy.ts | #1124 | - |
+| V8.4.1 | 2 | generator | Organization is the enforced isolation boundary; the cross_org matrix cell requires organization filtering | security matrix cross_org cell (check:security-matrix) | #1193 | - |
+| V8.4.2 | 3 | n/a | Out of scope (Level 3): administrative pages and APIs are protected by role permissions only, with no step-up (recent re-authentication) and no contextual check; a deployment that needs them adds them at the proxy or identity provider. `MFA_REQUIRED_ROLES` can require MFA for administrative roles at sign-in. docs/knowledge/field-level-authorization-rules.md ("Out of scope: contextual controls and step-up") | none | - | - |
+
+## V9 Self-contained Tokens
+
+| ID | Level | Status | Covered by | Verified by | Gap Issue | Source and version |
+|----|-------|--------|------------|-------------|-----------|--------------------|
+| V9.1.1 | 1 | generator | lib/mobile-auth.ts uses jose jwtVerify; the web JWT is verified by Auth.js | lib/mobile-auth.test.ts, cypress/e2e/api/mobile_auth.cy.ts (no tampered-token case) | - | - |
+| V9.1.2 | 1 | generator | jwtVerify(..., { algorithms: ['HS256'] }) in lib/mobile-auth.ts | cypress/e2e/api/mobile_auth.cy.ts (a no-type-claim HS256 token is rejected) | - | - |
+| V9.1.3 | 1 | generator | The key is the fixed AUTH_SECRET; no jku, jwk or kid lookup exists | none | - | - |
+| V9.2.1 | 1 | generator | jose enforces exp; mobile access tokens expire after 15 minutes | none | - | - |
+| V9.2.2 | 2 | generator | verifyMobileAccessToken rejects payload.type other than mobile_access | cypress/e2e/api/mobile_auth.cy.ts (token without type) | - | - |
+| V9.2.3 | 2 | generator | signMobileAccessToken sets iss and aud; verifyMobileAccessToken requires both (lib/mobile-auth.ts) | lib/mobile-auth.test.ts (wrong audience, wrong issuer, missing claims) | - | - |
+| V9.2.4 | 2 | generator | The mobile audience is checked on every verification, so a token minted for another audience is rejected; the web session JWT carries no mobile iss or aud. One AUTH_SECRET still signs both kinds (docs/knowledge/cryptographic-inventory-and-key-management.md) | lib/mobile-auth.test.ts (wrong audience) | - | - |
+
+## V10 OAuth and OIDC
+
+| ID | Level | Status | Covered by | Verified by | Gap Issue | Source and version |
+|----|-------|--------|------------|-------------|-----------|--------------------|
+| V10.1.1 | 2 | framework | Auth.js session token is an HttpOnly cookie; the server performs the OAuth exchange | none | #1234 | next-auth 5.0.0-beta.32, @auth/core 0.41.3 (package-lock.json) |
+| V10.1.2 | 2 | framework | Auth.js Google provider checks state, PKCE and nonce; the e2e mock provider bypasses the handshake | none (the mock provider cannot exercise it) | #1234 | next-auth 5.0.0-beta.32, @auth/core 0.41.3 (package-lock.json); oauth4webapi 3.8.6 |
+| V10.2.1 | 2 | framework | Auth.js uses PKCE and state by default; auth.ts overrides only prompt | none | #1234 | next-auth 5.0.0-beta.32, @auth/core 0.41.3 (package-lock.json) |
+| V10.2.2 | 2 | n/a | Only one authorization server (Google) | none | - | - |
+| V10.3.1 | 2 | n/a | The app is not a resource server for third-party OAuth tokens | none | - | - |
+| V10.3.2 | 2 | n/a | The app is not a resource server for third-party OAuth tokens | none | - | - |
+| V10.3.3 | 2 | n/a | The app is not a resource server for third-party OAuth tokens | none | - | - |
+| V10.3.4 | 2 | n/a | The app is not a resource server for third-party OAuth tokens | none | - | - |
+| V10.4.1 | 1 | n/a | The app is not an OAuth authorization server | none | - | - |
+| V10.4.2 | 1 | n/a | The app is not an OAuth authorization server | none | - | - |
+| V10.4.3 | 1 | n/a | The app is not an OAuth authorization server | none | - | - |
+| V10.4.4 | 1 | n/a | The app is not an OAuth authorization server | none | - | - |
+| V10.4.5 | 1 | n/a | The app is not an OAuth authorization server | none | - | - |
+| V10.4.6 | 2 | n/a | The app is not an OAuth authorization server | none | - | - |
+| V10.4.7 | 2 | n/a | The app is not an OAuth authorization server | none | - | - |
+| V10.4.8 | 2 | n/a | The app is not an OAuth authorization server | none | - | - |
+| V10.4.9 | 2 | n/a | The app is not an OAuth authorization server | none | - | - |
+| V10.4.10 | 2 | n/a | The app is not an OAuth authorization server | none | - | - |
+| V10.4.11 | 2 | n/a | The app is not an OAuth authorization server | none | - | - |
+| V10.5.1 | 2 | framework | Auth.js checks the ID token nonce, state and PKCE | none | #1234 | next-auth 5.0.0-beta.32, @auth/core 0.41.3 (package-lock.json); oauth4webapi 3.8.6 |
+| V10.5.2 | 2 | generator | auth.ts sets no `allowDangerousEmailAccountLinking` on the Google provider, so a Google account is identified by its `sub` (the Account row) and never by its email address; a signed-out sign-in with a new `sub` and the email of an existing user is refused with OAuthAccountNotLinked, and a Google account is linked only from a signed-in session (`/setting/accounts`) | lib/auth/google-account-linking.test.ts (provider has no flag; @auth/core refuses the signed-out case, links for the signed-in user, signs in a linked `sub`), app/[locale]/login/page.test.tsx | - | - |
+| V10.5.3 | 2 | framework | Auth.js validates the ID token issuer for the fixed Google provider | none | #1234 | next-auth 5.0.0-beta.32, @auth/core 0.41.3 (package-lock.json); oauth4webapi 3.8.6 |
+| V10.5.4 | 2 | framework | Auth.js validates the ID token audience against GOOGLE_CLIENT_ID | none | #1234 | next-auth 5.0.0-beta.32, @auth/core 0.41.3 (package-lock.json); oauth4webapi 3.8.6 |
+| V10.5.5 | 2 | n/a | OIDC back-channel logout is not used | none | - | - |
+| V10.6.1 | 2 | n/a | The app is a relying party, not an OpenID Provider | none | - | - |
+| V10.6.2 | 2 | n/a | The app is a relying party, not an OpenID Provider | none | - | - |
+| V10.7.1 | 2 | n/a | The app presents no consent screen for third-party clients | none | - | - |
+| V10.7.2 | 2 | n/a | The app presents no consent screen for third-party clients | none | - | - |
+| V10.7.3 | 2 | n/a | The app presents no consent screen for third-party clients | none | - | - |
+
+## V11 Cryptography
+
+| ID | Level | Status | Covered by | Verified by | Gap Issue | Source and version |
+|----|-------|--------|------------|-------------|-----------|--------------------|
+| V11.1.1 | 2 | generator | docs/knowledge/cryptographic-inventory-and-key-management.md covers the AUTH_SECRET lifecycle, including rotation with `AUTH_SECRET_PREVIOUS` and `npm run secrets:reencrypt` (docs/knowledge/authentication.md, "Rotating `AUTH_SECRET`") | lib/auth/reencrypt-stored-secrets.test.ts | - | - |
+| V11.1.2 | 2 | generator | docs/knowledge/cryptographic-inventory-and-key-management.md lists every key, algorithm and use | none | - | - |
+| V11.2.1 | 2 | generator | node:crypto and bcryptjs in lib/mfa, lib/auth; session crypto from Auth.js; no hand-rolled primitives found | lib/mfa/crypto.test.ts, lib/auth/password-check.test.ts | - | - |
+| V11.2.2 | 2 | generator | Values encrypted at rest carry the id of their key (`v2:<key_id>:...`, the id authenticated with the ciphertext); `AUTH_SECRET_PREVIOUS` keeps old values readable during a rotation, a successful MFA check re-encrypts the user's secret and `npm run secrets:reencrypt` rewrites every stored value under the current key; the bcrypt cost is configurable (`BCRYPT_COST`). lib/auth/secret-key-ring.ts, docs/knowledge/authentication.md ("Rotating `AUTH_SECRET`"). The cipher (AES-256-GCM) is not configurable: a change would be a new format version | lib/auth/secret-key-ring.test.ts, lib/mfa/crypto.test.ts, lib/compliance/attachment_name_crypto.test.ts, lib/auth/reencrypt-stored-secrets.test.ts | - | - |
+| V11.2.3 | 2 | generator | AES-256-GCM, HMAC-SHA256, SHA-256, bcrypt; the strength of AUTH_SECRET itself is not enforced | lib/mfa/crypto.test.ts | - | - |
+| V11.3.1 | 1 | generator | No ECB, PKCS#1 v1.5 or createCipher use found; only aes-256-gcm | none | - | - |
+| V11.3.2 | 1 | generator | aes-256-gcm with a 12-byte random nonce (lib/mfa/crypto.ts, lib/compliance/attachment_name_crypto.ts) | lib/mfa/crypto.test.ts (fresh ciphertext per call) | - | - |
+| V11.3.3 | 2 | generator | GCM auth tag verified in decryptSecret; import token verified in lib/_import.ts | lib/mfa/crypto.test.ts (tampered ciphertext rejected) | - | - |
+| V11.4.1 | 1 | generator | SHA-256 and HMAC-SHA256 only; no md5 or sha1 in lib, app or templates | none | - | - |
+| V11.4.2 | 2 | generator | bcryptjs for passwords at `BCRYPT_COST` (10 to 15, default 10); a sign-in rehashes a password stored at another cost. lib/auth/bcrypt-cost.ts, lib/auth/password-rehash.ts | lib/auth/bcrypt-cost.test.ts, lib/auth/password-rehash.test.ts, lib/auth/password-check.test.ts, lib/auth/credential-confirmation.test.ts | - | - |
+| V11.4.3 | 2 | generator | SHA-256 audit-log digest and HMAC-SHA256 tokens | lib/audit-log-integrity/digest.test.ts | - | - |
+| V11.4.4 | 2 | n/a | No password-derived keys; the MFA key is derived from the server secret | none | - | - |
+| V11.5.1 | 2 | generator | Other tokens use randomBytes(32) or randomUUID(). Recovery codes carry about 40 bits (31^8), below the 128 bits asked for; docs/knowledge/authentication.md documents the compensating controls (a code needs the password or a first-factor session, per-user limit of 10 attempts per 5 minutes, single use, bcrypt-hashed storage) and the residual offline-guessing risk | lib/mfa/recovery.test.ts (no modulo bias), lib/mfa/verify.test.ts (per-user attempt limit) | - | - |
+| V11.6.1 | 2 | n/a | No asymmetric key generation or digital signatures | none | - | - |
+
+## V12 Secure Communication
+
+| ID | Level | Status | Covered by | Verified by | Gap Issue | Source and version |
+|----|-------|--------|------------|-------------|-----------|--------------------|
+| V12.1.1 | 1 | environment | TLS is terminated by Cloud Run or Vercel; the Dockerfile serves plain HTTP behind it | none | - | - |
+| V12.1.2 | 2 | environment | Cipher suites are chosen by the platform | none | - | - |
+| V12.1.3 | 2 | n/a | No client-certificate authentication | none | - | - |
+| V12.2.1 | 1 | generator | HSTS via lib/security-headers.ts; the generated mobile client throws unless `EXPO_PUBLIC_API_BASE_URL` is https outside `__DEV__` (`code_generator/templates/mobile/lib/api-base.ts.jinja2`) | lib/security-headers.test.ts, code_generator/tests/test_mobile_api_base_https.py | - | - |
+| V12.2.2 | 1 | environment | Managed certificates from Cloud Run or Vercel | none | - | - |
+| V12.3.1 | 2 | generator | lib/db-url.ts pins verify-full for Postgres; the Upstash database is created with TLS; on a hosted production deployment `lib/transport-security.ts` fails startup for a database URL without TLS and for a `redis://` Redis URL | lib/db-url.test.ts, lib/transport-security.test.ts | - | - |
+| V12.3.2 | 2 | generator | lib/db-url.ts verify-full; nothing sets NODE_TLS_REJECT_UNAUTHORIZED or rejectUnauthorized false | lib/db-url.test.ts | - | - |
+| V12.3.3 | 2 | environment | Single service; no internal HTTP between services | none | - | - |
+| V12.3.4 | 2 | n/a | No internal services with internal CAs | none | - | - |
+
+## V13 Configuration
+
+| ID | Level | Status | Covered by | Verified by | Gap Issue | Source and version |
+|----|-------|--------|------------|-------------|-----------|--------------------|
+| V13.1.1 | 2 | generator | Every external service and endpoint is listed in docs/knowledge/outbound-communications.md | code_generator/tests/test_external_service_contracts.py | - | - |
+| V13.2.1 | 2 | gap | Backend dependencies use static credentials (database password, Redis URL, CRON_SECRET); docs/knowledge/backend-credentials.md lists them, what a leak allows, the evaluation of short-lived alternatives and the rotation steps; audit-log GCS can use workload identity | lib/audit-log-integrity/storage-gcs.test.ts | #1124, #1143 | - |
+| V13.2.2 | 2 | generator | Restricted database role on Vercel; narrow GCS bucket role; GCP database role was not verified | scripts/vercel-env.test.ts, scripts/gcp-storage-config.test.ts | - | - |
+| V13.2.3 | 2 | generator | Production seeding requires explicit admin credentials; docker-compose.prod.yml requires POSTGRES_PASSWORD from the environment and has no default | scripts/seed-baseline-credentials.test.ts, scripts/docker-compose-prod-password.test.ts | - | - |
+| V13.2.4 | 2 | environment | The application fetches no user-supplied URL; the fixed destinations are listed in docs/knowledge/outbound-communications.md and an allow-list is applied on the platform, which the deploy scripts do not configure | none | - | - |
+| V13.2.5 | 2 | environment | Egress restriction is a platform setting; docs/knowledge/outbound-communications.md says what to allow and that the deploy scripts configure none | none | - | - |
+| V13.3.1 | 2 | generator | Secrets go to Secret Manager (scripts/gcp-setup.sh) or sensitive Vercel variables (scripts/vercel-env.sh) | scripts/vercel-env.test.ts, scripts/env-file-permissions.test.ts | #1248 | - |
+| V13.3.2 | 2 | generator | Least-privilege roles for GCS and Vercel previews; per-secret scope of the GCP accessor binding was not verified | scripts/gcp-storage-config.test.ts, scripts/vercel-env.test.ts | - | - |
+| V13.4.1 | 1 | generator | The runner image copies only build output, and the generated .dockerignore keeps .git, .env* (except .env.example), node_modules and .next out of the build context | code_generator/tests/test_dockerfile_generation.py | - | - |
+| V13.4.2 | 2 | generator | Swagger UI gated on SWAGGER_UI_ENABLED; reset-caches route returns 404 without TEST_RESET_TOKEN; poweredByHeader false | none (no direct test of the production-off behavior) | - | - |
+| V13.4.3 | 2 | framework | Next.js serves no directory listing; only files under public/ by exact path | none | #1234 | next 16.4.2 (package-lock.json); public folder docs |
+| V13.4.4 | 2 | environment | Next.js route handlers answer only their exported methods; the platform front end filters TRACE | none | #1234 | - |
+| V13.4.5 | 2 | generator | GET /api/openapi.json and the Swagger UI that reads it return only the entities the caller may read (lib/openapi/filter.ts); the Dockerfile HEALTHCHECK probes /api/auth/csrf, which Auth.js serves without a session | lib/openapi/filter.test.ts, cypress/e2e/api/openapi_permission_filter.cy.ts, code_generator/tests/test_generators_openapi.py, code_generator/tests/test_dockerfile_generation.py | - | - |
+
+## V14 Data Protection
+
+| ID | Level | Status | Covered by | Verified by | Gap Issue | Source and version |
+|----|-------|--------|------------|-------------|-----------|--------------------|
+| V14.1.1 | 2 | generator | Data classes and the controls each gets are defined in docs/knowledge/data-classification.md; x-pii classifies the user entity only and is not consulted for logs, exports, REST or OpenAPI | none (document read against the code) | - | - |
+| V14.1.2 | 2 | generator | Protection per class (at rest, logs, responses, erasure) is stated in docs/knowledge/data-classification.md, including where no control exists | none (document read against the code) | - | - |
+| V14.2.1 | 1 | generator | API keys and tokens are read from headers; credentials are posted in bodies; GCS URLs carry no filename | cypress/e2e/api/upload_path_safety.cy.ts, lib/api-auth.test.ts | - | - |
+| V14.2.2 | 2 | gap | idempotency_key.response_body persists responses without a purge; attachment responses are no-store | lib/attachment/storage.test.ts | #1299 | - |
+| V14.2.3 | 2 | generator | No analytics, tracker or third-party script | none | - | - |
+| V14.2.4 | 2 | generator | Controls are traced to the classes in docs/knowledge/data-classification.md | lib/prisma-slow-query.test.ts (parameter redaction), lib/logger.test.ts | - | - |
+| V14.3.1 | 1 | generator | proxy.ts sends `Clear-Site-Data: "cache", "cookies", "storage"` on the Auth.js sign-out response (POST /api/auth/signout) | cypress/e2e/api/framework_guarantees.cy.ts (cache and client-data headers), lib/proxy-forwarded-headers.test.ts | - | - |
+| V14.3.2 | 2 | generator | next.config.ts sends `Cache-Control: no-store` on every `/api/` response except the attachment route, which sets `private, no-store` itself; proxy.ts sets `no-store` on signed-in page responses | cypress/e2e/api/framework_guarantees.cy.ts (cache and client-data headers), lib/security-headers.test.ts, lib/attachment/storage.test.ts | - | - |
+| V14.3.3 | 2 | n/a | Accepted gap: the mobile web build (expo start --web) is for development and tests and is not deployed to production, so the refresh token it keeps in localStorage is out of production scope; native builds use SecureStore (docs/knowledge/mobile-app.md) | none | - | - |
+
+## V15 Secure Coding and Architecture
+
+| ID | Level | Status | Covered by | Verified by | Gap Issue | Source and version |
+|----|-------|--------|------------|-------------|-----------|--------------------|
+| V15.1.1 | 1 | gap | CI audit job gates high and critical advisories; no remediation time frames (docs/knowledge/dependency-and-resource-controls.md) | none | #1320 | - |
+| V15.1.2 | 2 | generator | package-lock.json and npm ci; trusted sources documented in docs/knowledge/dependency-and-resource-controls.md; .github/workflows/sbom.yml generates a CycloneDX SBOM of the production npm dependencies (Python dependencies are not included) | code_generator/tests/test_sbom_workflow.py | - | - |
+| V15.1.3 | 2 | generator | Resource-demanding functions and their limits are listed in docs/knowledge/dependency-and-resource-controls.md | none | - | - |
+| V15.2.1 | 1 | generator | CI audit job (npm audit, pip-audit) blocks on high and critical | CI job audit (.github/workflows/ci.yml); gate steps 19 and 20 | #1074 | - |
+| V15.2.2 | 2 | generator | Rate-limit buckets, MAX_PAGE_SIZE, import limits, upload quota | lib/rate-limit/redis.test.ts, lib/rate-limit/in-memory.test.ts, lib/_pagination.test.ts, code_generator/tests/test_rate_limit_coverage.py | - | - |
+| V15.2.3 | 2 | generator | reset-caches route is token-gated; mock OAuth is gated by a filesystem sentinel | lib/auth/mock-oauth-gate.test.ts, lib/_secret_compare.test.ts | - | - |
+| V15.3.1 | 1 | generator | Write-only fields are removed from reads (getters_internal.ts.jinja2); other fields are returned in full | code_generator/tests/test_rest_update_write_only_omitted_unchanged.py, cypress/e2e/api/setting_write_only_omitted.cy.ts | #1235 | - |
+| V15.3.2 | 2 | n/a | No server-side fetch of a user-controlled URL | none | - | - |
+| V15.3.3 | 2 | generator | api_route.ts.jinja2 destructures only the allowed create fields and rejects read-only fields | code_generator/tests/test_bulk_route_readonly_fields.py, test_readonly_fields.py, test_org_readonly_field_write_guard.py, test_write_locked_values.py | - | - |
+| V15.3.4 | 2 | generator | lib/rate-limit/client-ip.ts takes the entry TRUSTED_PROXY_HOPS from the right of X-Forwarded-For; per-platform rule in docs/knowledge/authentication.md | lib/rate-limit/client-ip.test.ts | - | - |
+| V15.3.5 | 2 | generator | ESLint `eqeqeq` with the `smart` option (eslint.config.mjs) rejects loose `==` and `!=` except the `x == null` idiom; request bodies are read through the declared fields only and every value is type-checked in the generated service validation (lib/_field_rules.ts, Issue #1271) | lib/eslint_config.test.ts, lib/_field_rules.test.ts | - | - |
+| V15.3.6 | 2 | generator | Documented policy (input-validation-rules-and-limits.md, "Prototype pollution"): bodies are destructured into explicit fields and request data is never deep-merged or used as a dynamic key; there is no lint rule for it | code_generator/tests/test_bulk_route_readonly_fields.py, code_generator/tests/test_readonly_fields.py | - | - |
+| V15.3.7 | 2 | framework | Query parameters are read first-value-only and the body separately; the two are never merged | none | #1234 | next 16.4.2 (package-lock.json); Route Handlers docs |
+
+## V16 Security Logging and Error Handling
+
+| ID | Level | Status | Covered by | Verified by | Gap Issue | Source and version |
+|----|-------|--------|------------|-------------|-----------|--------------------|
+| V16.1.1 | 2 | generator | Logging layers, events, destinations, access and retention: docs/knowledge/logging-inventory.md | none | - | - |
+| V16.2.1 | 2 | generator | audit_log.request_id: a server-generated id per request (lib/request-id.ts), shared by every row of one request; no source IP or user agent is stored, by decision (append-only rows cannot be redacted). Request id in the application log lines is tracked with structured logging | lib/audit-log.test.ts, lib/audit-log-integrity/digest.test.ts | #1323 | - |
+| V16.2.2 | 2 | generator | audit_log.created_at is Timestamptz and written in UTC | lib/audit-log.test.ts, lib/audit-log-integrity/digest.test.ts | - | - |
+| V16.2.3 | 2 | generator | Permitted log sinks are listed in docs/knowledge/logging-inventory.md; application code has no other sink (lint, check:generated) | none | - | - |
+| V16.2.4 | 2 | gap | Console output formats are mixed | none | #1237 | - |
+| V16.2.5 | 2 | generator | Emails are kept out of audit_log metadata and auth logs; slow-query parameters are redacted | lib/auth/audit-no-pii.test.ts, lib/prisma-slow-query.test.ts | #1237 | - |
+| V16.3.1 | 2 | generator | Sign-in, sign-out, rejects and MFA events are audited. On REST routes every 401 (invalid or missing API key, failed mobile sign-in or token) writes a `[security-event]` log line, and a refused web sign-in (missing or wrong credentials, wrong second-factor code) writes one from `auth.ts` | lib/api-auth.test.ts, lib/security-event-web.test.ts, cypress/e2e/audit_log.cy.ts (sign-in only) | #1307 | - |
+| V16.3.2 | 2 | generator | Authorization denials write a `[security-event]` log line on REST routes (403, `PERMISSION_DENIED`) and in Server Actions: the permission checks log where they raise a denial, and `logSecurityEventForError` (lib/security-event.ts) logs any other denial, including one thrown by hand, from `handleApiError`, from every generated Server Action catch that returns an `ActionFailure`, and from `onRequestError` for one left uncaught | lib/api-auth.test.ts, lib/security-event-web.test.ts, code_generator/tests/test_server_action_security_event.py | - | - |
+| V16.3.3 | 2 | generator | The security events are listed in docs/knowledge/logging-inventory.md (`auth.rejected`, `authz.denied`, `rate_limit.hit`); a rate-limit hit on a REST route (429) or in a generated Server Action (`RATE_LIMITED`) is logged. Control bypass attempts beyond these are not logged | lib/api-auth.test.ts, lib/security-event-web.test.ts, code_generator/tests/test_server_action_security_event.py | #1307 | - |
+| V16.3.4 | 2 | generator | handleApiError logs unexpected errors; Redis rate-limit failures and startup failures are logged | lib/api-auth.test.ts, lib/rate-limit/redis.test.ts | - | - |
+| V16.4.1 | 2 | gap | Only some log lines are JSON-encoded; others pass raw values | none | #1237 | - |
+| V16.4.2 | 2 | generator | audit_log is append-only (Prisma guard, database trigger, restricted role, digest chain) | lib/audit-log-integrity/guard.test.ts, digest.test.ts, code_generator/tests/test_audit_log_append_only_templates.py | #990, #1193 | - |
+| V16.4.3 | 2 | environment | Audit digests are stored outside the database (S3 Object Lock, GCS); stdout log forwarding is a platform setting | lib/audit-log-integrity/storage-gcs.test.ts | #991 | - |
+| V16.5.1 | 2 | generator | handleApiError returns a generic body for unknown errors; some ApiError(403) paths still pass an exception message | lib/api-auth.test.ts, code_generator/tests/test_error_text_not_forwarded.py | #1095 | - |
+| V16.5.2 | 2 | generator | Rate limiter falls back to in-memory when Redis fails; no circuit breaker for the database, Stripe or storage | lib/rate-limit/redis.test.ts | - | - |
+| V16.5.3 | 2 | generator | Default-deny authorization and a 500 fallback in each route wrapper | lib/authz.test.ts, code_generator/tests/test_api_route_authentication_enumeration.py | - | - |
+| V16.5.4 | 3 | framework | Next.js catches unhandled route and render errors and returns a 500; app/[locale]/error.tsx and app/global-error.tsx are the error boundaries; onRequestError in instrumentation.ts logs the error name, digest and location without the message (lib/request-error.ts); handleApiError returns a generic 500 body. No process-level handler | lib/request-error.test.ts, code_generator/tests/test_request_error_hooks.py, lib/api-auth.test.ts | #1234 | next 16.4.2 (package-lock.json); error handling docs |
+
+## V17 WebRTC
+
+| ID | Level | Status | Covered by | Verified by | Gap Issue | Source and version |
+|----|-------|--------|------------|-------------|-----------|--------------------|
+| V17.1.1 | 2 | n/a | The app has no real-time media or WebRTC | none | - | - |
+| V17.2.1 | 2 | n/a | The app has no real-time media or WebRTC | none | - | - |
+| V17.2.2 | 2 | n/a | The app has no real-time media or WebRTC | none | - | - |
+| V17.2.3 | 2 | n/a | The app has no real-time media or WebRTC | none | - | - |
+| V17.2.4 | 2 | n/a | The app has no real-time media or WebRTC | none | - | - |
+| V17.3.1 | 2 | n/a | The app has no real-time media or WebRTC | none | - | - |
+| V17.3.2 | 2 | n/a | The app has no real-time media or WebRTC | none | - | - |

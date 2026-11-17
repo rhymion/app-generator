@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireCaller, handleApiError } from '@/lib/api-auth';
+import { enforceApiRateLimit } from '@/lib/api-auth';
 import { ApiError } from '@/lib/api-auth';
 import prisma from '@/lib/prisma';
 import { getUserRoleIds } from '@/lib/authz';
@@ -18,6 +19,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     // cmd_648: dual-auth — X-API-Key/Authorization header when present,
     // session cookie otherwise (see app/api/search/route.ts).
     const { userId } = await requireCaller(request);
+    await enforceApiRateLimit(userId);
 
     const req = await prisma.approval_request.findUnique({
       where: { id },

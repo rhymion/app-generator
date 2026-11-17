@@ -15,6 +15,7 @@
 // the intent visible at the call site and makes the vitest assertion
 // meaningful.
 
+import { logger } from '@/lib/logger';
 import type { AdapterUser } from "@auth/core/adapters";
 import { createId } from "@paralleldrive/cuid2";
 import { recordAuditEvent } from "@/lib/audit-log";
@@ -66,7 +67,7 @@ export async function createTenantBoundUser(
       tenant_id: DEFAULT_TENANT_ID,
     },
   });
-  console.info(
+  logger.info(
     "[auth:createUser]",
     JSON.stringify({
       at: new Date().toISOString(),

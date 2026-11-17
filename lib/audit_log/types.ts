@@ -10,6 +10,8 @@ export type AuditLog = {
   actor_user_id: string | null;
   actor_user?: AuditLogActor | null;
   metadata?: Record<string, unknown> | null;
+  /** Issue #1306: server-generated id of the request that wrote the row; null outside a request. */
+  request_id?: string | null;
   created_at: Date | string;
 };
 

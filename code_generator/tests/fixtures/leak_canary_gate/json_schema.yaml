@@ -1,0 +1,34 @@
+# Fixture entity for the leak-canary-gate. ONLY the entity this gate needs:
+# scripts/check_leak_canary_gate_fixture.sh merges it into a COPY of the default
+# code_generator/json_schema.yaml inside a disposable build directory. The default schema,
+# its generated output and every other fixture stay untouched.
+#
+#   lk_vault   an organization-scoped entity with a write-only field (`secret_note`: upsert-only
+#              custom component, so it is credential material that no read path may return).
+#              The seed task puts one record in the actor's organization (the write-only field holds
+#              a marker) and one in a foreign organization (its title holds a marker no actor of
+#              this run may see).
+definitions:
+  lk_vault:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: true
+    x-display:
+      table:
+        - title:
+            primary: true
+    properties:
+      title: {}
+      secret_note:
+        x-custom-component:
+          target:
+            - upsert
+      organization_id:
+        x-relationship:
+          labelField: name

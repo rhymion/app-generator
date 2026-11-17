@@ -95,4 +95,26 @@ describe('API: upload stores the file under an opaque key and never as a path', 
       expect(res.status).to.eq(400);
     });
   });
+
+  it('refuses a file whose content is not the format its extension names', () => {
+    upload('invoice.pdf', '<html><script>alert(1)</script></html>').then((res) => {
+      expect(res.status).to.eq(400);
+    });
+    upload('photo.png', 'not a png at all').then((res) => {
+      expect(res.status).to.eq(400);
+    });
+  });
+
+  it('accepts a file whose content matches its extension', () => {
+    upload('invoice.pdf', '%PDF-1.4 minimal').then((res) => {
+      expect(res.status).to.eq(200);
+    });
+  });
+
+  it('refuses an oversized upload with 413 and does not store it', () => {
+    upload('big.pdf', `%PDF-1.4 ${'a'.repeat(11 * 1024 * 1024)}`).then((res) => {
+      expect(res.status).to.eq(413);
+      expect(res.body.error).to.contain('byte limit');
+    });
+  });
 });

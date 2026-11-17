@@ -1,5 +1,8 @@
 import type { Metadata } from 'next';
+import { headers } from 'next/headers';
 import { getLocale } from 'next-intl/server';
+import { CSP_NONCE_HEADER } from '@/lib/csp';
+import { CspNonceProvider } from '@/components/_standard/CspNonceProvider';
 import { siteConfig } from '@/lib/site-config';
 import { AppRouterCacheProvider } from '@mui/material-nextjs/v15-appRouter';
 import './globals.css';
@@ -22,11 +25,14 @@ export const metadata: Metadata = {
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const locale = await getLocale();
+  // Set by proxy.ts for each page request; undefined when the proxy did not run.
+  const nonce = (await headers()).get(CSP_NONCE_HEADER) ?? undefined;
   return (
     <html lang={locale}>
       <body style={{ fontFamily: "'Inconsolata', 'Courier New', monospace" }}>
-        <AppRouterCacheProvider>
-          {children}
+        <AppRouterCacheProvider options={{ nonce }}>
+          {/* Client components that render their own inline <style> (MUI X DataGrid) read it here. */}
+          <CspNonceProvider nonce={nonce}>{children}</CspNonceProvider>
         </AppRouterCacheProvider>
       </body>
     </html>

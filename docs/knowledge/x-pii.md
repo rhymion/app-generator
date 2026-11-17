@@ -42,7 +42,6 @@ The default schema annotates these `user` columns:
 | `name` | `direct` | `[deleted]` |
 | `email` | `direct` | `<user id>@deleted.invalid` |
 | `password` | `sensitive` | `null` |
-| `api_key` | `sensitive` | `null` |
 | `mfa_enabled` | `sensitive` | `false` |
 | `image_id` | `indirect` | `null` |
 
@@ -110,7 +109,7 @@ Checked on a generated and started application with the default schema:
 | Detail view and `GET /api/user/{id}` | The same fields as before, with `name` showing `[deleted]`. `x-pii` does not choose the fields. |
 | Export (`GET /api/user/export`) | The same columns as before (`name`, `image_id` in the default schema); the name shows `[deleted]`. |
 | Sign-in with email and password, web or mobile | Rejected: `password` is `null`. |
-| Sign-in with the old API key | Rejected: `api_key` is `null`. |
+| Sign-in with the old API key | Rejected: `api_key_hash` is `null`. |
 | Avatar, mobile device names, notifications | The avatar `attachment` row and file are gone, `device_name` is `null`, the notifications are deleted. |
 | `audit_log` | No row is written by the erasure and no existing row is changed. Sign-in events carry the provider only. |
 | Mentions in comments (`x-mention`) | A mention is stored as `@[user_id:<id>]` and decoded to the user's current `name` when shown, so it shows `[deleted]` after erasure. Only the id-to-name decoding is covered by unit tests; the end-to-end display is not exercised in the default schema, which has no commentable entity. |

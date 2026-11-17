@@ -72,6 +72,7 @@ npx prisma generate --schema="$OUT_DIR/prisma/schema.prisma" >/tmp/oto_decimal_g
 # truth.
 cp "$FIXTURE_DIR/shims/prisma.ts" "$OUT_DIR/lib/prisma.ts"
 cp "$FIXTURE_DIR/shims/authz.ts" "$OUT_DIR/lib/authz.ts"
+cp "$FIXTURE_DIR/shims/_fk_reference.ts" "$OUT_DIR/lib/_fk_reference.ts"
 cp "$FIXTURE_DIR/shims/idempotency.ts" "$OUT_DIR/lib/idempotency.ts"
 cp "$FIXTURE_DIR/tsconfig.json" "$OUT_DIR/tsconfig.json"
 

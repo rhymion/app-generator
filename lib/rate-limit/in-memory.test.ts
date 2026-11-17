@@ -96,3 +96,24 @@ describe('createInMemoryRateLimiter', () => {
     expect(decision.allowed).toBe(true);
   });
 });
+
+describe('createInMemoryRateLimiter peek and reset', () => {
+  it('peek reports a spent bucket without recording a request', async () => {
+    const clock = makeClock();
+    const limiter = createInMemoryRateLimiter(BUCKETS, clock.now);
+    for (let i = 0; i < 10; i++) expect((await limiter.peek('tight', 'k')).allowed).toBe(true);
+    for (let i = 0; i < 3; i++) await limiter.check('tight', 'k');
+    const spent = await limiter.peek('tight', 'k');
+    expect(spent.allowed).toBe(false);
+    expect(spent.retryAfterSeconds).toBe(60);
+    clock.advance(60_001);
+    expect((await limiter.peek('tight', 'k')).allowed).toBe(true);
+  });
+
+  it('reset forgets the key', async () => {
+    const limiter = createInMemoryRateLimiter(BUCKETS, makeClock().now);
+    for (let i = 0; i < 3; i++) await limiter.check('tight', 'k');
+    await limiter.reset('tight', 'k');
+    expect((await limiter.check('tight', 'k')).remaining).toBe(2);
+  });
+});

@@ -26,7 +26,7 @@ Scope: $ARGUMENTS (if empty, review the entire codebase)
 ### Missing indexes
 
 - [ ] `user.tenant_id` — `@@index([tenant_id])` present (`prisma/schema.prisma:98`)
-- [ ] `user.api_key` — `@@index([api_key])` present (`prisma/schema.prisma:96`)
+- [ ] `user.api_key_hash` — `@@index([api_key_hash])` present (`prisma/schema.prisma:96`)
 - [ ] `user.creator_id` — `@@index([creator_id])` present (`prisma/schema.prisma:97`)
 - [ ] `audit_log` — indexes on `actor_user_id`, `(target_table, target_id)`, `created_at` present (`prisma/schema.prisma:~286`)
 - [ ] Generated entity models — each generated model has `@@index([creator_id])`; check whether models with `assignee_id` or `organization_id` also have indexes on those FK columns
@@ -59,7 +59,7 @@ Scope: $ARGUMENTS (if empty, review the entire codebase)
 ### API response time
 
 - [ ] JWT session reads off-DB — `session.strategy = "jwt"` means `auth()` in most routes resolves from the cookie without a DB round-trip (`auth.ts:~155`)
-- [ ] API key TTL-LRU cache — `lib/api-auth.ts` caches `api_key → userId` for 5 minutes with a 1000-entry LRU cap (production only); dev/test bypass to avoid stale data after `db:reset`
+- [ ] API key TTL-LRU cache — `lib/api-auth.ts` caches `SHA-256(api key) → userId` for 5 minutes with a 1000-entry LRU cap (production only); dev/test bypass to avoid stale data after `db:reset`
 - [ ] Vercel Tokyo DB latency — each sequential DB call adds ~500ms; the parallel fetch pattern (`Promise.all`) is critical to perceived performance per `docs/knowledge/performance-improvements.md`
 - [ ] `select` projections — `get{Entity}Page` uses `include:` for relations but does not `select` specific scalar columns; for wide tables, adding explicit `select` reduces payload size
 

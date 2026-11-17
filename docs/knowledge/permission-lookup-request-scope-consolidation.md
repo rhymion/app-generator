@@ -22,7 +22,7 @@ byte-identical `permission.findMany` queries in one request as a result.
 ## How call sites avoid a second fetch: reuse the RichPermissions object
 
 The fix is not a bigger cache — it is removing the reason to call
-`getModelPermissions()` a second time at all. `resolvePermissions(perms,
+`getModelPermissions()` a second time at all. `resolveRecordPermissions(perms,
 item, userId)` (also in `lib/authz.ts`) computes **all four** operation
 flags (`create`/`read`/`update`/`delete`/`import`) for an item in one call,
 regardless of which single operation the caller originally asked about.
@@ -35,17 +35,17 @@ operation on that same item, and needs no further call:
 const basePerms = await requireApiPermission(actorId, model, 'read');
 const item = await get{{Parent}}Detail(id);
 if (!item) return NextResponse.json({ error: 'Not found' }, { status: 404 });
-const resolved = await resolvePermissions(basePerms, item, actorId);
+const resolved = await resolveRecordPermissions(basePerms, item, actorId);
 // resolved.update / resolved.delete are already correct here — no
-// canAccess()/getModelPermissions() call needed for either.
+// canAccessRecord()/getModelPermissions() call needed for either.
 ```
 
 `code_generator/templates/api_capabilities_route.ts.jinja2` (the row-level
 capabilities endpoint), `api_detail_route.ts.jinja2` (GET/PUT/DELETE), and
 `api_import_route.ts.jinja2` (the per-row CSV update-permission check,
-previously one `canAccess()` call per imported row) all follow this
+previously one `canAccessEntity()` call per imported row) all follow this
 pattern: fetch a `RichPermissions` object once, then read every operation
-flag off the resolved object rather than calling `canAccess()`/
+flag off the resolved object rather than calling `canAccessRecord()`/
 `getModelPermissions()` again for the same `(model, userId)`.
 
 Parallelizing the old, now-removed redundant calls with `Promise.all`
@@ -71,7 +71,7 @@ with a two-phase check:
 2. **Item-level resolution second**: once the item is fetched (and found —
    a genuine "not found" still short-circuits to 404 at this point), the
    *same* `RichPermissions` object is resolved against the item via
-   `resolvePermissions()` and the specific operation flag is checked.
+   `resolveRecordPermissions()` and the specific operation flag is checked.
 
 This ordering closes an information-disclosure gap: previously, an item
 was fetched (and a 404 returned for a missing id) *before* any permission
@@ -124,9 +124,9 @@ possibly becoming a permission error instead) in a way carrying more risk
 than reward for their (Server-Action-only, non-guessable-id) exposure:
 
 - `attachment_actions.ts.jinja2`'s `assertCanEditBridge()` fetches the
-  attachment's owner row before calling `requirePermission()`.
+  attachment's owner row before calling `requireRecordPermission()`.
 - `actions.ts.jinja2`'s `toggle{{Parent}}CommentReaction()` fetches the
-  comment and its parent row before calling `requirePermission('read',
+  comment and its parent row before calling `requireRecordPermission('read',
   ...)`.
 
 `comment_reactions_api_route.ts.jinja2` (the REST counterpart to the

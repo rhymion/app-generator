@@ -11,7 +11,7 @@ orphan cleanup.
 |------|--------------|--------|
 | Store a file | `POST /api/upload` (multipart, field `file`) | `200 { id, name }`: the id of the `attachment` record that was created, and the file name for display |
 | Attach it to a record | `PUT /api/<entity>/<id>/attachments` (bridge) or the entity's own create / update (direct field) | The record references the attachment by id |
-| Read it | `GET /api/attachments/<id>` | The file, or `401` / `403` / `404` |
+| Read it | `GET /api/attachments/<id>` | The file, or `401` / `404` |
 
 - **Opaque keys.** The object is stored under `crypto.randomUUID()`: no extension, no original file name, no
   timestamp. The original name is kept only in `attachment.encrypted_original_name` (AES-256-GCM, see
@@ -38,6 +38,12 @@ orphan cleanup.
   restart or scale-down. When `K_SERVICE` (Cloud Run) or `VERCEL` is set, `NODE_ENV` is not `development`, and neither a
   bucket, a Blob credential nor `ATTACHMENT_LOCAL_DIR` is configured, `storageBackend()` throws with a message naming the
   variables to set. `ATTACHMENT_LOCAL_DIR` set explicitly (for example to a mounted persistent volume) opts in to local disk.
+- **Local-disk paths are excluded from build tracing.** The local backend's paths are built at runtime from
+  `process.cwd()`, `ATTACHMENT_LOCAL_DIR` and the storage key. Turbopack's file tracer cannot scope such a path, so it
+  warns "Dynamic filesystem access causes tracing of the whole project" and copies the entire project (source, `public/`)
+  into the server output of every route importing the module (Issue #1378). `localStorageRoot()` and `localObjectPath()`
+  mark these calls with `/*turbopackIgnore: true*/`. Any new local-disk access in `lib/attachment/storage.ts` goes through
+  `localObjectPath()`, so it does not bring the warning back; check that `next build` reports no warning for this file.
 - **The GCP scripts match the storage code.** `scripts/gcp-deploy.sh` maps the `app-gcs-bucket-name` secret to
   `GCS_BUCKET_NAME`, the variable the storage code reads. `scripts/gcp-setup.sh` creates the bucket with uniform
   bucket-level access and Public Access Prevention, grants the Cloud Run service account `roles/storage.objectUser` on it
@@ -58,7 +64,7 @@ orphan cleanup.
 
 | Attachment state | Decision |
 |------------------|----------|
-| Owned by a record (bridge or direct field) | The record's own read check: read permission on the owner model, the owner's organization scope (a record of another organization is `404`), Creator / Assignee item-level resolution. No read permission is `403`. |
+| Owned by a record (bridge or direct field) | The record's own read check: read permission on the owner model, the owner's organization scope (a record of another organization is `404`), Creator / Assignee item-level resolution. A caller who may not read the owner also gets `404`, so the status never reveals whether an id is linked to a record. |
 | Not owned by any record yet | Only the user who uploaded it; anyone else gets `404` |
 | Unknown id | `404` |
 | No credential | `401` |

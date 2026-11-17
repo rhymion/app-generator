@@ -34,7 +34,7 @@ from generate import generate
 REPO_ROOT = Path(__file__).resolve().parents[2]
 FIXTURE_DIR = REPO_ROOT / 'code_generator' / 'tests' / 'fixtures' / 'invalidate_gate'
 
-DIRECTIVE = re.compile(r"""\A(?:\s*//[^\n]*\n|\s*/\*.*?\*/)*\s*['"]use server['"]""", re.S)
+DIRECTIVE = re.compile(r"""\A(?:\s*//[^\n]*\n|\s*/\*[^*]*\*+(?:[^/*][^*]*\*+)*/)*\s*['"]use server['"]""")
 EXPORT = re.compile(r'^export\s+(?:async\s+)?function\s+(\w+)', re.M)
 
 # Exports that trust a caller-supplied identity / permissions.
@@ -112,14 +112,14 @@ TRUSTING_PARAM = re.compile(
 # Calls that derive the actor from the session / check a permission. A session
 # lookup alone is deliberately not enough: it only says who is calling.
 PERMISSION_CHECK = re.compile(
-    r'\b(?:requirePermission|assertPermission|resolvePermissions'
+    r'\b(?:require(?:Entity|Record)Permission|assertPermission|resolve(?:Entity|Record)Permissions'
     r'|assert\w*(?:Permission|Role|Approver|Access|Edit|Order)\w*'
     r'|readable\w+Where|get\w+NewPageAccessCheck|getScheduledTaskOperatorId)\s*\('
     r'|\bgetModelPermissions\s*\(\s*[^,)]*\)'
 )
 SESSION_LOOKUP = re.compile(r'\b(?:getSessionUserIdOrThrow|getSessionUserId|auth)\s*\(')
 # First point where the export writes or hands data back. A read that only
-# feeds the check (the item lookup before requirePermission(..., existing)) may
+# feeds the check (the item lookup before requireRecordPermission(..., existing)) may
 # come earlier, as may a bare `return;` or an `{ ok: false ... }` failure result,
 # which carry no data.
 SINK = re.compile(
@@ -222,8 +222,8 @@ ALLOWLIST: list[tuple[str, str, str]] = [
      'Subject is the pending-challenge session; completes the caller\'s own MFA step.'),
     (r'app/\[locale\]/setting/(?:mfa|accounts)/actions\.ts', r'\w+Action',
      'Every action derives the subject from the session and touches only that user\'s own MFA / account rows.'),
-    (r'lib/setting/password-actions\.ts', r'verifyAndHashPassword',
-     'Hashes the session user\'s own password input; reads no one else\'s data.'),
+    (r'lib/setting/api-key-actions\.ts', r'(?:getApiKeyStatus|issueApiKey|setApiKeyExpiry)',
+     'Subject is the session user; reads or replaces only that user\'s own API key hash and expiry; the new key is returned once.'),
     (r'lib/attachment/direct_actions\.ts', r'createDirectAttachment',
      'Actor comes from the session and the update is scoped to rows that actor uploaded and not yet linked.'),
     # --- delegating wrappers: the check lives in the delegate ---
@@ -238,17 +238,8 @@ ALLOWLIST: list[tuple[str, str, str]] = [
      'Session actor; returns only entity names the actor may read.'),
     (r'lib/mention/search\.ts', r'searchMentionUserOptions',
      'Session actor; getModelPermissions(\'user\', sessionUserId) and organization scope before the query.'),
-    # --- lib/authz.ts: pure or session-own helpers ---
-    (r'lib/authz\.ts', r'getSessionUserId(?:OrThrow)?|toPermissions|deriveRichPermissionsFromRows|assertPermission',
-     'Pure functions or the caller\'s own session identity; no data access.'),
-    # --- PENDING: known gaps ---
-    (r'lib/authz\.ts',
-     r'getPermissionRowsForUser|getModelPermissions|getUserRoleIds|canAccess|requirePermission|resolvePermissions'
-     r'|invalidatePermissionCache',
-     'PENDING (tracked publicly as #1214): accept an arbitrary subject / unauthenticated cache flush; '
-     'not part of this change.'),
 ]
-PENDING_ALLOWLIST_PATHS = {r'lib/authz\.ts'}
+PENDING_ALLOWLIST_PATHS: set[str] = set()
 
 # Function-level (inline) directives in page files: each is an opts-only closure
 # over a fetch*Page helper that itself checks session + read permission.
@@ -333,6 +324,16 @@ def _source_files(root: Path):
                 yield p
 
 
+def _tracked_paths(root: Path):
+    """Paths git tracks under lib/ and app/, or None when git cannot say."""
+    try:
+        out = subprocess.run(['git', 'ls-files', '-z', '--', 'lib', 'app'], cwd=root,
+                             capture_output=True, text=True, check=True).stdout
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    return {root / name for name in out.split('\0') if name}
+
+
 # ---- the classifier itself (synthetic shapes) ----
 
 _PREAMBLE = "'use server';\nimport prisma from '@/lib/prisma';\n"
@@ -364,7 +365,7 @@ def test_classifier_flags_a_session_bound_export_with_no_permission_check():
 def test_classifier_flags_identity_parameter_even_when_a_check_runs():
     text = _PREAMBLE + (
         'export const getThingPage = cache(async (userId: string) => {\n'
-        "  await requirePermission('thing', 'read', userId);\n"
+        "  await requireEntityPermission('thing', 'read', userId);\n"
         '  return prisma.thing.findMany();\n'
         '});\n'
     )
@@ -380,6 +381,20 @@ def test_classifier_accepts_a_session_derived_permission_check():
         '}\n'
     )
     assert findings_for(text) == {}
+
+
+def test_directive_matcher_handles_comments_and_runs_in_linear_time():
+    import time
+
+    assert DIRECTIVE.match("'use server'")
+    assert DIRECTIVE.match('// note\n/* a */\n"use server"')
+    assert DIRECTIVE.match('/* a ** b */ \'use server\'')
+    assert not DIRECTIVE.match("export const x = 1\n'use server'")
+    assert not DIRECTIVE.match('/* never closed\n\'use server\'')
+    # An unterminated block comment followed by many comment openers must fail fast.
+    start = time.perf_counter()
+    assert not DIRECTIVE.match('/*' * 20000)
+    assert time.perf_counter() - start < 0.5
 
 
 def test_classifier_ignores_modules_without_the_directive():
@@ -428,8 +443,11 @@ def test_allow_list_has_no_stale_entries_and_pending_ones_are_exactly_the_known_
 def test_inline_function_level_directives_are_a_known_closed_set():
     # The module-level scan cannot see a directive inside a function body; list
     # every file that has one so a new one is a deliberate decision.
+    # Only tracked files count: git-ignored generate-code output (app/[locale]/<entity>/)
+    # appears in a worktree that ran generate-code and must not change the result.
+    tracked = _tracked_paths(REPO_ROOT)
     sources = [p for p in _source_files(REPO_ROOT)
-               if INLINE_DIRECTIVE.search(p.read_text()) and not DIRECTIVE.search(p.read_text())]
+               if (tracked is None or p in tracked) and INLINE_DIRECTIVE.search(p.read_text()) and not DIRECTIVE.search(p.read_text())]
     found = {p.relative_to(REPO_ROOT).as_posix() for p in sources}
     templates = {
         p.relative_to(REPO_ROOT).as_posix()
@@ -448,7 +466,7 @@ def test_generated_submit_action_checks_update_permission_before_the_transaction
     assert files, 'the version-of fixture must emit submit actions'
     for f in files:
         text = f.read_text()
-        check = text.index("requirePermission(")
+        check = text.index("requireRecordPermission(")
         assert "'update'" in text[check:check + 120]
         lookup = text.index('_existing = await prisma.')
         assert lookup < check < text.index('prisma.$transaction')
@@ -472,4 +490,4 @@ def test_submit_action_permission_op_follows_the_entity_x_generate_flags():
     assert op_for({'edit': False}) == 'create'
     assert op_for({'edit': False, 'new': False}) == 'read'
     code = _build_submit_for_approval_authz_code('thing', 'thing', False, False, '{ id: true }', 'create')
-    assert "requirePermission('thing', 'create', _existing, actorId)" in code
+    assert "requireRecordPermission('thing', 'create', _existing, actorId)" in code

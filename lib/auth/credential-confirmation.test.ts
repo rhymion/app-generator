@@ -51,25 +51,30 @@ describe('confirmCredentialChange', () => {
   });
 
   it('rejects a new password without the current password', async () => {
-    const err = await rejection(confirmCredentialChange('u1', { password: 'new-pw' }));
+    const err = await rejection(confirmCredentialChange('u1', { password: 'new-pw-123' }));
+    expect(err.statusCode).toBe(400);
+  });
+
+  it('rejects a new password under the minimum length once the current password is confirmed', async () => {
+    const err = await rejection(confirmCredentialChange('u1', { password: 'short', currentPassword: 'current-pw' }));
     expect(err.statusCode).toBe(400);
   });
 
   it('rejects a new password with a wrong current password', async () => {
-    const err = await rejection(confirmCredentialChange('u1', { password: 'new-pw', currentPassword: 'nope' }));
+    const err = await rejection(confirmCredentialChange('u1', { password: 'new-pw-123', currentPassword: 'nope' }));
     expect(err.statusCode).toBe(403);
   });
 
   it('rejects a password change for an account that has no password', async () => {
     findUniqueMock.mockResolvedValue({ password: null, mfa_enabled: false, email: 'me@example.com' });
-    const err = await rejection(confirmCredentialChange('u1', { password: 'new-pw', currentPassword: 'anything' }));
+    const err = await rejection(confirmCredentialChange('u1', { password: 'new-pw-123', currentPassword: 'anything' }));
     expect(err.statusCode).toBe(403);
   });
 
   it('stores a hash of the new password once the current password is confirmed', async () => {
-    const out = await confirmCredentialChange('u1', { password: 'new-pw', currentPassword: 'current-pw' });
-    expect(out.password).not.toBe('new-pw');
-    expect(await bcrypt.compare('new-pw', out.password)).toBe(true);
+    const out = await confirmCredentialChange('u1', { password: 'new-pw-123', currentPassword: 'current-pw' });
+    expect(out.password).not.toBe('new-pw-123');
+    expect(await bcrypt.compare('new-pw-123', out.password)).toBe(true);
   });
 
   it('rejects a changed email address without the current password', async () => {
@@ -101,7 +106,7 @@ describe('confirmCredentialChange', () => {
 
   it('answers 429 once the confirmation budget is spent, before comparing', async () => {
     checkMock.mockResolvedValue({ allowed: false, retryAfterSeconds: 30 });
-    const err = await rejection(confirmCredentialChange('u1', { password: 'new-pw', currentPassword: 'current-pw' }));
+    const err = await rejection(confirmCredentialChange('u1', { password: 'new-pw-123', currentPassword: 'current-pw' }));
     expect(err.statusCode).toBe(429);
     expect(err.retryAfterSeconds).toBe(30);
   });

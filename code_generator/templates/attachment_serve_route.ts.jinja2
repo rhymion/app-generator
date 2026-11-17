@@ -1,9 +1,11 @@
 // AUTO-GENERATED - DO NOT EDIT
+import { logger } from '@/lib/logger';
 import { NextRequest, NextResponse } from 'next/server';
 import { authenticate, ApiError } from '@/lib/api-auth';
 import { getSessionUserId } from '@/lib/authz';
 import prisma from '@/lib/prisma';
 import { authorizeAttachmentRead } from '@/lib/attachment/access';
+import { contentDisposition } from '@/lib/attachment/content-disposition';
 import { isStorageKey, serveStoredObject } from '@/lib/attachment/storage';
 import { decryptFileName } from '@/lib/compliance/attachment_name_crypto';
 import { UPLOAD_CONTENT_TYPE_BY_EXTENSION, extensionOf } from '@/lib/_upload_validation';
@@ -13,16 +15,12 @@ import { UPLOAD_CONTENT_TYPE_BY_EXTENSION, extensionOf } from '@/lib/_upload_val
 // The only way a stored file is read. The caller is the signed-in user (browser session) or a mobile
 // access token / API key. Access follows the record the file is attached to: the same read permission
 // and organization scope as the record's own detail page, and a file that is not attached yet can only
-// be read by the user who uploaded it. A record outside the caller's organizations answers 404.
+// be read by the user who uploaded it. Every refusal answers 404, whether the id is unknown, unlinked,
+// in another organization or linked to a record the caller may not read, so the status does not reveal which.
 
 type Params = { params: Promise<{ id: string }> };
 
 const INLINE_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp']);
-
-function contentDisposition(kind: 'inline' | 'attachment', filename: string): string {
-  const ascii = filename.replace(/[^\x20-\x7e]|["\\]/g, '_');
-  return `${kind}; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
-}
 
 async function resolveActorId(request: NextRequest): Promise<string | null> {
   if (request.headers.get('Authorization') || request.headers.get('X-API-Key')) {
@@ -51,7 +49,6 @@ export async function GET(request: NextRequest, { params }: Params) {
   if (!isStorageKey(attachment.path)) return new NextResponse(null, { status: 404 });
 
   const decision = await authorizeAttachmentRead(actorId, attachment);
-  if (decision === 'forbidden') return new NextResponse(null, { status: 403 });
   if (decision !== 'allow') return new NextResponse(null, { status: 404 });
 
   let filename = 'file';
@@ -68,7 +65,7 @@ export async function GET(request: NextRequest, { params }: Params) {
     });
     return response ?? new NextResponse(null, { status: 404 });
   } catch (error) {
-    console.error('Attachment delivery error:', error);
+    logger.error('Attachment delivery error:', error);
     return new NextResponse(null, { status: 500 });
   }
 }

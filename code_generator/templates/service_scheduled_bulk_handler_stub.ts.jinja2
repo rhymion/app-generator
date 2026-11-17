@@ -2,6 +2,7 @@
 // x-scheduled-tasks (bulk) handler for task_id: {{ task_id }}
 {% if task_id == 'attachment_orphan_cleanup' %}
 
+import { logger } from '@/lib/logger';
 import { UNLINKED_ATTACHMENT_WHERE } from '@/lib/attachment/access';
 import { deleteOrphanAttachments } from '@/lib/attachment/orphan_cleanup';
 
@@ -16,9 +17,9 @@ import { deleteOrphanAttachments } from '@/lib/attachment/orphan_cleanup';
 export async function {{ handler }}(systemActorId: string): Promise<void> {
   void systemActorId;
   const { deleted, objectsNotRemoved } = await deleteOrphanAttachments(UNLINKED_ATTACHMENT_WHERE);
-  console.log(`attachment_orphan_cleanup: deleted ${deleted} upload(s)`);
+  logger.info(`attachment_orphan_cleanup: deleted ${deleted} upload(s)`);
   if (objectsNotRemoved.length > 0) {
-    console.warn(`attachment_orphan_cleanup: ${objectsNotRemoved.length} stored object(s) could not be removed`);
+    logger.warn(`attachment_orphan_cleanup: ${objectsNotRemoved.length} stored object(s) could not be removed`);
   }
 }
 {% else %}

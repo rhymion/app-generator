@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 // Guards the rule that auth code identifies users by id only: no email in
-// audit_log metadata and no email in the [auth:*] console.info lines.
+// audit_log metadata and no email in the [auth:*] logger.info lines.
 // auth.ts builds NextAuth at import time, so these checks read the source.
 
 function read(file: string): string {
@@ -32,7 +32,7 @@ describe.each(["auth.ts", "lib/auth/create-user.ts"])("%s", (file) => {
   const src = read(file);
   const all = [
     ...calls(src, "recordAuditEvent").filter((c) => c.includes("action:")),
-    ...calls(src, "console.info"),
+    ...calls(src, "logger.info"),
   ];
 
   it("has audit and log calls to check", () => {

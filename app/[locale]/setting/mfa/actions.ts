@@ -3,7 +3,7 @@
 import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 
-import { getSessionUserIdOrThrow } from '@/lib/authz';
+import { requireMfaSetupUserId } from '@/lib/authz';
 import {
   completeEnrollment,
   disableMfa,
@@ -48,7 +48,7 @@ function toErrorCode(err: unknown): MfaErrorCode {
 
 export async function startEnrollmentAction(): Promise<ActionResult> {
   try {
-    const userId = await getSessionUserIdOrThrow();
+    const userId = await requireMfaSetupUserId();
     const { qrDataUrl, secret } = await startEnrollment(userId);
     await recordAuditEvent({
       action: 'auth:mfa.startEnrollment',
@@ -65,7 +65,7 @@ export async function startEnrollmentAction(): Promise<ActionResult> {
 
 export async function completeEnrollmentAction(code: string): Promise<ActionResult> {
   try {
-    const userId = await getSessionUserIdOrThrow();
+    const userId = await requireMfaSetupUserId();
     const { recoveryCodes } = await completeEnrollment(userId, code);
     await recordAuditEvent({
       action: 'auth:mfa.enabled',
@@ -82,7 +82,7 @@ export async function completeEnrollmentAction(code: string): Promise<ActionResu
 
 export async function disableMfaAction(code: string): Promise<ActionResult> {
   try {
-    const userId = await getSessionUserIdOrThrow();
+    const userId = await requireMfaSetupUserId();
     await disableMfa(userId, code);
     await recordAuditEvent({
       action: 'auth:mfa.disabled',
@@ -103,7 +103,7 @@ export type RegenerateResult =
 
 export async function regenerateRecoveryCodesAction(code: string): Promise<RegenerateResult> {
   try {
-    const userId = await getSessionUserIdOrThrow();
+    const userId = await requireMfaSetupUserId();
     const { recoveryCodes } = await regenerateRecoveryCodes(userId, code);
     await recordAuditEvent({
       action: 'auth:mfa.regenerateCodes',
@@ -120,7 +120,7 @@ export async function regenerateRecoveryCodesAction(code: string): Promise<Regen
 
 /** Re-direct helper used by the cancel button on the pending screen. */
 export async function cancelEnrollmentAction(): Promise<never> {
-  const userId = await getSessionUserIdOrThrow();
+  const userId = await requireMfaSetupUserId();
   await disableMfa(userId, '__cancel__').catch(() => {
     // Cancel via the "clear pending secret" branch even when MFA isn't
     // yet enabled: a direct user.update is fine since there's no recovery

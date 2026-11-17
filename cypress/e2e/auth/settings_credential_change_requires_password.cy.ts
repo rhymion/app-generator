@@ -33,6 +33,13 @@ function openPasswordSection() {
   cy.contains('Change Password').click();
 }
 
+// The change-password block holds only these two fields; the current password is the
+// form's own "current_password" field, asked once.
+function typeNewPassword(value: string, confirmation: string = value) {
+  cy.get('input[type="password"]:visible').not('[name="current_password"]').eq(0).clear().type(value);
+  cy.get('input[type="password"]:visible').not('[name="current_password"]').eq(1).clear().type(confirmation);
+}
+
 function save() {
   cy.get('button[aria-label="Save"]').click();
 }
@@ -58,14 +65,20 @@ describe('Settings credential change needs the current password', () => {
     cy.url({ timeout: 8000 }).should('not.include', '/setting/edit/');
   });
 
+  it('asks for the current password once and has no verify step', () => {
+    openEdit();
+    openPasswordSection();
+    cy.get('input[name="current_password"]').should('have.length', 1);
+    cy.get('input[type="password"]:visible').should('have.length', 3);
+    cy.contains('Current Password').should('not.exist');
+    cy.contains('Verify Password').should('not.exist');
+    cy.contains('button', 'Verify').should('not.exist');
+  });
+
   it('rejects a password change with a wrong current password and keeps the old password', () => {
     openEdit();
     openPasswordSection();
-    cy.get('input[type="password"]:visible').eq(0).type(OLD_PASSWORD);
-    cy.get('input[type="password"]:visible').eq(1).type(NEW_PASSWORD);
-    cy.get('input[type="password"]:visible').eq(2).type(NEW_PASSWORD);
-    cy.contains('button', 'Verify Password').click();
-    cy.contains('Password verified').should('be.visible');
+    typeNewPassword(NEW_PASSWORD);
     typeCurrentPassword('not-the-password');
     save();
     cy.contains('The current password is incorrect.').should('be.visible');
@@ -76,14 +89,22 @@ describe('Settings credential change needs the current password', () => {
     cy.contains(NAME).should('be.visible');
   });
 
-  it('accepts a password change with the correct current password', () => {
+  it('rejects a typed new password when no current password is given', () => {
     openEdit();
     openPasswordSection();
-    cy.get('input[type="password"]:visible').eq(0).type(OLD_PASSWORD);
-    cy.get('input[type="password"]:visible').eq(1).type(NEW_PASSWORD);
-    cy.get('input[type="password"]:visible').eq(2).type(NEW_PASSWORD);
-    cy.contains('button', 'Verify Password').click();
-    cy.contains('Password verified').should('be.visible');
+    typeNewPassword(NEW_PASSWORD);
+    save();
+    cy.url().should('include', '/setting/edit/');
+    Cypress.session.clearAllSavedSessions();
+    cy.clearCookies();
+    login(seed.email, OLD_PASSWORD);
+    cy.contains(NAME).should('be.visible');
+  });
+
+  it('applies a typed new password with the correct current password, without any intermediate step', () => {
+    openEdit();
+    openPasswordSection();
+    typeNewPassword(NEW_PASSWORD);
     typeCurrentPassword(OLD_PASSWORD);
     save();
     cy.url({ timeout: 8000 }).should('not.include', '/setting/edit/');
@@ -93,14 +114,25 @@ describe('Settings credential change needs the current password', () => {
     cy.contains(NAME).should('be.visible');
   });
 
+  it('shows why a mismatched confirmation is not applied instead of claiming success', () => {
+    openEdit();
+    openPasswordSection();
+    typeNewPassword(NEW_PASSWORD, 'something-else-789');
+    cy.get('.password-mismatch').should('be.visible').and('contain', 'do not match');
+    cy.contains('Password verified').should('not.exist');
+    typeCurrentPassword(OLD_PASSWORD);
+    save();
+    cy.url({ timeout: 8000 }).should('not.include', '/setting/edit/');
+    Cypress.session.clearAllSavedSessions();
+    cy.clearCookies();
+    login(seed.email, OLD_PASSWORD);
+    cy.contains(NAME).should('be.visible');
+  });
+
   it('limits repeated wrong current passwords', () => {
     openEdit();
     openPasswordSection();
-    cy.get('input[type="password"]:visible').eq(0).type(OLD_PASSWORD);
-    cy.get('input[type="password"]:visible').eq(1).type(NEW_PASSWORD);
-    cy.get('input[type="password"]:visible').eq(2).type(NEW_PASSWORD);
-    cy.contains('button', 'Verify Password').click();
-    cy.contains('Password verified').should('be.visible');
+    typeNewPassword(NEW_PASSWORD);
     for (let i = 0; i < 10; i += 1) {
       typeCurrentPassword(`wrong-${i}`);
       save();

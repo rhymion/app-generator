@@ -765,7 +765,7 @@ def test_attachments_route_is_generated_for_the_owner_only(out):
     route = (out / 'app/api/mobile_asset/[id]/attachments/route.ts').read_text()
     assert 'export async function PUT' in route
     assert "requireApiPermission(actorId, 'mobile_asset', 'update')" in route
-    assert 'resolvePermissions(basePerms, item, actorId)' in route
+    assert 'resolveRecordPermissions(basePerms, item, actorId)' in route
     assert "setAttachmentsForBridge(attachableId, type as AttachmentType, parsed)" in route or 'setAttachmentsForBridge(attachableId' in route
     # Items are attachment ids only; a path is not accepted, and the action itself checks each id (the
     # record's own row, or an unlinked upload by the caller).

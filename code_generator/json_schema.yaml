@@ -165,11 +165,6 @@ definitions:
         x-custom-component:
           target:
             - upsert
-      api_key:
-        x-pii: sensitive
-        x-custom-component:
-          target:
-            - upsert
       image_id:
         x-relationship:
           target: attachment
@@ -205,7 +200,6 @@ definitions:
         - email
         - image_id
         - password
-        - api_key
         - mfa_enabled
     x-relationships:
       roles:
@@ -226,6 +220,14 @@ definitions:
     x-self-only:
       admin_bypass: true
     x-view-of: user
+    # The API key is server-managed: user.api_key_hash / api_key_issued_at exist only in
+    # prisma/schema.prisma (like mfa_secret), so no form, REST body, import or export can
+    # read or set them. This panel issues a key through a Server Action and shows it once.
+    x-custom-components:
+      - name: ApiKeyPanel
+        path: "@/components/setting/ApiKeyPanel"
+        target:
+          - view
     required:
       - roles
     properties:

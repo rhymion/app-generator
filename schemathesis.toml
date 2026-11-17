@@ -1,0 +1,12 @@
+# Schemathesis configuration for the weekly Dynamic Scans workflow.
+# Record a triaged false positive here with the reason, e.g.
+#
+#   [[operations]]
+#   include-path = "/api/example"
+#   include-method = "POST"
+#   enabled = false        # reason: ...
+#
+# Findings are report-only until the criteria in
+# docs/knowledge/ci-security-workflows.md are met.
+[generation]
+max-examples = 25

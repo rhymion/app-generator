@@ -10,6 +10,7 @@
  * view. There is no path that grants the wider access without a
  * corresponding audit row.
  */
+import { logger } from '@/lib/logger';
 import prisma from '@/lib/prisma';
 import { recordAuditEvent } from '@/lib/audit-log';
 
@@ -42,7 +43,7 @@ export async function trySelfOnlyAdminBypass(entity: string, actorUserId: string
     });
     return true;
   } catch (err) {
-    console.warn(
+    logger.warn(
       '[self_only:admin_bypass_denied]',
       JSON.stringify({
         at: new Date().toISOString(),

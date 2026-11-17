@@ -7,9 +7,9 @@
  * NextAuth's web JWT. The `type: "mobile_access"` claim is
  * the ONLY thing that distinguishes a mobile access token from a web
  * session JWT — auth.ts's `jwt()` callback never sets `type`. Every
- * verification path MUST check this claim ; skipping
+ * verification path MUST check this claim; skipping
  * it anywhere would let a web session JWT be accepted as a mobile token or
- * vice versa.
+ * vice versa. The `iss` and `aud` claims are set on issue and required on verification.
  */
 import { SignJWT, jwtVerify, type JWTPayload } from 'jose';
 import { createHmac, randomBytes } from 'node:crypto';
@@ -17,6 +17,11 @@ import { createId } from '@paralleldrive/cuid2';
 import prisma from '@/lib/prisma';
 
 export const MOBILE_ACCESS_TOKEN_TYPE = 'mobile_access';
+// Issuer and audience of a mobile access token. A web session JWT carries neither, so it is rejected
+// even if it were ever signed with a `type` claim; a token minted for another service with the same
+// key is rejected by the audience check.
+export const MOBILE_TOKEN_ISSUER = 'app:mobile-auth';
+export const MOBILE_TOKEN_AUDIENCE = 'app:mobile-api';
 export const ACCESS_TOKEN_TTL_SECONDS = 15 * 60; // 900s
 export const REFRESH_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 
@@ -42,6 +47,8 @@ export function isMobileJwt(token: string): boolean {
 export async function signMobileAccessToken(userId: string, sessionId: string): Promise<string> {
   return new SignJWT({ session_id: sessionId, type: MOBILE_ACCESS_TOKEN_TYPE })
     .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
+    .setIssuer(MOBILE_TOKEN_ISSUER)
+    .setAudience(MOBILE_TOKEN_AUDIENCE)
     .setSubject(userId)
     .setJti(createId())
     .setIssuedAt()
@@ -65,7 +72,11 @@ export async function verifyMobileAccessToken(
 ): Promise<{ userId: string; sessionId: string }> {
   let payload: JWTPayload;
   try {
-    ({ payload } = await jwtVerify(token, authSecretKey(), { algorithms: ['HS256'] }));
+    ({ payload } = await jwtVerify(token, authSecretKey(), {
+      algorithms: ['HS256'],
+      issuer: MOBILE_TOKEN_ISSUER,
+      audience: MOBILE_TOKEN_AUDIENCE,
+    }));
   } catch {
     throw new MobileAuthError('Invalid or expired access token');
   }

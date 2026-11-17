@@ -90,6 +90,8 @@ next-env.d.ts
 /prisma/migrations/
 # Uploaded files
 /.uploads/
+# lib/mail.ts outbox (development and tests, no SMTP_URL)
+/.mail-outbox/
 
 # non-technical docs
 /docs/slides
@@ -102,6 +104,7 @@ __pycache__/
 # code generator manifest — regenerated on every `generate-code`; cleanup reads
 # it but it churns with generated content, so it's kept out of version control.
 .generated-manifest.json
+.security-manifest.json
 
 # intermediate schema (cmd_395 Stage 1) — build_user_schema.py output, rebuilt
 # from user_schema.yaml + prisma/schema.prisma on every build. Never hand-edited,
@@ -152,6 +155,8 @@ code_generator/.generated/
 # (pre-existing gap alongside its seven siblings above, noticed while
 # running the update-generator gate for cmd_781 — unrelated to that task.)
 .generated-approval-lockdown-gate/
+.generated-leak-canary-gate/
+.generated-leak-canary-gate.lock
 
 # uri-kind-gate fixture check (cmd_792) scratch output —
 # scripts/check_uri_kind_gate_fixture.sh regenerates this from
@@ -188,6 +193,9 @@ code_generator/.generated/
 # version-of-e2e-gate: disposable app copy built and run by
 # scripts/check_version_of_e2e_gate_fixture.sh (never committed).
 .generated-version-of-e2e-gate/
+# security-matrix-e2e-gate: disposable app copy built and run by
+# scripts/check_security_matrix_e2e_gate_fixture.sh (never committed).
+.generated-security-matrix-e2e-gate/
 .generated-mobile-entity-pw/
 # Single-run locks taken by the e2e gate scripts (scripts/gate_run_lock.sh).
 .generated-*.lock
@@ -228,6 +236,8 @@ lib/dashboard/use_entity_approval_actions.ts
 !lib/attachment/orphan_cleanup.ts
 !lib/attachment/owner_cleanup.ts
 !lib/attachment/url.ts
+!lib/attachment/content-disposition.ts
+!lib/attachment/upload-scan-gate.ts
 !lib/attachment/*.test.ts
 !lib/approval_flow/autocomplete_filter.ts
 !lib/approval_flow/service_validation_custom.ts
@@ -241,7 +251,8 @@ lib/dashboard/use_entity_approval_actions.ts
 !lib/approval_request/org-check.test.ts
 !lib/approval_request/submit_predicate.ts
 !lib/approval_request/submit_predicate.test.ts
-!lib/setting/password-actions.ts
+!lib/setting/api-key-actions.ts
+!lib/setting/api-key-actions.test.ts
 !lib/audit_log/getters.ts
 !lib/audit_log/getters_internal.ts
 !lib/audit_log/types.ts
@@ -276,6 +287,10 @@ app/\[locale\]/*/
 !app/\[locale\]/mfa-challenge/**
 !app/\[locale\]/register/
 !app/\[locale\]/register/**
+!app/\[locale\]/forgot-password/
+!app/\[locale\]/forgot-password/**
+!app/\[locale\]/reset-password/
+!app/\[locale\]/reset-password/**
 !app/\[locale\]/setting/
 !app/\[locale\]/setting/**
 app/\[locale\]/setting/edit/
@@ -299,6 +314,8 @@ app/api/*/
 !app/api/notifications/**
 !app/api/test-utils/
 !app/api/test-utils/**
+!app/api/security/
+!app/api/security/**
 # app/api/upload/route.ts is a generate-code target, so it is intentionally NOT
 # negated here — it stays ignored to avoid generated-vs-VCS drift.
 !app/api/approval_request/
@@ -336,6 +353,7 @@ components/setting/form_validation.ts
 cypress/e2e/*.cy.ts
 !cypress/e2e/auth.cy.ts
 !cypress/e2e/auth_redirect.cy.ts
+!cypress/e2e/csp_report_only.cy.ts
 !cypress/e2e/search_page.cy.ts
 !cypress/e2e/audit_log.cy.ts
 !cypress/e2e/import_modal.cy.ts
@@ -366,6 +384,7 @@ cypress/e2e/api/*.cy.ts
 !cypress/e2e/api/round_trip.cy.ts
 !cypress/e2e/api/mobile_auth.cy.ts
 !cypress/e2e/api/mobile_nav.cy.ts
+!cypress/e2e/api/framework_guarantees.cy.ts
 !cypress/e2e/api/mobile_permissions.cy.ts
 !cypress/e2e/api/mobile_token_dual_auth.cy.ts
 !cypress/e2e/api/fk_autocomplete_options.cy.ts
@@ -378,6 +397,7 @@ cypress/e2e/api/*.cy.ts
 !cypress/e2e/api/self_only_access_control.cy.ts
 !cypress/e2e/api/self_only_setting_access_control.cy.ts
 !cypress/e2e/api/openapi_document.cy.ts
+!cypress/e2e/api/openapi_permission_filter.cy.ts
 !cypress/e2e/api/approval_request_resubmit_notification.cy.ts
 !cypress/e2e/api/write_once_side_effect_roundtrip_probe.cy.ts
 !cypress/e2e/api/update_omitted_relation_unchanged.cy.ts
@@ -386,6 +406,10 @@ cypress/e2e/api/*.cy.ts
 !cypress/e2e/api/user_invalidate_record_scope.cy.ts
 !cypress/e2e/api/setting_write_only_omitted.cy.ts
 !cypress/e2e/api/setting_credential_confirmation.cy.ts
+!cypress/e2e/api/api_key_storage.cy.ts
+!cypress/e2e/api/permission_cache_invalidation.cy.ts
+!cypress/e2e/api/sql_parameter_binding.cy.ts
+!cypress/e2e/api/runtime_field_rules.cy.ts
 
 # ── cypress/support/ ──
 cypress/support/*/
@@ -406,3 +430,6 @@ docs/generated/
 # prj:sync record of the files it copied from ../prj (scripts/prj_sync.py, Issue #619)
 .prj-sync-manifest.json
 .prj-sync-excluded-tests.json
+
+# Semgrep scan output (scripts/semgrep_scan.sh)
+semgrep-results/

@@ -1,9 +1,11 @@
 // AUTO-GENERATED - DO NOT EDIT
+import { logger } from '@/lib/logger';
 import { NextRequest, NextResponse } from 'next/server';
 import Papa from 'papaparse';
 import prisma from '@/lib/prisma';
-import { getModelPermissions, assertPermission{% if import_can_update and not is_self_only %}, resolvePermissions{% endif %} } from '@/lib/authz';
+import { getModelPermissions, assertPermission{% if import_can_update and not is_self_only %}, resolveRecordPermissions{% endif %} } from '@/lib/authz';
 import { handleApiError, resolveActorId } from '@/lib/api-auth';
+import { enforceApiRateLimit } from '@/lib/api-auth';
 import { unescapeImportValue } from '@/lib/_csv';
 import { generateImportToken, verifyImportToken } from '@/lib/_import';
 {% if import_uses_format_label_value %}
@@ -53,7 +55,7 @@ export async function POST() {
   );
 }
 {% else %}
-type FieldSpec = { name: string; ts_type: 'string' | 'number' | 'boolean' | 'decimal'; nullable: boolean; is_key: boolean; is_update: boolean };
+type FieldSpec = { name: string; ts_type: 'string' | 'number' | 'boolean' | 'decimal'; nullable: boolean; is_key: boolean; is_update: boolean; max_length: number | null };
 // Decimal-format cells: optional sign, digits, optional fractional part —
 // matches what a Prisma Decimal column accepts. No thousands separators.
 const DECIMAL_CELL_RE = /^-?\d+(\.\d+)?$/;
@@ -91,6 +93,10 @@ function coerceValue(raw: string | undefined, spec: FieldSpec): { ok: true; valu
     if (v === 'false' || v === '0') return { ok: true, value: false };
     return { ok: false };
   }
+  // Issue #1273: the same maximum length service_validation.ts enforces (code points).
+  if (spec.max_length !== null && v.length > spec.max_length && Array.from(v).length > spec.max_length) {
+    return { ok: false };
+  }
   return { ok: true, value: v };
 }
 
@@ -100,6 +106,7 @@ export async function POST(request: NextRequest) {
     // session cookie otherwise (see app/api/search/route.ts).
     const actorId = await resolveActorId(request);
     if (!actorId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    await enforceApiRateLimit(actorId);
     const { permissions } = await getModelPermissions('{{ parent }}', actorId);
     try {
       await assertPermission(permissions, 'import', '{{ parent }}');
@@ -452,7 +459,7 @@ export async function POST(request: NextRequest) {
       // would call getModelPermissions() again for the SAME (model,
       // actorId) on every row -- a CSV import can be hundreds/thousands
       // of rows, so this was a real per-row DB round trip, not a one-off.
-      const canUpdate = (await resolvePermissions(permissions, existing, actorId)).update;
+      const canUpdate = (await resolveRecordPermissions(permissions, existing, actorId)).update;
 {% endif %}
       if (!canUpdate) {
         errors.push({ row: rowNum, code: 'ACCESS_DENIED', message: 'Not permitted to update this row' });
@@ -566,7 +573,7 @@ export async function POST(request: NextRequest) {
           });
         } else {
           // Not one of the app's own typed errors: keep the detail in the server log only.
-          console.error('[import] row write failed', action.row, err instanceof Error ? err.name : typeof err);
+          logger.error('[import] row write failed', action.row, err instanceof Error ? err.name : typeof err);
           commitErrors.push({ row: action.row, code: 'WRITE_FAILED', message: 'The row could not be written' });
         }
       }

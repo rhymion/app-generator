@@ -217,6 +217,20 @@ describe('API: CSV Import batch2 (cmd_328) — dotted FK + Tier2/Tier3 authoriza
           flags: { create: true, read: true, update: true, delete: false, import: true },
           label: 'p4',
         }).then((email) => {
+          // The imported row points at a role, so the importer must be able to read that role:
+          // give the importer's own role a read permission on `role`.
+          cy.request({ url: `${ROLE_API_BASE}?pageSize=100`, headers: { 'X-API-Key': TEST_API_KEY } }).then((roles) => {
+            const importerRole = (roles.body.rows as Array<{ id: string; name: string }>).find((r) =>
+              r.name.startsWith('SessionRole_p4_permission_'),
+            );
+            expect(importerRole).to.exist;
+            cy.request({
+              method: 'POST',
+              url: PERMISSION_API_BASE,
+              headers: { 'X-API-Key': TEST_API_KEY },
+              body: { name: 'role', role_id: importerRole!.id, create: false, read: true, update: false, delete: false, import: false },
+            }).its('status').should('eq', 201);
+          });
           cy.login(email, TEST_CREDENTIALS.password);
           const csv = 'name,role_name,create,read,update,delete,import\n__perm_p4_test__,__test_role_p4__,true,true,false,false,false';
           cy.request({ method: 'POST', url: PERMISSION_IMPORT_PATH, body: { csv, dryRun: true } }).then((dryRes) => {

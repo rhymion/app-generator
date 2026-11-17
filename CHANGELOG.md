@@ -3,6 +3,147 @@ All notable changes to this project will be documented in this file.
 The format is based on Keep a Changelog (https://keepachangelog.com/),
 and this project adheres to Semantic Versioning (https://semver.org/).
 
+## [7.0.0]
+### Breaking changes
+Regenerate after upgrading. The generator ships no Prisma migrations; write the migration for the schema changes below
+yourself (`prisma migrate dev --create-only`, edit `migration.sql`, deploy with `prisma migrate deploy`), as described in
+`docs/knowledge/migration-guide.md`. Test it on a copy of the database first.
+
+**Schema changes and migration**
+- **`user.api_key` is replaced by `user.api_key_hash` and `user.api_key_issued_at`** (Issue #1157). The plaintext key is
+  no longer stored. In `json_schema.yaml`, remove the `api_key` property from `user` and remove `api_key` from the
+  `x-generate.fields` of `setting`. If your schema declares its own `x-custom-components` on `setting`, add `ApiKeyPanel`.
+  Do not accept the migration Prisma proposes, because it drops the keys. Replace its body with
+  `prisma/sql/api_key_hash_migration.sql`, which hashes each stored key in place so existing keys keep working. Code of
+  your own that reads `user.api_key` must use `api_key_hash` and `hashApiKey()`. See `docs/knowledge/api-key-hashing.md`
+  ("Consumer migration").
+- **New column `user.mfa_last_totp_step`** (Issue #1283): `ALTER TABLE "user" ADD COLUMN "mfa_last_totp_step" INTEGER;`.
+  See `docs/knowledge/authentication.md`.
+- **New column `audit_log.request_id`** (Issue #1306): `ALTER TABLE audit_log ADD COLUMN request_id TEXT;`. Run it as the
+  table owner so that it reaches every partition. Digests of periods that are already closed keep verifying. See
+  `docs/knowledge/audit-log-append-only.md` ("Request id").
+- New optional schema key `x-generator.email-verification` (default off). No migration is needed. See
+  `docs/knowledge/schema-yaml-configuration.md` (1.2).
+
+**Behavior that changes after regenerating**
+- **The server enforces the JSON schema on every write.** The JSON type, `enum`, ranges, `minLength`, `pattern`, `format`
+  and `maxLength` (65535 when none is declared) are checked on REST, bulk, Server Action and CSV import writes. Before,
+  only the browser form checked them. Declare a larger `maxLength` for a field that needs more. See
+  `docs/knowledge/input-validation-rules-and-limits.md`.
+- **Writes must not reference rows the caller cannot reach.** This covers single foreign keys, to-many set members and
+  inline child rows. Such a write, and re-pointing, clearing or deleting a record that already holds such a reference,
+  now fails with 404 or 403. See `docs/knowledge/multi-tenancy-and-permissions.md`.
+- **Authorization API renamed.** `resolvePermissions`, `requirePermission`, `canAccess` and `ItemContext` are removed.
+  Use the `*Entity*` functions (no record) or the `*Record*` functions (record required). `lib/authz.ts` is no longer a
+  `'use server'` module, so a client component must not import its helpers. See
+  `docs/knowledge/multi-tenancy-and-permissions.md`.
+- **Error handling for hand-written code.** `handleApiError` answers `500 Internal server error` for a plain `Error`; a
+  message meant for the user must be thrown as an `AppError`. Add the new `RATE_LIMITED` error code to any hand-written
+  `ErrorCode` switch. A hand-written Server Action that turns errors into results should call
+  `logSecurityEventForError(e)`. A hand-written route that reads the session cookie must call
+  `assertSameSiteCookieWrite()`. See `docs/knowledge/error-message-framework.md`,
+  `docs/knowledge/api-idempotency-and-rate-limiting.md` and `docs/knowledge/authentication.md`.
+- **Sign-in.** Google sign-in no longer links to an existing user by email address; such a user connects Google from
+  `/setting/accounts`. New passwords must be at least 8 characters. Mobile access tokens issued before this version are
+  rejected once, and the app refreshes them. See `docs/knowledge/authentication.md`.
+- **Deployment.** On hosted production, startup fails without TLS on `DATABASE_URL` and `REDIS_URL` (`rediss://`).
+  `docker-compose.prod.yml` requires `POSTGRES_PASSWORD`. An app served under extra custom domains must list them in
+  `AUTH_ALLOWED_HOSTS`. See `docs/knowledge/security-asvs-coverage.md` and `docs/knowledge/authentication.md`.
+- **`prj:sync` refuses `prj/package.json` and `prj/package-lock.json`.** Move those dependencies to
+  `prj/package.extra.json`. See `docs/knowledge/prj-sync-package-extra.md`.
+- **The served OpenAPI document lists only the entities the caller may read.** To generate clients from it, use an API key
+  that can read every entity. See `docs/knowledge/generated-documentation-and-openapi-spec.md`.
+- **No downgrade.** A secret encrypted by this version (`v2:` format) cannot be read by an older version. See
+  `docs/knowledge/cryptographic-inventory-and-key-management.md`.
+
+### Security
+- **Server-side input validation** (Issues #1271, #1273, #1393). Writes are checked against the JSON schema rules and a
+  maximum string length. A value too long for its `@db.VarChar(n)` column is reported as a validation error that names the
+  field. See `docs/knowledge/input-validation-rules-and-limits.md`.
+- **Reference reachability** (Issues #1120, #1324, Refs #1220, #1221). Every reference a write carries, including to-many
+  sets and inline child rows, must point at a row the caller can read. The security matrix declares each reference shape.
+  See `docs/knowledge/multi-tenancy-and-permissions.md` and `docs/knowledge/security-test-matrix.md`.
+- **Required record arguments in authorization checks** (Issues #1121, #1214). A permission check that needs a record must
+  be given one, and the authorization helpers can no longer be called as Server Actions. See
+  `docs/knowledge/multi-tenancy-and-permissions.md`.
+- **Permission cache cleared on role changes** (Issue #731). Role, permission and membership changes clear the permission
+  cache at once, and erasing a user drops their cached API key. See `docs/knowledge/multi-tenancy-and-permissions.md`.
+- **API keys** (Issues #1157, #1143). Keys are stored only as a SHA-256 hash and shown once when issued. The owner chooses
+  when a key expires (default 90 days). See `docs/knowledge/api-key-hashing.md` and `docs/knowledge/api-key-expiry.md`.
+- **Passwords and secrets** (Issues #1291, #1239). `BCRYPT_COST` is configurable. Encrypted values carry a key id, and
+  `AUTH_SECRET` can be rotated with `AUTH_SECRET_PREVIOUS` and `npm run secrets:reencrypt`. Bearer secrets are compared in
+  constant time. See `docs/knowledge/authentication.md` and
+  `docs/knowledge/cryptographic-inventory-and-key-management.md`.
+- **Sign-in protections** (Issues #1125, #1283, #1183, #1289). Accounts lock after repeated failed sign-ins, passwords need
+  at least 8 characters, a TOTP code cannot be replayed, Google sign-in no longer links by email, and mobile tokens carry
+  and require `iss` and `aud`. See `docs/knowledge/authentication.md`.
+- **Sessions** (Refs #1284, #1285). The session lifetime is configurable, an optional absolute lifetime can be set, and an
+  email change on the settings screen requires the current password. See `docs/knowledge/authentication.md`.
+- **Requests from outside the app** (Issues #1275, #1276, #1300). Cookie-authenticated writes from another site are
+  refused, `proxy.ts` trusts forwarded host headers only for configured hosts, API responses are `no-store`, and sign-out
+  sends `Clear-Site-Data`. See `docs/knowledge/authentication.md`.
+- **Security headers and Content Security Policy** (Issue #1123). The app sends default security headers and a
+  report-only Content Security Policy with a per-request nonce. See `docs/knowledge/content-security-policy.md`.
+- **Rate limiting** (Issue #1245). Server Actions and the remaining REST routes are rate-limited, and a test fails when a
+  route has no limiter. See `docs/knowledge/api-idempotency-and-rate-limiting.md`.
+- **Security event logging** (Issue #1307). Failed authentication, permission denials (REST, Server Actions and
+  hand-thrown) and rate-limit hits write a `[security-event]` line. See `docs/knowledge/logging-inventory.md`.
+- **Error output and logging** (Issues #1238, #1237, #1303, #1304). Unexpected error messages are no longer returned to
+  the client, all code logs through a redacting logger, the app has a root error boundary and an `onRequestError` hook,
+  and ESLint enforces `eqeqeq`. See `docs/knowledge/error-message-framework.md` and `docs/knowledge/logging.md`.
+- **Uploads** (Issues #1278, #1321). An upload is checked for size before it is buffered and for content against its
+  extension, and `contentDisposition()` has unit tests. See `docs/knowledge/upload-limits-and-malicious-file-handling.md`.
+- **Deployment hardening** (Issues #1293, #1296, #1297). Production refuses database and Redis connections without TLS,
+  `docker-compose.prod.yml` no longer defaults the database password, and the Dockerfile `HEALTHCHECK` probes a route
+  that exists. See `docs/knowledge/security-asvs-coverage.md`.
+- **Security tests** (Issues #1228, #1229, #1235, #1236, #1272, #1242, #1277). The security matrix gate fails when a test
+  is missing. Generated specs cover the remaining denial and cross-organization cases. New tests cover leaked values,
+  reservation atomicity, Stripe webhook signature checks and list limits. See `docs/knowledge/security-test-matrix.md` and
+  `docs/knowledge/leak-canary-test.md`.
+- **CI security scanning** (Issues #1246-#1255, #1074, #1320). CI runs gitleaks, dependency review, Semgrep (also in the
+  local gate), actionlint, zizmor, OSV-Scanner, OpenSSF Scorecard, a mobile `npm audit`, a CycloneDX SBOM and weekly
+  ZAP, Schemathesis and Nuclei scans. See `docs/knowledge/ci-security-workflows.md`.
+- **Documentation** (Issues #1233, #1234, #1241, #1270, #1279, #1286, #1288, #1290, #1292, #1294, #1295, #1298, #1301,
+  #1302, #1305). New pages cover validation limits, upload limits, field-level authorization and its out-of-scope
+  controls, cryptography, backend credentials, external-service contracts, outbound communications, data classification,
+  dependency controls and the logging inventory, and the OWASP ASVS 5.0 coverage table (`security-asvs-coverage.md`).
+  Each page is under `docs/knowledge/`.
+
+### Added
+- **Opt-in email verification for self-registration** (Issue #1092). It is turned on with
+  `x-generator.email-verification` and sends mail over SMTP (`nodemailer`). See `docs/knowledge/authentication.md`
+  ("Self-registration").
+- **Self-service password reset by email** (Issue #1282). It is available only when email verification is on. See
+  `docs/knowledge/authentication.md`.
+- **Registration domain allow-list** (Issue #1093). `siteConfig.auth.registrationAllowedDomains` limits self-registration
+  to the listed email domains. See `docs/knowledge/authentication.md`.
+- **`MFA_REQUIRED_ROLES`** (Issue #1281). Requires MFA enrolment for every user or for the named roles. See
+  `docs/knowledge/authentication.md` ("Required MFA").
+- **Request id in the audit log** (Issue #1306). Every audit row records `audit_log.request_id`. See
+  `docs/knowledge/audit-log-append-only.md`.
+- **Optional malware scan hook for uploads** (Issue #1279). Override `lib/upload-scan.ts` through `prj/`. See
+  `docs/knowledge/upload-limits-and-malicious-file-handling.md`.
+- **Security test helpers for hand-written code** (Refs #1258, #1260). New `expectDeniedFor`, `seedActorWithoutRole` and
+  `seedActorFromOtherOrganization`, plus a security section in `CLAUDE.md` and `AGENTS.md`. See
+  `docs/knowledge/security-test-helpers.md`.
+- **`prj/package.extra.json`**. Adds consumer npm dependencies during `prj:sync`. See
+  `docs/knowledge/prj-sync-package-extra.md`.
+
+### Changed
+- **Per-caller OpenAPI document** (Refs #1161). `GET /api/openapi.json` and the Swagger UI list only the entities the
+  caller may read. See `docs/knowledge/generated-documentation-and-openapi-spec.md`.
+
+### Fixed
+- **Neon adapter** (follow-up to Issue #1213). `ensureSearchIndexes()` works with the Neon driver adapter again. See
+  `docs/knowledge/raw-sql-policy.md`.
+- **Settings password change** (Refs #1355, #1285). The form asks for the current password once and no longer drops a
+  typed password silently.
+- **List paging** (Refs #1381). The "Go to next page" and "Go to previous page" buttons on list pages work again.
+- **CSP violation on list pages** (Refs #1382). List pages no longer report a `style-src-elem` CSP violation. See
+  `docs/knowledge/content-security-policy.md`.
+- **Flaky tests** (Refs #1346, Issue #1056). The mention-scope and dashboard widget editor specs no longer fail
+  intermittently.
+
 ## [6.1.1] - 2026-11-03
 ### Security
 - **The settings screen and the settings REST routes verify the current password when the password or the email address changes.** The generated settings Server Action now runs `confirmCredentialChange()` after the permission check and before the write, as the REST routes do: it applies the rate limit, checks the current password, and stores only the hash it returns. The edit form has a "Current password" field posted as `current_password`. A refusal comes back as a `VALIDATION` failure on that field. The REST routes (`PUT /api/setting/:id`, `PUT /api/setting/bulk`) ask for `current_password` when `email` differs from the stored address, ignoring case and padding. A save that changes neither needs no current password.
@@ -21,6 +162,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 - **Attachment storage addresses the Vercel Blob store explicitly** (Issue #1148). The store is resolved once and passed to every `put`, `get` and `del` call instead of being left to the SDK's resolution order, in which an OIDC connection outranks `BLOB_READ_WRITE_TOKEN`. The optional environment variable `ATTACHMENT_BLOB_READ_WRITE_TOKEN` wins when set, and also selects Vercel Blob. Projects that set only `BLOB_READ_WRITE_TOKEN` are unchanged. See `docs/knowledge/attachment-storage.md`.
 - **The Stripe Checkout cancel page checks that the caller started the checkout** (Issue #1177). The `cancel_url` now carries a `token` (an HMAC of the payable id keyed by `AUTH_SECRET`), and `expirePendingCheckout(payableId, token)` expires the session and lets the page remove the record only when it matches; a bare `payable_id` does nothing. Starting a checkout fails when `AUTH_SECRET` is unset. The cancel page is a write-once file: an app generated earlier must pass `token` from `searchParams` to `expirePendingCheckout()`, otherwise cancelling falls back to the `checkout.session.expired` webhook. See `docs/knowledge/stripe-payment-integration.md`.
 - **Stripe Checkout session creation carries an idempotency key** (Issue #1175). A client retry that races the original request gets the original session back instead of a second one for the same record. See `docs/knowledge/stripe-payment-integration.md`.
+- **The attachment route answers 404 for every refused read** (Issue #1192). `GET /api/attachments/<id>` no longer answers 403 when the id is linked to a record the caller may not read, so the status does not reveal whether an id is linked. A caller who relied on the 403 now receives 404.
 - **File uploads are rate limited per user** (Issue #1158). `POST /api/upload` spends a new `upload:file` bucket (30 uploads per user per 10 minutes, `RATE_LIMIT_UPLOAD_LIMIT` to override) and answers HTTP 429 with `Retry-After` when it is spent. See `docs/knowledge/api-idempotency-and-rate-limiting.md`.
 - **An unreachable Redis reaches the limiter's failure path in seconds** (Issue #1176). The Redis client uses short connect/command timeouts and a single retry per command, each check is bounded by `RATE_LIMIT_REDIS_TIMEOUT_MS` (default 2000), and Redis is bypassed for `RATE_LIMIT_REDIS_COOLDOWN_MS` (default 5000) after a failure. It used to take about 80 seconds.
 - **Rate limiting keeps working while Redis is failing** (Issue #1178). A failed check is answered by a per-process in-memory limiter with the same buckets instead of allowing the request unconditionally, so exhausting the Redis provider's command quota no longer disables limiting. Failures are still logged as `[rate-limit:fail_open]`. See `docs/knowledge/authentication.md`.
@@ -58,6 +200,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ### Fixed
 - **A second e2e gate run in the same checkout no longer destroys a running one** (Issue #1199). `test:child-datagrid-e2e-gate`, `test:list-child-e2e-gate`, `test:comment-rest-e2e-gate`, `test:scheduled-task-e2e-gate` and `test:version-of-e2e-gate` take a per-checkout `flock` (`scripts/gate_run_lock.sh`) before their startup teardown and refuse to start while another run holds it. See `docs/knowledge/gate-tooling-guards.md`.
+- **`ensureSearchIndexes()` no longer fails on every cold start when the app connects as a restricted (non-owner) role** (Issue #1213). The generated `lib/db-init.ts` reads the existing index names from `pg_indexes` first and issues `CREATE INDEX CONCURRENTLY` only for the missing ones, so with every index present it runs no DDL and logs nothing, whichever role it runs as (PostgreSQL checks table ownership before it evaluates `IF NOT EXISTS`). A missing index the role may not create is reported in one warning that names it and points at `scripts/create-gin-indexes.sql` (run as the table owner); the remaining missing indexes are still attempted. With a restricted role, run that script as the owner after the switch and after any deploy that adds a searchable field. See `docs/knowledge/audit-log-append-only.md`.
 - **Generated specs expect the seeded label of a second FK to the same target when its key is a string** (follow-up to Issue #851). The populate helper gives the second same-target FK's dependency row a suffixed string key (for example `Test Agent Code A 2`), but the generated view-page check still expected the unsuffixed label, so the Create examples of such an entity failed. The expected label now follows the key the helper seeded.
 - **GCP deploy reads the attachment bucket under the name the storage code uses** (Issue #1160). `scripts/gcp-deploy.sh` now maps the `app-gcs-bucket-name` secret to `GCS_BUCKET_NAME` (it set `GCS_BUCKET`, which nothing read, so uploads silently went to local disk). Re-run the deploy script to update an existing service. Attachment storage also throws on Cloud Run or Vercel when no backend is configured, instead of falling back to local disk; set `ATTACHMENT_LOCAL_DIR` to opt in to a persistent local path. See `docs/knowledge/attachment-storage.md`.
 - **Vercel Blob is selected by `BLOB_STORE_ID` as well as the read-write token** (Issue #1168), so a project using OIDC only no longer falls through to local disk.

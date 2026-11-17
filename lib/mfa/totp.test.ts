@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { generate as otplibGenerate } from 'otplib';
 
-import { generateSecret, otpauthUrl, verifyTotp } from './totp';
+import { generateSecret, otpauthUrl, verifyTotp, verifyTotpStep } from './totp';
 
 describe('generateSecret', () => {
   it('returns a base32 string', () => {
@@ -55,5 +55,16 @@ describe('otpauthUrl', () => {
     expect(url).toContain('issuer=my-next');
     // Account is URL-encoded; the '@' becomes %40.
     expect(url).toContain('alice%40example.com');
+  });
+});
+
+describe('verifyTotpStep replay protection', () => {
+  it('refuses a code whose step is not after the last accepted step', async () => {
+    const secret = generateSecret();
+    const code = await otplibGenerate({ secret });
+    const step = await verifyTotpStep(secret, code);
+    expect(step).not.toBeNull();
+    expect(await verifyTotpStep(secret, code, step)).toBeNull();
+    expect(await verifyTotpStep(secret, code, (step as number) - 1)).toBe(step);
   });
 });

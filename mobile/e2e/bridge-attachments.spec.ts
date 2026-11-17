@@ -25,7 +25,11 @@ async function createAsset(page: Page, title: string) {
 async function add(page: Page, type: 'image' | 'file', name: string, mimeType: string) {
   const chooser = page.waitForEvent('filechooser');
   await page.getByTestId(`attachments-pick-${type}`).click();
-  await (await chooser).setFiles({ name, mimeType, buffer: Buffer.from('hello') });
+  // The upload route checks the leading bytes against the extension.
+  const buffer = name.endsWith('.png')
+    ? Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00])
+    : Buffer.from('%PDF-1.4 hello');
+  await (await chooser).setFiles({ name, mimeType, buffer });
   await expect(page.getByTestId(`attachments-${type}`).getByText(name)).toBeVisible();
 }
 

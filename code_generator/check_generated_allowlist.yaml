@@ -45,6 +45,17 @@ exemptions:
       schema.yaml at generate-code time, not runtime input; CREATE INDEX
       target names can't be bind parameters regardless (issue #737). See
       code_generator/templates/db_init.ts.jinja2 header comment.
+  # lib/db-init.ts reads the existing index names from pg_indexes and the
+  # installed extensions from pg_extension before creating anything (Issue
+  # #1213), so a restricted application role that does not own the tables
+  # never runs a CREATE INDEX for an index that already exists. Both
+  # statements are fixed tagged-template literals with no `${}` substitution.
+  - path: lib/db-init.ts
+    pattern: raw:queryRaw
+    substring: "prisma.$queryRaw<"
+    reason: >-
+      Catalog reads (pg_indexes, pg_extension), fixed literal, zero runtime
+      interpolation; not expressible with the Prisma query builder.
   # issue #737: lib/search/helpers.ts's cross-entity search UNION query (count,
   # facet, and main page queries) cannot be expressed through Prisma's query
   # builder -- it unions N heterogeneous entity tables under one

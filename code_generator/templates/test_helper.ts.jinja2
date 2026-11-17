@@ -29,7 +29,7 @@
 {% endfor %}
 {% endmacro %}
 // AUTO-GENERATED - DO NOT EDIT
-import { prisma{% if has_approvable %}, ALL_ENTITIES{% endif %} } from '../db-helpers';
+import { prisma{% if has_approvable %}, ALL_ENTITIES, createKeyedUser{% endif %} } from '../db-helpers';
 import { TEST_CREDENTIALS } from '../test-credentials';
 import { dependencyData, dependencyLookup } from '../dependency-values';
 import { dependencyValues } from './helper_custom';
@@ -37,7 +37,7 @@ import { dependencyValues } from './helper_custom';
 import { formatLabelValue } from '@/lib/_format';
 {% endif %}
 {% if has_mention_comments %}
-import { notify } from '@/lib/_notifier';
+import { randomUUID } from 'node:crypto';
 {% endif %}
 {% if has_approvable %}
 import { createId } from '@paralleldrive/cuid2';
@@ -812,12 +812,24 @@ export async function populate{{ pascal }}WithMentionUser() {
   });
   // cmd_522 (M2): this helper inserts the comment via direct prisma (like
   // M1 above) rather than through the generated add{{ pascal }}Comment()
-  // action, so it must fire the mention notification itself — mirroring
+  // action, so it must write the mention notification itself -- mirroring
   // what that action's mention-notify block does on the real save path.
-  await notify(mentionedUser.id, 'mentioned_in_comment', {
-    title: 'You were mentioned in a {{ pascal }} comment',
-    href: `/{{ parent }}/view/${record.id}`,
-    commentSnippet: comment.message.slice(0, 80),
+  // It writes the row directly and awaits it, instead of calling notify(),
+  // which is fire-and-forget: a seed row that lands after the spec's first
+  // notification read would be counted as a notification of the action
+  // under test.
+  await prisma.notification.create({
+    data: {
+      id: randomUUID(),
+      user_id: mentionedUser.id,
+      type: 'mentioned_in_comment',
+      payload: {
+        title: 'You were mentioned in a {{ pascal }} comment',
+        href: `/{{ parent }}/view/${record.id}`,
+        commentSnippet: comment.message.slice(0, 80),
+      },
+      read: false,
+    },
   });
   return {
     record,
@@ -1146,36 +1158,33 @@ export async function setup{{ pascal }}ApprovalFlow() {
     )
   );
 
-  const requestorUser = await prisma.user.create({
+  const requestorUser = await createKeyedUser(`test_mk_{{ model_name }}_requestor`, {
     data: {
       name: 'Test {{ title }} Requestor User',
       email: 'test-{{ model_name }}-requestor@example.com',
       password: hashedPw,
-      api_key: `test_mk_{{ model_name }}_requestor`,
       creator_id: testUser.id,
       updater_id: testUser.id,
       roles: { connect: [{ id: requestorRole.id }] },
     },
   });
 
-  const approverUser = await prisma.user.create({
+  const approverUser = await createKeyedUser(`test_mk_{{ model_name }}_approver`, {
     data: {
       name: 'Test {{ title }} Approver User',
       email: 'test-{{ model_name }}-approver@example.com',
       password: hashedPw,
-      api_key: `test_mk_{{ model_name }}_approver`,
       creator_id: testUser.id,
       updater_id: testUser.id,
       roles: { connect: [{ id: approverRole.id }] },
     },
   });
 
-  const noRoleUser = await prisma.user.create({
+  const noRoleUser = await createKeyedUser(`test_mk_{{ model_name }}_norole`, {
     data: {
       name: 'Test {{ title }} No Role User',
       email: 'test-{{ model_name }}-norole@example.com',
       password: hashedPw,
-      api_key: `test_mk_{{ model_name }}_norole`,
       creator_id: testUser.id,
       updater_id: testUser.id,
       roles: { connect: [{ id: basicRole.id }] },
@@ -1268,23 +1277,21 @@ export async function setup{{ pascal }}OrderedApprovalFlow() {
     )
   );
 
-  const approverUser1 = await prisma.user.create({
+  const approverUser1 = await createKeyedUser(`test_mk_{{ model_name }}_ordered_approver1`, {
     data: {
       name: 'Test {{ title }} Ordered Approver 1',
       email: 'test-{{ model_name }}-ordered-approver1@example.com',
       password: hashedPw,
-      api_key: `test_mk_{{ model_name }}_ordered_approver1`,
       creator_id: testUser.id,
       updater_id: testUser.id,
       roles: { connect: [{ id: approverRole1.id }] },
     },
   });
-  const approverUser2 = await prisma.user.create({
+  const approverUser2 = await createKeyedUser(`test_mk_{{ model_name }}_ordered_approver2`, {
     data: {
       name: 'Test {{ title }} Ordered Approver 2',
       email: 'test-{{ model_name }}-ordered-approver2@example.com',
       password: hashedPw,
-      api_key: `test_mk_{{ model_name }}_ordered_approver2`,
       creator_id: testUser.id,
       updater_id: testUser.id,
       roles: { connect: [{ id: approverRole2.id }] },

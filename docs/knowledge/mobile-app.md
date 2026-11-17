@@ -117,7 +117,7 @@ The desktop-only user-identity link and sign-in link have no mobile counterpart 
 
 `GET /api/mobile/nav` returns `{ hiddenHrefs }`: the nav hrefs the caller cannot open. It applies the
 rule `app/[locale]/layout.tsx` applies to the desktop sidebar — an entity link is hidden when the caller
-lacks `read` on the entity — through the same `canAccess()`. The app prunes its tree with the answer and
+lacks `read` on the entity — through the same `canAccessEntity()`. The app prunes its tree with the answer and
 drops groups left empty. If the request fails the app shows no entity tabs rather than links the user may
 not be allowed to open.
 
@@ -652,8 +652,8 @@ The mobile app signs in with email and password and holds an access/refresh toke
 | `GET /api/mobile/auth/sessions` | Lists the caller's active devices. |
 | `DELETE /api/mobile/auth/sessions/:id` | Revokes one of the caller's own device sessions. |
 
-The access token is a 15-minute HS256 JWT signed with `AUTH_SECRET` and carrying `type: "mobile_access"`;
-that claim is the only thing separating it from a web session JWT, so every verification path checks it.
+The access token is a 15-minute HS256 JWT signed with `AUTH_SECRET` and carrying `type: "mobile_access"`, `iss: "app:mobile-auth"` and `aud: "app:mobile-api"`;
+the web session JWT carries none of these, so every verification path checks all three.
 Refresh tokens last 30 days and are stored as a keyed HMAC, never in plaintext (`mobile_session` table).
 Access-token verification does not read the `mobile_session` row: a token issued just before sign-out or revocation stays valid for
 the rest of its 15 minutes. It does read the user row (one primary-key lookup), so a token of an anonymized user is
@@ -668,7 +668,9 @@ such text in its own `Info.plist`, so the app stores and reads the token there w
 stored beside it (`app_refresh_token_locked`, unlocked) and every read reuses it, so enrolling or removing a device
 lock later does not log the user out. A failure of the device authentication API stores the token unlocked and logs a
 warning. A locked save that fails outside Expo Go is not retried unlocked. Face ID therefore cannot
-be verified in Expo Go; only a standalone or development build locks the token. Web uses `localStorage`.
+be verified in Expo Go; only a standalone or development build locks the token.
+
+The web build (`expo start --web`, react-native-web) is for development and tests and is not deployed to production. On web the refresh token is held in `localStorage`. ASVS V14.3.3 records this as an accepted gap with the web build out of production scope (`docs/knowledge/security-asvs-coverage.md`).
 
 Generated REST routes call `authenticate()` (`lib/api-auth.ts`), which accepts either a mobile access JWT
 or an API key (`X-API-Key` / `Authorization: Bearer`); a JWT always has three dot-separated segments and
@@ -902,6 +904,22 @@ The minimal set above is the base. Later steps add, in this order: list filter/s
 inline create and attachments; comments; approval and split actions; reservation, custom components, scheduled tasks, audit log.
 The Playwright specs under `mobile/e2e/` already cover each of these on the web build and are the source for the assertions.
 
+## Dependency audit in CI
+
+The generated `mobile/` has its own `package.json` and commits no lock file, so the root `audit` and
+`audit-full-scope` jobs of `.github/workflows/ci.yml` do not see it. The job `audit-mobile` covers it: it switches
+`x-generator.mobile.enabled` on in the runner's copy of the default schema, runs `npm run generate-code`, resolves
+the tree with `npm install --package-lock-only --ignore-scripts` in `mobile/` and runs `npm audit --json` over it,
+`devDependencies` included.
+
+The job is **non-blocking**. It writes a severity table to the job summary and keeps the JSON as the
+`npm-audit-mobile` artifact for 30 days. Because the tree is resolved fresh on each run, the counts can change
+without a code change, and `n/a` in the table means no report was produced (generation or resolution failed).
+Most findings sit in Expo tooling that never reaches the app bundle, which is why the job does not fail the run;
+a blocking rule would have to be limited to packages in the `expo export` bundle or use an allowlist, and neither
+exists yet. Whether the generated app should commit a lock file and whether Dependabot should watch it are also
+undecided. See [dependency-and-resource-controls.md](dependency-and-resource-controls.md).
+
 ## Not implemented yet
 
 - Entity screens for an entity that declares anything beyond plain fields, the relation pickers, direct attachment
@@ -917,3 +935,4 @@ The Playwright specs under `mobile/e2e/` already cover each of these on the web 
   `lib/api-auth.ts` dispatches a bearer token by shape), but the app has no CSV screens. Bulk import and export
   stay in the Web admin screens.
 - Translated field labels.
+- A blocking dependency audit of `mobile/` (the `audit-mobile` CI job only reports; see [Dependency audit in CI](#dependency-audit-in-ci)).

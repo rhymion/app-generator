@@ -30,7 +30,9 @@
  * script below is short enough that a vanilla `ioredis` client keeps the
  * dependency surface smaller and works against any Redis without a proxy.
  */
+import { logger } from '@/lib/logger';
 import Redis, { type RedisOptions } from 'ioredis';
+import { assertSecureRedisUrl } from '../transport-security';
 
 import type { RateLimitBucketConfig, RateLimitDecision, RateLimiter } from './index';
 import { createInMemoryRateLimiter } from './in-memory';
@@ -80,6 +82,23 @@ local resetAt = oldestScore + windowMs
 return {0, 0, math.max(0, resetAt - now), resetAt}
 `;
 
+// Read-only twin of the script above: trim, count, report; never ZADD.
+const PEEK_LUA = `
+local key       = KEYS[1]
+local now       = tonumber(ARGV[1])
+local windowMs  = tonumber(ARGV[2])
+local limit     = tonumber(ARGV[3])
+
+redis.call('ZREMRANGEBYSCORE', key, '-inf', now - windowMs)
+local count = redis.call('ZCARD', key)
+if count < limit then
+  return {1, limit - count, 0, now + windowMs}
+end
+local oldest = redis.call('ZRANGE', key, 0, 0, 'WITHSCORES')
+local resetAt = tonumber(oldest[2]) + windowMs
+return {0, 0, math.max(0, resetAt - now), resetAt}
+`;
+
 export type CreateRedisRateLimiterOptions = {
   /** Pre-built ioredis client (used by tests / callers that own connection lifecycle). */
   client?: Redis;
@@ -100,6 +119,7 @@ export function createRedisRateLimiter(
   options: CreateRedisRateLimiterOptions = {},
 ): RateLimiter {
   const url = options.url ?? process.env.REDIS_URL;
+  if (!options.client) assertSecureRedisUrl(url);
   if (!options.client && !url) {
     throw new Error(
       'Redis rate-limit adapter requires REDIS_URL (or an injected client). ' +
@@ -139,7 +159,67 @@ export function createRedisRateLimiter(
 
   let callCounter = 0;
 
+  // Same bounded wait and in-memory fallback as check().
+  async function withTimeout<T>(run: () => Promise<T>): Promise<T> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        run(),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(
+            () => reject(new Error(`rate-limit Redis call timed out after ${timeoutMs}ms`)),
+            timeoutMs,
+          );
+        }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
+  function markDown(bucket: string, err: unknown) {
+    redisDownUntil = Date.now() + cooldownMs;
+    logger.error(
+      '[rate-limit:fail_open]',
+      JSON.stringify({
+        at: new Date().toISOString(),
+        bucket,
+        error: err instanceof Error ? err.message : String(err),
+      }),
+    );
+  }
+
   return {
+    async peek(bucket: string, key: string): Promise<RateLimitDecision> {
+      const cfg = buckets[bucket];
+      if (!cfg) return fallback.peek(bucket, key);
+      if (Date.now() < redisDownUntil) return fallback.peek(bucket, key);
+      try {
+        const [allowedNum, remaining, retryMs, resetAt] = (await withTimeout(() =>
+          client.eval(PEEK_LUA, 1, `rl:${keyPrefix}${bucket}:${key}`, String(Date.now()), String(cfg.windowMs), String(cfg.limit)),
+        )) as [number, number, number, number];
+        return {
+          allowed: allowedNum === 1,
+          remaining: Number(remaining),
+          retryAfterSeconds: Math.ceil(Number(retryMs) / 1000),
+          resetAt: Number(resetAt),
+        };
+      } catch (err) {
+        markDown(bucket, err);
+        return fallback.peek(bucket, key);
+      }
+    },
+
+    async reset(bucket: string, key: string): Promise<void> {
+      await fallback.reset(bucket, key);
+      if (Date.now() < redisDownUntil) return;
+      try {
+        await withTimeout(() => client.del(`rl:${keyPrefix}${bucket}:${key}`));
+      } catch (err) {
+        markDown(bucket, err);
+      }
+    },
+
     async check(bucket: string, key: string): Promise<RateLimitDecision> {
       const cfg = buckets[bucket];
       if (!cfg) {
@@ -203,7 +283,7 @@ export function createRedisRateLimiter(
         // handling: a broken Redis must never take auth down with it, but
         // the degraded window must be visible in server logs, not silent.
         redisDownUntil = Date.now() + cooldownMs;
-        console.error(
+        logger.error(
           '[rate-limit:fail_open]',
           JSON.stringify({
             at: new Date().toISOString(),

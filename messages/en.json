@@ -38,7 +38,7 @@
     "capacityExhausted": "No capacity is available. Please try a different selection.",
     "currentPasswordIncorrect": "The current password is incorrect.",
     "currentPasswordRateLimited": "Too many attempts. Please wait a few minutes and try again.",
-    "currentPasswordRequired": "Enter your current password to change your password.",
+    "currentPasswordRequired": "Enter your current password to confirm this change.",
     "exclusiveParentsInvalid": "Only one of {fields} can be set; the others must be empty.",
     "exclusiveParentsMissing": "Exactly one of {fields} must be set.",
     "fieldAlreadyLinked": "{field} is already linked to another record.",
@@ -51,6 +51,7 @@
     "pageError": "Something went wrong.",
     "permissionDenied": "You do not have permission to perform this action.",
     "relatedRecordInvalid": "This action cannot be completed because a related record does not meet the required condition.",
+    "rateLimited": "Too many requests. Please wait a moment and try again.",
     "reservationConflict": "This action conflicts with an existing reservation.",
     "reservationLocked": "This row's reservation has already been allocated and its quantity or criteria can no longer be changed.",
     "sessionExpired": "Your session has expired. Please sign in again.",
@@ -190,6 +191,7 @@
     "haveAccount": "Already have an account? Sign in",
     "invalidCredentials": "Invalid credentials",
     "loginError": "An error occurred during login",
+    "oauthAccountNotLinked": "This Google account is not linked to an existing account that uses the same email address. Sign in with your existing account first, then connect Google from your account settings.",
     "confirmPasswordPlaceholder": "Confirm password",
     "passwordMismatch": "Passwords do not match",
     "emailInUse": "Email address is already in use",
@@ -200,7 +202,29 @@
     "mfaChallengeTitle": "Verify it's you",
     "mfaInvalid": "That code did not match. Try again with a fresh 6-digit code, or use a recovery code.",
     "mfaRateLimited": "Too many attempts. Wait a few minutes before trying again.",
-    "legalAgreementNotice": "By creating an account, you agree to our <terms>Terms of Service</terms> and <privacy>Privacy Policy</privacy>."
+    "legalAgreementNotice": "By creating an account, you agree to our <terms>Terms of Service</terms> and <privacy>Privacy Policy</privacy>.",
+    "registerSendLink": "Send sign-up link",
+    "registerEmailOnlyNotice": "We will email you a link. Open it to choose your name and password and finish signing up.",
+    "registerCheckEmailTitle": "Check your email",
+    "registerCheckEmailBody": "If this address can be used to sign up, a message with a link is on its way. Open the link within 24 hours to finish signing up.",
+    "registerCompleteTitle": "Finish signing up",
+    "registerCompleteButton": "Create account",
+    "registerLinkInvalid": "This sign-up link cannot be used. It may have expired or been used already.",
+    "registerStartAgain": "Sign up again",
+    "forgotPasswordLink": "Forgot your password?",
+    "forgotPasswordTitle": "Reset your password",
+    "forgotPasswordNotice": "Enter the email address of your account. We will email you a link to choose a new password.",
+    "forgotPasswordSend": "Send reset link",
+    "forgotPasswordCheckEmailBody": "If an account with a password uses this address, a message with a link is on its way. Open the link within one hour.",
+    "forgotPasswordFailed": "The reset link could not be requested. Try again later.",
+    "resetPasswordTitle": "Choose a new password",
+    "resetPasswordButton": "Set new password",
+    "resetPasswordMfaHelper": "Your account uses two-factor authentication: enter the current code from your authenticator app, or a recovery code.",
+    "resetPasswordDone": "Your password has been changed. Sign in with the new password.",
+    "resetPasswordLinkInvalid": "This reset link cannot be used. It may have expired or been used already.",
+    "resetPasswordStartAgain": "Request a new link",
+    "resetPasswordFailed": "The password could not be changed.",
+    "backToSignIn": "Back to sign in"
   },
   "Legal": {
     "termsTitle": "Terms of Service",
@@ -238,6 +262,29 @@
     "toggleDisabledLabel": "MFA Disabled",
     "toggleDisableButton": "Disable MFA"
   },
+  "ApiKey": {
+    "title": "API key",
+    "statusNotSet": "No API key is set.",
+    "statusSet": "An API key is set.",
+    "statusSetIssued": "An API key is set. Issued {issuedAt}.",
+    "expires": "Expires {expiresAt}.",
+    "issue": "Issue API key",
+    "reissue": "Issue a new API key",
+    "reissueWarning": "Issuing a new key stops the current key from working immediately.",
+    "newKeyLabel": "New API key",
+    "copy": "Copy to clipboard",
+    "shownOnce": "Copy this key now. It is shown only once and cannot be displayed again.",
+    "loadFailed": "The API key status could not be loaded.",
+    "issueFailed": "The API key could not be issued.",
+    "neverExpires": "Never expires.",
+    "expired": "Expired {expiresAt}.",
+    "newKeyExpiryLabel": "Expiry of the new key",
+    "currentKeyExpiryLabel": "Expiry of the current key",
+    "neverExpiresOption": "Never expires",
+    "saveExpiry": "Save expiry",
+    "expiryInvalid": "Choose an expiry in the future, or select Never expires.",
+    "expiryFailed": "The expiry could not be saved."
+  },
   "Setting": {
     "title": "Account settings",
     "mfaTitle": "Two-factor authentication",
@@ -247,7 +294,7 @@
     "accountsTitle": "Connected accounts",
     "accountsBody": "Manage which providers can sign you into this account.",
     "currentPassword": "Current password",
-    "currentPasswordHelp": "Required when you change your password."
+    "currentPasswordHelp": "Required when you change your password or email address."
   },
   "LinkedAccounts": {
     "title": "Connected accounts",
@@ -422,5 +469,15 @@
     "csvLabel": "label",
     "csvCount": "count",
     "csvCategory": "category"
+  },
+  "RegistrationMail": {
+    "newSubject": "Finish signing up for {app}",
+    "newBody": "Someone asked to create an account on {app} with this email address.\n\nTo finish signing up, open this link within 24 hours:\n{link}\n\nIf this was not you, ignore this message. No account is created.",
+    "existingSubject": "Sign-up request for {app}",
+    "existingBody": "Someone asked to create an account on {app} with this email address, but an account already exists for it.\n\nIf this was you, sign in instead:\n{loginLink}\n\nIf this was not you, ignore this message. Nothing has changed."
+  },
+  "PasswordResetMail": {
+    "subject": "Reset your password for {app}",
+    "body": "Someone asked to reset the password of your account on {app}.\n\nTo choose a new password, open this link within one hour:\n{link}\n\nIf this was not you, ignore this message. Your password has not changed."
   }
 }

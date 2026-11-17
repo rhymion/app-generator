@@ -164,7 +164,7 @@ class TestServerAction:
         assert re.search(r'\bemail: email,', call), call
         assert "currentPassword: data.get('current_password')" in call
         # Permission is decided first, the write comes last.
-        assert body.index('requirePermission') < body.index('confirmCredentialChange(id')
+        assert body.index('requireRecordPermission') < body.index('confirmCredentialChange(id')
         assert body.index('confirmCredentialChange(id') < body.index('await updateSetting(')
 
     def test_password_change_is_confirmed_and_only_the_hash_is_stored(self):

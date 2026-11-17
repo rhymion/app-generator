@@ -18,10 +18,35 @@ function candidate(name: string, organizationId?: string | null) {
   return cy.task<Candidate>('db:createMentionCandidate', { name, organizationId: organizationId ?? null });
 }
 
-function mentionedCount(user: Candidate) {
+const POLL_TIMEOUT_MS = 5000;
+const POLL_INTERVAL_MS = 200;
+
+function readMentionedCount(user: Candidate) {
   return cy
     .task<Array<{ type: string }>>('db:getNotificationsForUser', user.id)
     .then((rows) => rows.filter((n) => n.type === 'mentioned_in_comment').length);
+}
+
+// The notification row is written after the HTTP response (fire-and-forget), so a single read can run
+// before it commits. Re-run the task until the count matches. A cy.task is not re-run by a Cypress
+// retry, hence the explicit loop. For an expected count of 0 the whole bounded wait must pass without
+// a notification appearing, so an absence is proven after the same wait a presence would have had.
+function expectMentionedCount(user: Candidate, expected: number) {
+  const deadline = Date.now() + POLL_TIMEOUT_MS;
+  const poll = (): Cypress.Chainable<unknown> =>
+    readMentionedCount(user).then((count) => {
+      if (expected === 0) {
+        expect(count, `mentions of ${user.name}`).to.equal(0);
+        if (Date.now() < deadline) return cy.wait(POLL_INTERVAL_MS, { log: false }).then(poll);
+        return;
+      }
+      if (count === expected || Date.now() >= deadline) {
+        expect(count, `mentions of ${user.name}`).to.equal(expected);
+        return;
+      }
+      return cy.wait(POLL_INTERVAL_MS, { log: false }).then(poll);
+    });
+  return poll();
 }
 
 function addComment(entity: string, recordId: string, message: string) {
@@ -51,8 +76,8 @@ describe('API: who a comment mention notifies', () => {
           candidate('Memo Foreign', orgB.id).then((foreign) => {
             candidate('Memo No Org').then((noOrg) => {
               addComment('cr_memo', memo.id, `${mention(foreign)} ${mention(noOrg)}`).its('status').should('eq', 201);
-              mentionedCount(foreign).should('eq', 1);
-              mentionedCount(noOrg).should('eq', 1);
+              expectMentionedCount(foreign, 1);
+              expectMentionedCount(noOrg, 1);
             });
           });
         });
@@ -66,7 +91,7 @@ describe('API: who a comment mention notifies', () => {
             editComment('cr_memo', memo.id, (created.body as { id: string }).id, `now with ${mention(late)}`)
               .its('status')
               .should('eq', 200);
-            mentionedCount(late).should('eq', 1);
+            expectMentionedCount(late, 1);
           });
         });
       });
@@ -85,10 +110,10 @@ describe('API: who a comment mention notifies', () => {
                   addComment('cr_ticket', ticket.id, [member, sharesCommenterOrg, foreign, noOrg].map(mention).join(' '))
                     .its('status')
                     .should('eq', 201);
-                  mentionedCount(member).should('eq', 1);
-                  mentionedCount(sharesCommenterOrg).should('eq', 0);
-                  mentionedCount(foreign).should('eq', 0);
-                  mentionedCount(noOrg).should('eq', 0);
+                  expectMentionedCount(member, 1);
+                  expectMentionedCount(sharesCommenterOrg, 0);
+                  expectMentionedCount(foreign, 0);
+                  expectMentionedCount(noOrg, 0);
                 });
               });
             });
@@ -106,8 +131,8 @@ describe('API: who a comment mention notifies', () => {
                 editComment('cr_ticket', ticket.id, (created.body as { id: string }).id, `${mention(member)} ${mention(sharesCommenterOrg)}`)
                   .its('status')
                   .should('eq', 200);
-                mentionedCount(member).should('eq', 1);
-                mentionedCount(sharesCommenterOrg).should('eq', 0);
+                expectMentionedCount(member, 1);
+                expectMentionedCount(sharesCommenterOrg, 0);
               });
             });
           });

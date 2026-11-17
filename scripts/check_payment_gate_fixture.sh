@@ -91,7 +91,7 @@ echo "-- vitest lifecycle.test.ts (generated lib/payment/*.ts against in-memory 
 TEST_DIR="$OUT_DIR/lifecycle-test"
 mkdir -p "$TEST_DIR/fake"
 cp "$FIXTURE_DIR/shims/fake/"*.ts "$TEST_DIR/fake/"
-cp "$FIXTURE_DIR/lifecycle.test.ts" "$FIXTURE_DIR/vitest.config.mts" "$TEST_DIR/"
+cp "$FIXTURE_DIR/lifecycle.test.ts" "$FIXTURE_DIR/webhook_signature.test.ts" "$FIXTURE_DIR/vitest.config.mts" "$TEST_DIR/"
 if ! npx vitest run --config "$TEST_DIR/vitest.config.mts"; then
   echo "payment-gate fixture check FAILED -- the generated x-payment record" >&2
   echo "lifecycle (lib/payment/*.ts) no longer behaves as lifecycle.test.ts expects." >&2

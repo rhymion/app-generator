@@ -1,6 +1,7 @@
 // Handwritten MFA test fixture — not auto-generated.
 // Used by cypress/e2e/auth/mfa.cy.ts via cy.task('db:seedMfaUser').
 import 'dotenv/config';
+import { hashApiKey } from '@/lib/api-key';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient } from '@/app/generated/prisma/client';
 import { createId } from '@paralleldrive/cuid2';
@@ -105,7 +106,7 @@ export async function seedMfaTestUser(): Promise<MfaUserSeed> {
       password: hashedPassword,
       mfa_secret: encryptedSecret,
       mfa_enabled: true,
-      api_key: apiKey,
+      api_key_hash: hashApiKey(apiKey),
     },
   });
 

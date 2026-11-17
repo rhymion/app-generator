@@ -53,7 +53,7 @@ interfaces above (`record` is the Web `src`, `permissions`, plus `reload`; a fie
 Add `x-custom-component` to a property definition in `json_schema_db_table.yaml`:
 
 ```yaml
-api_key:
+password:
   type: string
   x-custom-component:
     target:
@@ -63,8 +63,8 @@ api_key:
 
 ### What the generator does
 
-- **FormUpsert**: skips generating a `TextField` for that property; instead imports `ApiKey` from `./api_key` and renders `<ApiKey value={apiKey} onChange={setApiKey} />`. State is managed with `useState<string>` and included in `formData.set(...)`.
-- **FormView**: same pattern but renders `<ApiKey value={src.api_key} />` (read-only).
+- **FormUpsert**: skips generating a `TextField` for that property; instead imports `Password` from `./password` and renders it with `value` and `onChange`. State is managed with `useState<string>` and included in `formData.set(...)`.
+- **FormView**: same pattern but renders the component with `value={src.password}` (read-only).
 - The component file (`components/{entity}/{prop}.tsx`) is **never created or overwritten** by the generator.
 
 ### Component interface
@@ -79,12 +79,12 @@ interface Props { value: string; }
 
 ### Example
 
-`components/setting/api_key.tsx` — renders the API key with a "Generate" button. The generator references it but never touches it.
+`components/setting/password.tsx` — renders the change-password section. The generator references it but never touches it. (The API key is not a field: `components/setting/ApiKeyPanel.tsx` is an entity-level `x-custom-components` entry on `setting`; see `api-key-hashing.md`.)
 
 ### Upsert-only fields are treated as write-only
 
 A string property whose `x-custom-component.target` includes `upsert` but
-omits `view` (e.g. `password`, `api_key`) is a write-only field:
+omits `view` (e.g. `password`) is a write-only field:
 `is_write_only_prop()`/`get_write_only_field_names()`
 (`code_generator/helpers/schema_helpers.py`) is the single predicate that
 drives every read path an entity has — `get{Parent}Detail()`
@@ -99,10 +99,10 @@ not `filtered_props` (the subset narrowed by `x-generate.fields`). The
 `get{Parent}Detail()` Prisma query has no `select` clause — it fetches
 every column on the row regardless of `x-generate.fields` — so an entity
 whose `fields` allowlist happens to omit a write-only column (this repo's
-own `user` entity: `fields: [name, image_id, roles]`, password/api_key
+own `user` entity: `fields: [name, image_id, roles]`, password
 excluded) would otherwise compute an empty write-only set and let the
 unconditional `...{{ parent_camel }}` spread return the raw password hash
-and api_key straight through `GET /api/user/{id}`. Confirmed by curl
+straight through `GET /api/user/{id}`. Confirmed by curl
 (subtask_810e, 2026-08-25) and fixed by switching both call sites from
 `filtered_props` to `model_def.get('properties', {})`.
 
@@ -112,8 +112,7 @@ treat `''` as no new value (`password === '' ? undefined : password`, and
 Prisma omits an `undefined` column). The REST update routes
 (`PUT /api/<entity>/:id` and the bulk update) pass `''` for a write-only field
 the body leaves out, instead of the `?? null` used for other nullable fields,
-so a request that only changes `name` no longer clears `password` or
-`api_key`. Create still passes `null`.
+so a request that only changes `name` no longer clears `password`. Create still passes `null`.
 
 ### On a child array property: replacing the generated grid
 

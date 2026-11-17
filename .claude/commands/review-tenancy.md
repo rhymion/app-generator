@@ -45,7 +45,7 @@ the organization boundary as the active one.
 
 ### Cross-organization operations
 
-- [ ] `PUT` and `DELETE /api/{entity}/{id}` re-fetch the target with the org-scoped `findFirst` before `requirePermission()`, and a miss answers 404
+- [ ] `PUT` and `DELETE /api/{entity}/{id}` re-fetch the target with the org-scoped `findFirst` before `requireRecordPermission()`, and a miss answers 404
 - [ ] Bulk routes (`api_bulk_route.ts.jinja2`) filter the requested ids by organization
 - [ ] Session upsert and delete actions throw on an org-scoped lookup miss instead of falling through to the write
 - [ ] CSV import (`api_import_route.ts.jinja2`) org-filters every existing-row lookup and fetches the actor's organizations once before the row loop

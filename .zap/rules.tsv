@@ -1,0 +1,4 @@
+# ZAP rule configuration shared by the baseline and API scans (-c).
+# Format: <rule id> <TAB> <IGNORE|INFO|WARN|FAIL> <TAB> <reason, optional>
+# Add a line only for a triaged false positive, with the reason.
+# Rule ids: https://www.zaproxy.org/docs/alerts/

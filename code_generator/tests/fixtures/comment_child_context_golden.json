@@ -219,6 +219,13 @@
      "field_type": "{ name: string; rel_par_id: string }",
      "field_type_with_id": "{ id?: string; name: string; rel_par_id: string }",
      "file_type": null,
+     "fk_write_checks": [
+      {
+       "prop": "rel_par_id",
+       "self_only": false,
+       "target": "cc_rel_par_par"
+      }
+     ],
      "form_key": "note",
      "has_assignee_id": false,
      "has_audit_fields": false,

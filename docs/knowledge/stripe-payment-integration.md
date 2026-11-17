@@ -627,6 +627,8 @@ the session is created with an `expires_at` of about 31 minutes. The create-time
 `add{Entity}()` is checked structurally by the pytest assertions above, not
 executed. It is a required, unconditional CI job (`payment-gate-fixture`).
 
+It also runs `webhook_signature.test.ts`, which calls the generated `app/api/webhooks/stripe/route.ts` with the real Stripe SDK (the dispatcher is mocked): a correctly signed payload is dispatched once, and a payload signed with another secret, changed after signing, with a malformed or missing signature header, or with a timestamp outside the tolerance is refused with `400` and never dispatched.
+
 The fakes do not exercise Stripe itself, a real database, or
 `x-reservation`; those are checked in a consumer against Stripe test mode. Under
 Stripe's Adaptive Pricing it has not been measured whether `session.currency`

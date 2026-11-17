@@ -22,6 +22,7 @@ export type ErrorCode =
                              // so there is no `field` on THIS form to attach the error to (see
                              // cmd_979, docs/knowledge/error-message-framework.md).
   | 'CAPACITY'            // pool / inventory exhausted
+  | 'RATE_LIMITED'        // per-user request ceiling reached (lib/rate-limit/action.ts)
   | 'UNKNOWN';            // unexpected internal error
 
 // VALIDATION carries two structurally different failure shapes that must
@@ -143,6 +144,7 @@ export function errorMessageKey(code: ErrorCode): string {
     case 'RESERVATION_LOCKED': return 'reservationLocked';
     case 'RELATED_RECORD_INVALID': return 'relatedRecordInvalid';
     case 'CAPACITY':          return 'capacityExhausted';
+    case 'RATE_LIMITED':      return 'rateLimited';
     default:                  return 'unknown';
   }
 }

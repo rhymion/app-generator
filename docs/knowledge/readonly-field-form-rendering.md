@@ -174,9 +174,9 @@ conclusion about which key to reach for.
 **Verified against a real, live example** — `user` and its Proxy View
 `setting` (both resolve to the same raw model, `__user`): `user` declares
 `x-generate.fields: [name, image_id, roles]` and `setting` declares
-`x-generate.fields: [name, email, image_id, password, api_key,
+`x-generate.fields: [name, email, image_id, password,
 mfa_enabled]`. Their generated `FormUpsert.tsx` files render exactly their
-own list and nothing else — `user`'s form has no email/password/api_key/
+own list and nothing else — `user`'s form has no email/password/
 mfa_enabled inputs at all, and `setting`'s form has all of them plus
 `email`, neither leaking into the other — confirming `x-generate.fields`
 filters per-view, independent of the shared raw model. `x-display` itself,

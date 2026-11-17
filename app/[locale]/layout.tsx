@@ -7,7 +7,7 @@ import Footer from './@footer/page';
 import SessionSidebar from '@/components/_standard/SessionSidebar';
 import { siteConfig, themeConfig } from '@/lib/site-config';
 import { routing } from '@/i18n/routing';
-import { canAccess } from '@/lib/authz';
+import { canAccessEntity } from '@/lib/authz';
 import { getScheduledTaskOperatorId } from '@/lib/scheduled-tasks/access';
 
 export const metadata: Metadata = {
@@ -41,7 +41,7 @@ export default async function LocaleLayout({
     entityLinks.map(async (l) =>
       l.href === '/scheduled_task_run'
         ? (await getScheduledTaskOperatorId()) !== null
-        : canAccess(l.href.slice(1), 'read'),
+        : canAccessEntity(l.href.slice(1), 'read'),
     ),
   );
   const hiddenHrefs = entityLinks.filter((_, i) => !readable[i]).map((l) => l.href);

@@ -142,6 +142,7 @@ from helpers.naming import (
     to_camel_case, to_pascal_case, to_title_case, safe_var_name, singularize,
 )
 from helpers.schema_helpers import (
+    fk_reference_shapes,
     filter_fields,
     get_parent_relationships,
     get_direct_attachment_fk_props,
@@ -677,6 +678,14 @@ def _get_dep_populate_fields(target: str, var_name: str, title: str, schema: dic
             val = f"'{_decimal_literal(1, _scale, _force_zero)}'"
             val_unique = _decimal_ts_expr('i', _scale, _force_zero)
             val_second = f"'{_decimal_literal(2, _scale, _force_zero)}'"
+        elif actual == 'string' and isinstance(prop.get('enum'), list) and any(v is not None for v in prop['enum']):
+            # A required enum column (a native Prisma enum behind it) accepts a
+            # member only: the generic placeholder below is refused by Prisma
+            # ("Invalid value for argument `status`. Expected <Enum>"). The
+            # first member, as the entity's own populate helper uses.
+            _members = [v for v in prop['enum'] if v is not None]
+            val = val_unique = f"'{_members[0]}'"
+            val_second = f"'{_members[1] if len(_members) > 1 else _members[0]}'"
         elif actual == 'string':
             field_title = to_title_case(prop_name)
             # Deterministic, human-readable values. Dep-helper-call collisions
@@ -6023,6 +6032,7 @@ def api_spec_context(
                     'prop': _probe_prop,
                     'dep_var': primary_dep_var,
                     'target': primary_fk_rel['target'],
+                    'shape': fk_reference_shapes(model, schema)[_probe_prop],
                 }
 
     return {
@@ -6393,7 +6403,7 @@ def db_helpers_context(
             if rel_target and rel_target in base_entities and rel.get('labelField'):
                 labelfield_entities |= relation_chain_targets(rel['labelField'], rel_target, schema)
     # Only entities with a live generated API route are ever subject to a
-    # requirePermission() check — entities with x-generate.api: false (e.g.
+    # requireRecordPermission() check — entities with x-generate.api: false (e.g.
     # approvable, commentable) or no x-generate at all (internal-only, e.g.
     # comment) have no route to call and so need no permission grant.
     labelfield_entities = {e for e in labelfield_entities if e in base_entities and _has_api(e)}

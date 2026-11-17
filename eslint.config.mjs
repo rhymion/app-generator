@@ -58,6 +58,43 @@ const eslintConfig = defineConfig([
       ],
     },
   },
+  // Issue #1303 (ASVS V15.3.5): comparisons are strict. The "smart" option keeps the one loose
+  // form that is deliberate and safe, `x == null` / `x != null` (null or undefined in a single
+  // comparison); every other `==` / `!=` is an error. lib/eslint_config.test.ts fails if the
+  // rule is removed or weakened.
+  {
+    rules: {
+      eqeqeq: ["error", "smart"],
+    },
+  },
+  // Issue #1237: application code never writes to the console directly. It goes through
+  // lib/logger.ts, which redacts credential-like keys and email addresses first. This rule
+  // covers hand-written code and, because the gate lints after generate-code, generated code.
+  {
+    rules: {
+      "no-console": "error",
+    },
+  },
+  // The no-console allowlist. Every entry needs a reason; add a file here only when the console
+  // is that code's actual interface and no request, user or secret data can reach it.
+  {
+    files: [
+      // The logger itself is the one place that writes to the console.
+      "lib/logger.ts",
+      // Command-line tools and build/gate scripts: stdout/stderr is their output channel. They run
+      // in a terminal or a one-off job, never inside a request handler.
+      "scripts/**",
+      "utils/scripts/**",
+      // Generator, its tests and fixtures: developer tooling that never ships in a generated app.
+      "code_generator/**",
+      // Cypress runs in the test runner, not in the app.
+      "cypress/**",
+      "cypress.config.ts",
+    ],
+    rules: {
+      "no-console": "off",
+    },
+  },
   // Override default ignores of eslint-config-next.
   globalIgnores([
     // Default ignores of eslint-config-next:
@@ -67,6 +104,8 @@ const eslintConfig = defineConfig([
     "next-env.d.ts",
     // Generated coverage report — never lint:
     "coverage/**",
+    // Semgrep rule test cases: deliberately contain the patterns the rules flag.
+    ".semgrep/**",
     // Mention-gate fixture check (cmd_535) scratch output — rebuilt from
     // code_generator/tests/fixtures/mention_gate/ on every
     // scripts/check_mention_gate_fixture.sh run, gitignored, never part of
@@ -109,6 +148,7 @@ const eslintConfig = defineConfig([
     ".generated-list-child-e2e-gate/**",
     ".generated-scheduled-task-e2e-gate/**",
     ".generated-version-of-e2e-gate/**",
+    ".generated-security-matrix-e2e-gate/**",
     // Disposable app copy built by scripts/run_mobile_entity_playwright.sh.
     ".generated-mobile-entity-pw/**",
     // Local Python virtualenv (code_generator/tests pytest deps) — never

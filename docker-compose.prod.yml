@@ -6,7 +6,8 @@ services:
     image: postgres:18
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      # No default: the password comes from the environment (.env.production.local or the shell).
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD for the production database}
       POSTGRES_DB: my_next_prod
     ports:
       - "${POSTGRES_PORT:-5432}:5432"

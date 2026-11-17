@@ -1,0 +1,46 @@
+name: SBOM
+
+# Software bill of materials for the npm dependencies, generated from package-lock.json and kept
+# as a build artifact. See docs/knowledge/dependency-and-resource-controls.md.
+on:
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - package-lock.json
+      - .github/workflows/sbom.yml
+  push:
+    branches: [main, develop]
+    paths:
+      - package-lock.json
+      - .github/workflows/sbom.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sbom-${{ github.head_ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  sbom:
+    name: Generate SBOM
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24.18.0'
+      # Reads the lock file only; nothing is installed. Production dependencies, CycloneDX format.
+      - name: Generate CycloneDX SBOM
+        run: npm sbom --sbom-format cyclonedx --omit dev --package-lock-only > sbom.cdx.json
+      - name: Check the SBOM lists components
+        run: node -e 'const b=JSON.parse(require("fs").readFileSync("sbom.cdx.json","utf8")); if(b.bomFormat!=="CycloneDX"||!Array.isArray(b.components)||b.components.length===0){console.error("SBOM is empty or malformed");process.exit(1)} console.log(b.components.length+" components")'
+      - name: Upload SBOM artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sbom-cyclonedx
+          path: sbom.cdx.json
+          retention-days: 90

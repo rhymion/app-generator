@@ -16,7 +16,7 @@ vi.mock('@/lib/prisma', () => ({
 vi.mock('@/lib/authz', () => ({
   assertPermission: vi.fn(),
   getModelPermissions: vi.fn(),
-  resolvePermissions: vi.fn(),
+  resolveRecordPermissions: vi.fn(),
   toPermissions: vi.fn(),
 }));
 

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireCaller, requireApiPermission, handleApiError, ApiError } from '@/lib/api-auth';
-import { resolvePermissions } from '@/lib/authz';
+import { enforceApiRateLimit } from '@/lib/api-auth';
+import { resolveRecordPermissions } from '@/lib/authz';
 import prisma from '@/lib/prisma';
 {% if should_filter_by_org %}
 import { getAssociatedOrganizations } from '@/lib/organization/associated_internal';
@@ -31,6 +32,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     // X-API-Key / Authorization (API key or mobile access token) when present,
     // session cookie otherwise (see app/api/search/route.ts).
     const { userId } = await requireCaller(req);
+    await enforceApiRateLimit(userId);
     const { id } = await params;
 
     // Splitting closes the parent and creates children, so it needs the same
@@ -83,7 +85,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     {% else %}
     // Record-level resolution (general / Creator / Assignee grants), as the
     // single-record PUT does.
-    const _resolved = await resolvePermissions(_basePerms, parent as Record<string, unknown>, userId);
+    const _resolved = await resolveRecordPermissions(_basePerms, parent as Record<string, unknown>, userId);
     if (!_resolved.{{ split_permission_op }}) throw new ApiError(403, 'Access denied: {{ entity_name }}.{{ split_permission_op }}');
     {% endif %}
 

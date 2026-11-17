@@ -57,7 +57,7 @@ org-isolation check applied, 2026-08-01).
 | U3 | Permission denied — LIST page | error.tsx (full page) | `getters.ts assertPermission` → throw |
 | U4 | Permission denied — DETAIL page | error.tsx (full page) | `getters.ts assertPermission` → throw |
 | U5 | Permission denied — CREATE form access | error.tsx (full page) | `getters.ts assertPermission` → throw |
-| U6 | Permission denied — UPDATE submit | error.tsx (full page) | `actions.ts requirePermission` → throw |
+| U6 | Permission denied — UPDATE submit | error.tsx (full page) | `actions.ts requireRecordPermission` → throw |
 | U7 | Permission denied — DELETE | error.tsx (full page) | `actions.ts: throw new Error('No permission to delete')` |
 | U8 | FK autocomplete denied (case g, before the FK-autocomplete fix) | error.tsx — page crashes | `getters.ts assertPermission` → throw (in Promise.all) |
 | U9 | FK autocomplete denied (case g, after the FK-autocomplete fix) | FK field disabled, no i18n text yet | `getters.ts` returns `{ permissionDenied: true }` |
@@ -87,6 +87,13 @@ still throws and still terminates at `error.tsx`; converting that path would req
 redesigning the page itself (`notFound()` / conditional render), which is out of scope
 here. `error.tsx` now shows a static, safe `te('pageError')` message instead of a
 hardcoded string, so U3-U5 are no less safe than before — just not yet inline.
+
+**Security events (Issue #1307)**: a catch that turns an error into an
+`ActionFailure` calls `logSecurityEventForError(e)` (`lib/security-event.ts`) first,
+so a denial, expired session or rate-limit hit returned inline writes the same
+`[security-event]` line `handleApiError` writes on REST. Hand-written actions that
+convert errors themselves follow the same rule. See `logging-inventory.md`
+("Security-event log").
 
 **NEW-2 (found during this implementation, not in the original checklist)**: a real
 literal "Unique key constraint violation" had no throw site anywhere in this
@@ -776,3 +783,11 @@ Steps 1–5 are write-once lib / config changes. Steps 6–12 are generator temp
 ## Unexpected errors in route responses
 
 A route answers with the caller-facing text of the app's own typed errors (`AppError`, `ApiError`). Any other exception (a driver, SDK or database error) is logged on the server and answered with a generic message. This applies to `POST /api/auth/register` (`REGISTRATION_FAILED`), the per-item failures of the bulk routes (`Internal error`), the CSV-import commit path (`WRITE_FAILED`), the Stripe webhook route (`Webhook signature verification failed`) and the errors reported by `anonymizeUser()`. Log lines carry the error class and code, never the message, because a message can embed call arguments.
+
+## Unexpected errors in REST responses
+
+`handleApiError` (`lib/api-auth.ts`) answers an `ApiError` or `AppError` with its message and status. Any other thrown value is unexpected: the response is `500` with the generic body `{"error":"Internal server error"}` and the original goes to the server log only, because library and database errors can carry SQL fragments, column names or file paths. Text meant for the caller must therefore be raised as an `AppError` (`VALIDATION` maps to 422, `CONFLICT` to 409). `lib/api-auth.test.ts` throws an error containing a Prisma code, a SQL fragment and a file path and asserts none of them reach the response.
+
+## Secret comparison and response headers
+
+Compare bearer or shared secrets with `secretsEqual()` (`lib/_secret_compare.ts`), never with `===`; `code_generator/tests/test_secret_comparison_static.py` enforces this. Default security response headers come from `lib/security-headers.ts` (wired in `next.config.ts`, checked by `cypress/e2e/api/security_headers.cy.ts`). The only Content-Security-Policy directive sent is `frame-ancestors 'none'`.

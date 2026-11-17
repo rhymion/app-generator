@@ -46,7 +46,7 @@ from helpers.schema_helpers import resolve_ledger_domain
 from helpers.timezones import TIMEZONES, DEFAULT_MEMBER
 from helpers.schema_helpers import get_entity_properties
 from helpers.schema_helpers import get_self_only_flags
-from helpers.schema_helpers import get_parent_relationships
+from helpers.schema_helpers import fk_reference_shapes, get_parent_relationships
 from helpers.schema_helpers import resolve_set_fields as _resolve_set_fields
 from helpers.schema_helpers import schema_has_direct_attachment_fk
 from helpers.schema_helpers import get_parent_fk_props
@@ -115,6 +115,7 @@ from generators_test import (
 from schema_deriver import collect_unique_columns, parse_prisma_schema
 from validation_context import build_validation_context
 from manifest import ManifestRecorder, sha256_file, sha256_text
+import security_matrix
 
 
 # ---------------------------------------------------------------------------
@@ -1500,6 +1501,43 @@ def _resolve_search_columns(entity: dict, schema: dict, search_default_scope: st
     }
 
 
+def _security_fk_shape_flags(model: str, entity: dict, schema: dict, filters_by_org: bool,
+                             set_checks: list[dict] | None = None) -> dict[str, bool]:
+    """Flags for the security matrix's `fk_shape` axis: which kinds of reference to an
+    organization-scoped entity `model` holds, directly, in an inline child grid, or as a
+    member of a to-many set chosen on it.
+
+    Shapes come from helpers.schema_helpers.fk_reference_shapes. A child's foreign key
+    back to its parent is the ownership link, not a reference the user picks, so it is
+    left out. The to-many sets are the ones service.ts checks (`set_fk_checks` of the
+    build context), counted when their member entity has an organization column.
+    Without an organization column nothing is unreachable, so every flag is false.
+    """
+    kinds = ('many_to_one', 'one_to_one')
+    flags = {f'fk_{kind}_{need}': False for kind in kinds for need in ('required', 'optional')}
+    flags.update({'fk_inline_required': False, 'fk_inline_optional': False})
+    flags.update({'fk_set_many_to_many': False, 'fk_set_one_to_many': False})
+    if not filters_by_org:
+        return flags
+    defs = schema.get('definitions') or {}
+    for check in set_checks or []:
+        target_def = defs.get(f"__{check['target']}") or defs.get(check['target']) or {}
+        if 'organization_id' in (target_def.get('properties') or {}):
+            flags[f"fk_set_{check['kind']}"] = True
+    for shape in fk_reference_shapes(model, schema).values():
+        flags[f'fk_{shape}'] = True
+    for child in entity.get('children') or []:
+        if child.get('output_type') not in (None, 'list'):
+            continue
+        if (child.get('relationship') or {}).get('type') == 'many-to-many':
+            continue
+        for prop, shape in fk_reference_shapes(child['name'], schema).items():
+            if prop == f'{model}_id':
+                continue
+            flags[f"fk_inline_{shape.rsplit('_', 1)[1]}"] = True
+    return flags
+
+
 def generate(schema_path: str, output_dir: str) -> None:
     with open(schema_path) as f:
         schema = yaml.safe_load(f)
@@ -1640,6 +1678,8 @@ def generate(schema_path: str, output_dir: str) -> None:
     # direct-attachment foreign key.
     parent_pascal_by_parent: dict[str, str] = {}
     direct_attachment_owners: list[dict] = []
+    # Per-entity flags the security matrix (security_matrix.yaml) evaluates.
+    security_entity_flags: dict[str, dict] = {}
 
     for entity in entities:
         parent     = entity['parent']
@@ -2085,6 +2125,16 @@ def generate(schema_path: str, output_dir: str) -> None:
                 _write(components_dir / 'ImportModal.tsx',
                        _render(env, 'components/ImportModal.tsx.jinja2', ctx))
                 print(f'  ImportModal → components/{parent}/ImportModal.tsx')
+
+        security_entity_flags[parent] = {
+            'can_api': bool(can_api), 'can_list': bool(can_list), 'can_view': bool(can_view),
+            'can_new': bool(can_new), 'can_edit': bool(can_edit), 'can_delete': bool(can_delete),
+            'can_export': bool(can_export), 'can_invalidate': bool(can_invalidate),
+            'import_eligible': bool(ctx.get('import_eligible')),
+            'should_filter_by_org': bool(ctx.get('should_filter_by_org')),
+            **_security_fk_shape_flags(parent, entity, schema, bool(ctx.get('should_filter_by_org')),
+                                       ctx.get('set_fk_checks')),
+        }
 
         # --- Invalidate action route (independent of can_api) ---
         if can_invalidate:
@@ -3707,16 +3757,19 @@ def generate(schema_path: str, output_dir: str) -> None:
             _render(env, 'db_init.ts.jinja2', index_ctx_base),
         )
         print(f'  DB init → lib/db-init.ts (GIN indexes for gin_trgm_ops)')
-        _write(
-            out / 'instrumentation.ts',
-            _render(env, 'instrumentation.ts.jinja2', index_ctx_base),
-        )
-        print(f'  Instrumentation hook → instrumentation.ts (calls ensureSearchIndexes() on cold start)')
     else:
-        for _stale in (out / 'scripts' / 'create-gin-indexes.sql', out / 'instrumentation.ts'):
+        for _stale in (out / 'scripts' / 'create-gin-indexes.sql',):
             if _stale.exists():
                 _stale.unlink()
                 print(f'  Search: deleted stale {_stale.relative_to(out)}')
+
+    # Issue #1304: instrumentation.ts is written for every app (onRequestError); its register()
+    # hook, which provisions the GIN indexes, is rendered only when gin_index_entities is non-empty.
+    _write(
+        out / 'instrumentation.ts',
+        _render(env, 'instrumentation.ts.jinja2', index_ctx_base),
+    )
+    print('  Instrumentation hooks → instrumentation.ts (onRequestError; register() when search indexes exist)')
 
     # --- docs/generated/index.md + app/[locale]/docs/page.mdx ---
     print('\nGenerating documentation index...')
@@ -3930,6 +3983,13 @@ def generate(schema_path: str, output_dir: str) -> None:
                 print('  Cloud: output:standalone already present in next.config.ts')
         else:
             print('  Cloud: next.config.ts not found — skipping standalone injection')
+
+    # --- security manifest: every cell of the security test matrix that applies ---
+    # Consumed by `npm run check:security-matrix`, which compares it with the
+    # security-cell markers in the tests.
+    _write(out / security_matrix.MANIFEST_FILENAME, json.dumps(
+        security_matrix.build_manifest(security_matrix.load_matrix(), security_entity_flags),
+        indent=2) + '\n')
 
     # --- cmd_941 gate (1): write-once side-effect asymmetry ---
     # Must run after every service_after_*.ts stub for this run has been

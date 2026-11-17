@@ -38,7 +38,7 @@
     "capacityExhausted": "利用可能な容量がありません。別の選択肢をお試しください。",
     "currentPasswordIncorrect": "現在のパスワードが正しくありません。",
     "currentPasswordRateLimited": "試行回数が多すぎます。数分待ってからもう一度お試しください。",
-    "currentPasswordRequired": "パスワードを変更するには現在のパスワードを入力してください。",
+    "currentPasswordRequired": "この変更を確認するため、現在のパスワードを入力してください。",
     "exclusiveParentsInvalid": "{fields}は一つだけ設定でき、他は空にしてください。",
     "exclusiveParentsMissing": "{fields}のうち、ちょうど一つを設定してください。",
     "fieldAlreadyLinked": "{field}は既に他のレコードにリンクされています。",
@@ -51,6 +51,7 @@
     "pageError": "問題が発生しました。",
     "permissionDenied": "この操作を行う権限がありません。",
     "relatedRecordInvalid": "関連するレコードが必要な条件を満たしていないため、この操作を完了できません。",
+    "rateLimited": "リクエストが多すぎます。しばらく待ってからもう一度お試しください。",
     "reservationConflict": "この操作は既存の予約と競合しています。",
     "reservationLocked": "この行の予約は既に確保済みのため、数量や条件を変更することはできません。",
     "sessionExpired": "セッションの有効期限が切れました。再度サインインしてください。",
@@ -190,6 +191,7 @@
     "haveAccount": "既にアカウントをお持ちの方はこちら",
     "invalidCredentials": "認証情報が正しくありません",
     "loginError": "ログイン中にエラーが発生しました",
+    "oauthAccountNotLinked": "このGoogleアカウントは、同じメールアドレスの既存アカウントと連携されていません。まず既存のアカウントでサインインし、アカウント設定からGoogleを連携してください。",
     "confirmPasswordPlaceholder": "パスワード（確認）",
     "passwordMismatch": "パスワードが一致しません",
     "emailInUse": "このメールアドレスは既に使用されています",
@@ -200,7 +202,29 @@
     "mfaChallengeTitle": "本人確認",
     "mfaInvalid": "コードが一致しません。新しい 6 桁コードを入力するか、リカバリーコードを使用してください。",
     "mfaRateLimited": "試行回数が上限に達しました。数分待ってから再度お試しください。",
-    "legalAgreementNotice": "アカウントを作成すると、<terms>利用規約</terms>および<privacy>プライバシーポリシー</privacy>に同意したものとみなされます。"
+    "legalAgreementNotice": "アカウントを作成すると、<terms>利用規約</terms>および<privacy>プライバシーポリシー</privacy>に同意したものとみなされます。",
+    "registerSendLink": "登録用リンクを送信",
+    "registerEmailOnlyNotice": "入力したアドレスにリンクを送ります。リンクを開いて名前とパスワードを設定すると登録が完了します。",
+    "registerCheckEmailTitle": "メールを確認してください",
+    "registerCheckEmailBody": "このアドレスで登録できる場合は、リンクを記載したメールを送信しました。24時間以内にリンクを開いて登録を完了してください。",
+    "registerCompleteTitle": "登録の完了",
+    "registerCompleteButton": "アカウントを作成",
+    "registerLinkInvalid": "この登録用リンクは使用できません。有効期限が切れたか、すでに使用された可能性があります。",
+    "registerStartAgain": "もう一度登録する",
+    "forgotPasswordLink": "パスワードをお忘れですか？",
+    "forgotPasswordTitle": "パスワードの再設定",
+    "forgotPasswordNotice": "アカウントのメールアドレスを入力してください。新しいパスワードを設定するためのリンクをメールでお送りします。",
+    "forgotPasswordSend": "再設定リンクを送信",
+    "forgotPasswordCheckEmailBody": "このアドレスでパスワードを使うアカウントがある場合、リンク付きのメールを送信しました。1時間以内にリンクを開いてください。",
+    "forgotPasswordFailed": "再設定リンクを要求できませんでした。しばらくしてからもう一度お試しください。",
+    "resetPasswordTitle": "新しいパスワードの設定",
+    "resetPasswordButton": "新しいパスワードを設定",
+    "resetPasswordMfaHelper": "このアカウントは二要素認証を使用しています。認証アプリの現在のコード、またはリカバリーコードを入力してください。",
+    "resetPasswordDone": "パスワードを変更しました。新しいパスワードでサインインしてください。",
+    "resetPasswordLinkInvalid": "この再設定リンクは使用できません。有効期限が切れているか、すでに使用されています。",
+    "resetPasswordStartAgain": "新しいリンクを要求",
+    "resetPasswordFailed": "パスワードを変更できませんでした。",
+    "backToSignIn": "サインインに戻る"
   },
   "Legal": {
     "termsTitle": "利用規約",
@@ -238,6 +262,29 @@
     "toggleDisabledLabel": "MFA 無効",
     "toggleDisableButton": "MFA を無効化"
   },
+  "ApiKey": {
+    "title": "APIキー",
+    "statusNotSet": "APIキーは未設定です。",
+    "statusSet": "APIキーが設定されています。",
+    "statusSetIssued": "APIキーが設定されています。発行日時: {issuedAt}",
+    "expires": "有効期限: {expiresAt}",
+    "issue": "APIキーを発行",
+    "reissue": "APIキーを再発行",
+    "reissueWarning": "新しいキーを発行すると、現在のキーはただちに使えなくなります。",
+    "newKeyLabel": "新しいAPIキー",
+    "copy": "クリップボードにコピー",
+    "shownOnce": "このキーは今だけ表示されます。今すぐコピーしてください。再表示はできません。",
+    "loadFailed": "APIキーの状態を読み込めませんでした。",
+    "issueFailed": "APIキーを発行できませんでした。",
+    "neverExpires": "有効期限はありません。",
+    "expired": "{expiresAt} に期限切れになりました。",
+    "newKeyExpiryLabel": "新しいキーの有効期限",
+    "currentKeyExpiryLabel": "現在のキーの有効期限",
+    "neverExpiresOption": "無期限",
+    "saveExpiry": "有効期限を保存",
+    "expiryInvalid": "未来の日時を選ぶか、「無期限」を選択してください。",
+    "expiryFailed": "有効期限を保存できませんでした。"
+  },
   "Setting": {
     "title": "アカウント設定",
     "mfaTitle": "2要素認証",
@@ -247,7 +294,7 @@
     "accountsTitle": "連携アカウント",
     "accountsBody": "このアカウントへサインインできるプロバイダーを管理します。",
     "currentPassword": "現在のパスワード",
-    "currentPasswordHelp": "パスワードを変更する場合に必要です。"
+    "currentPasswordHelp": "パスワードまたはメールアドレスを変更する場合に必要です。"
   },
   "LinkedAccounts": {
     "title": "連携アカウント",
@@ -422,5 +469,15 @@
     "csvLabel": "ラベル",
     "csvCount": "件数",
     "csvCategory": "カテゴリ"
+  },
+  "RegistrationMail": {
+    "newSubject": "{app} の登録を完了してください",
+    "newBody": "このメールアドレスで {app} のアカウント作成が申請されました。\n\n24時間以内に次のリンクを開いて登録を完了してください。\n{link}\n\n心当たりがない場合は、このメールを無視してください。アカウントは作成されません。",
+    "existingSubject": "{app} への登録申請について",
+    "existingBody": "このメールアドレスで {app} のアカウント作成が申請されましたが、このアドレスのアカウントはすでに存在します。\n\nご本人の場合は、次のリンクからサインインしてください。\n{loginLink}\n\n心当たりがない場合は、このメールを無視してください。何も変更されていません。"
+  },
+  "PasswordResetMail": {
+    "subject": "{app} のパスワード再設定",
+    "body": "{app} のアカウントのパスワード再設定が要求されました。\n\n新しいパスワードを設定するには、1時間以内に次のリンクを開いてください:\n{link}\n\n心当たりがない場合は、このメールを無視してください。パスワードは変更されていません。"
   }
 }

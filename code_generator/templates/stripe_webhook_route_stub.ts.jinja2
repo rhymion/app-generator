@@ -7,6 +7,7 @@
 // deliver an event more than once). Add cases for other event types here
 // (subscriptions are not covered). See docs/knowledge/stripe-payment-integration.md.
 
+import { logger } from '@/lib/logger';
 import { NextResponse } from 'next/server';
 import type Stripe from 'stripe';
 import { stripe } from '@/lib/stripe';
@@ -45,7 +46,7 @@ export async function POST(req: Request) {
   try {
     event = stripe.webhooks.constructEvent(payload, signature, webhookSecret);
   } catch (err) {
-    console.error('[x-payment] webhook signature verification failed', err instanceof Error ? err.name : typeof err);
+    logger.error('[x-payment] webhook signature verification failed', err instanceof Error ? err.name : typeof err);
     return NextResponse.json({ error: 'Webhook signature verification failed' }, { status: 400 });
   }
 
@@ -54,7 +55,7 @@ export async function POST(req: Request) {
   } catch (err) {
     // The event was not fully applied. Answer 500 so Stripe redelivers it;
     // the dispatcher is idempotent, so the retry is safe.
-    console.error('[x-payment] webhook dispatch failed', event.id, err);
+    logger.error('[x-payment] webhook dispatch failed', event.id, err);
     return NextResponse.json({ error: 'Webhook handling failed' }, { status: 500 });
   }
 

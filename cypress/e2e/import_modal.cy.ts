@@ -10,6 +10,9 @@ describe('ImportModal UI', () => {
     cy.task('db:reset');
     cy.task('db:seed');
     cy.task('db:grantAllPermissions');   // must include import:true (see prerequisite)
+    // db:reset recreates the test user with a new id, so a login saved by an
+    // earlier test refers to a user that no longer exists.
+    Cypress.session.clearAllSavedSessions();
     cy.clearCookies();
     cy.clearLocalStorage();
     cy.visit('/en/');

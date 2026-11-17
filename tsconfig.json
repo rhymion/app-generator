@@ -43,6 +43,7 @@
     "custom",
     "**/*.cy.tsx",
     "code_generator",
+    ".semgrep",
     "cypress", // Exclude the entire Cypress directory
     "cypress.config.ts",
     "mobile" // Expo app: its own tsconfig and dependencies

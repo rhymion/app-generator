@@ -31,10 +31,185 @@ and the version comment, and keep them in step.
 `javascript-typescript` and `python` with the `security-extended` query suite,
 on pushes and pull requests to `develop` and `main`, and weekly.
 
+`.github/codeql/codeql-config.yml` (passed as `config-file`) excludes
+`code_generator/tests/**` from analysis. Those tests render Jinja2 templates
+into TypeScript source with `autoescape=False` on purpose, and
+`py/jinja2/autoescape-false` reported this again on each PR that added such a
+test (#1384, #1392). Generator code and templates are still analysed. Add a
+path to `paths-ignore` only for code that is neither shipped nor generated.
+
 GitHub's CodeQL *default setup* and an advanced workflow conflict, so the
 default setup must be switched off (`state: not-configured` on the
 `code-scanning/default-setup` endpoint) when the workflow lands. Alerts are
 reviewed by maintainers before anyone discusses their content publicly.
+
+## OSV-Scanner
+
+`.github/workflows/osv-scanner.yml` gives a second opinion next to `npm audit`
+and `pip-audit`. It scans `package-lock.json` and `requirements.txt` only; the
+generated mobile app's dependencies are covered by the mobile dependency audit
+and are out of scope.
+
+| Trigger | Behaviour |
+|---|---|
+| weekly (Monday) and manual | full scan, SARIF uploaded to code scanning |
+| pull request touching a scanned file | compares head with base and lists newly introduced vulnerabilities in the job log; no SARIF upload, because a fork or Dependabot token cannot write code-scanning results |
+
+Both jobs run with `fail-on-vuln: false`, so they report and never block. They
+are not a required check. Criteria for making the pull-request scan blocking
+(flip `fail-on-vuln` to `true` and add it to the required checks): at least
+four consecutive weekly runs with no finding that the existing gates
+(`npm audit --audit-level=high`, `pip-audit`) did not also report, and a
+written rule for advisories OSV reports but the other sources do not
+(accept with a dated reason, or fix).
+
+## OpenSSF Scorecard
+
+`.github/workflows/scorecard.yml` runs the Scorecard action weekly (and on
+branch-protection changes and manually) and uploads SARIF to code scanning
+under the `scorecard` category; it also publishes the score to the public
+Scorecard API. It is report-only. Its job holds `security-events: write` and
+`id-token: write` (the latter for result publishing); the workflow default
+stays `contents: read`. A check that scores below 5 is either opened as a
+follow-up Issue or recorded as accepted, with a reason, on the tracking Issue.
+
+## Dynamic Scans workflow
+
+`.github/workflows/dynamic-scans.yml` runs weekly (Monday) and on demand. It builds
+and starts a generated app on the disposable test database, as the end-to-end job
+does, fetches `/api/openapi.json` with the seeded test admin API key (the fixed
+default of `scripts/seed-baseline-credentials.ts`, valid only under `NODE_ENV=test`;
+no repository secret is used), and runs four checks. Everything is uploaded as the
+`dynamic-scan-results` artifact and summarized in the job summary
+(`scripts/summarize_dynamic_scans.py`).
+
+| Check | Blocks? | What it does |
+|---|---|---|
+| OWASP ZAP baseline | no | Passive scan of the running app (`zap-baseline.py`, image pinned by digest). |
+| OWASP ZAP API scan | no | `zap-api-scan.py` driven by the generated OpenAPI document, sending the API key. |
+| Schemathesis | no | Fuzzes the API against the same document; the summary counts "server error" and "schema violation" failures. |
+| Nuclei | yes | Runs every template in `security/nuclei/templates`; any match fails the job. |
+
+Triaged false positives are recorded with a reason in `.zap/rules.tsv` (ZAP) and
+`schemathesis.toml` (Schemathesis).
+
+`/api/openapi.json` returns only the entities the caller may read (`lib/openapi/filter.ts`).
+The ZAP API scan and Schemathesis therefore see only what the seeded test admin API key
+may read. `scripts/seed-baseline.ts` grants that role a fixed list of entities (the default
+schema's `app_setting` is not on it, and neither is any entity a consumer adds), so the
+scans do not cover the endpoints of an entity outside the list, and they do not fail for it.
+To cover every entity, run them with a key whose owner can read all of them.
+
+Criteria for making the ZAP scans fail on High findings: at least four consecutive
+weekly runs whose High alerts are all either fixed or listed in `.zap/rules.tsv` with
+a reason. Then change `-I` to a `FAIL` entry for each High rule id in `.zap/rules.tsv`
+and drop `-I`. Schemathesis stays report-only until the same four runs show no
+unexplained "server error" failure; then remove `continue-on-error`.
+
+### Nuclei templates
+
+`security/nuclei/README.md` explains how to add a template. Each template matches a
+condition that must not occur (a missing default security header, an authenticated route
+that answers anonymously, a reachable `.env` or source map). `security/nuclei/check_templates_fire.sh`
+starts a deliberately broken stand-in server (`security/nuclei/broken_app.py`) and fails
+unless every template reports a finding against it.
+
+## Security Checks workflow
+
+`.github/workflows/security-checks.yml` runs on pull requests and on pushes to
+`main` and `develop`, weekly, and on demand. It uses no secret, and its checks
+are not path-filtered, so each one reports on every pull request.
+
+| Job | Blocks? | What it does |
+|---|---|---|
+| Secret Scan (gitleaks) | yes | Runs the `gitleaks` CLI (pinned version, SHA-256 checked; not the GitHub Action, which needs a license for organizations). A pull request is scanned over the commits it adds; pushes and the weekly run scan the full history. |
+| Dependency Review | yes | `actions/dependency-review-action` fails a pull request that adds or bumps a dependency to a version with a High or Critical advisory. |
+| Semgrep | project rules: yes; registry packs: no | `scripts/semgrep_scan.sh` scans the repository sources and a freshly generated app. |
+
+### gitleaks
+
+Reviewed findings of the full-history scan are listed in `.gitleaksignore`,
+each with the reason it is not a credential. An entry is an exact
+`commit:file:rule:line` fingerprint, so a new secret of the same shape in the
+same file is still reported. Do not add an entry to turn a run green: rotate
+the credential, or record why the value is harmless.
+
+Run it locally with `gitleaks detect --source . --redact`.
+
+GitHub secret scanning and push protection are repository settings, not files.
+They are verified with
+`gh api repos/rhymion/app-generator --jq .security_and_analysis`.
+
+### Semgrep
+
+- **Project rules** live in `.semgrep/rules.yml` and `.semgrep/use_server_rules.yml`
+  (rules that need the `'use server'` directive at the top of the file) with test
+  cases in the files of the same name (`.semgrep/rules.ts`, `.semgrep/rules.tsx`,
+  `.semgrep/use_server_rules.ts`; run `cd .semgrep && semgrep test .`). Each rule
+  has a fixture that triggers it and one that does not. They are blocking from the
+  start because the tree has no findings: raw `$queryRawUnsafe` / `$executeRawUnsafe`,
+  `dangerouslySetInnerHTML`, `eval()` / `new Function()`, an entity-only
+  `requireEntityPermission` / `canAccessEntity` / `requireApiPermission` check for
+  `update`, `delete` or `invalidate` (the generated invalidate action is gated by the
+  `delete` permission; `Operation` has no separate invalidate or action value) in a
+  function with no record-level resolution: `requireRecordPermission`,
+  `requireApiRecordPermission`, `canAccessRecord`, `resolveRecordPermissions`, an inline
+  `creator?.update` / `creator?.delete` flag check (generated bulk routes) or a
+  `creator_id ===` ownership comparison (`x-self-only`) (test files are exempt), a `'use server'` function that writes through Prisma with no
+  `getSessionUserIdOrThrow` / `requireEntityPermission` / `requireRecordPermission` /
+  `requireDualAuth` / `auth` call, public object storage (`access: 'public'`, public
+  ACLs, `allUsers`), a secret-named value compared with `==` / `===` / `!=` / `!==`,
+  and logging a request body or headers. A deliberate exception takes an inline
+  `// nosemgrep: <rule-id>` with the reason.
+- **Registry packs** (`p/typescript`, `p/nextjs`, `p/owasp-top-ten`) are
+  report-only. Their SARIF files are uploaded as the `semgrep-results` artifact
+  and the counts are written to the job summary. They become blocking, for
+  findings that are new relative to the baseline below, once the baseline is
+  triaged.
+- **Generated app**: `generate-code` runs in a scratch copy of the tree and the
+  same scans run on the copy. The generator repository holds its generated
+  output in place, so today the generated scan reports the same findings as
+  the source scan.
+
+Run both scans locally with `bash scripts/semgrep_scan.sh --registry`
+(needs `semgrep` and the packages in `requirements.txt`; results go to
+`semgrep-results/`). The script runs the fixture test first and exits 3 when
+`semgrep` is not installed. It is step 16c of the update-generator Completion
+gate, so the project rules run in the local gate as well as in CI.
+
+Registry baseline, measured with Semgrep 1.183.0 when this was added (10
+findings):
+
+| Rule | Count | File |
+|---|---|---|
+| `dependabot-missing-cooldown` | 6 | `.github/dependabot.yml` |
+| `missing-autoescape-disabled` | 2 | `code_generator/generate.py`, `code_generator/generate_types.py` |
+| `gcm-no-tag-length` | 2 | `lib/compliance/attachment_name_crypto.ts`, `lib/mfa/crypto.ts` |
+
+The Jinja2 findings are intended: the templates generate TypeScript, not HTML.
+The two `gcm-no-tag-length` findings need a decision on whether to pass an
+explicit authentication tag length to `createDecipheriv`.
+
+## Workflow Lint
+
+`.github/workflows/workflow-lint.yml` runs `actionlint` and `zizmor` on pull
+requests and pushes that touch `.github/`. Both fail on any finding. It is
+path-filtered, so do not make its checks required in branch protection.
+
+`.github/zizmor.yml` requires every action to be pinned to a commit SHA and
+suppresses `dependabot-cooldown`, with the reason in the file. `pull_request_target`
+is reported by zizmor's `dangerous-triggers` audit and is not used. Every
+`actions/checkout` step sets `persist-credentials: false`.
+
+Run both locally with `zizmor --no-online-audits .github` and `actionlint`.
+
+`actionlint` runs `shellcheck` on every `run:` script only when `shellcheck` is on
+`PATH`, and it skips that check silently otherwise. A local `actionlint` that exits 0
+on a machine without `shellcheck` is therefore not equivalent to the CI run, which has
+it. Install `shellcheck` first (for example `pip install shellcheck-py` into a venv)
+and confirm it is found with `which shellcheck` before trusting a clean result. A
+`shellcheck` directive must be on its own comment line; text after the code on the
+same line is a parse error.
 
 ## Static checks run by CI
 
@@ -47,3 +222,5 @@ Two checks that used to run only by hand are CI steps:
 
 A new violation reported by either is a finding to fix, not something to add
 to an allowlist to turn the run green.
+
+See also [security-asvs-coverage.md](security-asvs-coverage.md), which maps each OWASP ASVS 5.0 requirement to the code, test or Issue that covers it.

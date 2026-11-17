@@ -1,8 +1,10 @@
+import { logger } from '@/lib/logger';
 import { PrismaClient, type Prisma } from '@/app/generated/prisma/client'
 import { withAccelerate } from '@prisma/extension-accelerate';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaNeon } from '@prisma/adapter-neon';
 import { pinSslModeVerifyFull } from './db-url';
+import { assertSecureDatabaseUrl } from './transport-security';
 import { resolvePrismaPoolMax } from './prisma-pool';
 import { cacheOnGlobal } from './global-singleton';
 import { auditLogAppendOnlyExtension } from './audit-log-integrity/guard';
@@ -47,7 +49,7 @@ function attachSlowQueryListener(client: PrismaClient<'query'>): void {
   client.$on('query', (e: Prisma.QueryEvent) => {
     if (e.duration >= slowQueryThresholdMs) {
       // Single-line WARN so log aggregators can grep on `prisma slow-query`.
-      console.warn(formatSlowQueryLog(e));
+      logger.warn(formatSlowQueryLog(e));
     }
   });
 }
@@ -71,7 +73,7 @@ const createBasePrismaClient = () => {
         `Got: "${accelerateUrl.slice(0, 30)}..." — see docs/knowledge/manual-ops.md §1.`
       );
     }
-    console.log('Using Accelerate URL for Prisma Client');
+    logger.info('Using Accelerate URL for Prisma Client');
     // log option is absent from all official Prisma 7 + Accelerate examples.
     // Accelerate monitoring belongs in the Prisma dashboard, not local events.
     const client = new PrismaClient({
@@ -89,8 +91,9 @@ const createBasePrismaClient = () => {
     // Doreen sets it there): falls straight through to the existing PrismaPg
     // branch below with zero behavior change — GCP Cloud Run and local/CI
     // never set this var, so they always take that branch.
-    console.log('Using Neon adapter for Prisma Client');
+    logger.info('Using Neon adapter for Prisma Client');
     const rawUrl = `${process.env.DATABASE_URL}`;
+    assertSecureDatabaseUrl(rawUrl);
 
     // Same URL handling as the PrismaPg branch below (schema extraction +
     // statement_timeout) — Postgres connection-string semantics, not a
@@ -146,8 +149,9 @@ const createBasePrismaClient = () => {
     const client = new PrismaClient({ adapter, log: prismaLogLevels });
     return client;
   } else {
-    console.log('Using direct database connection for Prisma Client');
+    logger.info('Using direct database connection for Prisma Client');
     const rawUrl = `${process.env.DATABASE_URL}`;
+    assertSecureDatabaseUrl(rawUrl);
 
     // PrismaPg passes the connection string to pg.Pool, which ignores Prisma's
     // ?schema= extension. Strip it from the URL and pass it via the adapter's

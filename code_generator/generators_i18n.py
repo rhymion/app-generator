@@ -7,7 +7,7 @@ removes or overwrites existing values so manual translations are preserved.
 Updates:
   messages/en.json         Nav, EntityLabel, Fields, <nativeEnum namespace> sections
   messages/ja.json         same (placeholder values for manual translation)
-  lib/site-config.ts       navLinks array
+  lib/site-config.ts       navLinks array, auth.registration.emailVerification
   app/[locale]/@sidebar/page.tsx  navTranslationKeys object
 """
 import json
@@ -17,6 +17,7 @@ from pathlib import Path
 from helpers.naming import to_camel_case, to_title_case
 from version_of import version_of_entities
 from helpers.schema_helpers import filter_fields
+from validate import email_verification_enabled
 from nav_config import (
     build_nav_config,
     nav_extra_entities,
@@ -450,6 +451,49 @@ SCHEDULED_TASK_RUN_MESSAGES = {
 }
 
 
+_EMAIL_VERIFICATION_LINE = re.compile(r'^(\s*emailVerification:\s*)(true|false),', re.M)
+_AUTH_BLOCK_OPEN = re.compile(r'^(\s*)auth:\s*\{\n', re.M)
+
+
+def _update_site_config_email_verification(path: Path, enabled: bool) -> bool:
+    """Mirror `x-generator.email-verification.enabled` into
+    `siteConfig.auth.registration.emailVerification` (Issue #1092).
+
+    The register routes and pages are hand-written, tracked files, and a tracked
+    file may not import git-ignored generated output, so the schema value reaches
+    them through this tracked, generator-maintained line. The schema is the
+    source of truth: an existing line is rewritten to match it. A site-config
+    without the line (written before this setting existed) gets a `registration`
+    block as the first entry of `auth`. Returns True when the file changed.
+    """
+    content = path.read_text(encoding='utf-8')
+    value = 'true' if enabled else 'false'
+    if _EMAIL_VERIFICATION_LINE.search(content):
+        updated = _EMAIL_VERIFICATION_LINE.sub(lambda m: f'{m.group(1)}{value},', content, count=1)
+    else:
+        m = _AUTH_BLOCK_OPEN.search(content)
+        if not m:
+            print(f'  WARNING: {path.name} has no `auth: {{` block; '
+                  'siteConfig.auth.registration.emailVerification not written')
+            return False
+        indent = m.group(1) + '  '
+        block = (
+            f'{indent}/**\n'
+            f'{indent} * Self-registration. Set by generate-code from\n'
+            f'{indent} * `x-generator.email-verification.enabled` in json_schema.yaml; edit the\n'
+            f'{indent} * schema, not this line. See docs/knowledge/authentication.md.\n'
+            f'{indent} */\n'
+            f'{indent}registration: {{\n'
+            f'{indent}  emailVerification: {value},\n'
+            f'{indent}}},\n'
+        )
+        updated = content[:m.end()] + block + content[m.end():]
+    if updated == content:
+        return False
+    path.write_text(updated, encoding='utf-8')
+    return True
+
+
 def _update_site_config(path: Path, nav_entities: list, nav_config: dict) -> bool:
     content = path.read_text(encoding='utf-8')
 
@@ -628,6 +672,7 @@ def update_i18n_and_config(entities: list, schema: dict, output_dir: Path, has_s
     site_config = output_dir / 'lib' / 'site-config.ts'
     if site_config.exists():
         changed = _update_site_config(site_config, nav_entities, nav_config)
+        changed = _update_site_config_email_verification(site_config, email_verification_enabled(schema)) or changed
         status = 'Updated' if changed else 'No changes'
         print(f'  {status}: {site_config.relative_to(output_dir)}')
 

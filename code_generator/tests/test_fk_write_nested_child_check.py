@@ -90,7 +90,10 @@ def test_child_fk_is_checked_on_update_against_the_stored_value():
     assert update_body.index("model: 'gadget'") < update_body.index('prisma.$transaction')
 
 
-def test_child_fk_to_a_system_global_target_is_not_checked():
+def test_child_fk_to_a_system_global_target_is_checked_for_read_permission():
+    # No organization column on the target: the reference is still one the client
+    # chooses, so it must be a row the actor may read.
     rendered, _ = _render(_schema(target_scoped=False))
-    assert "model: 'gadget'" not in rendered
-    assert 'assertFkReferencesUsable' not in rendered
+    add_body = _body(rendered, 'addWidget')
+    assert "model: 'gadget', id: f.gadget_id" in add_body
+    assert 'assertFkReferencesUsable' in rendered

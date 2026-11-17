@@ -206,7 +206,7 @@ guard to match):
   `can_delete` branch. An org-scoped entity that is create/update-able but
   not delete-able (the common x-approval shape — approvable records are
   typically undeletable) got an unused import. `getSessionUserIdOrThrow`/
-  `requirePermission` had the opposite problem: imported unconditionally,
+  `requireRecordPermission` had the opposite problem: imported unconditionally,
   but only referenced inside the upsert body (`can_create`/`can_update`),
   the invalidate action (`can_invalidate`), or the comment-reaction action
   (`has_commentable`) — an entity with none of those (e.g. a

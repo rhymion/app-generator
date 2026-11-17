@@ -1,0 +1,10 @@
+# CodeQL configuration, used by .github/workflows/codeql.yml.
+name: app-generator CodeQL config
+
+# The generator's own tests render Jinja2 templates into TypeScript source,
+# never into HTML served to a browser, so autoescape=False is intended there.
+# py/jinja2/autoescape-false was raised (and dismissed) on every PR that added
+# such a test (#1384, #1392). The tests are not shipped and are not part of a
+# generated app.
+paths-ignore:
+  - code_generator/tests/**

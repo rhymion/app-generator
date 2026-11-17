@@ -1,11 +1,12 @@
 'use server';
 
+import { logger } from '@/lib/logger';
 import prisma from '@/lib/prisma';
 {% if version_of %}
 import { AppError } from '@/lib/_errors';
 {% endif %}
 import type { {{ parent_pascal }} } from '@/lib/{{ parent }}/types';
-import { assertPermission, getModelPermissions, resolvePermissions, toPermissions{% if should_filter_by_org or is_self_only %}, getSessionUserIdOrThrow{% endif %} } from '@/lib/authz';
+import { assertPermission, getModelPermissions, resolveEntityPermissions, resolveRecordPermissions, toPermissions{% if should_filter_by_org or is_self_only %}, getSessionUserIdOrThrow{% endif %} } from '@/lib/authz';
 import type { Operation } from '@/lib/authz';
 import { type PageOpts, type PageResult, DEFAULT_PAGE_SIZE } from '@/lib/_pagination';
 {% if should_filter_by_org %}
@@ -36,7 +37,9 @@ export async function get{{ parent_pascal }}DetailPageData(id: string, operation
     getModelPermissions('{{ parent }}'),
   ]);
 {% endif %}
-  const resolved = await resolvePermissions(basePermissions, {{ parent_camel }}, userId ?? '');
+  const resolved = {{ parent_camel }}
+    ? await resolveRecordPermissions(basePermissions, {{ parent_camel }}, userId ?? '')
+    : await resolveEntityPermissions(basePermissions);
   await assertPermission(resolved, operation, '{{ parent }}');
 {% if comment_has_mention %}
   // canViewUserProfile (cmd_522): whether the viewer may link mentioned users'
@@ -259,7 +262,7 @@ export async function search{{ parent_pascal }}Options(
   try {
     virtualData = await resolveVirtualColumns(rowsRaw as unknown as ReadonlyArray<Record<string, unknown>>);
   } catch (e) {
-    console.warn('virtual resolver error:', e);
+    logger.warn('virtual resolver error:', e);
     virtualData = new Map();
   }
 {% endif %}

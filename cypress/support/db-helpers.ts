@@ -1,5 +1,6 @@
 // AUTO-GENERATED - DO NOT EDIT (hand-edited sections: grantAllEntityPermissions, createLimitedApiUser, createSessionUserWithPermission, createApiUserWithPermission, createCrossOrgScenario)
 import 'dotenv/config'
+import { hashApiKey } from '@/lib/api-key';
 import { PrismaPg } from '@prisma/adapter-pg'
 import { PrismaClient } from '@/app/generated/prisma/client';
 import { TEST_CREDENTIALS, TEST_API_KEY, getTestPasswordHash } from './test-credentials';
@@ -108,11 +109,22 @@ export async function seedTestDatabase() {
       email: TEST_CREDENTIALS.email,
       name: TEST_CREDENTIALS.name,
       password: hashedPassword,
-      api_key: TEST_API_KEY,
+      api_key_hash: hashApiKey(TEST_API_KEY),
     },
   });
 
   return { user };
+}
+
+type _UserCreateData = Parameters<typeof prisma.user.create>[0]['data'];
+
+// Creates a user whose API key is `apiKey`. The database stores only the key's hash;
+// the returned user carries the plain key as `api_key` (test-only) for request headers.
+export async function createKeyedUser(apiKey: string, args: { data: _UserCreateData }) {
+  const user = await prisma.user.create({
+    data: { ...args.data, api_key_hash: hashApiKey(apiKey), api_key_issued_at: new Date() } as _UserCreateData,
+  });
+  return { ...user, api_key: apiKey };
 }
 
 export const ALL_ENTITIES = [
@@ -221,7 +233,7 @@ export async function createLimitedApiUser(entityName: string): Promise<string> 
       email: `limited_${entityName}@example.com`,
       name: `Limited User (${entityName})`,
       password: 'not_needed',
-      api_key: limitedApiKey,
+      api_key_hash: hashApiKey(limitedApiKey),
       roles: { connect: [{ id: denyRole.id }] },
     },
   });
@@ -290,7 +302,7 @@ export async function createApiUserWithPermission(
       email: `api_${label}_${entityName}@example.com`,
       name: `API User (${label}/${entityName})`,
       password: 'not_needed',
-      api_key: apiKey,
+      api_key_hash: hashApiKey(apiKey),
       roles: { connect: [{ id: customRole.id }] },
       ...(organizationId ? { organizations: { connect: [{ id: organizationId }] } } : {}),
     },

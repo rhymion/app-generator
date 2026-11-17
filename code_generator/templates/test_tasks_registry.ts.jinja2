@@ -78,6 +78,10 @@ export function getGeneratedTasks() {
       const { seedReservation{{ entity.pascal }}Insufficient } = require('{{ entity.reservation_helper_path }}');
       return await seedReservation{{ entity.pascal }}Insufficient();
     },
+    async 'db:seedReservation{{ entity.pascal }}Scarce'() {
+      const { seedReservation{{ entity.pascal }}Scarce } = require('{{ entity.reservation_helper_path }}');
+      return await seedReservation{{ entity.pascal }}Scarce();
+    },
     async 'db:seedReservation{{ entity.pascal }}Criteria'() {
       const { seedReservation{{ entity.pascal }}Criteria } = require('{{ entity.reservation_helper_path }}');
       return await seedReservation{{ entity.pascal }}Criteria();

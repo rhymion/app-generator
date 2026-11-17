@@ -139,7 +139,7 @@ def test_template_emits_select_branch_per_owner():
 
 def test_template_emits_select_branch_includes_assignee_when_present():
     """cmd_413: an owner with its own assignee_id gets it added to the
-    permission-check select so requirePermission's Assignee item-level
+    permission-check select so requireRecordPermission's Assignee item-level
     resolution has the field it needs."""
     out = _render([{'name': 'resource', 'has_assignee': True}])
     assert 'resource: { select: { id: true, creator_id: true, assignee_id: true } }' in out
@@ -151,11 +151,11 @@ def test_template_emits_owner_permission_check_per_owner():
     a bespoke creatorId check — one branch per owner, falling through to a
     final error when none of the owner FKs resolved. Since #750, the
     item-level check reuses the per-owner RichPermissions already fetched
-    by the coarse pre-check (resolvePermissions), rather than a second
-    requirePermission(model, 'update', item) call."""
+    by the coarse pre-check (resolveRecordPermissions), rather than a second
+    requireRecordPermission(model, 'update', item) call."""
     out = _render([{'name': 'resource'}, {'name': 'product'}])
-    assert "const resolved = await resolvePermissions(basePermsByOwner['resource'], owner.resource, userId);" in out
-    assert "const resolved = await resolvePermissions(basePermsByOwner['product'], owner.product, userId);" in out
+    assert "const resolved = await resolveRecordPermissions(basePermsByOwner['resource'], owner.resource, userId);" in out
+    assert "const resolved = await resolveRecordPermissions(basePermsByOwner['product'], owner.product, userId);" in out
     assert "throw new Error('Attachable has no owner');" in out
 
 
@@ -176,7 +176,7 @@ def test_template_coarse_check_precedes_owner_row_fetch():
     assert out.index(coarse_fetch) < out.index(coarse_gate)
     assert out.index(coarse_gate) < out.index(owner_fetch)
     # No second getModelPermissions()-backed call for either model -- the
-    # item-level check reuses basePermsByOwner via resolvePermissions().
+    # item-level check reuses basePermsByOwner via resolveRecordPermissions().
     assert "getModelPermissions('resource', userId)" in out
     assert out.count("getModelPermissions('resource', userId)") == 1
 

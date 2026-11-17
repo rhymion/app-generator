@@ -1,4 +1,5 @@
 // AUTO-GENERATED - DO NOT EDIT
+import { logger } from '@/lib/logger';
 import { NextRequest, NextResponse } from 'next/server';
 import { authenticate, requireApiPermission, handleApiError, ApiError } from '@/lib/api-auth';
 import { AppError } from '@/lib/_errors';
@@ -10,7 +11,7 @@ import { getRateLimiter } from '@/lib/rate-limit';
 import { add{{ parent_pascal }} } from '@/lib/{{ parent }}/service';
 {% endif %}
 {% if can_update or can_delete %}
-import { {% if can_update %}update{{ parent_pascal }}{% endif %}{% if can_update and can_delete %}, {% endif %}{% if can_delete %}delete{{ parent_pascal }}{% endif %} } from '@/lib/{{ parent }}/service';
+import { {% if can_update %}update{{ parent_pascal }}{% endif %}{% if can_update and can_delete %}, {% endif %}{% if can_delete %}delete{{ parent_pascal }}{% if delete_reference_check %}, assertDeleteReferencesReachable{{ parent_pascal }}{% endif %}{% endif %} } from '@/lib/{{ parent }}/service';
 {% endif %}
 
 // ---------------------------------------------------------------------------
@@ -31,7 +32,7 @@ interface BulkResponse<T> {
 // with a generic message so internal wording never reaches the client.
 function bulkErrorText(err: unknown): string {
   if (err instanceof AppError || err instanceof ApiError) return err.message;
-  console.error('[bulk] item failed', err instanceof Error ? err.name : typeof err);
+  logger.error('[bulk] item failed', err instanceof Error ? err.name : typeof err);
   return 'Internal error';
 }
 
@@ -296,6 +297,19 @@ export async function DELETE(request: NextRequest) {
         results.push({ index: i, success: false, error: `Access denied: ${id}` });
         continue;
       }
+{% if delete_reference_check %}
+      // A record that references a row the caller cannot reach is not
+      // deletable by them, as in the single-record route.
+      try {
+        await assertDeleteReferencesReachable{{ parent_pascal }}(actorId, [id]);
+      } catch (e) {
+        if (e instanceof AppError && e.code === 'PERMISSION_DENIED') {
+          results.push({ index: i, success: false, error: `Access denied: ${id}` });
+          continue;
+        }
+        throw e;
+      }
+{% endif %}
       permitted.push({ index: i, id });
     }
 

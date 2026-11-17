@@ -120,14 +120,6 @@ definitions:
         x-custom-component:
           target:
             - upsert
-      api_key:
-        type:
-          - string
-          - "null"
-        x-pii: sensitive
-        x-custom-component:
-          target:
-            - upsert
       image_id:
         type:
           - string
@@ -216,7 +208,6 @@ definitions:
         - email
         - image_id
         - password
-        - api_key
         - mfa_enabled
     x-relationships:
       roles:

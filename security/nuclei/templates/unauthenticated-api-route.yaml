@@ -1,0 +1,28 @@
+id: unauthenticated-api-route
+
+info:
+  name: An API route that requires authentication answers without credentials
+  author: project
+  severity: high
+  description: |
+    These routes require an API key or a session. A 2xx answer to a request without
+    credentials means the authentication check was lost.
+  tags: auth,regression
+
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/api/openapi.json"
+      - "{{BaseURL}}/api/audit_log"
+      - "{{BaseURL}}/api/notifications"
+      - "{{BaseURL}}/api/approval_request"
+    stop-at-first-match: false
+    matchers-condition: and
+    matchers:
+      - type: dsl
+        dsl:
+          - 'status_code >= 200 && status_code < 300'
+      - type: word
+        part: header
+        words:
+          - "application/json"

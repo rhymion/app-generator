@@ -18,7 +18,7 @@
 // (`@@unique([entity_name, approver_role_id])`, prisma/schema.prisma) and a
 // tracked-snapshot update path, and does not require org-scoping
 // infrastructure this dogfood schema does not currently have.
-import { TEST_CREDENTIALS } from '../support/test-credentials';
+import { TEST_API_KEY, TEST_CREDENTIALS } from '../support/test-credentials';
 import { apiCreateRole, apiCreateApprovalFlow } from '../support/approval_flow_seed';
 
 function assertNoReactErrorBoundary() {
@@ -99,7 +99,7 @@ describe('Error message delivery (cmd_695 — Server Action ActionFailure conver
 
   it('3) permission denied on delete ("Insufficient privilege") shows inline, not error.tsx', () => {
     apiCreateRole('Approver Perm Test').then((role) => {
-      apiCreateApprovalFlow({ entityName: 'user', approverRoleId: role.id }).then(() => {
+      apiCreateApprovalFlow({ entityName: 'user', approverRoleId: role.id }).then((flow) => {
         cy.task<string>('db:createSessionUserWithPermission', {
           entityName: 'approval_flow',
           flags: { read: true, delete: true },
@@ -154,6 +154,11 @@ describe('Error message delivery (cmd_695 — Server Action ActionFailure conver
           // instead of crashing, and rolls back the optimistic removal.
           cy.contains('do not have permission').should('be.visible');
           cy.contains('.MuiDataGrid-cell', 'User').should('be.visible');
+          // The denied delete must not have removed the row.
+          cy.request({
+            url: `/api/approval_flow/${flow.id}`,
+            headers: { 'X-API-Key': TEST_API_KEY },
+          }).its('status').should('eq', 200);
           cy.screenshot('cmd695-3-permission-denied-fixed', { capture: 'fullPage' });
         });
       });

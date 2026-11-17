@@ -12,6 +12,7 @@
     "cleanup": "python3 code_generator/build_user_schema.py code_generator/json_schema.yaml prisma/schema.prisma --out code_generator/.generated/json_schema.yaml && python3 code_generator/cleanup.py code_generator/.generated/json_schema.yaml ./ --prune-orphans --keep-stubs",
     "cleanup:all": "python3 code_generator/build_user_schema.py code_generator/json_schema.yaml prisma/schema.prisma --out code_generator/.generated/json_schema.yaml && python3 code_generator/cleanup.py code_generator/.generated/json_schema.yaml ./ --prune-orphans",
     "check:generated": "python3 code_generator/build_user_schema.py code_generator/json_schema.yaml prisma/schema.prisma --out code_generator/.generated/json_schema.yaml && python3 code_generator/check_generated.py code_generator/.generated/json_schema.yaml ./",
+    "check:security-matrix": "python3 code_generator/security_matrix.py check --manifest .security-manifest.json --tests cypress",
     "check:handwritten-routes": "python3 code_generator/check_handwritten_routes.py ./",
     "check:tracked-generated-imports": "python3 code_generator/check_tracked_generated_imports.py ./",
     "check:readme-sync": "bash scripts/check_readme_sync.sh",
@@ -24,8 +25,10 @@
     "db:seed-baseline": "tsx scripts/seed-baseline.ts",
     "db:studio": "prisma studio",
     "db:push": "prisma db push",
+    "db:create": "bash scripts/db-create.sh",
     "db:apply-audit-log-sql": "tsx scripts/apply-audit-log-sql.ts",
     "audit-log:digest": "tsx scripts/audit-log-digest.ts",
+    "secrets:reencrypt": "tsx scripts/reencrypt-secrets.ts",
     "task:run": "tsx scripts/scheduled-task-run.ts",
     "task:run-all": "tsx scripts/scheduled-task-run.ts --all",
     "dev": "node scripts/run-next-dev.js",
@@ -60,6 +63,8 @@
     "test:list-child-e2e-gate": "bash scripts/check_list_child_e2e_gate_fixture.sh",
     "test:comment-rest-e2e-gate": "bash scripts/check_comment_rest_e2e_gate_fixture.sh",
     "test:version-of-e2e-gate": "bash scripts/check_version_of_e2e_gate_fixture.sh",
+    "test:leak-canary-gate": "bash scripts/check_leak_canary_gate_fixture.sh",
+    "test:security-matrix-e2e-gate": "bash scripts/check_security_matrix_e2e_gate_fixture.sh",
     "test:scheduled-task-e2e-gate": "bash scripts/check_scheduled_task_e2e_gate_fixture.sh",
     "test:timezone-migration": "bash scripts/check_timezone_migration.sh",
     "test:business-date-migration": "bash scripts/check_business_date_migration.sh",
@@ -88,7 +93,7 @@
     "dev:full": "run-s docker:up:dev generate-code migrate:dev db:generate db:seed-baseline dev",
     "build:full": "cross-env NODE_ENV=production run-s docker:up:prod generate-code migrate:deploy db:generate db:seed-baseline build",
     "python-generate": "uv venv --python 3.12 .venv && source .venv/bin/activate && uv pip install -r requirements.txt && npm run generate-code",
-    "vercel-build": "run-s prj:sync python-generate migrate:deploy db:generate build",
+    "vercel-build": "run-s prj:sync python-generate db:create db:generate build",
     "prj:sync": "python3 scripts/prj_sync.py"
   },
   "dependencies": {
@@ -129,6 +134,7 @@
     "next": "^16.4.6",
     "next-auth": "^5.0.0-beta.32",
     "next-intl": "^4.15.1",
+    "nodemailer": "~10.3.1",
     "otplib": "^13.6.0",
     "papaparse": "^5.7.1",
     "qrcode": "^1.5.4",
@@ -159,7 +165,8 @@
     "postcss-selector-parser": "^7.1.6",
     "@vercel/cli-config": {
       "zod": "^4.6.6"
-    }
+    },
+    "nodemailer": "$nodemailer"
   },
   "devDependencies": {
     "@fontsource/noto-sans-jp": "^5.3.1",

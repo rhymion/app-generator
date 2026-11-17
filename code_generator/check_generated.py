@@ -3,7 +3,7 @@
 check_generated.py — Post-generation guard against low-level constraint bypass.
 
 Walks the files the generator would have written for the current schema
-(see cleanup.py for the same enumeration) and flags three classes of
+(see cleanup.py for the same enumeration) and flags four classes of
 violation:
 
 1. Any `prisma.$queryRaw*` / `prisma.$executeRaw*` use. These bypass the
@@ -34,6 +34,12 @@ violation:
    files and proj_c's `prj/` API specs are tracked separately (cmd_658
    classification report) and are out of scope for this rule until their own
    follow-up task lands.
+
+4. A direct `console.*` call in generated code (Issue #1237). Generated
+   code logs through `logger` from `@/lib/logger`, which redacts credential
+   -like keys and email addresses; ESLint's `no-console` rule enforces the
+   same for the hand-written tree. Comment lines are not scanned; the
+   allowlist applies.
 
 `app/generated/` is intentionally excluded: that tree is produced by
 `prisma generate` and contains the client-internal definitions of the
@@ -117,6 +123,9 @@ _CY_LOGIN = re.compile(r'\bcy\.login\s*\(')
 _SESSION_CANARY_MARKER = 'dual-auth-session-canary'
 _SESSION_CANARY_LOOKBACK_LINES = 5
 
+# Issue #1237: generated code must not write to the console directly.
+_CONSOLE_CALL = re.compile(r'\bconsole\s*\.\s*(?:log|info|warn|error|debug|trace)\s*\(')
+
 _ALLOWLIST_PATH = Path(__file__).parent / 'check_generated_allowlist.yaml'
 
 
@@ -125,7 +134,7 @@ class Violation:
     path: str          # POSIX-style, relative to project root
     line: int
     column: int
-    rule: str          # 'raw:queryRaw' | 'raw:executeRaw' | 'write:direct' | 'test:unexplained-login'
+    rule: str          # 'raw:queryRaw' | 'raw:executeRaw' | 'write:direct' | 'console:direct' | 'test:unexplained-login'
     snippet: str       # one-line context
 
     def render(self) -> str:
@@ -390,6 +399,12 @@ def _scan_file(path: Path, root: Path) -> list[Violation]:
                 violations.append(Violation(
                     path=rel, line=line_no, column=m.start() + 1,
                     rule=rule_id, snippet=line.strip(),
+                ))
+        if not line.lstrip().startswith(('//', '*', '/*')):
+            for m in _CONSOLE_CALL.finditer(line):
+                violations.append(Violation(
+                    path=rel, line=line_no, column=m.start() + 1,
+                    rule='console:direct', snippet=line.strip(),
                 ))
         if not is_service_layer:
             for m in _DIRECT_WRITE.finditer(line):

@@ -472,3 +472,17 @@ If Cypress tests fail because `cy.task('db:reset')` does not fully clear state, 
 1. `cypress.config.ts` imports `getGeneratedTasks()` from `cypress/support/generated-tasks.ts`
 2. The task registry is up to date: `npm run generate-code`
 3. `db:reset` calls `/api/test-utils/reset-caches` to clear the server-side permission and API-key caches
+
+### 4.5 `Failed to deserialize column of type 'name'` (`UnsupportedNativeDataType`)
+
+**Symptom**: on a deployment with `USE_NEON_ADAPTER=true` (Vercel + Neon), a `$queryRaw` fails with `P2010`,
+`Raw query failed. Code: N/A. Message: Failed to deserialize column of type 'name'` and
+`driverAdapterError: UnsupportedNativeDataType`, while the same query works locally and in CI.
+
+**Cause**: the query returns a column of PostgreSQL's `name` type (system catalog identifiers such as
+`pg_indexes.indexname` or `pg_extension.extname`). `@prisma/adapter-pg`, used locally and in CI, reads it;
+`@prisma/adapter-neon` does not.
+
+**Fix**: cast the column in the query (`SELECT indexname::text AS indexname ...`). See
+`docs/knowledge/raw-sql-policy.md`, "Adding a new raw query". Generated `lib/db-init.ts` before this fix logged
+`ensureSearchIndexes() failed during startup` with this error on every cold start; regenerate.

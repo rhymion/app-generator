@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 const { userFindFirst, roleCount, getSessionUserId, verifyMobileAccessToken } = vi.hoisted(() => ({
   userFindFirst: vi.fn(),
@@ -18,14 +18,15 @@ vi.mock('@/lib/prisma', () => ({
 }));
 
 vi.mock('@/lib/authz', () => ({
-  requirePermission: vi.fn(),
+  requireEntityPermission: vi.fn(), requireRecordPermission: vi.fn(),
   getSessionUserId,
 }));
 
 vi.mock('@/lib/rate-limit', async () => (await import('@/test/helpers/real-rate-limiter')).realRateLimiterModule());
 import { _resetForTests as resetRateLimiter } from './rate-limit';
-import { ApiError, authenticate, authenticateApiKey, handleApiError, requireCaller, requireDualAuth, requireScheduledTaskRole, resolveActorId } from './api-auth';
+import { ApiError, assertSameSiteCookieWrite, authenticate, authenticateApiKey, handleApiError, requireCaller, requireDualAuth, requireScheduledTaskRole, resolveActorId } from './api-auth';
 import { SCHEDULED_TASK_ROLE_NAME } from './scheduled-tasks/system-actor';
+import { hashApiKey } from './api-key';
 
 function makeRequest(headers: Record<string, string> = {}) {
   return { headers: { get: (name: string) => headers[name] ?? null } } as unknown as Parameters<typeof requireScheduledTaskRole>[0];
@@ -84,6 +85,16 @@ describe('requireScheduledTaskRole', () => {
 });
 
 describe('authenticateApiKey', () => {
+  it('looks the user up by the SHA-256 of the presented key, never by the key', async () => {
+    userFindFirst.mockResolvedValueOnce({ id: 'user-h', api_key_expires_at: null });
+
+    await authenticateApiKey(makeRequest({ 'X-API-Key': 'mk_lookup_probe' }));
+
+    const query = userFindFirst.mock.calls[0][0];
+    expect(query.where).toEqual({ api_key_hash: hashApiKey('mk_lookup_probe') });
+    expect(JSON.stringify(query)).not.toContain('mk_lookup_probe');
+  });
+
   it('resolves a key with no expiry (null = never expires)', async () => {
     userFindFirst.mockResolvedValueOnce({ id: 'user-4', api_key_expires_at: null });
 
@@ -289,5 +300,133 @@ describe('requireDualAuth and requireScheduledTaskRole with a mobile access toke
     await expect(
       requireScheduledTaskRole(makeRequest({ Authorization: `Bearer ${MOBILE_JWT}` })),
     ).rejects.toMatchObject({ statusCode: 403 });
+  });
+});
+
+describe('handleApiError with an unexpected error', () => {
+  it('returns a generic 500 body and keeps the original text out of the response', async () => {
+    const leaky = new Error(
+      'Invalid `prisma.user.findMany()` invocation: code P2022 column "users.secret_col" does not exist; ' +
+        'SELECT "public"."user"."secret_col" FROM "public"."user" at /srv/app/lib/prisma.ts:42:7',
+    );
+    leaky.stack = 'Error: boom\n    at /srv/app/lib/prisma.ts:42:7';
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const res = handleApiError(leaky);
+    const text = JSON.stringify(await res.json());
+    expect(res.status).toBe(500);
+    expect(text).toBe(JSON.stringify({ error: 'Internal server error' }));
+    for (const fragment of ['P2022', 'SELECT', 'secret_col', '/srv/app', 'prisma.ts']) {
+      expect(text).not.toContain(fragment);
+    }
+    expect(logged).toHaveBeenCalledWith(
+      'API error:',
+      expect.objectContaining({ name: 'Error', message: leaky.message, stack: leaky.stack }),
+    );
+    logged.mockRestore();
+  });
+
+  it('still returns an intentional AppError message to the client', async () => {
+    const { AppError } = await import('./_errors');
+    const res = handleApiError(new AppError('VALIDATION', 'Start date must be before end date'));
+    expect(res.status).toBe(422);
+    expect((await res.json()).error).toBe('Start date must be before end date');
+  });
+});
+
+describe('cookie-authenticated writes from another site', () => {
+  function write(headers: Record<string, string> = {}, method = 'POST') {
+    const lower: Record<string, string> = {};
+    for (const [k, v] of Object.entries(headers)) lower[k.toLowerCase()] = v;
+    return { method, headers: { get: (name: string) => lower[name.toLowerCase()] ?? null } } as unknown as Parameters<typeof requireCaller>[0];
+  }
+
+  const prevAuthUrl = process.env.AUTH_URL;
+  beforeEach(() => { process.env.AUTH_URL = 'https://app.example.com'; });
+  afterEach(() => {
+    if (prevAuthUrl === undefined) delete process.env.AUTH_URL;
+    else process.env.AUTH_URL = prevAuthUrl;
+  });
+
+  it('refuses Sec-Fetch-Site cross-site and same-site (a sibling subdomain)', () => {
+    for (const site of ['cross-site', 'same-site']) {
+      expect(() => assertSameSiteCookieWrite(write({ 'Sec-Fetch-Site': site }))).toThrowError(
+        expect.objectContaining({ statusCode: 403 }),
+      );
+    }
+  });
+
+  it('lets same-origin and user-initiated requests through', () => {
+    for (const site of ['same-origin', 'none']) {
+      expect(() => assertSameSiteCookieWrite(write({ 'Sec-Fetch-Site': site }))).not.toThrow();
+    }
+  });
+
+  it('falls back to Origin: a foreign origin is refused, the app and the request host pass', () => {
+    expect(() => assertSameSiteCookieWrite(write({ Origin: 'https://evil.example.net', Host: 'app.example.com' }))).toThrowError(
+      expect.objectContaining({ statusCode: 403 }),
+    );
+    expect(() => assertSameSiteCookieWrite(write({ Origin: 'https://app.example.com', Host: 'app.example.com:8080' }))).not.toThrow();
+    expect(() => assertSameSiteCookieWrite(write({ Origin: 'https://other.example.org', Host: 'other.example.org' }))).not.toThrow();
+    expect(() => assertSameSiteCookieWrite(write({ Origin: 'null' }))).toThrowError(expect.objectContaining({ statusCode: 403 }));
+  });
+
+  it('does not constrain safe methods or a request with neither header', () => {
+    expect(() => assertSameSiteCookieWrite(write({ 'Sec-Fetch-Site': 'cross-site' }, 'GET'))).not.toThrow();
+    expect(() => assertSameSiteCookieWrite(write())).not.toThrow();
+  });
+
+  it('is applied before the session cookie is read by requireCaller and resolveActorId', async () => {
+    getSessionUserId.mockResolvedValue('user-1');
+    const crossSite = write({ 'Sec-Fetch-Site': 'cross-site' });
+    await expect(requireCaller(crossSite)).rejects.toMatchObject({ statusCode: 403 });
+    await expect(resolveActorId(crossSite)).rejects.toMatchObject({ statusCode: 403 });
+    await expect(requireDualAuth(crossSite)).rejects.toMatchObject({ statusCode: 403 });
+    expect(getSessionUserId).not.toHaveBeenCalled();
+    await expect(requireCaller(write({ 'Sec-Fetch-Site': 'same-origin' }))).resolves.toEqual({ userId: 'user-1' });
+  });
+
+  it('does not apply to an API key, which the browser never attaches by itself', async () => {
+    userFindFirst.mockResolvedValue({ id: 'key-user', api_key_expires_at: null });
+    await expect(
+      requireCaller(write({ 'X-API-Key': 'k1', 'Sec-Fetch-Site': 'cross-site' })),
+    ).resolves.toEqual({ userId: 'key-user' });
+  });
+});
+
+describe('handleApiError security events', () => {
+  const lines = (spy: { mock: { calls: unknown[][] } }) =>
+    spy.mock.calls.filter((c: unknown[]) => c[0] === '[security-event]').map((c) => JSON.parse(String(c[1])));
+
+  it.each([
+    [new ApiError(401, 'Invalid API key.'), 'auth.rejected', 401],
+    [new ApiError(403, 'Forbidden for user alice@example.com'), 'authz.denied', 403],
+    [new ApiError(429, 'Too many API key attempts.', 30), 'rate_limit.hit', 429],
+  ])('records one event for %s', (err, event, status) => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    handleApiError(err);
+    const events = lines(warn);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ event, status });
+    // Only the event name, status and code: no message, id, address or credential.
+    expect(Object.keys(events[0]).sort()).toEqual(['at', 'event', 'status']);
+    expect(JSON.stringify(warn.mock.calls)).not.toContain('alice@example.com');
+    warn.mockRestore();
+  });
+
+  it('records an AppError permission denial with its code', async () => {
+    const { AppError } = await import('./_errors');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    handleApiError(new AppError('PERMISSION_DENIED', 'no access to order'));
+    expect(lines(warn)).toEqual([expect.objectContaining({ event: 'authz.denied', status: 403, code: 'PERMISSION_DENIED' })]);
+    warn.mockRestore();
+  });
+
+  it('records nothing for ordinary client errors', async () => {
+    const { AppError } = await import('./_errors');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    handleApiError(new ApiError(404, 'Not found'));
+    handleApiError(new AppError('VALIDATION', 'bad'));
+    expect(lines(warn)).toEqual([]);
+    warn.mockRestore();
   });
 });

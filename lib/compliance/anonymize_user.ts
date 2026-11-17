@@ -9,7 +9,9 @@
 // Auto-generated from x-pii annotations on the user entity.
 // Does NOT physically delete the user row to preserve referential integrity.
 
+import { logger } from '@/lib/logger';
 import prisma from '@/lib/prisma';
+import { invalidateApiKeyCache } from '@/lib/api-auth';
 import { deleteStoredObject, isStorageKey } from '@/lib/attachment/storage';
 
 export interface AnonymizeUserResult {
@@ -32,6 +34,9 @@ export async function anonymizeUser(userId: string): Promise<AnonymizeUserResult
   // An object, so that TypeScript keeps the assignment made inside the transaction callback.
   const avatar = { path: null as string | null };
 
+  // The hash of the API key the erasure removes, so its cache entry can be dropped after the commit.
+  let previousApiKeyHash: string | null = null;
+
   // Unique placeholder email to satisfy @unique constraint after scrub
   const placeholderEmail = `${userId}@deleted.invalid`;
 
@@ -41,9 +46,10 @@ export async function anonymizeUser(userId: string): Promise<AnonymizeUserResult
       // whatever related records an earlier call left behind.
       const current = await tx.user.findUnique({
         where: { id: userId },
-        select: { anonymized_at: true, invalidated_at: true, image_id: true },
+        select: { anonymized_at: true, invalidated_at: true, api_key_hash: true, image_id: true },
       });
       if (!current) throw new Error(`User ${userId} not found`);
+      previousApiKeyHash = current.api_key_hash;
       if (current.anonymized_at) anonymizedAt = current.anonymized_at;
       const invalidatedAt = current.invalidated_at ?? anonymizedAt;
 
@@ -63,10 +69,11 @@ export async function anonymizeUser(userId: string): Promise<AnonymizeUserResult
           name: '[deleted]',
           email: placeholderEmail,
           password: null,
-          api_key: null,
           image_id: null,
           emailVerified: null,
           mfa_secret: null,
+          api_key_hash: null,
+          api_key_issued_at: null,
           mfa_enabled: false,
           anonymized_at: anonymizedAt,
           invalidated_at: invalidatedAt,
@@ -103,10 +110,13 @@ export async function anonymizeUser(userId: string): Promise<AnonymizeUserResult
     });
   } catch (err) {
     // The detail stays in the server log; callers get a generic message.
-    console.error('[anonymizeUser] transaction failed', userId, err instanceof Error ? err.name : typeof err);
+    logger.error('[anonymizeUser] transaction failed', JSON.stringify(userId), err instanceof Error ? err.name : typeof err);
     errors.push('Anonymization failed');
     return { success: false, userId, anonymizedAt, errors };
   }
+
+  // The key is gone from the row; stop the per-process cache from still accepting it.
+  invalidateApiKeyCache(previousApiKeyHash);
 
   // The stored file goes after the commit: a failure here leaves the erasure
   // in place and is reported instead of rolling it back.
@@ -114,7 +124,7 @@ export async function anonymizeUser(userId: string): Promise<AnonymizeUserResult
     try {
       await removeStoredFile(avatar.path);
     } catch (err) {
-      console.error('[anonymizeUser] avatar file removal failed', userId, err instanceof Error ? err.name : typeof err);
+      logger.error('[anonymizeUser] avatar file removal failed', JSON.stringify(userId), err instanceof Error ? err.name : typeof err);
       errors.push('Stored avatar file was not removed');
     }
   }

@@ -4,8 +4,9 @@
 // validateCustomRules() is called unconditionally from validateOnAdd()/
 // validateOnUpdate() (see lib/approval_flow/service_validation.ts), after
 // the generated schema-driven checks (required fields, one-to-one
-// uniqueness). Throw an Error to reject the save — the message surfaces to
+// uniqueness). Throw an AppError to reject the save — its message surfaces to
 // the caller (UI form or direct API request) as the save failure.
+import { AppError } from '@/lib/_errors';
 import type { PrismaClient } from '@/app/generated/prisma/client';
 import { isCrossEntityRef } from './autocomplete_filter';
 
@@ -36,7 +37,7 @@ async function validateSameEntityRefs(
   });
   for (const row of linked) {
     if (isCrossEntityRef(selfValue, row.entity_name)) {
-      throw new Error(`${label} must share this record's entity_name`);
+      throw new AppError('VALIDATION', `${label} must share this record's entity_name`, propName, 'invalid');
     }
   }
 }

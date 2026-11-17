@@ -199,3 +199,5 @@ explicitly via `aria-label="Select User 1"`. This avoids selecting the seed user
 - `npm run test:vitest` — Vitest component/unit tests (excludes `test/flows/`)
 
 These are reflected in `AGENTS.md` gate matrix and `package.json` scripts.
+
+See also [security-asvs-coverage.md](security-asvs-coverage.md), which maps each OWASP ASVS 5.0 requirement to the code, test or Issue that covers it.

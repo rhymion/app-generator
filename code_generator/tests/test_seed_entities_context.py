@@ -196,7 +196,7 @@ def test_self_only_admin_bypass_proxy_view_excluded() -> None:
 
 def test_proxy_view_without_self_only_now_included() -> None:
     """A proxy view with no self-only declaration of its own (e.g. a demo
-    fixture like 'setting1') now gets its own grant -- requirePermission()
+    fixture like 'setting1') now gets its own grant -- requireRecordPermission()
     checks the view's own route name, not the shared model, so excluding
     every proxy view left it permanently ungranted."""
     schema = _minimal_schema({

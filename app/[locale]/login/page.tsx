@@ -30,6 +30,12 @@ export default function LoginPage() {
   // query param is attacker-visible (a malicious link could set it), so it
   // is validated with the same same-origin-only check on the way out here —
   // never trusted as-is. Falls back to the app root when absent/invalid.
+  // Auth.js lands back here with ?error=OAuthAccountNotLinked when a Google
+  // sign-in names an email that already has an account the Google identity is
+  // not linked to. Point the person at the linking path instead of failing
+  // silently.
+  const oauthNotLinked = searchParams.get("error") === "OAuthAccountNotLinked";
+
   const redirectTarget = safeRedirectPath(searchParams.get("redirect")) ?? "/";
 
   const enabledProviders = siteConfig.auth?.providers ?? ["credentials"];
@@ -90,6 +96,12 @@ export default function LoginPage() {
         <AppText variant="h5" fontWeight="bold" textAlign="center" mb={3}>
           {t("signInTitle")}
         </AppText>
+
+        {oauthNotLinked && (
+          <AppAlert severity="warning" mb={2}>
+            {t("oauthAccountNotLinked")}
+          </AppAlert>
+        )}
 
         {showGoogle && (
           <AppBox display="flex" flexDirection="column" gap={2} mb={showCredentials ? 2 : 0}>
@@ -154,6 +166,13 @@ export default function LoginPage() {
           </AppBox>
         )}
 
+        {showCredentials && siteConfig.auth.registration?.emailVerification && (
+          // Password reset needs a mail transport, so it is offered only with email
+          // verification on (Issue #1282).
+          <AppText textAlign="center" mt={2} variant="body2">
+            <Link href="/forgot-password">{t("forgotPasswordLink")}</Link>
+          </AppText>
+        )}
         {showCredentials && (
           <AppText textAlign="center" mt={2} variant="body2">
             <Link href="/register">{t("noAccount")}</Link>
