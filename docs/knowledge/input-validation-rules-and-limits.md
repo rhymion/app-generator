@@ -51,7 +51,7 @@ Details and examples: [same-entity-validation-socket.md](same-entity-validation-
 
 ## Limits
 
-Every limit in the generated app is global (the same for every user and every entity). There is **no** per-user or per-organization record count, storage quota or other business limit, and no schema key to declare one. A business limit such as "at most N open orders per customer" is an application rule: implement it in `validateCustomRules` and add a test for it.
+Every limit in the generated app is global (the same for every user and every entity). There is **no** per-user or per-organization record count, storage quota or other business limit, and no schema key to declare one. A business limit such as "at most N open orders per customer" is an application rule: implement it in `validateCustomRules` and add a test for it (see "Business limits" below).
 
 | Limit | Value | Configuration | Where |
 |-------|-------|---------------|-------|
@@ -67,6 +67,37 @@ Every limit in the generated app is global (the same for every user and every en
 | Mention search text | 200 characters | none | `mention_users_api_route.ts.jinja2` |
 | Rate limits (per user id or IP) | `api:read` 300/min, `api:write` 60/min, `upload:file` 30/10 min, sign-in, MFA, registration and API-key buckets | `api:read`, `api:write` and `upload:file` have environment overrides (`RATE_LIMIT_API_READ_LIMIT`, `RATE_LIMIT_API_WRITE_LIMIT`, `RATE_LIMIT_UPLOAD_LIMIT`) | `lib/rate-limit/index.ts`; see [api-idempotency-and-rate-limiting.md](api-idempotency-and-rate-limiting.md) |
 | Idempotency key retention | one day | none | `lib/idempotency.ts` |
+
+### Business limits are application-specific (Issue #1270)
+
+The generator ships no business limit, by design (ASVS V2.1.3, V2.3.2): what to limit (records per user, per organization, per day, a total amount, a number of open items) and the numbers depend on the product, so they are neither defaulted nor configured through a schema key. An application that has such a rule writes it down in its own documentation and enforces it here:
+
+- **Where:** the entity's `validateCustomRules` in `lib/{entity}/service_validation_custom.ts` (write-once, never overwritten). It runs inside the write transaction on every write path (REST, bulk, Server Action, CSV import), after the generated rules. `currentId === null` means create; `actorId` is the caller; `prevRow` is the stored row on update.
+- **How it refuses:** throw `AppError('VALIDATION', message, fieldKey)`; the write is rolled back and the caller gets 422. Use `CONFLICT` when the refusal depends on the current state of other rows rather than on the submitted value.
+- **Concurrency:** a count followed by an insert can let two simultaneous requests both pass. Where an exact limit matters, serialize the check (for example a row lock on the owning record with `SELECT ... FOR UPDATE` through a tagged `$queryRaw`, listed in `code_generator/check_generated_allowlist.yaml`, see [raw-sql-policy.md](raw-sql-policy.md)) or back it with a database constraint.
+
+Worked example, "a user may have at most 20 open orders":
+
+```ts
+// lib/order/service_validation_custom.ts
+import { AppError } from '@/lib/_errors';
+
+const MAX_OPEN_ORDERS_PER_USER = 20;
+
+export async function validateCustomRules(tx, data, currentId, prevRow, actorId) {
+  const opensOne = data.status === 'open' && (currentId === null || prevRow?.status !== 'open');
+  if (!opensOne) return;
+  const open = await tx.order.count({ where: { creator_id: actorId, status: 'open' } });
+  if (open >= MAX_OPEN_ORDERS_PER_USER) {
+    throw new AppError('VALIDATION', `At most ${MAX_OPEN_ORDERS_PER_USER} open orders per user`, 'status');
+  }
+}
+```
+
+Test pattern (both are needed: the unit test pins the rule, the API test proves it is wired into the write path):
+
+- Unit test: call `validateCustomRules` with a transaction stub whose `order.count` resolves to 19 (accepted) and 20 (rejects with `VALIDATION` on `status`), for a create and for an update that reopens an order; an update that keeps an order open is not counted again.
+- API test: create 20 open orders as one user, then a 21st; expect `422` with `field: 'status'`, re-read the list and assert that the count is still 20; a second user can still create one.
 
 ## Prototype pollution
 
