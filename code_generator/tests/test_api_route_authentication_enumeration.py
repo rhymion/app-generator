@@ -43,6 +43,10 @@ _ALTERNATE_CREDENTIAL = {
         None, 'public sign-up, rate limited per IP'),
     'app/api/auth/register/complete/route.ts': (
         r'consumeRegistrationToken', 'the single-use emailed sign-up token is the credential'),
+    'app/api/auth/password-reset/route.ts': (
+        None, 'public password reset request (Issue #1282), same answer for every address, rate limited per IP and per address'),
+    'app/api/auth/password-reset/complete/route.ts': (
+        r'consumePasswordResetToken', 'the single-use emailed reset token is the credential, plus TOTP or a recovery code for an MFA user'),
     'app/api/security/csp-report/route.ts': (
         None, 'the browser posts policy violation reports without a session; rate limited per IP, log line only'),
     'app/api/mobile/auth/refresh/route.ts': (

@@ -28,6 +28,12 @@ exemptions:
   - path: app/api/auth/register/complete/route.ts
     skip: [permission]
     reason: Second step of public sign-up with email verification; the single-use emailed token is the credential; rate limited per IP (auth:register:complete); 404 while verification is off.
+  - path: app/api/auth/password-reset/route.ts
+    skip: [permission]
+    reason: Public password reset request (Issue #1282); answers 202 for every address; rate limited per IP (auth:password-reset) and per address (auth:password-reset:email); 404 while email verification is off.
+  - path: app/api/auth/password-reset/complete/route.ts
+    skip: [permission]
+    reason: Second step of the password reset; the single-use emailed token is the credential, plus the TOTP or recovery code for an MFA user; rate limited per IP (auth:password-reset:complete); 404 while email verification is off.
   - path: app/api/security/csp-report/route.ts
     skip: [permission]
     reason: The browser posts policy violation reports without a session; rate limited per IP (csp:report) and the route only writes a log line.

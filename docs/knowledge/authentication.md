@@ -58,8 +58,8 @@ as the adapter requires. The other three are PascalCase NextAuth-only
 tables at the bottom of `prisma/schema.prisma`, a deliberate exception to
 the snake_case convention. `Account` is populated on every OAuth sign-in;
 `Session` is **unused today** (we run on `session.strategy = "jwt"` —
-see "Session strategy" below); `VerificationToken` lights up if/when a
-magic-link provider is added.
+see "Session strategy" below); `VerificationToken` holds the sign-up and
+password-reset link tokens (hashed), see "Self-registration" and "Password reset".
 
 Two gates have to agree before a provider button works:
 
@@ -565,6 +565,53 @@ matches Google's `hd` claim) and unchanged. Helpers: `isRegistrationEmailAllowed
 older site config without the property as an empty list). Tests:
 `lib/auth/domain-allow-list.test.ts`, `app/api/auth/register/route.test.ts`,
 `app/api/auth/register/complete/route.test.ts`.
+
+**Password reset** (Issue #1282). Self-service reset by emailed link, available **only
+with email verification on** (`siteConfig.auth.registration.emailVerification`): the
+deployment then has a mail transport and proven addresses. With verification off both
+routes answer `404`, the login page shows no link and `/forgot-password` shows no form;
+a lost password is then an operator task (below).
+
+| Step | Route | Behavior |
+|---|---|---|
+| Request | `/forgot-password` -> `POST /api/auth/password-reset` `{ email, locale? }` | `202 { ok: true }` for every well-formed address. Only an address with a password account that is not anonymized receives a link `/{locale}/reset-password?token=…`; OAuth-only, erased and unknown addresses receive nothing. |
+| Complete | `/reset-password` -> `POST /api/auth/password-reset/complete` `{ token, password, mfaCode? }` | Password policy first (`400 WEAK_PASSWORD`, link kept). A user with MFA enabled must also give a current TOTP code or an unused recovery code: `401 MFA_REQUIRED` without one, `401 INVALID_MFA_CODE` for a wrong one, `429 MFA_RATE_LIMITED` past `auth:mfa:challenge`; the code is checked before the link is used up. Then, in one transaction: the token is consumed (conditional delete, so a link works once), the password replaced, the user's mobile sessions revoked and `auth:passwordReset` audited. The sign-in lockout counters of the address are cleared. `200 { ok: true }`; the page asks the user to sign in. |
+
+Tokens (`lib/auth/password-reset-token.ts`): same storage as sign-up tokens,
+`identifier = password-reset:<email>`, `token = sha256(token)`, valid **one hour**, only
+the newest link works. The prefixes keep the kinds apart: a sign-up link never resets a
+password and a reset link never finishes a sign-up. An unknown, expired, used or
+replaced token answers `400 INVALID_TOKEN`. Limits: `auth:password-reset` (5 / 10 min
+per IP), `auth:password-reset:email` (3 mails / hour per address; past it still `202`),
+`auth:password-reset:complete` (10 / 10 min per IP). Link host from
+`resolveExternalUrl()`; `/reset-password` sends `Referrer-Policy: no-referrer` and drops
+the token from the address bar once read. Mail text: the `PasswordResetMail` messages.
+
+Not done by a reset: **web sessions are not ended**. They are JWTs with no server-side
+revocation (#1127) and end at their configured lifetime (`SESSION_MAX_AGE_SECONDS`,
+optionally `SESSION_ABSOLUTE_MAX_AGE_SECONDS`). API keys are not rotated. Tests:
+`app/api/auth/password-reset/route.test.ts`,
+`app/api/auth/password-reset/complete/route.test.ts`,
+`app/[locale]/forgot-password/page.test.tsx`,
+`app/[locale]/reset-password/ResetPasswordForm.test.tsx`,
+`app/[locale]/login/page.test.tsx`.
+
+**Lost password without email verification, and a lost second factor** (operator
+procedure, ASVS V6.4.3, V6.4.4). A user who lost the authenticator first uses a
+recovery code (accepted wherever a TOTP code is) and can then re-enrol at
+`/setting/mfa`. When no recovery code is left, or a password must be reset on a
+deployment without email verification, an administrator:
+
+1. proves the requester's identity outside the app with the deployment's own procedure
+   (for example a call-back to a number on file, or confirmation by the user's manager);
+   the app does not decide what is sufficient;
+2. as the database owner clears the factor (`mfa_enabled = false`, `mfa_secret = NULL`,
+   `mfa_last_totp_step = NULL`, delete the user's `mfa_recovery_code` rows, increment
+   `mfa_token_version`) and/or sets a temporary password hash, in one transaction;
+3. records the action outside `audit_log` (the table takes no operator writes), with who
+   asked, who approved, and when;
+4. asks the user to sign in, change the password and enrol MFA again; with
+   `MFA_REQUIRED_ROLES` covering the user, the app enforces the re-enrolment.
 
 **Password strength.** `lib/auth/password-policy.ts` requires at least 8
 characters (ASVS V6.2.1) and no composition rules (V6.2.5). Registration, the
