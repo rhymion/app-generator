@@ -561,14 +561,23 @@ handful of pre-existing fields.
 
 ### 4.2 Validation constraints
 
-These are enforced only in the frontend form; the generator does not add Prisma-level
-constraints beyond what the Prisma schema already defines. All are Category C — write them
-under the column's entry in `properties:`.
+These are enforced only in the frontend form, except `maxLength`, which the server enforces
+too; the generator does not add Prisma-level constraints beyond what the Prisma schema already
+defines. All are Category C — write them under the column's entry in `properties:`.
+
+Every writable string field has a server-side maximum length (Issue #1273): the declared
+`maxLength`, or 65535 characters when none is declared. The generated `service_validation.ts`
+rejects a longer value with a `VALIDATION` error (HTTP 422 on REST), and CSV import refuses the
+row. There is no opt-out; declare a larger `maxLength` for a field that needs one (no upper cap; a
+plain Prisma `String` is PostgreSQL `text`). The generator does not read `@db.VarChar(n)`: for such a
+column declare `maxLength: n` too, or a longer value passes the check and fails in the database with
+the generic "invalid value" error instead of a field-level message. See
+[input-validation-rules-and-limits.md](input-validation-rules-and-limits.md).
 
 | Keyword | Effect in generated form |
 |---|---|
 | `minLength` | Input required to be at least N characters |
-| `maxLength` | Input capped at N characters |
+| `maxLength` | Input capped at N characters; also enforced on the server (default 65535 when absent) |
 | `minimum` / `maximum` | Number field min/max (also used by legacy int-enum, §4.3) |
 | `pattern` | Regex pattern (mainly used for CUID id fields — not shown in form; auto-added for FK columns, see §2) |
 | `format: date-time` | Renders MUI X DateTimePicker |

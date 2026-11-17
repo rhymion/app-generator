@@ -47,6 +47,21 @@ const DATE_FIELDS: (RequiredField & { format: DateValueFormat })[] = [
 {% endfor %}
 ] ;
 
+// Server-side maximum length of every writable string field (Issue #1273):
+// the schema's maxLength, or the default cap when none is declared. Counted
+// in Unicode code points, as JSON Schema's maxLength is.
+const STRING_LENGTH_FIELDS: (RequiredField & { maxLength: number })[] = [
+{% for field in string_length_fields %}
+  { key: '{{ field.key }}', label: '{{ field.label }}', maxLength: {{ field.max_length }} },
+{% endfor %}
+] ;
+
+function exceedsMaxLength(value: unknown, maxLength: number): boolean {
+  if (typeof value !== 'string' || value.length <= maxLength) return false;
+  // UTF-16 length is at least the code-point count, so only a long string is counted exactly.
+  return Array.from(value).length > maxLength;
+}
+
 {% if direct_attachment_rels %}
 // Direct-attachment foreign keys: a new value must be an unlinked attachment the caller uploaded.
 const DIRECT_ATTACHMENT_FIELDS: string[] = [{% for r in direct_attachment_rels %}'{{ r.prop_name }}'{% if not loop.last %}, {% endif %}{% endfor %}];
@@ -129,6 +144,12 @@ async function validateSchemaRules(tx: TransactionClient, data: Record<string, u
   for (const field of DECIMAL_FIELDS) {
     if (isInvalidDecimal(data[field.key])) {
       throw new AppError('VALIDATION', `${field.label} must be a valid decimal number`, field.key, 'invalid');
+    }
+  }
+
+  for (const field of STRING_LENGTH_FIELDS) {
+    if (exceedsMaxLength(data[field.key], field.maxLength)) {
+      throw new AppError('VALIDATION', `${field.label} must be at most ${field.maxLength} characters`, field.key, 'invalid');
     }
   }
 

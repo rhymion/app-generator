@@ -6,13 +6,13 @@ This document lists where a generated app validates input, which rules the gener
 
 | Layer | What it checks | Where |
 |-------|----------------|-------|
-| Browser form | Required, decimal, date/time, plus the schema keywords `minLength`, `maxLength`, `minimum`, `maximum`, `pattern` | `components/{entity}/form_validation.ts` and the generated form. These keywords are enforced **only** here (see [schema-yaml-configuration.md](schema-yaml-configuration.md), "Validation constraints"). |
+| Browser form | Required, decimal, date/time, plus the schema keywords `minLength`, `maxLength`, `minimum`, `maximum`, `pattern` | `components/{entity}/form_validation.ts` and the generated form. Except for the maximum string length (enforced on the server too, see rule 3 below), these keywords are enforced **only** here (see [schema-yaml-configuration.md](schema-yaml-configuration.md), "Validation constraints"). |
 | Server, every write path | The generated rules below, then the hand-written rules | `lib/{entity}/service_validation.ts` |
 | Database | Column types, unique indexes and foreign keys from the Prisma schema | `prisma/schema.prisma` |
 
 The server layer runs for REST routes and Server Actions alike, inside the same transaction as the write. A failure throws `AppError` with code `VALIDATION` (field-level input error, carries the field key and a reason of `missing` or `invalid`) or `CONFLICT`, which the routes map to an error response without writing anything.
 
-Do not rely on a schema `maxLength`, `minimum`, `maximum` or `pattern` for a server-side guarantee: a request that bypasses the form is not checked against them. Enforce such a limit in the hand-written rules below.
+Do not rely on a schema `minLength`, `minimum`, `maximum` or `pattern` for a server-side guarantee: a request that bypasses the form is not checked against them. Enforce such a limit in the hand-written rules below. `maxLength` is the exception: the server enforces it (rule 3 below).
 
 ## Rules applied to every entity (generated)
 
@@ -22,19 +22,22 @@ Do not rely on a schema `maxLength`, `minimum`, `maximum` or `pattern` for a ser
 |-------|------|---------|
 | 1 | Required fields are present. A value counts as missing when it is `null`, `undefined`, a blank string, `NaN` or an invalid date. | `VALIDATION`, reason `missing` |
 | 2 | Decimal fields match `^-?\d+(\.\d+)?$` (a blank value is skipped). | `VALIDATION`, reason `invalid` |
-| 3 | Date, time and date-time fields hold a valid value of their declared format. | `VALIDATION`, reason `invalid` |
-| 4 | One-to-one relations: a required one is present; a given id exists in the target table; no other record already links it. | `VALIDATION` (missing, does not exist) or `CONFLICT` (already linked) |
-| 5 | Direct attachment fields refer to an attachment that is unlinked or already belongs to this record (entities with a direct attachment field). | `VALIDATION` |
-| 6 | Exclusive parent columns: exactly one parent column is set, taking the stored value when an update omits it (entities with exclusive parents). | `VALIDATION` |
-| 7 | Write-locked values: a field declared with `x-write-locked-values` cannot be set to a locked value unless the record already holds it. | `VALIDATION`, reason `invalid` |
-| 8 | State transitions: an update may only move a state field along a declared transition, and a create may only start in a declared initial state (entities with a state machine). | `VALIDATION`, reason `invalid` (`no such transition`, or `transition not permitted by x-approval`) |
-| 9 | The hand-written rules in `lib/{entity}/service_validation_custom.ts` (`validateCustomRules`). | whatever it throws; a `VALIDATION` error without a reason is tagged `invalid` |
+| 3 | String fields are at most their maximum length: the schema's `maxLength`, or 65535 when none is declared (Issue #1273). Counted in Unicode code points, as JSON Schema counts. Every writable string column is checked; decimal-backed strings have rule 2 instead. There is no opt-out. | `VALIDATION`, reason `invalid` |
+| 4 | Date, time and date-time fields hold a valid value of their declared format. | `VALIDATION`, reason `invalid` |
+| 5 | One-to-one relations: a required one is present; a given id exists in the target table; no other record already links it. | `VALIDATION` (missing, does not exist) or `CONFLICT` (already linked) |
+| 6 | Direct attachment fields refer to an attachment that is unlinked or already belongs to this record (entities with a direct attachment field). | `VALIDATION` |
+| 7 | Exclusive parent columns: exactly one parent column is set, taking the stored value when an update omits it (entities with exclusive parents). | `VALIDATION` |
+| 8 | Write-locked values: a field declared with `x-write-locked-values` cannot be set to a locked value unless the record already holds it. | `VALIDATION`, reason `invalid` |
+| 9 | State transitions: an update may only move a state field along a declared transition, and a create may only start in a declared initial state (entities with a state machine). | `VALIDATION`, reason `invalid` (`no such transition`, or `transition not permitted by x-approval`) |
+| 10 | The hand-written rules in `lib/{entity}/service_validation_custom.ts` (`validateCustomRules`). | whatever it throws; a `VALIDATION` error without a reason is tagged `invalid` |
 
 Unique-index violations raised by the database are mapped to `CONFLICT`.
 
+CSV import refuses a cell longer than the same maximum length before the row reaches the service (row error `INVALID_VALUE`), so a dry run reports it too. Rows of an inline-edited child grid written through the parent's nested create/update are not checked by rule 3 (they carry no `validateOnAdd`/`validateOnUpdate` of their own; see the comment in `service.ts.jinja2`); their child entity's own REST route and Server Action are checked.
+
 ## Cross-field consistency
 
-The generator knows no cross-field rule beyond steps 4 to 8 above. Any other relation between fields (an end date after a start date, a total equal to the sum of its lines, a quantity within stock) is an application rule and belongs in `validateCustomRules`.
+The generator knows no cross-field rule beyond steps 5 to 9 above. Any other relation between fields (an end date after a start date, a total equal to the sum of its lines, a quantity within stock) is an application rule and belongs in `validateCustomRules`.
 
 `validateCustomRules(tx, data, currentId, prevRow, actorId)` is a write-once stub the generator creates for every entity and never overwrites:
 
@@ -56,6 +59,7 @@ Every limit in the generated app is global (the same for every user and every en
 | CSV import rows | 5000 | `IMPORT_MAX_ROWS` | `api_import_route.ts.jinja2` |
 | CSV import size | 10 MiB | `IMPORT_MAX_BYTES` | `api_import_route.ts.jinja2` |
 | Upload size | 10 MiB | `UPLOAD_MAX_BYTES` | `lib/_upload_validation.ts` |
+| String field length | the field's `maxLength`, else 65535 characters (code points) | `maxLength` in `json_schema.yaml`; default `DEFAULT_STRING_MAX_LENGTH` in `code_generator/helpers/string_limits.py` | `lib/{entity}/service_validation.ts`, `api_import_route.ts.jinja2` |
 | Comment text | 10000 characters | none | `api_comments_route.ts.jinja2`, `api_comment_item_route.ts.jinja2` |
 | Attachments per request | 100 | none | `api_attachments_route.ts.jinja2` |
 | Ids per options lookup | 200; context 4096 characters | none | `api_options_route.ts.jinja2` |

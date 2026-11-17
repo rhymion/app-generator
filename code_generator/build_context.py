@@ -11,6 +11,7 @@ from helpers.naming import (
     to_title_case, safe_var_name, singularize,
 )
 from helpers.type_mapping import get_ts_type
+from helpers.string_limits import is_length_checked_string, string_max_length
 from helpers.schema_helpers import (
     filter_fields, get_parent_relationships, get_detail_relation_name,
     is_optional_fk_to_parent, get_parent_fk_props, resolve_parent_fk_props, get_one_to_one_rels,
@@ -3239,6 +3240,8 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
             'nullable':  _nullable,
             'is_key':    _f in import_key_fields,
             'is_update': _f not in import_key_fields,
+            # Issue #1273: the same server-side length limit as service_validation.ts.
+            'max_length': string_max_length(_prop) if _ts_type == 'string' and is_length_checked_string(_prop) else None,
         })
 
     has_assignee_id   = 'assignee_id' in filtered_props

@@ -23,7 +23,7 @@ Row-level legality can be read before acting: `GET /api/{entity}/[id]/capabiliti
 ### Known limitations
 
 - The readonly annotations do not reach the inline editing of a DataGrid child: a field declared readonly on the child still renders as an editable cell, and the child's create and update calls accept client values for it. Treat child fields as unprotected by `x-readonly`; see [readonly-field-form-rendering.md](readonly-field-form-rendering.md).
-- Schema keywords such as `maxLength` and `minimum` are form-only; see [input-validation-rules-and-limits.md](input-validation-rules-and-limits.md).
+- Schema keywords such as `minimum` and `pattern` are form-only; `maxLength` (default 65535) is also enforced on the server. See [input-validation-rules-and-limits.md](input-validation-rules-and-limits.md).
 
 ## Contextual attributes in security decisions
 

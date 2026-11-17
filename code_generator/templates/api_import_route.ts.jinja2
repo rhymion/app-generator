@@ -55,7 +55,7 @@ export async function POST() {
   );
 }
 {% else %}
-type FieldSpec = { name: string; ts_type: 'string' | 'number' | 'boolean' | 'decimal'; nullable: boolean; is_key: boolean; is_update: boolean };
+type FieldSpec = { name: string; ts_type: 'string' | 'number' | 'boolean' | 'decimal'; nullable: boolean; is_key: boolean; is_update: boolean; max_length: number | null };
 // Decimal-format cells: optional sign, digits, optional fractional part —
 // matches what a Prisma Decimal column accepts. No thousands separators.
 const DECIMAL_CELL_RE = /^-?\d+(\.\d+)?$/;
@@ -91,6 +91,10 @@ function coerceValue(raw: string | undefined, spec: FieldSpec): { ok: true; valu
   if (spec.ts_type === 'boolean') {
     if (v === 'true' || v === '1') return { ok: true, value: true };
     if (v === 'false' || v === '0') return { ok: true, value: false };
+    return { ok: false };
+  }
+  // Issue #1273: the same maximum length service_validation.ts enforces (code points).
+  if (spec.max_length !== null && v.length > spec.max_length && Array.from(v).length > spec.max_length) {
     return { ok: false };
   }
   return { ok: true, value: v };

@@ -34,7 +34,7 @@ Chapter V17 (WebRTC) does not apply: the generated app has no real-time media, T
 | ID | Level | Status | Covered by | Verified by | Gap Issue | Source and version |
 |----|-------|--------|------------|-------------|-----------|--------------------|
 | V1.1.1 | 2 | framework | Routes read the body once with request.json(); no decode after validation found | none | - | next 16.4.2 (package-lock.json); Route Handlers docs |
-| V1.1.2 | 2 | framework | React JSX escaping, Prisma parameter binding, escapeCSV in lib/_csv.ts | lib/_output_encoding.test.tsx (JSX text and attribute escaping), lib/_csv.test.ts (CSV quoting and formula neutralization); no test yet for SQL parameter binding | #1273 | react 19.3.1 (package-lock.json); JSX escaping docs |
+| V1.1.2 | 2 | framework | React JSX escaping, Prisma parameter binding, escapeCSV in lib/_csv.ts | lib/_output_encoding.test.tsx (JSX text and attribute escaping), lib/_csv.test.ts (CSV quoting and formula neutralization), cypress/e2e/api/sql_parameter_binding.cy.ts (SQL syntax in values stored and read back unchanged through create, list filter, trigram search and global search) | - | react 19.3.1 (package-lock.json); JSX escaping docs |
 | V1.2.1 | 1 | framework | React JSX escaping; no dangerouslySetInnerHTML in app, components or templates | components/_standard/ListWrapper.test.tsx, EditableListWrapper.test.tsx | - | react 19.3.1 (package-lock.json); JSX escaping docs |
 | V1.2.2 | 1 | generator | lib/_safe_url.ts isSafeUrl; lib/auth/safe-redirect.ts | lib/_safe_url.test.ts, lib/auth/safe-redirect.test.ts | - | - |
 | V1.2.3 | 1 | framework | React JSX escaping; NextResponse.json serializes JSON; no inline script construction found | none | - | next 16.4.2 (package-lock.json); NextResponse.json |
@@ -46,7 +46,7 @@ Chapter V17 (WebRTC) does not apply: the generated app has no real-time media, T
 | V1.2.9 | 2 | generator | lib/mention/parser.ts escapeRegExp before new RegExp; one other dynamic RegExp in lib/legal/content.ts was not traced to its input | none | #1273 | - |
 | V1.3.1 | 1 | n/a | No WYSIWYG or user HTML input; comments are plain text | none | - | - |
 | V1.3.2 | 1 | gap | No gate rule forbids eval or new Function; the only eval hit is a Redis Lua call in lib/rate-limit/redis.ts | none | #1247 | - |
-| V1.3.3 | 2 | generator | lib/_upload_validation.ts allow-list; lib/_safe_url.ts; CSV import checks | lib/_upload_validation.test.ts, cypress/e2e/api/upload_path_safety.cy.ts | #1273 | - |
+| V1.3.3 | 2 | generator | lib/_upload_validation.ts allow-list; lib/_safe_url.ts; CSV import checks; every writable string field has a server-side maximum length (declared maxLength, default 65535) in the generated service_validation.ts and the CSV import route | lib/_upload_validation.test.ts, cypress/e2e/api/upload_path_safety.cy.ts, code_generator/tests/test_string_max_length.py | - | - |
 | V1.3.4 | 2 | n/a | SVG is not in the upload allow-list | none | - | - |
 | V1.3.5 | 2 | framework | components/legal/LegalDocumentView.tsx renders repository-owned Markdown with react-markdown (no rehype-raw) | lib/legal/content.test.ts (loading only) | - | react-markdown 10.1.0 (package-lock.json) |
 | V1.3.6 | 2 | n/a | No server-side fetch of a user-supplied URL; outbound calls use fixed SDK endpoints (see #1241) | none | - | - |
@@ -65,7 +65,7 @@ Chapter V17 (WebRTC) does not apply: the generated app has no real-time media, T
 
 | ID | Level | Status | Covered by | Verified by | Gap Issue | Source and version |
 |----|-------|--------|------------|-------------|-----------|--------------------|
-| V2.1.1 | 1 | generator | Validation rules per layer and the generated rules are in docs/knowledge/input-validation-rules-and-limits.md; schema keywords such as maxLength are form-only | none | - | - |
+| V2.1.1 | 1 | generator | Validation rules per layer and the generated rules are in docs/knowledge/input-validation-rules-and-limits.md; schema keywords such as minimum and pattern are form-only; maxLength is also enforced on the server | none | - | - |
 | V2.1.2 | 2 | generator | Generated cross-field rules and the validateCustomRules hook contract are in docs/knowledge/input-validation-rules-and-limits.md; application rules live in the hand-written hook | none | - | - |
 | V2.1.3 | 2 | gap | Rate limits and the global size limits are listed in docs/knowledge/input-validation-rules-and-limits.md; the app defines no per-user or per-organization business limits | none | #1270 | - |
 | V2.2.1 | 1 | generator | Prisma column types, nativeEnum mapping, read-only field rejection (api_route.ts.jinja2), service_validation hooks; no runtime schema validator | none | #1271 | - |
