@@ -675,6 +675,28 @@ gate was.
 
 ---
 
+## Required MFA (`MFA_REQUIRED_ROLES`)
+
+MFA is opt-in per user unless `MFA_REQUIRED_ROLES` says otherwise (Issue #1281, ASVS V6.3.3; `lib/auth/mfa-required.ts`):
+
+| Value | Who must enrol |
+|---|---|
+| unset or empty (default) | nobody: behavior unchanged |
+| `*` | every user |
+| `Admin,Approver` | a user holding at least one of the named roles (`role.name`, exact and case-sensitive) |
+
+A required user who has not enrolled still signs in normally, with any sign-in method (password or OAuth), but the session is restricted until enrolment completes:
+
+- `jwt()` in `auth.ts` sets `token.mfa_enrollment_required` at sign-in and re-evaluates it on every request, so enrolling, a role change or a change of the variable takes effect on the next request. The extra query (the user's role names) runs only for a user who is not enrolled while the variable is set; `*` needs no query.
+- `proxy.ts` redirects every page except `/setting/mfa` and `/mfa-challenge` to `/setting/mfa`.
+- `getSessionUserId()` (`lib/authz.ts`) answers `null` for the restricted session, so a Server Action (whichever page it is posted to) and a cookie-authenticated API route act for nobody. Only the MFA settings page and its Server Actions read the user, through `getSessionUserIdForMfaSetup()` / `requireMfaSetupUserId()`; do not use those anywhere else. Generated templates never call `auth()` directly for the same reason (`code_generator/tests/test_session_reads_through_authz.py`); the search route reads the session through `getSessionUserId()`.
+- After enrolment the MFA version bump re-arms `mfa_pending` (see above), so the user is asked for the new factor once on `/mfa-challenge`, then continues normally.
+- API-key and mobile-token callers are not affected: the policy is about interactive web sessions.
+- A required user who disables MFA is restricted again on the next request.
+- There is no exemption list. A service or demo account that must not be forced should not hold a listed role; use an API key for automation.
+
+Tests: `lib/auth/mfa-required.test.ts`, `auth.mfa-required.test.ts`, `lib/authz_mfa_enrollment.test.ts`.
+
 ## Audit and log records carry no email address
 
 The generator's own auth code never writes an email address into

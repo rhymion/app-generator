@@ -129,6 +129,9 @@ planning doc in commit b11269b; recover it via
 (AES-256-GCM), and recovery codes (8 per enrollment, bcrypt-hashed)
 are implemented in `lib/mfa/`. Self-service enrollment and disable are
 available at `/setting/mfa`.
+Setting `MFA_REQUIRED_ROLES` (`*` or a comma-separated list of role names)
+makes enrollment mandatory for those users: until they enroll, they can only
+use `/setting/mfa` (see [`docs/knowledge/authentication.md`](docs/knowledge/authentication.md), "Required MFA").
 
 **Note:** Recovery codes can be entered in the standard MFA code field at login.
 There is no separate recovery-code-only screen; the same code input accepts

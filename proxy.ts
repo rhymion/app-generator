@@ -7,6 +7,7 @@ import { clientIp } from '@/lib/rate-limit/client-ip';
 import { safeRedirectPath } from '@/lib/auth/safe-redirect';
 import { resolveExternalUrl } from '@/lib/auth/external-url';
 import { CSP_NONCE_HEADER, cspReportOnlyFromEnv, generateNonce } from '@/lib/csp';
+import { MFA_SETUP_PATH, isPathAllowedWhileEnrollmentRequired } from '@/lib/auth/mfa-required';
 
 const intlMiddleware = createIntlMiddleware(routing);
 
@@ -223,6 +224,16 @@ export const proxy = auth(async (req) => {
     const url = buildExternalUrl(req, `/${locale}/mfa-challenge`);
     url.searchParams.set('callbackUrl', pathname);
     return NextResponse.redirect(url);
+  }
+
+  // Required MFA enrolment (Issue #1281, MFA_REQUIRED_ROLES). A user whose
+  // role requires MFA and who has not enrolled may only use the MFA settings
+  // page (its Server Actions post to the same path). getSessionUserId() also
+  // answers null for this session, so a Server Action invoked from elsewhere or
+  // a cookie-authenticated API route does not act for the user either.
+  if (req.auth.mfa_enrollment_required && !isPathAllowedWhileEnrollmentRequired(pathnameWithoutLocale)) {
+    const locale = localePrefix ?? routing.defaultLocale;
+    return NextResponse.redirect(buildExternalUrl(req, `/${locale}${MFA_SETUP_PATH}`));
   }
 
   // Everything past this point is for a signed-in user: keep it out of

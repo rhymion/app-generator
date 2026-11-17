@@ -18,6 +18,7 @@ import { isMockGoogleOAuthTestEnabled } from "@/lib/auth/mock-oauth-gate";
 import { isDomainAllowed } from "@/lib/auth/domain-allow-list";
 import { isPastAbsoluteLifetime, resolveSessionPolicy } from "@/lib/session-policy";
 import { logSignInRejected } from "@/lib/security-event";
+import { isMfaEnrollmentRequired } from "@/lib/auth/mfa-required";
 
 // Custom CredentialsSignin subclasses so @auth/core re-throws them as-is
 // (plain Error gets wrapped in CallbackRouteError and the code is lost).
@@ -400,7 +401,10 @@ export const authConfig: NextAuthConfig = {
     async session({ session, user, token }) {
       const id = (user?.id ?? (token as { id?: string } | undefined)?.id) ?? "";
       const mfa_pending = (token as { mfa_pending?: boolean } | undefined)?.mfa_pending ?? false;
-      return { ...session, user: { ...session.user, id }, mfa_pending };
+      // Issue #1281: the user must enrol in MFA before using the app (MFA_REQUIRED_ROLES).
+      const mfa_enrollment_required =
+        (token as { mfa_enrollment_required?: boolean } | undefined)?.mfa_enrollment_required ?? false;
+      return { ...session, user: { ...session.user, id }, mfa_pending, mfa_enrollment_required };
     },
     // Runs on every sign-in AND on every subsequent session read (JWT
     // strategy calls back into this on each `auth()` resolution — see
@@ -460,6 +464,9 @@ export const authConfig: NextAuthConfig = {
         if (account.provider !== "credentials" && dbUser?.mfa_enabled) {
           token.mfa_pending = true;
         }
+        // Issue #1281: any sign-in method. A role listed in MFA_REQUIRED_ROLES
+        // without enrolment restricts the session to the MFA settings page.
+        token.mfa_enrollment_required = await isMfaEnrollmentRequired(token.id, dbUser?.mfa_enabled ?? false);
         return token;
       }
 
@@ -479,6 +486,10 @@ export const authConfig: NextAuthConfig = {
           token.mfa_pending = true;
         }
         token.mfa_token_version = dbVersion;
+        // Issue #1281: re-evaluated on every request, so enrolling (or a role or
+        // MFA_REQUIRED_ROLES change) takes effect on the next one. No query for an
+        // enrolled user or while the policy is off.
+        token.mfa_enrollment_required = await isMfaEnrollmentRequired(token.id, dbUser?.mfa_enabled ?? false);
       }
 
       return token;
@@ -558,6 +569,9 @@ declare module "next-auth" {
      *  required MFA code has not yet been verified this session. See the
      *  jwt() callback above and proxy.ts. */
     mfa_pending?: boolean;
+    /** True while MFA_REQUIRED_ROLES requires this user to enrol in MFA and
+     *  they have not (Issue #1281): only the MFA settings page is usable. */
+    mfa_enrollment_required?: boolean;
   }
 }
 
@@ -565,6 +579,7 @@ declare module "@auth/core/jwt" {
   interface JWT {
     id: string;
     mfa_pending?: boolean;
+    mfa_enrollment_required?: boolean;
     mfa_token_version?: number;
     /** Unix seconds at sign-in; the absolute session lifetime counts from here. */
     session_started_at?: number;

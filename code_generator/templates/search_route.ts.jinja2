@@ -2,7 +2,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { authenticate, ApiError, handleApiError } from '@/lib/api-auth';
 import { buildSearchQuery } from '@/lib/search/helpers';
-import { auth } from '@/auth';
+import { getSessionUserId } from '@/lib/authz';
 
 /**
  * GET /api/search
@@ -33,11 +33,13 @@ export async function GET(request: NextRequest) {
       const result = await authenticate(request);
       userId = result.userId;
     } else {
-      const session = await auth();
-      if (!session?.user?.id) {
+      // getSessionUserId(), not auth(): it answers null for a session that may
+      // not act yet (required MFA enrolment, Issue #1281).
+      const sessionUserId = await getSessionUserId();
+      if (!sessionUserId) {
         throw new ApiError(401, 'Authentication required. Provide X-API-Key header or sign in.');
       }
-      userId = session.user.id;
+      userId = sessionUserId;
     }
 
     const params = request.nextUrl.searchParams;

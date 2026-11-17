@@ -8,7 +8,7 @@ rules:
       An exported function of a 'use server' module is callable from any browser.
       One that writes through Prisma must authorize the caller first
       (getSessionUserIdOrThrow(), requireEntityPermission(), requireRecordPermission(),
-      requireDualAuth() or auth()).
+      requireDualAuth(), auth(), or requireMfaSetupUserId() on the MFA settings page only).
     patterns:
       - pattern-inside: |
           'use server';
@@ -26,6 +26,12 @@ rules:
           export async function $F(...) {
             ...
             getSessionUserIdOrThrow(...)
+            ...
+          }
+      - pattern-not: |
+          export async function $F(...) {
+            ...
+            requireMfaSetupUserId(...)
             ...
           }
       - pattern-not: |

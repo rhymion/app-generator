@@ -1,4 +1,4 @@
-import { getSessionUserIdOrThrow } from '@/lib/authz';
+import { requireMfaSetupUserId } from '@/lib/authz';
 import { getEnrollmentStatus } from '@/lib/mfa/enrollment';
 
 import MfaClient from './mfa-client';
@@ -9,7 +9,7 @@ import MfaClient from './mfa-client';
 // triggers a `router.refresh()` so this re-renders with the new state
 // (revalidatePath in the action does the cache invalidation).
 export default async function MfaSettingsPage() {
-  const userId = await getSessionUserIdOrThrow();
+  const userId = await requireMfaSetupUserId();
   const status = await getEnrollmentStatus(userId);
   return <MfaClient initial={status} />;
 }
