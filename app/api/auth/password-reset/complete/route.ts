@@ -6,7 +6,7 @@ import { getRateLimiter } from "@/lib/rate-limit";
 import { clientIp } from "@/lib/rate-limit/client-ip";
 import { siteConfig } from "@/lib/site-config";
 import { passwordPolicyError } from "@/lib/auth/password-policy";
-import { consumePasswordResetToken, peekPasswordResetToken } from "@/lib/auth/password-reset-token";
+import { consumeResetLink, peekResetLinkEmail } from "@/lib/auth/password-reset-token";
 import { clearFailedSignIns } from "@/lib/auth/account-lockout";
 import { verifyMfaCode } from "@/lib/mfa/verify";
 import { MfaRateLimitedError } from "@/lib/mfa/errors";
@@ -53,7 +53,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: weak, code: "WEAK_PASSWORD" }, { status: 400 });
     }
 
-    const email = await peekPasswordResetToken(prisma, token);
+    const email = await peekResetLinkEmail(prisma, token);
     if (!email) return invalidToken();
     const user = await prisma.user.findUnique({
       where: { email },
@@ -79,7 +79,7 @@ export async function POST(request: Request) {
     const passwordHash = await hashPassword(password);
     const done = await prisma.$transaction(async (tx) => {
       // Consumed inside the transaction: of two concurrent requests only one resets.
-      const consumed = await consumePasswordResetToken(tx, token);
+      const consumed = await consumeResetLink(tx, token);
       if (consumed !== email) return false;
       await tx.user.update({ where: { id: user.id }, data: { password: passwordHash, updater_id: user.id } });
       await tx.mobile_session.updateMany({

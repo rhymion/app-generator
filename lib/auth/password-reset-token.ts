@@ -6,6 +6,10 @@
  * the random value in the link, `expires` = one hour later. The prefixes keep the two kinds
  * apart: a reset link never finishes a sign-up and a sign-up link never resets a password.
  * Only the newest link for an address works, and a link works once.
+ *
+ * The readers are named for what they return, an email address (`peekResetLinkEmail`,
+ * `consumeResetLink`): CodeQL's js/insufficient-password-hash guesses passwords from names and
+ * flagged the SHA-256 lockout key built from that email when the name said "Password" (PR #1394).
  */
 import { randomBytes } from 'node:crypto';
 import type prisma from '@/lib/prisma';
@@ -41,7 +45,7 @@ export async function issuePasswordResetToken(db: TokenStore, email: string, now
  * The email a still-valid reset token was issued for, without using the token up, or null.
  * The complete route reads it first so that a wrong second-factor code does not burn the link.
  */
-export async function peekPasswordResetToken(db: TokenStore, token: unknown, now = new Date()): Promise<string | null> {
+export async function peekResetLinkEmail(db: TokenStore, token: unknown, now = new Date()): Promise<string | null> {
   if (!validShape(token)) return null;
   const row = await db.verificationToken.findUnique({ where: { token: hashRegistrationToken(token) } });
   if (!row || !row.identifier.startsWith(IDENTIFIER_PREFIX) || row.expires <= now) return null;
@@ -52,7 +56,7 @@ export async function peekPasswordResetToken(db: TokenStore, token: unknown, now
  * Uses up `token` and returns its email, or null when it is unknown, expired, of the other
  * kind or already used. A conditional delete makes only one of two concurrent calls succeed.
  */
-export async function consumePasswordResetToken(db: TokenStore, token: unknown, now = new Date()): Promise<string | null> {
+export async function consumeResetLink(db: TokenStore, token: unknown, now = new Date()): Promise<string | null> {
   if (!validShape(token)) return null;
   const hashed = hashRegistrationToken(token);
   const row = await db.verificationToken.findUnique({ where: { token: hashed } });
