@@ -36,3 +36,18 @@ Row-level legality can be read before acting: `GET /api/{entity}/[id]/capabiliti
 | Authentication strength | Whether MFA is enrolled and verified at sign-in; over REST, changing the password or the email requires the current password, and turning MFA off requires a current MFA code (see [authentication.md](authentication.md), which also states which settings-page paths are not covered yet). | Per-record or per-field step-up: a signed-in caller's access does not depend on how recently they authenticated. |
 
 A deployment that needs a contextual rule (office-network-only access, a device check, working hours) adds it in front of the app (the platform's firewall or identity-aware proxy) or in the hand-written validation of the entity; the generated app has no schema key for it.
+
+### Out of scope: contextual controls and step-up
+
+These ASVS Level 3 requirements are out of scope for the generated app, by decision (Issue #1288):
+
+- **Contextual access control (V8.2.4).** No IP, device, time-of-day or location rule takes part in an access decision, as the table above states.
+- **Step-up and contextual checks for administrative interfaces (V8.4.2).** Administrative pages and APIs (role, permission, user and tenant administration, audit log, settings) are guarded by role permissions only. Access does not depend on how recently the caller authenticated, and no extra factor is asked for an administrative operation. Changing one's own password or email, and turning one's own MFA off, are the exceptions listed in the table above.
+
+What a deployment can use instead:
+
+- `MFA_REQUIRED_ROLES` (see [authentication.md](authentication.md), "Required MFA") requires MFA at sign-in for administrative roles.
+- An identity-aware proxy, the platform firewall or the identity provider (conditional access) restricts administrative paths by network, device or time, or asks for re-authentication.
+- An entity's hand-written validation (`validateCustomRules`) can refuse an operation on a condition the application knows.
+
+Reconsider when a customer needs either control in the product itself.
