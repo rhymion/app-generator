@@ -491,17 +491,31 @@ export async function update{{ parent_pascal }}(actorId: string, id: string{% if
 }
 {% endif %}
 {% if can_delete %}
-{% if fk_write_checks %}
+{% if delete_reference_check %}
 // A record whose stored reference points at a row the actor cannot reach is not
 // deletable by that actor (the same reachability that refuses to re-point or
 // clear that reference in update{{ parent_pascal }}). Called by every
 // user-facing delete entrance before delete{{ parent_pascal }}.
+{% if set_fk_checks or child_fk_delete_checks %}
+// The members of a to-many set and the references held by inline child rows
+// count too: deleting the record removes them as well.
+{% endif %}
 export async function assertDeleteReferencesReachable{{ parent_pascal }}(actorId: string, ids: string[]): Promise<void> {
-  const _rows = await prisma.{{ model }}.findMany({ where: { id: { in: ids } }, select: { {% for c in fk_write_checks %}{{ c.prop }}: true, {% endfor %}} });
+  const _rows = await prisma.{{ model }}.findMany({ where: { id: { in: ids } }, select: { {% for c in fk_write_checks %}{{ c.prop }}: true, {% endfor %}{% for s in set_fk_checks %}{{ s.prop }}: { select: { id: true } }, {% endfor %}{% for c in child_fk_delete_checks %}{{ c.prop }}: { select: { {% for k in c.checks %}{{ k.prop }}: true, {% endfor %}} }, {% endfor %}} });
   for (const _row of _rows) {
     await assertStoredFkReferencesReachable(actorId, [
 {% for c in fk_write_checks %}
       { model: '{{ c.target }}',{% if c.self_only %} selfOnly: true,{% endif %} id: _row.{{ c.prop }}, load: (_id) => prisma.{{ c.target }}.findUnique({ where: { id: _id } }) as Promise<Record<string, unknown> | null> },
+{% endfor %}
+{% for s in set_fk_checks %}
+      ..._row.{{ s.prop }}.map((_m) => ({ model: '{{ s.target }}',{% if s.self_only %} selfOnly: true,{% endif %} id: _m.id, load: (_id: string) => prisma.{{ s.target }}.findUnique({ where: { id: _id } }) as Promise<Record<string, unknown> | null> })),
+{% endfor %}
+{% for c in child_fk_delete_checks %}
+      ..._row.{{ c.prop }}.flatMap((_c) => [
+{% for k in c.checks %}
+        { model: '{{ k.target }}',{% if k.self_only %} selfOnly: true,{% endif %} id: _c.{{ k.prop }}, load: (_id: string) => prisma.{{ k.target }}.findUnique({ where: { id: _id } }) as Promise<Record<string, unknown> | null> },
+{% endfor %}
+      ]),
 {% endfor %}
     ]);
   }

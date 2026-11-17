@@ -497,7 +497,11 @@ export async function requireRecordPermission(
 
 export async function assertPermission(permissions: OperationFlags, operation: Operation, model?: ModelName): Promise<void> {
   if (!permissions[operation]) {
-    throw new Error(`Access denied: ${model ?? 'model'}.${operation}`);
+    // A plain Error, as callers have always received; the denial is still
+    // written to the security-event log once (Issue #1307).
+    const error = new Error(`Access denied: ${model ?? 'model'}.${operation}`);
+    logAuthzDenied(error);
+    throw error;
   }
 }
 

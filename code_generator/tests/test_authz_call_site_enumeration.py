@@ -59,6 +59,12 @@ def _exports(rel: str) -> set:
     text = (REPO_ROOT / rel).read_text(encoding='utf-8')
     names = set(re.findall(r'export\s+(?:async\s+)?(?:function|const|class)\s+(\w+)', text))
     names |= set(re.findall(r'export\s+(?:type|interface)\s+(\w+)', text))
+    # Re-exports: `export { A, B as C };` and `export { A } from '...';`
+    for group in re.findall(r'export\s+(?:type\s+)?\{([^}]*)\}', text):
+        for item in group.split(','):
+            item = item.strip()
+            if item:
+                names.add(item.split(' as ')[-1].strip())
     return names
 
 

@@ -92,10 +92,33 @@ export default defineConfig({
           assertCellAndStatus(params.cell, params.status, loadManifest());
           return null;
         },
-        async 'security:snapshot'(params: { model: string; where?: Record<string, unknown> }) {
+        async 'security:snapshot'(params: { model: string; where?: Record<string, unknown>; include?: Record<string, unknown> }) {
           const { prisma } = require('./cypress/support/db-helpers');
-          const rows = await (prisma as Record<string, any>)[params.model].findMany({ where: params.where ?? {}, orderBy: { id: 'asc' } });
+          const rows = await (prisma as Record<string, any>)[params.model].findMany({
+            where: params.where ?? {},
+            orderBy: { id: 'asc' },
+            ...(params.include ? { include: params.include } : {}),
+          });
           return JSON.parse(JSON.stringify(rows));
+        },
+        // Reference-shape security tests (security_helpers.ts: seedRow / updateRow / seedScopedActor):
+        // rows of any model written straight to the database, to place a referenced row in another
+        // organization or outside the actor's Creator / Assignee scope.
+        async 'security:seedRow'(params: { model: string; data: Record<string, unknown> }) {
+          const { seedRow } = require('./cypress/support/security_seed');
+          return await seedRow(params.model, params.data);
+        },
+        async 'security:updateRow'(params: { model: string; id: string; data: Record<string, unknown> }) {
+          const { updateRow } = require('./cypress/support/security_seed');
+          return await updateRow(params.model, params.id, params.data);
+        },
+        async 'security:seedScopedActor'(params: {
+          label: string;
+          organizationIds: string[];
+          grants: Array<{ entity: string; scope: 'general' | 'Creator' | 'Assignee'; flags: Record<string, boolean> }>;
+        }) {
+          const { seedScopedActor } = require('./cypress/support/security_seed');
+          return await seedScopedActor(params.label, params.organizationIds, params.grants);
         },
         async 'db:createLimitedApiUser'(modelName: string) {
           const { createLimitedApiUser } = require('./cypress/support/db-helpers');

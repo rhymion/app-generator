@@ -41,6 +41,8 @@ _ALTERNATE_CREDENTIAL = {
         r'handlers', 'the sign-in handler itself (Auth.js)'),
     'app/api/auth/register/route.ts': (
         None, 'public sign-up, rate limited per IP'),
+    'app/api/auth/register/complete/route.ts': (
+        r'consumeRegistrationToken', 'the single-use emailed sign-up token is the credential'),
     'app/api/security/csp-report/route.ts': (
         None, 'the browser posts policy violation reports without a session; rate limited per IP, log line only'),
     'app/api/mobile/auth/refresh/route.ts': (

@@ -59,7 +59,15 @@ export function assertPersistenceDeclared(method: string, persistence: unknown):
   }
 }
 
-export type PersistenceSpec = { model: string; where?: Record<string, unknown> };
+export type PersistenceSpec = {
+  model: string;
+  where?: Record<string, unknown>;
+  /**
+   * Relations re-read with each row (Prisma `include`), e.g. the members of a to-many set or the rows of an
+   * inline child grid, so a denied write is shown to have left them unchanged too.
+   */
+  include?: Record<string, unknown>;
+};
 
 /** Rows of `persistence`, read straight from the database and normalised for a deep comparison. */
 export type SnapshotReader = (spec: PersistenceSpec) => Promise<unknown>;

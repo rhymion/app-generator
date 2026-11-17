@@ -678,6 +678,14 @@ def _get_dep_populate_fields(target: str, var_name: str, title: str, schema: dic
             val = f"'{_decimal_literal(1, _scale, _force_zero)}'"
             val_unique = _decimal_ts_expr('i', _scale, _force_zero)
             val_second = f"'{_decimal_literal(2, _scale, _force_zero)}'"
+        elif actual == 'string' and isinstance(prop.get('enum'), list) and any(v is not None for v in prop['enum']):
+            # A required enum column (a native Prisma enum behind it) accepts a
+            # member only: the generic placeholder below is refused by Prisma
+            # ("Invalid value for argument `status`. Expected <Enum>"). The
+            # first member, as the entity's own populate helper uses.
+            _members = [v for v in prop['enum'] if v is not None]
+            val = val_unique = f"'{_members[0]}'"
+            val_second = f"'{_members[1] if len(_members) > 1 else _members[0]}'"
         elif actual == 'string':
             field_title = to_title_case(prop_name)
             # Deterministic, human-readable values. Dep-helper-call collisions

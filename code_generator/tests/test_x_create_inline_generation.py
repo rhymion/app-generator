@@ -128,11 +128,17 @@ def test_target_gets_the_dialog_and_its_server_actions(out):
 def test_target_server_actions_probe_the_same_check_as_the_new_page(out):
     text = _server_actions(out, 'inline_topic').read_text()
     assert text.startswith("'use server';")
-    # The dialog shows the /new form, so the hint is the /new page's own access check; the
-    # save action stays the authority on whether a record is created.
+    # The dialog shows the /new form, so the hint is the /new page's own rule (the general
+    # create flag); the save action stays the authority on whether a record is created.
     probe = text[text.index('export async function canInlineTopicBeCreatedInline'):text.index('export async function getInlineTopicInlineCreateInit')]
-    assert 'await getInlineTopicNewPageAccessCheck();' in probe
-    assert 'return false;' in probe
+    assert "await getModelPermissions('inline_topic');" in probe
+    assert 'return Boolean(permissions.general.create);' in probe
+    # The probe reads the flag rather than catching the /new page check's denial: that check
+    # writes an authz.denied security event, and a hint is not a refused request (#1307).
+    assert 'NewPageAccessCheck' not in probe
+    assert 'catch {' not in probe and 'catch (' not in probe
+    access_check = (out / 'lib' / 'inline_topic' / 'getters.ts').read_text()
+    assert "await assertPermission(richPermissions.general, 'create', 'inline_topic');" in access_check
     # The init action throws when the user may not open the form, like the /new page does.
     assert 'getInlineTopicNewPageAccessCheck()' in text
     # Permission-denied markers become plain booleans before crossing to the client.

@@ -17,7 +17,9 @@
     "created_sx_notes sx_note[] @relation(\"SxNoteCreator\")",
     "updated_sx_notes sx_note[] @relation(\"SxNoteUpdater\")",
     "created_sx_tags sx_tag[] @relation(\"SxTagCreator\")",
-    "updated_sx_tags sx_tag[] @relation(\"SxTagUpdater\")"
+    "updated_sx_tags sx_tag[] @relation(\"SxTagUpdater\")",
+    "created_sx_entries sx_entry[] @relation(\"SxEntryCreator\")",
+    "updated_sx_entries sx_entry[] @relation(\"SxEntryUpdater\")"
   ],
   "organization": [
     "sx_accounts sx_account[]",
@@ -26,7 +28,8 @@
     "sx_profiles sx_profile[]",
     "sx_tickets sx_ticket[]",
     "sx_notes sx_note[]",
-    "sx_tags sx_tag[]"
+    "sx_tags sx_tag[]",
+    "sx_entries sx_entry[]"
   ],
   "commentable": [
     "sx_account sx_account?"

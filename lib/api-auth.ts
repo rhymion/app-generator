@@ -6,23 +6,15 @@ import { getRateLimiter } from '@/lib/rate-limit';
 import { requireEntityPermission, requireRecordPermission, getSessionUserId, type RichPermissions, type Operation, type RecordContext } from '@/lib/authz';
 import { TtlLruCache } from '@/lib/_ttl_lru';
 import { cacheOnGlobal } from '@/lib/global-singleton';
-import { AppError, type ErrorCode } from '@/lib/_errors';
+import { AppError } from '@/lib/_errors';
 import { SCHEDULED_TASK_ROLE_NAME } from '@/lib/scheduled-tasks/system-actor';
 import { enterRequestScope, runAsActor } from '@/lib/_request_scope';
 import { isAllowedHost } from '@/lib/auth/external-url';
-import { logSecurityEvent, securityEventForStatus, wasSecurityEventLogged } from '@/lib/security-event';
+import { APP_ERROR_STATUS_MAP, logSecurityEventForError } from '@/lib/security-event';
+import { ApiError } from '@/lib/api-error';
 import { isMobileJwt, verifyMobileAccessToken, MobileAuthError } from '@/lib/mobile-auth';
 
-export class ApiError extends Error {
-  constructor(
-    public statusCode: number,
-    message: string,
-    public retryAfterSeconds?: number,
-  ) {
-    super(message);
-    this.name = 'ApiError';
-  }
-}
+export { ApiError };
 
 // Per-process cache of SHA-256(api key) → userId | null (Phase 2 #4 from
 // performance-plan-session.md). The negative-result cache (`null`) lets
@@ -343,23 +335,9 @@ export async function requireApiRecordPermission(
   }
 }
 
-const APP_ERROR_STATUS_MAP: Record<ErrorCode, number> = {
-  SESSION_EXPIRED: 401,
-  PERMISSION_DENIED: 403,
-  NOT_FOUND: 404,
-  VALIDATION: 422,
-  CONFLICT: 409,
-  RESERVATION_LOCKED: 409,
-  RELATED_RECORD_INVALID: 422,
-  CAPACITY: 409,
-  RATE_LIMITED: 429,
-  UNKNOWN: 500,
-};
-
 export function handleApiError(error: unknown): NextResponse {
   if (error instanceof ApiError) {
-    const event = securityEventForStatus(error.statusCode);
-    if (event) logSecurityEvent({ event, status: error.statusCode });
+    logSecurityEventForError(error);
     return NextResponse.json(
       { error: error.message },
       {
@@ -371,9 +349,7 @@ export function handleApiError(error: unknown): NextResponse {
     );
   }
   if (error instanceof AppError) {
-    const status = APP_ERROR_STATUS_MAP[error.code] ?? 500;
-    const event = securityEventForStatus(status);
-    if (event && !wasSecurityEventLogged(error)) logSecurityEvent({ event, status, code: error.code });
+    logSecurityEventForError(error);
     return NextResponse.json(
       {
         error: error.message,

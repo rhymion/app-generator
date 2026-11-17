@@ -74,6 +74,14 @@ export const siteConfig = {
    * would be defence-in-depth at best.
    */
   auth: {
+    /**
+     * Self-registration. Set by generate-code from
+     * `x-generator.email-verification.enabled` in json_schema.yaml; edit the
+     * schema, not this line. See docs/knowledge/authentication.md.
+     */
+    registration: {
+      emailVerification: false,
+    },
     providers: ['credentials', 'google'] as AuthProviderId[],
     allowedDomains: [] as string[],
     /**

@@ -1174,11 +1174,56 @@ def _fk_reference_check(schema: dict, target: str) -> dict | None:
     return {'target': target, 'self_only': is_self_only}
 
 
-def _build_child_fk_check(children_data: list[dict], for_update: bool) -> str:
+def _fk_load_expr(target: str) -> str:
+    return (f"load: (_id: string) => prisma.{target}.findUnique({{ where: {{ id: _id }} }}) "
+            f"as Promise<Record<string, unknown> | null>")
+
+
+def _set_fk_checks(children_data: list[dict], schema: dict) -> list[dict]:
+    """To-many sets chosen on the parent (a many-to-many set, or a one-to-many
+    list attached through the child's nullable foreign key): each member is a
+    reference to a row of the child entity, checked like a single foreign key
+    (lib/_fk_reference.ts)."""
+    checks = []
+    for c in children_data:
+        if not c['use_connect']:
+            continue
+        check = _fk_reference_check(schema, c['name'])
+        if check is None:
+            continue
+        checks.append({
+            'prop': c['property_name'],
+            'ids_var': f"{c['child_var']}Ids",
+            'target': c['name'],
+            'self_only': check['self_only'],
+            'kind': 'many_to_many' if c.get('is_many_to_many') else 'one_to_many',
+        })
+    return checks
+
+
+def _child_fk_delete_checks(children_data: list[dict]) -> list[dict]:
+    """Inline child rows written by the parent whose own foreign keys are checked:
+    deleting the parent deletes them, so their stored references are checked too."""
+    return [
+        {'prop': c['property_name'], 'checks': c['fk_write_checks']}
+        for c in children_data
+        if not c['use_connect'] and c.get('fk_write_checks')
+    ]
+
+
+def _build_child_fk_check(children_data: list[dict], for_update: bool,
+                          schema: dict | None = None, model: str | None = None) -> str:
     """Service-layer check for the foreign keys carried by nested child rows:
     each one that points at an organization-scoped entity must reference a row
     the actor may use, exactly like the parent's own foreign keys. On update an
-    existing row's unchanged value is not checked again."""
+    existing row's unchanged value is not checked again, and a row the update
+    drops is checked like a cleared reference (its stored target must be
+    reachable).
+
+    With `schema` and `model`, the members of a to-many set chosen on the parent
+    are checked the same way: an added member must be reachable (else NOT_FOUND),
+    a removed member must be reachable (else PERMISSION_DENIED), and a member
+    kept unchanged is not checked again."""
     blocks = []
     for c in children_data:
         checks = c.get('fk_write_checks') or []
@@ -1186,6 +1231,7 @@ def _build_child_fk_check(children_data: list[dict], for_update: bool) -> str:
             continue
         cv, cm = c['child_var'], c['name']
         prev = f"_{cv}FkPrev"
+        dropped = f"_{cv}Dropped"
         if for_update:
             sel = ', '.join(f"{k['prop']}: true" for k in checks)
             blocks.append(
@@ -1194,6 +1240,14 @@ def _build_child_fk_check(children_data: list[dict], for_update: bool) -> str:
                 f"    select: {{ id: true, {sel} }},\n"
                 f"  }})).map((r) => [r.id, r] as const));\n"
             )
+            if model:
+                # Rows of this parent that the nested update's deleteMany removes.
+                blocks.append(
+                    f"  const {dropped} = (await prisma.{model}.findUnique({{\n"
+                    f"    where: {{ id }},\n"
+                    f"    select: {{ {c['property_name']}: {{ where: {{ id: {{ notIn: {cv}Items.map((f) => f.id).filter((x): x is string => Boolean(x)) }} }}, select: {{ {sel} }} }} }},\n"
+                    f"  }}))?.{c['property_name']} ?? [];\n"
+                )
         entries = []
         for k in checks:
             p, t = k['prop'], k['target']
@@ -1201,9 +1255,36 @@ def _build_child_fk_check(children_data: list[dict], for_update: bool) -> str:
             prev_expr = f", previousId: f.id ? {prev}.get(f.id)?.{p} : undefined" if for_update else ''
             entries.append(
                 f"    ...{cv}Items.map((f) => ({{ model: '{t}'{so_expr}, id: f.{p}{prev_expr}, "
-                f"load: (_id: string) => prisma.{t}.findUnique({{ where: {{ id: _id }} }}) as Promise<Record<string, unknown> | null> }})),"
+                f"{_fk_load_expr(t)} }})),"
             )
+        if for_update and model:
+            for k in checks:
+                p, t = k['prop'], k['target']
+                so_expr = ", selfOnly: true" if k.get('self_only') else ''
+                entries.append(
+                    f"    ...{dropped}.map((f) => ({{ model: '{t}'{so_expr}, id: null, previousId: f.{p}, "
+                    f"{_fk_load_expr(t)} }})),"
+                )
         blocks.append("  await assertFkReferencesUsable(actorId, [\n" + '\n'.join(entries) + "\n  ]);")
+    if schema is not None:
+        for s in _set_fk_checks(children_data, schema):
+            pn, ids, t = s['prop'], s['ids_var'], s['target']
+            so_expr = ", selfOnly: true" if s['self_only'] else ''
+            if not for_update:
+                blocks.append(
+                    "  await assertFkReferencesUsable(actorId, [\n"
+                    f"    ...{ids}.map((_m) => ({{ model: '{t}'{so_expr}, id: _m, {_fk_load_expr(t)} }})),\n"
+                    "  ]);"
+                )
+                continue
+            prev = f"_{ids}Prev"
+            blocks.append(
+                f"  const {prev} = ((await prisma.{model}.findUnique({{ where: {{ id }}, select: {{ {pn}: {{ select: {{ id: true }} }} }} }}))?.{pn} ?? []).map((r) => r.id);\n"
+                "  await assertFkReferencesUsable(actorId, [\n"
+                f"    ...{ids}.filter((_m) => !{prev}.includes(_m)).map((_m) => ({{ model: '{t}'{so_expr}, id: _m, {_fk_load_expr(t)} }})),\n"
+                f"    ...{prev}.filter((_m) => !{ids}.includes(_m)).map((_m) => ({{ model: '{t}'{so_expr}, id: null, previousId: _m, {_fk_load_expr(t)} }})),\n"
+                "  ]);"
+            )
     return '\n'.join(blocks)
 
 
@@ -3705,8 +3786,14 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     # search below narrows its options to records that are not attached yet.
     list_child_attach_callers = _list_child_attach_callers(schema, parent)
     child_attach_guard_create = _build_child_attach_guard(write_ch, model, for_update=False)
-    child_fk_check_create = _build_child_fk_check(write_ch, for_update=False)
-    child_fk_check_update = _build_child_fk_check(write_ch, for_update=True)
+    child_fk_check_create = _build_child_fk_check(write_ch, for_update=False, schema=schema, model=model)
+    child_fk_check_update = _build_child_fk_check(write_ch, for_update=True, schema=schema, model=model)
+    # The delete side of the same rule: a record whose own foreign key, set
+    # member or inline child row points at a row the actor cannot reach is not
+    # deletable by that actor (assertDeleteReferencesReachable<Entity>).
+    set_fk_checks = _set_fk_checks(write_ch, schema)
+    child_fk_delete_checks = _child_fk_delete_checks(write_ch)
+    delete_reference_check = bool(fk_write_checks or set_fk_checks or child_fk_delete_checks)
     child_attach_guard_update = _build_child_attach_guard(write_ch, model, for_update=True)
     child_exclusive_create_check = _build_child_exclusive_create_check(write_ch)
     child_exclusive_update_check = _build_child_exclusive_update_check(write_ch)
@@ -4955,6 +5042,9 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         fk_write_checks=fk_write_checks,
         child_fk_check_create=child_fk_check_create,
         child_fk_check_update=child_fk_check_update,
+        set_fk_checks=set_fk_checks,
+        child_fk_delete_checks=child_fk_delete_checks,
+        delete_reference_check=delete_reference_check,
         org_relationship_optional=org_relationship_optional,
         is_self_only=is_self_only,
         self_only_admin_bypass=self_only_admin_bypass,

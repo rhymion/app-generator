@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { signIn } from "next-auth/react";
 import RegisterPage from "./page";
 import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
+import { siteConfig } from "@/lib/site-config";
 
 // Mock @/i18n/navigation (replaces next/navigation in this component)
 const mockPush = vi.fn();
@@ -28,6 +29,10 @@ vi.mock("next-intl", () => {
     emailInUse: "Email address is already in use",
     registrationFailed: "Registration failed",
     legalAgreementNotice: "By creating an account, you agree to our <terms>Terms of Service</terms> and <privacy>Privacy Policy</privacy>.",
+    registerSendLink: "Send sign-up link",
+    registerEmailOnlyNotice: "We will email you a link.",
+    registerCheckEmailTitle: "Check your email",
+    registerCheckEmailBody: "If this address can be used to sign up, a message with a link is on its way.",
   };
   const t = (key: string) => messages[key] ?? key;
   t.rich = (
@@ -46,6 +51,7 @@ vi.mock("next-intl", () => {
   };
   return {
     useTranslations: (_namespace: string) => t,
+    useLocale: () => "ja",
   };
 });
 
@@ -241,5 +247,58 @@ describe("RegisterPage", () => {
 
     // Should not navigate
     expect(mockPush).not.toHaveBeenCalled();
+  });
+});
+
+describe("RegisterPage with email verification on (Issue #1092)", () => {
+  const registration = siteConfig.auth.registration as { emailVerification: boolean };
+  const saved = registration.emailVerification;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    registration.emailVerification = true;
+  });
+
+  afterEach(() => {
+    registration.emailVerification = saved;
+    vi.unstubAllGlobals();
+  });
+
+  it("asks for the email address only", () => {
+    render(<RegisterPage />);
+
+    expect(screen.getByRole("textbox", { name: /email/i })).toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: /full name/i })).not.toBeInTheDocument();
+    expect(screen.queryByTestId("password")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /send sign-up link/i })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /terms of service/i })).toHaveAttribute("href", "/legal/terms");
+  });
+
+  it("posts the address and locale, then says to check the inbox without signing in", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn().mockResolvedValueOnce({ ok: true, status: 202, json: async () => ({ ok: true }) });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<RegisterPage />);
+
+    await user.type(screen.getByRole("textbox", { name: /email/i }), "john@example.com");
+    await user.click(screen.getByRole("button", { name: /send sign-up link/i }));
+
+    await waitFor(() => expect(screen.getByText("Check your email")).toBeInTheDocument());
+    expect(fetchMock).toHaveBeenCalledWith("/api/auth/register", expect.objectContaining({ method: "POST" }));
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ email: "john@example.com", locale: "ja" });
+    expect(screen.queryByRole("button", { name: /send sign-up link/i })).not.toBeInTheDocument();
+    expect(signIn).not.toHaveBeenCalled();
+  });
+
+  it("shows a generic error when the request fails", async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce({ ok: false, status: 500, json: async () => ({}) }));
+    render(<RegisterPage />);
+
+    await user.type(screen.getByRole("textbox", { name: /email/i }), "john@example.com");
+    await user.click(screen.getByRole("button", { name: /send sign-up link/i }));
+
+    await waitFor(() => expect(screen.getByText("Registration failed")).toBeInTheDocument());
+    expect(screen.queryByText("Check your email")).not.toBeInTheDocument();
   });
 });

@@ -1278,12 +1278,19 @@ def actions_context(ctx: dict) -> dict:
         field-less 'CONFLICT' is exactly what a real assertNotStale
         snapshot mismatch also produces, so collapsing them together made
         a reservation-allocation rejection display as a stale-update
-        warning. See docs/knowledge/error-message-framework.md."""
+        warning. See docs/knowledge/error-message-framework.md.
+
+        logSecurityEventForError(e) runs first: a denial, expired session or
+        rate-limit hit returned as an ActionFailure writes the same
+        [security-event] line handleApiError writes for it on REST, including
+        one thrown by hand in consumer code (Issue #1307,
+        docs/knowledge/logging-inventory.md)."""
         lines = [
             f"{indent}try {{",
             f"{indent}  await enforceActionRateLimit(actorId);",
             f"{indent}  {call_stmt}",
             f"{indent}}} catch (e) {{",
+            f"{indent}  logSecurityEventForError(e);",
             f"{indent}  if (e instanceof AppError) {{",
             f"{indent}    return {{ ok: false, errorCode: e.code, field: e.field, reason: e.reason, ...((m: {{ messageKey?: string; messageArgs?: Record<string, string | number> }}) => (m.messageKey ? {{ messageKey: m.messageKey, messageArgs: m.messageArgs }} : {{}}))(e) }} satisfies ActionFailure;",
             f"{indent}  }}",
@@ -1316,6 +1323,7 @@ def actions_context(ctx: dict) -> dict:
             f"{indent}try {{\n"
             f"{block}"
             f"{indent}}} catch (e) {{\n"
+            f"{indent}  logSecurityEventForError(e);\n"
             f"{indent}  if (e instanceof AppError) {{\n"
             f"{indent}    return {{ ok: false, errorCode: e.code, field: e.field, reason: e.reason, ...((m: {{ messageKey?: string; messageArgs?: Record<string, string | number> }}) => (m.messageKey ? {{ messageKey: m.messageKey, messageArgs: m.messageArgs }} : {{}}))(e) }} satisfies ActionFailure;\n"
             f"{indent}  }}\n"
@@ -1372,6 +1380,7 @@ def actions_context(ctx: dict) -> dict:
             f"{indent}    currentPassword: data.get('current_password'),\n"
             f"{indent}  }});\n"
             f"{indent}}} catch (e) {{\n"
+            f"{indent}  logSecurityEventForError(e);\n"
             f"{indent}  if (e instanceof ApiError) {{\n"
             f"{indent}    return {{\n"
             f"{indent}      ok: false,\n"
@@ -1556,7 +1565,7 @@ def actions_context(ctx: dict) -> dict:
         f'add{parent_pascal}'    if can_create else '',
         f'update{parent_pascal}' if can_update else '',
         f'delete{parent_pascal}' if can_delete else '',
-        f'assertDeleteReferencesReachable{parent_pascal}' if can_delete and ctx.get('fk_write_checks') else '',
+        f'assertDeleteReferencesReachable{parent_pascal}' if can_delete and ctx.get('delete_reference_check') else '',
     ]
     error_imports = ', InsufficientPoolCapacityError, ReservationMutationError' if has_reservation else ''
     service_imports = ', '.join(f for f in service_fns if f) + error_imports
@@ -4194,7 +4203,7 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
         + ("\nimport { invalidatePermissionCache } from '@/lib/authz';" if invalidates_permission_cache else '')
         + (f"\nimport {{ getAssociatedOrganizations }} from '@/lib/organization/associated_internal';" if org_id_client_writable and (can_create or can_update) else '')
         + ("\nimport { assertFkReferencesUsable } from '@/lib/_fk_reference';" if (fk_write_checks or child_fk_check_create or child_fk_check_update) and (can_create or can_update) else '')
-        + ("\nimport { assertStoredFkReferencesReachable } from '@/lib/_fk_reference';" if fk_write_checks and can_delete else '')
+        + ("\nimport { assertStoredFkReferencesReachable } from '@/lib/_fk_reference';" if ctx.get('delete_reference_check') and can_delete else '')
         + (f"\nimport {{ AppError, p2002Field }} from '@/lib/_errors';" if can_create or can_update else '')
         + (ctx.get('child_exclusive_imports', '') if can_create or can_update else '')
         + (f"\nimport {{ getModelPermissions }} from '@/lib/authz';" if server_value_override_fields and can_create else '')

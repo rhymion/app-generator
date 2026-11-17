@@ -88,6 +88,13 @@ redesigning the page itself (`notFound()` / conditional render), which is out of
 here. `error.tsx` now shows a static, safe `te('pageError')` message instead of a
 hardcoded string, so U3-U5 are no less safe than before — just not yet inline.
 
+**Security events (Issue #1307)**: a catch that turns an error into an
+`ActionFailure` calls `logSecurityEventForError(e)` (`lib/security-event.ts`) first,
+so a denial, expired session or rate-limit hit returned inline writes the same
+`[security-event]` line `handleApiError` writes on REST. Hand-written actions that
+convert errors themselves follow the same rule. See `logging-inventory.md`
+("Security-event log").
+
 **NEW-2 (found during this implementation, not in the original checklist)**: a real
 literal "Unique key constraint violation" had no throw site anywhere in this
 framework — `service_validation.ts.jinja2`'s checks only cover the schema-driven

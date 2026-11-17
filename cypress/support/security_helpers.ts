@@ -53,6 +53,38 @@ export function seedActorFromOtherOrganization(
 }
 
 /**
+ * A row of any model written straight to the database, with exactly `data` (audit columns included).
+ * Used to place a referenced row in another organization or outside a Creator / Assignee scope.
+ */
+export function seedRow<T = Record<string, unknown>>(model: string, data: Record<string, unknown>): Cypress.Chainable<T> {
+  return cy.task<T>('security:seedRow', { model, data });
+}
+
+/** Changes columns of an existing row straight in the database (e.g. moves it into another organization). */
+export function updateRow<T = Record<string, unknown>>(model: string, id: string, data: Record<string, unknown>): Cypress.Chainable<T> {
+  return cy.task<T>('security:updateRow', { model, id, data });
+}
+
+export type ScopedGrant = {
+  entity: string;
+  /** `general` applies to every row; `Creator` / `Assignee` only to rows the actor created / is assigned to. */
+  scope: 'general' | 'Creator' | 'Assignee';
+  flags: { create?: boolean; read?: boolean; update?: boolean; delete?: boolean; import?: boolean };
+};
+
+/**
+ * An actor who belongs to `organizationIds` and holds exactly `grants`. With a Creator or Assignee grant on
+ * a referenced entity, some rows of that entity are reachable by the actor and others are not.
+ */
+export function seedScopedActor(
+  label: string,
+  organizationIds: string[],
+  grants: ScopedGrant[],
+): Cypress.Chainable<SecurityActor & { userId: string }> {
+  return cy.task<{ apiKey: string; userId: string }>('security:seedScopedActor', { label, organizationIds, grants });
+}
+
+/**
  * Asserts that `actor` is refused with exactly `status`, and that the denied write left the database
  * unchanged (the rows named by `persistence` are re-read from the database before and after).
  */

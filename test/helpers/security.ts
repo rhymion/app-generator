@@ -44,10 +44,13 @@ type Deps = {
 /** Reads the rows of `spec` through Prisma, ordered by id, as plain JSON. */
 async function readSnapshotFromDatabase(spec: PersistenceSpec): Promise<unknown> {
   const { default: db } = await import('@/lib/prisma');
-  type Delegate = { findMany(args: { where: Record<string, unknown>; orderBy: { id: 'asc' } }): Promise<unknown[]> };
+  type Delegate = {
+    findMany(args: { where: Record<string, unknown>; orderBy: { id: 'asc' }; include?: Record<string, unknown> }): Promise<unknown[]>;
+  };
   const rows = await (db as unknown as Record<string, Delegate>)[spec.model].findMany({
     where: spec.where ?? {},
     orderBy: { id: 'asc' },
+    ...(spec.include ? { include: spec.include } : {}),
   });
   return JSON.parse(JSON.stringify(rows));
 }
