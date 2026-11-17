@@ -759,6 +759,55 @@ A required user who has not enrolled still signs in normally, with any sign-in m
 
 Tests: `lib/auth/mfa-required.test.ts`, `auth.mfa-required.test.ts`, `lib/authz_mfa_enrollment.test.ts`.
 
+## Password hashing cost (`BCRYPT_COST`)
+
+Password hashes are bcrypt (bcryptjs). `BCRYPT_COST` sets the cost (Issue #1291, ASVS V11.4.2; `lib/auth/bcrypt-cost.ts`):
+
+- Unset or empty: 10. Allowed: an integer from 10 to 15. Any other value makes every password write (registration, password reset, password change, seeding) fail with `BCRYPT_COST must be an integer from 10 to 15`; there is no silent fallback to a weaker cost.
+- Every path that stores a password hash uses `hashPassword()`, and the throwaway hash used for unknown accounts (`lib/auth/password-check.ts`) has the same cost, so timing stays equal after a change.
+- **Rehash on sign-in.** A successful password sign-in (web `authorize()` in `auth.ts` and `POST /api/mobile/auth/token`) replaces a stored hash whose cost differs from the setting (`lib/auth/password-rehash.ts`). The write is conditional on the stored hash being unchanged, and a failure is logged without failing the sign-in. Raising the cost therefore upgrades each account at its next sign-in; accounts that never sign in keep the old hash, which still verifies. Lowering it (not below 10) works the same way.
+- MFA recovery codes keep cost 10 (random, single-use, up to eight compared per attempt).
+
+Each step of the cost doubles the time of a hash: measure a sign-in on the production instance size before raising it.
+
+Tests: `lib/auth/bcrypt-cost.test.ts`, `lib/auth/password-rehash.test.ts`.
+
+## Rotating `AUTH_SECRET`
+
+Values encrypted at rest use keys derived from `AUTH_SECRET`, one per kind of value (Issue #1291, ASVS V11.2.2; `lib/auth/secret-key-ring.ts`): `user.mfa_secret` (`lib/mfa/crypto.ts`) and `attachment.encrypted_original_name` (`lib/compliance/attachment_name_crypto.ts`). Each stored value names its key:
+
+| Format | Written by | Read with |
+|---|---|---|
+| `v2:<key_id>:<nonce>:<tag>:<ciphertext>` | everything since #1291 | the configured secret whose key id matches; the key id is authenticated with the ciphertext |
+| `v1:<nonce>:<tag>:<ciphertext>` | code before #1291 | `AUTH_SECRET`, then `AUTH_SECRET_PREVIOUS` |
+
+The key id is the first 8 hex characters of SHA-256(`key-id:` + secret); it identifies a secret without revealing it. A value whose key id matches no configured secret fails with `No configured secret has key id <id>`.
+
+`AUTH_SECRET_PREVIOUS` (optional) holds the old value during a rotation. While it is set:
+
+- values under either key decrypt; new values are written under `AUTH_SECRET`;
+- a successful TOTP check re-encrypts that user's MFA secret under the current key (conditional on the stored value, failures logged only);
+- web sessions issued under the old secret stay valid and are re-issued under the new one (`secret: [AUTH_SECRET, AUTH_SECRET_PREVIOUS]` in `auth.ts`).
+
+`npm run secrets:reencrypt` (`scripts/reencrypt-secrets.ts`, `lib/auth/reencrypt-stored-secrets.ts`) rewrites every stored value that is not under the current key, a page at a time with conditional writes, and prints how many it rewrote, found current, or could not decrypt (by row id; exit code 1 then). A second run changes nothing.
+
+**Planned rotation (sessions survive).**
+
+1. Deploy with `AUTH_SECRET=<new>` and `AUTH_SECRET_PREVIOUS=<old>`.
+2. Run `npm run secrets:reencrypt` with the same two variables until it reports no failures.
+3. After the web session lifetime (`SESSION_MAX_AGE_SECONDS`) has passed, remove `AUTH_SECRET_PREVIOUS` and redeploy.
+
+**Compromised secret (end every session).** `AUTH_SECRET_PREVIOUS` would keep the old sessions valid, so the app must not run with it:
+
+1. Deploy with `AUTH_SECRET=<new>` only. Every web session ends. Until step 2 finishes, a user whose MFA secret is under the old key cannot complete MFA, and an old attachment's original name is not shown.
+2. Immediately run `npm run secrets:reencrypt` with `AUTH_SECRET=<new>` and `AUTH_SECRET_PREVIOUS=<old>` in the script's environment only.
+
+**Not covered by the key ring.** These also use `AUTH_SECRET` and are not readable under the previous value after a rotation: the mobile access token (15 minutes) and refresh-token lookup hash (`lib/mobile-auth.ts`; mobile users sign in again), the CSV import token (5 minutes, `lib/_import.ts`) and the payment cancel-link signature (an in-flight checkout's cancel link stops working). None of them is stored encrypted data.
+
+Losing `AUTH_SECRET` without a copy makes the encrypted values unreadable: affected users re-enrol MFA (an operator clears it, see "Lost password without email verification, and a lost second factor" above) and old attachments show their stored UUID instead of the original name.
+
+Tests: `lib/auth/secret-key-ring.test.ts`, `lib/mfa/crypto.test.ts`, `lib/compliance/attachment_name_crypto.test.ts`, `lib/mfa/verify.test.ts`, `lib/auth/reencrypt-stored-secrets.test.ts`.
+
 ## Audit and log records carry no email address
 
 The generator's own auth code never writes an email address into
@@ -936,7 +985,7 @@ https); a `__Host-` prefix is not applied.
 
 The following are explicitly out of scope for the current implementation:
 
-- **Server-side revocation for credentials users**: Not implemented for sign-in itself — a stolen JWT cookie is self-contained and rotating `AUTH_SECRET` is the only global invalidation. Custom `adapter.createSession()` shim deferred. See `auth.ts` `authorize()`. (MFA-state revocation is handled separately — see "MFA on the OAuth path" below.)
+- **Server-side revocation for credentials users**: Not implemented for sign-in itself — a stolen JWT cookie is self-contained and rotating `AUTH_SECRET` (without `AUTH_SECRET_PREVIOUS`, see "Rotating `AUTH_SECRET`") is the only global invalidation. Custom `adapter.createSession()` shim deferred. See `auth.ts` `authorize()`. (MFA-state revocation is handled separately — see "MFA on the OAuth path" below.)
 - **MFA / TOTP**: Shipped in v1 (S5 phase 5a) for the credentials provider, opt-in per user. Shipped for the OAuth path too as of S8 — see "MFA on the OAuth path" below. Admin-mandated MFA is still deferred.
 - **Account linking UI**: Shipped in v1 (S7). `/setting/accounts` lists and connects/detaches OAuth providers; linking needs a signed-in session and the same email, cross-email linking deferred. See `lib/account-link/`, `auth.ts`.
 - **Audit-log table**: Not implemented. Auth events log to `console.info` only. Prisma model with role/permission hooks deferred.

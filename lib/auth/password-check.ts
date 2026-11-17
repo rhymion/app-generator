@@ -1,13 +1,16 @@
 import bcrypt from 'bcryptjs';
+import { bcryptCost } from './bcrypt-cost';
 
-// Same cost factor the app uses when it stores a password hash.
-const BCRYPT_COST = 10;
-
-let dummyHash: Promise<string> | undefined;
+// The throwaway hash uses the cost the app stores password hashes with (BCRYPT_COST), so a
+// comparison against it takes as long as one against a real hash.
+let dummyHash: { cost: number; hash: Promise<string> } | undefined;
 
 function getDummyHash(): Promise<string> {
-  dummyHash ??= bcrypt.hash('dummy-password-for-timing-equalisation', BCRYPT_COST);
-  return dummyHash;
+  const cost = bcryptCost();
+  if (dummyHash?.cost !== cost) {
+    dummyHash = { cost, hash: bcrypt.hash('dummy-password-for-timing-equalisation', cost) };
+  }
+  return dummyHash.hash;
 }
 
 /**

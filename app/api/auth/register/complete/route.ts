@@ -1,7 +1,7 @@
 import { logger } from '@/lib/logger';
 import { NextResponse } from "next/server";
 import { createId } from "@paralleldrive/cuid2";
-import bcrypt from "bcryptjs";
+import { hashPassword } from "@/lib/auth/bcrypt-cost";
 import prisma from "@/lib/prisma";
 import { getRateLimiter } from "@/lib/rate-limit";
 import { clientIp } from "@/lib/rate-limit/client-ip";
@@ -55,7 +55,7 @@ export async function POST(request: Request) {
     if (weak) {
       return NextResponse.json({ error: weak, code: "WEAK_PASSWORD" }, { status: 400 });
     }
-    const passwordHash = await bcrypt.hash(password, 10);
+    const passwordHash = await hashPassword(password);
 
     const created = await prisma.$transaction(async (tx) => {
       const email = await consumeRegistrationToken(tx, token);

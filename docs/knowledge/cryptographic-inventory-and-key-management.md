@@ -12,20 +12,20 @@ This document lists every cryptographic key, algorithm and use in the generated 
 | Per-environment separation | Vercel Production reads `AUTH_SECRET`, Preview reads `AUTH_SECRET_STAGING`; Preview never receives the Production value. The test environment uses its own generated value. See [authentication.md](authentication.md). |
 | Storage | Vercel project environment variable, or the `app-nextauth-secret` / `app-auth-secret` Secret Manager entries on GCP (`scripts/gcp-setup.sh`). Cloud Run reads the `latest` version at start-up (`scripts/gcp-deploy.sh`). |
 | Minimum strength | Not enforced by the app. The deployment scripts generate 256 bits; a hand-set value is used as given. A missing value makes each use below fail closed (see the table). |
-| Key identifier | None. A stored value does not record which `AUTH_SECRET` produced it, and only one value is accepted at a time. |
+| Key identifier | Values encrypted at rest record the id of their key (`v2:<key_id>:...`, the first 8 hex characters of SHA-256(`key-id:` + secret); Issue #1291). `AUTH_SECRET_PREVIOUS` adds the old value during a rotation (see Lifecycle). HMACs and the JWTs carry no key id. |
 
 ## Inventory
 
 | Use | Algorithm | Key | Where | Stored or sent as |
 |-----|-----------|-----|-------|-------------------|
-| Web session cookie | Auth.js JWT strategy: encrypted JWE (Auth.js defaults) | `AUTH_SECRET`, handled by Auth.js | `auth.ts` | Session cookie. No session row is read per request. |
+| Web session cookie | Auth.js JWT strategy: encrypted JWE (Auth.js defaults) | `AUTH_SECRET` (and `AUTH_SECRET_PREVIOUS` for reading while rotating), handled by Auth.js | `auth.ts` | Session cookie. No session row is read per request. |
 | Mobile access token | HS256 JWT (`jose`), 15-minute lifetime, claims `type: mobile_access`, `iss: app:mobile-auth`, `aud: app:mobile-api` (all checked on verification) | `AUTH_SECRET` used directly as the HMAC key | `lib/mobile-auth.ts` | Bearer token, never stored |
 | Mobile refresh token, stored form | HMAC-SHA256 | `AUTH_SECRET` | `hashRefreshToken()` in `lib/mobile-auth.ts` | Hex digest in `refresh_token_hash` (unique-indexed for lookup). The token itself is 32 random bytes and is never stored. |
-| MFA TOTP secret at rest | AES-256-GCM, 12-byte random nonce | SHA-256 of `AUTH_SECRET` + `mfa-encryption-v1` | `lib/mfa/crypto.ts` | `v1:<nonce>:<tag>:<ciphertext>` (hex) in `user.mfa_secret` |
-| Attachment original file name | AES-256-GCM, 12-byte random nonce | SHA-256 of `AUTH_SECRET` + `attachment-name-encryption-v1` | `lib/compliance/attachment_name_crypto.ts` | Same `v1:` wire format in `encrypted_original_name`; the visible name is a random UUID |
+| MFA TOTP secret at rest | AES-256-GCM, 12-byte random nonce | SHA-256 of `AUTH_SECRET` + `mfa-encryption-v1` | `lib/mfa/crypto.ts`, `lib/auth/secret-key-ring.ts` | `v2:<key_id>:<nonce>:<tag>:<ciphertext>` (hex; `v2:<key_id>` is authenticated data) in `user.mfa_secret`; `v1:<nonce>:<tag>:<ciphertext>` written before #1291 is still read |
+| Attachment original file name | AES-256-GCM, 12-byte random nonce | SHA-256 of `AUTH_SECRET` + `attachment-name-encryption-v1` | `lib/compliance/attachment_name_crypto.ts`, `lib/auth/secret-key-ring.ts` | Same `v2:` wire format in `encrypted_original_name` (`v1:` still read); the visible name is a random UUID |
 | Import confirmation token | HMAC-SHA256 over `actor:entity:expiry`, 5-minute lifetime | `AUTH_SECRET` | `lib/_import.ts` | base64url token returned to the caller; compared with `timingSafeEqual` |
 | Payment cancel proof (only when the schema has a payable entity) | HMAC-SHA256 over `payment-cancel:<id>` | `AUTH_SECRET` | `cancelToken()` in `code_generator/templates/payment_checkout.ts.jinja2` | Query value inside the `cancel_url` given to Stripe; returns no token (fails closed) when `AUTH_SECRET` is unset |
-| Password | bcrypt (`bcryptjs`), cost 10 | Per-hash salt, no server key | `lib/auth/password-check.ts`, `lib/auth/credential-confirmation.ts` | `user.password` |
+| Password | bcrypt (`bcryptjs`), cost `BCRYPT_COST` (10 to 15, default 10); a sign-in rehashes a hash at another cost | Per-hash salt, no server key | `lib/auth/bcrypt-cost.ts`, `lib/auth/password-rehash.ts`, `lib/auth/password-check.ts` | `user.password` |
 | MFA recovery codes | bcrypt, cost 10 | Per-hash salt, no server key | `lib/mfa/recovery.ts` | Hash per code, single use |
 | API key, stored form | SHA-256, unsalted, deterministic | None | `lib/api-key.ts` | `user.api_key_hash`. The key is `mk_` + 32 random bytes in hex and is shown once. See [api-key-hashing.md](api-key-hashing.md). |
 | Secret comparison | SHA-256 of both sides, then `timingSafeEqual` | None | `lib/_secret_compare.ts` | Not stored |
@@ -40,25 +40,24 @@ No asymmetric keys, key agreement or digital signatures are used by the app code
 
 - **Create.** The deployment scripts generate `AUTH_SECRET` on first run and store it per environment. Nothing in the app creates it.
 - **Use.** Read from `process.env.AUTH_SECRET` on each call; derived keys are recomputed per call and are not cached or written anywhere.
-- **Rotate.** There is no supported in-place rotation. The app accepts exactly one value, and stored ciphertext and digests carry no key identifier, so there is no way to read old values with the old key while writing new ones with the new key. Changing the value has these effects:
+- **Rotate.** Set the new value in `AUTH_SECRET` and the old one in `AUTH_SECRET_PREVIOUS`, then run `npm run secrets:reencrypt`; the procedure, for a planned rotation and for a compromised secret, is in [authentication.md](authentication.md) ("Rotating `AUTH_SECRET`"). The effects:
 
 | Item | Effect of changing `AUTH_SECRET` |
 |------|----------------------------------|
-| Web sessions | All sessions stop verifying; every user signs in again. |
+| Web sessions | With `AUTH_SECRET_PREVIOUS` set, existing sessions stay valid and are re-issued under the new value. Without it, every user signs in again. |
 | Mobile access tokens | Stop verifying; clients refresh. |
 | Mobile refresh tokens | The stored HMAC no longer matches, so every refresh fails and every mobile user signs in again. |
 | Import and payment cancel tokens | Outstanding tokens stop verifying. Import tokens live 5 minutes; a payment cancel link already sent to a buyer stops working. |
-| MFA secrets | Stored secrets can no longer be decrypted (the GCM tag check fails), so verification and enrollment throw for every enrolled user until each re-enrolls. The data is not re-encrypted. |
-| Attachment names | Decryption fails; the generated getters log a warning and show the stored UUID name instead of the original name. The original names are not recoverable under the new secret. |
+| MFA secrets | Read with the key named by their key id (or, for `v1` values, with either secret) while `AUTH_SECRET_PREVIOUS` is set. A successful MFA check and `npm run secrets:reencrypt` rewrite them under the new key. A value under a secret no longer configured cannot be decrypted, and that user must re-enrol. |
+| Attachment names | Same as MFA secrets, rewritten by `npm run secrets:reencrypt` (with `name_iv`). An undecryptable name makes the generated getters log a warning and show the stored UUID. |
 | Passwords, API keys, recovery codes, audit-log digests | Unaffected; they do not use `AUTH_SECRET`. |
 
-  Rotate only after planning for the MFA re-enrollment and the loss of original attachment names, or leave the value unchanged. Re-encrypting stored data and keeping two accepted values during a rotation window are tracked in #1291.
 - **Compromise.** Treat a leaked `AUTH_SECRET` as a leak of every use above: replace it in the environment's secret store and redeploy, accept the effects in the rotation table, and re-enroll MFA. A leaked `AUTH_SECRET` also lets its holder derive the MFA and attachment-name keys, so previously exposed database dumps become decryptable.
 - **Destroy.** `scripts/vercel-teardown.sh` removes the Vercel variable. Deleting the stored secret on GCP is an operator action outside the scripts.
 
 ## Algorithm choices that are fixed in code
 
-The bcrypt cost (10), the AES-256-GCM and HMAC-SHA256 choices and the `v1` wire-format prefix are constants in the files listed above. The `v1` prefix lets a reader reject an unknown format; it does not select a key. Configurable cost and key identifiers are tracked in #1291.
+The AES-256-GCM and HMAC-SHA256 choices are constants in the files listed above. The wire-format version (`v2`) lets a reader reject an unknown format, and the key id in it selects the key; changing the cipher would be a new version. The password bcrypt cost is configurable (`BCRYPT_COST`, see [authentication.md](authentication.md), "Password hashing cost"); the recovery-code cost stays 10.
 
 ## Related
 

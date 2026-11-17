@@ -199,6 +199,8 @@ openssl rand -base64 32
 
 生成した値を `.env.development`（ローカル開発用）と `.env.test`（E2E テスト用）に追加してください。本番環境では Vercel ダッシュボードで設定します。
 
+`AUTH_SECRET` は MFA シークレットと添付ファイル名の暗号化にも使われます。これらを失わずに値を変更するには、旧い値を `AUTH_SECRET_PREVIOUS` に残したまま `npm run secrets:reencrypt` を実行してください（[`docs/knowledge/authentication.md`](docs/knowledge/authentication.md) の "Rotating `AUTH_SECRET`" を参照）。`BCRYPT_COST`（10〜15、既定値 10）はパスワードハッシュのコストを設定します。
+
 ### クイックスタート（コマンド一発）
 
 依存パッケージのインストール後、一つのコマンドでデータベースの起動、コード生成、マイグレーション実行、シーディング、開発サーバー起動まで完了します:

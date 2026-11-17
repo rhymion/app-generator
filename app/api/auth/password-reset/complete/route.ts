@@ -1,6 +1,6 @@
 import { logger } from '@/lib/logger';
 import { NextResponse } from "next/server";
-import bcrypt from "bcryptjs";
+import { hashPassword } from "@/lib/auth/bcrypt-cost";
 import prisma from "@/lib/prisma";
 import { getRateLimiter } from "@/lib/rate-limit";
 import { clientIp } from "@/lib/rate-limit/client-ip";
@@ -24,8 +24,6 @@ import { recordAuditEvent } from "@/lib/audit-log";
 //     configured lifetime.
 //
 // 404 while email verification is off. See docs/knowledge/authentication.md "Password reset".
-
-const BCRYPT_COST = 10;
 
 function invalidToken(): NextResponse {
   return NextResponse.json({ error: "This link cannot be used.", code: "INVALID_TOKEN" }, { status: 400 });
@@ -78,7 +76,7 @@ export async function POST(request: Request) {
       if (!ok) return NextResponse.json({ error: "That code did not match.", code: "INVALID_MFA_CODE" }, { status: 401 });
     }
 
-    const passwordHash = await bcrypt.hash(password, BCRYPT_COST);
+    const passwordHash = await hashPassword(password);
     const done = await prisma.$transaction(async (tx) => {
       // Consumed inside the transaction: of two concurrent requests only one resets.
       const consumed = await consumePasswordResetToken(tx, token);

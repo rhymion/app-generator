@@ -2,7 +2,7 @@ import { logger } from '@/lib/logger';
 import { NextResponse } from "next/server";
 import { createHash } from "node:crypto";
 import { createId } from "@paralleldrive/cuid2";
-import bcrypt from "bcryptjs";
+import { hashPassword } from "@/lib/auth/bcrypt-cost";
 import prisma from "@/lib/prisma";
 import { getRateLimiter } from "@/lib/rate-limit";
 import { clientIp } from "@/lib/rate-limit/client-ip";
@@ -141,7 +141,7 @@ export async function POST(request: Request) {
         updater_id: userId,
         name: name ?? email,
         email,
-        password: await bcrypt.hash(password, 10),
+        password: await hashPassword(password),
       },
     });
 

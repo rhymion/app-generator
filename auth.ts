@@ -8,6 +8,8 @@ import GoogleProvider from "next-auth/providers/google";
 import { PrismaAdapter } from "@auth/prisma-adapter";
 import prisma from "@/lib/prisma";
 import { verifyPassword } from "@/lib/auth/password-check";
+import { rehashPasswordIfNeeded } from "@/lib/auth/password-rehash";
+import { secretsEqual } from "@/lib/_secret_compare";
 import { clearFailedSignIns, getAccountLockState, recordFailedSignIn } from "@/lib/auth/account-lockout";
 import { siteConfig } from "@/lib/site-config";
 import { recordAuditEvent } from "@/lib/audit-log";
@@ -103,6 +105,8 @@ function buildProviders(): Provider[] {
           throw new Error("Invalid credentials");
         }
         await clearFailedSignIns(email, request.headers);
+        // A hash at another bcrypt cost than BCRYPT_COST is replaced (Issue #1291).
+        await rehashPasswordIfNeeded(user.id, credentials.password as string, user.password);
 
         // MFA gate. The cast covers the case where the generated Prisma
         // client in the current checkout predates the user.mfa_enabled
@@ -250,8 +254,17 @@ const sessionStrategy = "jwt" as const;
 // Read once at load. The absolute lifetime is enforced in jwt() below.
 const sessionPolicy = resolveSessionPolicy();
 
+// While AUTH_SECRET is being rotated, AUTH_SECRET_PREVIOUS holds the old value: sessions issued
+// under it stay valid and are re-issued under the new one (Auth.js tries each secret in turn and
+// signs with the first). See docs/knowledge/authentication.md "Rotating AUTH_SECRET" (#1291).
+function sessionSecrets(): string | string[] | undefined {
+  const current = process.env.AUTH_SECRET;
+  const previous = (process.env.AUTH_SECRET_PREVIOUS ?? "").trim();
+  return current && previous && !secretsEqual(previous, current) ? [current, previous] : current;
+}
+
 export const authConfig: NextAuthConfig = {
-  secret: process.env.AUTH_SECRET,
+  secret: sessionSecrets(),
 
   adapter: buildAdapter(),
   // JWT strategy keeps session reads off the DB on every request. Without an

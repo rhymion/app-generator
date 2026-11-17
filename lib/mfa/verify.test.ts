@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
-const { userFindUnique, userUpdateMany, recoveryFindMany, recoveryUpdateMany, verifyTotpStep, verifyRecoveryCode } = vi.hoisted(() => ({
+const { userFindUnique, userUpdateMany, recoveryFindMany, recoveryUpdateMany, verifyTotpStep, verifyRecoveryCode, reencryptedSecret } = vi.hoisted(() => ({
+  reencryptedSecret: vi.fn(),
   userFindUnique: vi.fn(),
   userUpdateMany: vi.fn(),
   recoveryFindMany: vi.fn(),
@@ -15,7 +16,7 @@ vi.mock('@/lib/prisma', () => ({
     mfa_recovery_code: { findMany: recoveryFindMany, updateMany: recoveryUpdateMany },
   },
 }));
-vi.mock('./crypto', () => ({ decryptSecret: (s: string) => s }));
+vi.mock('./crypto', () => ({ decryptSecret: (s: string) => s, reencryptedSecret }));
 vi.mock('./totp', () => ({ verifyTotpStep }));
 vi.mock('./recovery', () => ({ verifyRecoveryCode }));
 
@@ -32,6 +33,8 @@ beforeEach(() => {
   recoveryUpdateMany.mockReset();
   verifyTotpStep.mockReset();
   verifyRecoveryCode.mockReset();
+  reencryptedSecret.mockReset();
+  reencryptedSecret.mockReturnValue(null);
   userFindUnique.mockResolvedValue({ id: 'user-1', mfa_secret: 'secret', mfa_enabled: true, mfa_last_totp_step: null });
   recoveryFindMany.mockResolvedValue([]);
   verifyTotpStep.mockResolvedValue(null);
@@ -101,5 +104,37 @@ describe('verifyMfaCode one-time use', () => {
   it('does not offer a used recovery code again: only unused rows are looked up', async () => {
     await verifyMfaCode('user-1', 'abcd-efgh');
     expect(recoveryFindMany).toHaveBeenCalledWith(expect.objectContaining({ where: { user_id: 'user-1', used_at: null } }));
+  });
+});
+
+describe('verifyMfaCode re-encryption (Issue #1291)', () => {
+  it('rewrites a secret not under the current key after an accepted code, conditional on the stored value', async () => {
+    verifyTotpStep.mockResolvedValue(101);
+    reencryptedSecret.mockReturnValue('v2:newkey:n:t:c');
+    await expect(verifyMfaCode('user-1', '123456')).resolves.toBe(true);
+    expect(reencryptedSecret).toHaveBeenCalledWith('secret', 'secret');
+    expect(userUpdateMany).toHaveBeenLastCalledWith({
+      where: { id: 'user-1', mfa_secret: 'secret' },
+      data: { mfa_secret: 'v2:newkey:n:t:c' },
+    });
+  });
+
+  it('writes nothing more when the secret is already under the current key', async () => {
+    verifyTotpStep.mockResolvedValue(101);
+    await expect(verifyMfaCode('user-1', '123456')).resolves.toBe(true);
+    expect(userUpdateMany).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not re-encrypt after a refused code', async () => {
+    reencryptedSecret.mockReturnValue('v2:newkey:n:t:c');
+    await expect(verifyMfaCode('user-1', '000000')).resolves.toBe(false);
+    expect(reencryptedSecret).not.toHaveBeenCalled();
+  });
+
+  it('still accepts the code when the re-encryption write fails', async () => {
+    verifyTotpStep.mockResolvedValue(101);
+    reencryptedSecret.mockReturnValue('v2:newkey:n:t:c');
+    userUpdateMany.mockResolvedValueOnce({ count: 1 }).mockRejectedValueOnce(new Error('db down'));
+    await expect(verifyMfaCode('user-1', '123456')).resolves.toBe(true);
   });
 });

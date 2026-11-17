@@ -222,6 +222,8 @@ openssl rand -base64 32
 
 Add the output to `.env.development` (for local dev) and `.env.test` (for E2E tests). For production, set it in the Vercel dashboard.
 
+`AUTH_SECRET` also encrypts MFA secrets and attachment names. To change it without losing them, keep the old value in `AUTH_SECRET_PREVIOUS` and run `npm run secrets:reencrypt` (see [`docs/knowledge/authentication.md`](docs/knowledge/authentication.md), "Rotating `AUTH_SECRET`"). `BCRYPT_COST` (10 to 15, default 10) sets the password hashing cost.
+
 ### Quick Start (One Command)
 
 After installing dependencies, a single command starts the database, generates code, runs migrations, seeds, and launches the dev server:
