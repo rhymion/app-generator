@@ -573,9 +573,11 @@ Every writable string field has a server-side maximum length (Issue #1273): the 
 `maxLength`, or 65535 characters when none is declared. The generated `service_validation.ts`
 rejects a longer value with a `VALIDATION` error (HTTP 422 on REST), and CSV import refuses the
 row. There is no opt-out; declare a larger `maxLength` for a field that needs one (no upper cap; a
-plain Prisma `String` is PostgreSQL `text`). The generator does not read `@db.VarChar(n)`: for such a
-column declare `maxLength: n` too, or a longer value passes the check and fails in the database with
-the generic "invalid value" error instead of a field-level message. See
+plain Prisma `String` is PostgreSQL `text`). The generator does not read `@db.VarChar(n)`, and `maxLength`
+may be larger than `n` by design (`maxLength` is the security limit, `n` follows the product spec):
+a value between `n` and `maxLength` passes the check, the database refuses it, and the caller gets a
+`VALIDATION` error saying the value is too long, naming the field when PostgreSQL reports the column
+(Issue #1393). Declare `maxLength: n` when the form should stop the user earlier. See
 [input-validation-rules-and-limits.md](input-validation-rules-and-limits.md).
 
 | Keyword | Effect in generated form |

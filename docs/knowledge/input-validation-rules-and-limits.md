@@ -32,7 +32,7 @@ The server checks every supplied value against its field's JSON schema rules (Is
 | 10 | State transitions: an update may only move a state field along a declared transition, and a create may only start in a declared initial state (entities with a state machine). | `VALIDATION`, reason `invalid` (`no such transition`, or `transition not permitted by x-approval`) |
 | 11 | The hand-written rules in `lib/{entity}/service_validation_custom.ts` (`validateCustomRules`). | whatever it throws; a `VALIDATION` error without a reason is tagged `invalid` |
 
-Unique-index violations raised by the database are mapped to `CONFLICT`.
+Unique-index violations raised by the database are mapped to `CONFLICT`. A value longer than its column's `@db.VarChar(n)` (allowed by a larger `maxLength`, which is intended: `maxLength` is the security limit, `n` follows the product spec) is refused by the database (`P2000`) and mapped to a `VALIDATION` error, reason `invalid`, saying the value is too long and naming the field when PostgreSQL reports the column (Issue #1393, `lib/_prisma_value_too_long.ts`).
 
 CSV import refuses a cell longer than the same maximum length before the row reaches the service (row error `INVALID_VALUE`), so a dry run reports it too. Rows of an inline-edited child grid written through the parent's nested create/update are not checked by rules 2 and 4 (they carry no `validateOnAdd`/`validateOnUpdate` of their own; see the comment in `service.ts.jinja2`); their child entity's own REST route and Server Action are checked.
 

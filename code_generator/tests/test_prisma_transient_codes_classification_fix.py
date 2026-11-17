@@ -66,5 +66,10 @@ def test_generic_validation_catch_all_still_handles_other_codes(signature):
         "      throw new AppError('VALIDATION', 'One or more fields have an invalid value');\n"
         "    }"
     ) in catch_block
-    for code in ('P2003', 'P2011', 'P2000'):
+    for code in ('P2003', 'P2011'):
         assert f"e.code === '{code}'" not in catch_block
+    # P2000 (value longer than a @db.VarChar(n) column) gets its own field-level
+    # VALIDATION branch just above the catch-all (Issue #1393).
+    p2000 = catch_block.index("e.code === 'P2000'")
+    assert p2000 < catch_block.index("'One or more fields have an invalid value'")
+    assert "p2000Message(field), field, 'invalid'" in catch_block

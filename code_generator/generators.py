@@ -4205,6 +4205,7 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
         + ("\nimport { assertFkReferencesUsable } from '@/lib/_fk_reference';" if (fk_write_checks or child_fk_check_create or child_fk_check_update) and (can_create or can_update) else '')
         + ("\nimport { assertStoredFkReferencesReachable } from '@/lib/_fk_reference';" if ctx.get('delete_reference_check') and can_delete else '')
         + (f"\nimport {{ AppError, p2002Field }} from '@/lib/_errors';" if can_create or can_update else '')
+        + ("\nimport { p2000Field, p2000Message } from '@/lib/_prisma_value_too_long';" if can_create or can_update else '')
         + (ctx.get('child_exclusive_imports', '') if can_create or can_update else '')
         + (f"\nimport {{ getModelPermissions }} from '@/lib/authz';" if server_value_override_fields and can_create else '')
         + (f"\nimport {{ assertEditAllowed }} from './edit_guard';" if has_edit_guard else '')

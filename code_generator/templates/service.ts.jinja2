@@ -186,6 +186,13 @@ export async function add{{ parent_pascal }}(actorId: string{% if parent_params_
     // past the browser). P2002, P2028, P2034, P2037 and P2025 are handled above; every other
     // PrismaClientKnownRequestError code below is likewise a bad-input
     // shape (FK/type/constraint), not a server bug.
+    // P2000: a value longer than its @db.VarChar(n) column, though within the
+    // field's maxLength (Issue #1393). A field-level VALIDATION error, not the
+    // generic invalid-value one below.
+    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2000') {
+      const field = p2000Field(e.meta);
+      throw new AppError('VALIDATION', p2000Message(field), field, 'invalid');
+    }
     if (e instanceof Prisma.PrismaClientValidationError || e instanceof Prisma.PrismaClientKnownRequestError) {
       throw new AppError('VALIDATION', 'One or more fields have an invalid value');
     }
@@ -463,6 +470,13 @@ export async function update{{ parent_pascal }}(actorId: string, id: string{% if
     // past the browser). P2002, P2028, P2034, P2037 and P2025 are handled above; every other
     // PrismaClientKnownRequestError code below is likewise a bad-input
     // shape (FK/type/constraint), not a server bug.
+    // P2000: a value longer than its @db.VarChar(n) column, though within the
+    // field's maxLength (Issue #1393). A field-level VALIDATION error, not the
+    // generic invalid-value one below.
+    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2000') {
+      const field = p2000Field(e.meta);
+      throw new AppError('VALIDATION', p2000Message(field), field, 'invalid');
+    }
     if (e instanceof Prisma.PrismaClientValidationError || e instanceof Prisma.PrismaClientKnownRequestError) {
       throw new AppError('VALIDATION', 'One or more fields have an invalid value');
     }
