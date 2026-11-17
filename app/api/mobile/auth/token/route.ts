@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyPassword } from '@/lib/auth/password-check';
+import { rehashPasswordIfNeeded } from '@/lib/auth/password-rehash';
 import { clearFailedSignIns, getAccountLockState, recordFailedSignIn } from '@/lib/auth/account-lockout';
 import prisma from '@/lib/prisma';
 import { ApiError, handleApiError, requireMobileAuth } from '@/lib/api-auth';
@@ -76,6 +77,8 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
       throw new ApiError(401, 'Invalid credentials');
     }
     await clearFailedSignIns(email, request.headers);
+    // A hash at another bcrypt cost than BCRYPT_COST is replaced (Issue #1291).
+    await rehashPasswordIfNeeded(user.id, password, user.password);
 
     const mfaUser = user as unknown as { mfa_enabled?: boolean };
     if (mfaUser.mfa_enabled) {

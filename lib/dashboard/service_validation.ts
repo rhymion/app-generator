@@ -2,6 +2,7 @@ import prisma from '@/lib/prisma';
 import { validateCustomRules } from '@/lib/dashboard/service_validation_custom';
 import { AppError } from '@/lib/_errors';
 import { isValidDateValue, type DateValueFormat } from '@/lib/_date_value';
+import { fieldRuleViolation, type FieldRule } from '@/lib/_field_rules';
 
 type TransactionClient = Pick<typeof prisma, 'dashboard'>;
 type RequiredField = { key: string; label: string };
@@ -28,6 +29,26 @@ function isInvalidDecimal(value: unknown): boolean {
 
 const DATE_FIELDS: (RequiredField & { format: DateValueFormat })[] = [
 ] ;
+
+// Server-side maximum length of every writable string field (Issue #1273):
+// the schema's maxLength, or the default cap when none is declared. Counted
+// in Unicode code points, as JSON Schema's maxLength is.
+const STRING_LENGTH_FIELDS: (RequiredField & { maxLength: number })[] = [
+  { key: 'name', label: 'Name', maxLength: 65535 },
+] ;
+
+// Runtime rules of every writable scalar field (Issue #1271): the JSON type, plus
+// enum, numeric bounds, minLength, pattern and format where the schema declares
+// them. Checked for each supplied value; a missing value is the required rule's job.
+const FIELD_RULES: FieldRule[] = [
+  {"key": "name", "label": "Name", "type": "string"},
+] ;
+
+function exceedsMaxLength(value: unknown, maxLength: number): boolean {
+  if (typeof value !== 'string' || value.length <= maxLength) return false;
+  // UTF-16 length is at least the code-point count, so only a long string is counted exactly.
+  return Array.from(value).length > maxLength;
+}
 
 const ONE_TO_ONE_RELATIONS: OneToOneRelation[] = [
 ] ;
@@ -84,9 +105,22 @@ async function validateSchemaRules(tx: TransactionClient, data: Record<string, u
     }
   }
 
+  for (const rule of FIELD_RULES) {
+    const violation = fieldRuleViolation(rule, data[rule.key]);
+    if (violation) {
+      throw new AppError('VALIDATION', violation, rule.key, 'invalid');
+    }
+  }
+
   for (const field of DECIMAL_FIELDS) {
     if (isInvalidDecimal(data[field.key])) {
       throw new AppError('VALIDATION', `${field.label} must be a valid decimal number`, field.key, 'invalid');
+    }
+  }
+
+  for (const field of STRING_LENGTH_FIELDS) {
+    if (exceedsMaxLength(data[field.key], field.maxLength)) {
+      throw new AppError('VALIDATION', `${field.label} must be at most ${field.maxLength} characters`, field.key, 'invalid');
     }
   }
 

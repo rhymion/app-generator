@@ -32,6 +32,20 @@ describe('audit_log digest serialization', () => {
     expect(serializeAuditRow(row({ created_at: new Date('2026-10-01T00:00:01Z') }))).not.toBe(base);
   });
 
+  // Issue #1306: rows written before request_id existed must serialize exactly as before.
+  it('serializes a row without request_id exactly as before the column existed', () => {
+    const legacy = JSON.stringify(['a', 'u1', 'auth:signIn', null, null, { a: { c: 3, d: 2 }, b: 1 }, '2026-10-01T00:00:00.000Z']);
+    expect(serializeAuditRow(row())).toBe(legacy);
+    expect(serializeAuditRow(row({ request_id: null }))).toBe(legacy);
+  });
+
+  it('changes when request_id is set or changed', () => {
+    const base = serializeAuditRow(row());
+    const withId = serializeAuditRow(row({ request_id: 'r1' }));
+    expect(withId).not.toBe(base);
+    expect(serializeAuditRow(row({ request_id: 'r2' }))).not.toBe(withId);
+  });
+
   it('chains to the previous digest and depends on row order', async () => {
     const a = row({ id: 'a' });
     const b = row({ id: 'b' });

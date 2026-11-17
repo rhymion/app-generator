@@ -5,25 +5,19 @@
  * (e.g. "John_Smith_passport.pdf") is not readable from a DB dump.
  * The stored `name` field is replaced with a UUID v4.
  *
- * Key derivation reuses AUTH_SECRET with a distinct KEY_CONTEXT so
- * no new environment variable is required, and the key is independent
- * from the MFA encryption key.
+ * The key is derived from AUTH_SECRET with a distinct context, through the key ring in
+ * lib/auth/secret-key-ring.ts, so it is independent from the MFA encryption key, the stored
+ * value carries the id of its key (`v2:<key_id>:<nonce_hex>:<tag_hex>:<ciphertext_hex>`), and
+ * values written before Issue #1291 (`v1:...`) or under `AUTH_SECRET_PREVIOUS` still decrypt.
+ * `npm run secrets:reencrypt` rewrites stored names under the current key.
  *
- * Wire format for encrypted_original_name: `v1:<nonce_hex>:<tag_hex>:<ciphertext_hex>`
- * Wire format for name_iv: same nonce_hex value (stored separately for clarity).
+ * name_iv: the nonce_hex of the stored value (kept separately for clarity).
  */
-import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
+import { isSealedWithCurrentKey, open, seal } from '@/lib/auth/secret-key-ring';
 
-const VERSION = 'v1';
 const KEY_CONTEXT = 'attachment-name-encryption-v1';
-
-function deriveKey(): Buffer {
-  const secret = process.env.AUTH_SECRET;
-  if (!secret) {
-    throw new Error('AUTH_SECRET must be set to use attachment name encryption');
-  }
-  return createHash('sha256').update(secret + KEY_CONTEXT).digest();
-}
+const MISSING_SECRET = 'AUTH_SECRET must be set to use attachment name encryption';
 
 export type EncryptedFileName = {
   uuid: string;
@@ -32,29 +26,19 @@ export type EncryptedFileName = {
 };
 
 export function encryptFileName(originalName: string): EncryptedFileName {
-  const key = deriveKey();
-  const nonce = randomBytes(12);
-  const cipher = createCipheriv('aes-256-gcm', key, nonce);
-  const ciphertext = Buffer.concat([cipher.update(originalName, 'utf8'), cipher.final()]);
-  const tag = cipher.getAuthTag();
-  const nonceHex = nonce.toString('hex');
-  const encryptedName = `${VERSION}:${nonceHex}:${tag.toString('hex')}:${ciphertext.toString('hex')}`;
+  const { blob, nonceHex } = seal(KEY_CONTEXT, originalName, MISSING_SECRET);
   return {
     uuid: randomUUID(),
-    encryptedName,
+    encryptedName: blob,
     iv: nonceHex,
   };
 }
 
 export function decryptFileName(encryptedName: string): string {
-  const parts = encryptedName.split(':');
-  if (parts.length !== 4 || parts[0] !== VERSION) {
-    throw new Error('Unsupported attachment name encoding');
-  }
-  const [, nonceHex, tagHex, ctHex] = parts;
-  const key = deriveKey();
-  const decipher = createDecipheriv('aes-256-gcm', key, Buffer.from(nonceHex, 'hex'));
-  decipher.setAuthTag(Buffer.from(tagHex, 'hex'));
-  const plaintext = Buffer.concat([decipher.update(Buffer.from(ctHex, 'hex')), decipher.final()]);
-  return plaintext.toString('utf8');
+  return open(KEY_CONTEXT, encryptedName, 'Unsupported attachment name encoding', MISSING_SECRET);
+}
+
+/** True when `encryptedName` is already under the current key. */
+export function isFileNameUnderCurrentKey(encryptedName: string): boolean {
+  return isSealedWithCurrentKey(encryptedName, MISSING_SECRET);
 }

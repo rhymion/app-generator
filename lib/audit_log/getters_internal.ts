@@ -10,8 +10,8 @@ import { type PageOpts, type PageResult, clampPage, buildOrderBy, buildFilter } 
 
 // Allow-lists for sort/filter — anything not in here is silently dropped at
 // request time so external input cannot pick arbitrary columns.
-const SORTABLE_FIELDS = new Set<string>(['id', 'target_table', 'target_id', 'action', 'actor_user_id', 'created_at']);
-const FILTERABLE_FIELDS = new Set<string>(['id', 'target_table', 'target_id', 'action', 'actor_user_id', 'created_at']);
+const SORTABLE_FIELDS = new Set<string>(['id', 'target_table', 'target_id', 'action', 'actor_user_id', 'request_id', 'created_at']);
+const FILTERABLE_FIELDS = new Set<string>(['id', 'target_table', 'target_id', 'action', 'actor_user_id', 'request_id', 'created_at']);
 
 // The actor relation exposes only what the UI renders (the display name).
 const ACTOR_USER_SELECT = { id: true, name: true } as const;
@@ -79,6 +79,7 @@ export async function getAuditLogPage(
     action: auditLog.action,
     actor_user_id: auditLog.actor_user_id,
     metadata: auditLog.metadata as Record<string, unknown> | null,
+    request_id: auditLog.request_id,
     created_at: auditLog.created_at,
     actor_user: auditLog.actor_user,
   }));

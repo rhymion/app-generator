@@ -19,6 +19,7 @@ Built with [Next.js](https://nextjs.org/), [Prisma](https://www.prisma.io/), and
 - **REST API** — JSON endpoints with API key authentication generated per entity, plus a row-level `GET /api/{entity}/[id]/capabilities` endpoint reporting which operations/writes/transitions are legal for that specific row right now, and a `GET /api/{entity}/options` endpoint that searches or looks up the records a relation field can select (the REST side of the web pickers, with the same permission and organization scoping), and, for an entity with a comment thread, `POST` / `PATCH` / `DELETE` comment routes plus a `GET /api/mention/users` search for `@`-mentions (the REST side of the comment box, running the same actions) — see [`docs/knowledge/comment-and-mention-rest-routes.md`](docs/knowledge/comment-and-mention-rest-routes.md)
 - **API idempotency keys + per-API-key rate limiting** — an optional `Idempotency-Key` header on a single-record create endpoint makes a retried `POST` safe (same key + same body replays the original result; same key + a different body is rejected as a conflict), backed by a one-day-retention database table written in the same transaction as the record it guards; every `authenticateApiKey()`-only REST route also enforces a per-caller `api:read`/`api:write` rate-limit ceiling (both env-overridable) — see [`docs/knowledge/api-idempotency-and-rate-limiting.md`](docs/knowledge/api-idempotency-and-rate-limiting.md)
 - **Email verification for self-registration** (`x-generator.email-verification.enabled`, opt-in, default off) — `/register` asks for the address only and mails a single-use sign-up link (valid 24 hours); the account is created when the link is used, and the register response is the same whether or not the address already has an account. Mail goes over SMTP (`SMTP_URL`); outside production messages are written to a local outbox — see [`docs/knowledge/authentication.md`](docs/knowledge/authentication.md) ("Self-registration")
+- **Password reset by email** (only with email verification on) — `/forgot-password` mails a single-use reset link valid one hour, with the same answer for every address; a user with MFA must also give a TOTP or recovery code. **Registration domain allow-list** — `siteConfig.auth.registrationAllowedDomains` (empty = anyone) limits self-registration to listed email domains — see [`docs/knowledge/authentication.md`](docs/knowledge/authentication.md) ("Password reset", "Registration domain allow-list")
 - **API key expiry** — an optional, nullable `user.api_key_expires_at` (`null` = never expires, the existing behavior for every key; the key's owner picks it on the account settings page, 90 days by default for new keys, configurable in `siteConfig.auth.apiKeyDefaultExpiryDays`) checked in the single shared `authenticateApiKey()`; a request made with an expired key is rejected with `401 API key expired.` — see [`docs/knowledge/api-key-expiry.md`](docs/knowledge/api-key-expiry.md)
 - **Generated documentation + OpenAPI 3.1 spec** — per-entity human-readable docs (`docs/generated/{entity}.md`, mirrored under `/en/docs`) including a "Constraints" section for approval-flow/write-lock entities, plus a combined machine-readable `docs/generated/openapi.json` build artifact served at `GET /api/openapi.json` (API key or session required, every environment) and, on demand, an interactive `/swagger` explorer gated behind `SWAGGER_UI_ENABLED` (development/staging only, never enabled in production) — see [`docs/knowledge/generated-documentation-and-openapi-spec.md`](docs/knowledge/generated-documentation-and-openapi-spec.md)
 - **Generated Cypress tests** — UI and API test suites generated alongside application code
@@ -56,7 +57,7 @@ Built with [Next.js](https://nextjs.org/), [Prisma](https://www.prisma.io/), and
 ### Built-in Systems
 
 - **Comment threads** — polymorphic bridge pattern for attaching comments to any entity, with reaction buttons (toggle endpoint, batched aggregation, parent-owner read authorization)
-- **Attachment management** — file and image upload via polymorphic bridge; image/file previews can be opted out independently per entity (`AttachmentSection` `showImages`/`showFiles` props, both default `true`)
+- **Attachment management** — file and image upload via polymorphic bridge; image/file previews can be opted out independently per entity (`AttachmentSection` `showImages`/`showFiles` props, both default `true`); every upload passes an optional malware scan hook (`lib/upload-scan.ts`, replaced through `prj/`; accepts everything by default) — see [`docs/knowledge/upload-limits-and-malicious-file-handling.md`](docs/knowledge/upload-limits-and-malicious-file-handling.md)
 - **Inventory reservation** — schema-level `x-reservation` for capacity and inventory management (count and item modes); lifecycle transitions for the owning entity go through the Approval Flow System's approve/(terminal) reject rather than a bespoke reservation-lifecycle mechanism
 - **Inventory ledger** (`x-ledger-source`) — an `inventory_transaction` ledger entity and `transactionable` bridge, generated when a ledger top-level declaration is present in the schema; annotate a receiving-receipt or billing-detail entity with `x-ledger-source` to emit write/adjust/move stub templates
 - **Split action** (`x-splittable`) — annotate an entity to generate a split-action UI section and API route for lot-level split operations from the list or edit page
@@ -91,7 +92,7 @@ Built with [Next.js](https://nextjs.org/), [Prisma](https://www.prisma.io/), and
 
 ### Audit & Compliance
 
-- **Audit log** — schema-agnostic, read-only viewer (`app/[locale]/audit_log/page.tsx`) over the create/update/delete actions recorded for entities that opt in with `x-audit: true`; the table is append-only, with chained daily digests for tamper detection (see [`docs/knowledge/audit-log-append-only.md`](docs/knowledge/audit-log-append-only.md))
+- **Audit log** — schema-agnostic, read-only viewer (`app/[locale]/audit_log/page.tsx`) over the create/update/delete actions recorded for entities that opt in with `x-audit: true`; the table is append-only, with chained daily digests for tamper detection, and each row records the server-generated id of the request that wrote it (`request_id`) (see [`docs/knowledge/audit-log-append-only.md`](docs/knowledge/audit-log-append-only.md))
 - **GDPR / data protection** — `x-pii` field classification (`direct`/`sensitive`/`indirect`), an `anonymizeUser()` erasure function, `x-gdpr-mode` data-subject-scope label (`internal`/`consumer`/`both`; schema-validated, no generated effect), AES-256-GCM at-rest attachment filename encryption, and `x-mention` user-mention parsing in comments
 - **Terms of Service / Privacy Policy** (`/[locale]/legal/terms`, `/[locale]/legal/privacy`) — Markdown template documents linked from the registration page; adding a document language is dropping a `content/legal/<doc>.<locale>.md` file, independent of the site's UI locale list (see `docs/knowledge/legal-documents.md`)
 
@@ -129,6 +130,9 @@ planning doc in commit b11269b; recover it via
 (AES-256-GCM), and recovery codes (8 per enrollment, bcrypt-hashed)
 are implemented in `lib/mfa/`. Self-service enrollment and disable are
 available at `/setting/mfa`.
+Setting `MFA_REQUIRED_ROLES` (`*` or a comma-separated list of role names)
+makes enrollment mandatory for those users: until they enroll, they can only
+use `/setting/mfa` (see [`docs/knowledge/authentication.md`](docs/knowledge/authentication.md), "Required MFA").
 
 **Note:** Recovery codes can be entered in the standard MFA code field at login.
 There is no separate recovery-code-only screen; the same code input accepts
@@ -217,6 +221,8 @@ openssl rand -base64 32
 ```
 
 Add the output to `.env.development` (for local dev) and `.env.test` (for E2E tests). For production, set it in the Vercel dashboard.
+
+`AUTH_SECRET` also encrypts MFA secrets and attachment names. To change it without losing them, keep the old value in `AUTH_SECRET_PREVIOUS` and run `npm run secrets:reencrypt` (see [`docs/knowledge/authentication.md`](docs/knowledge/authentication.md), "Rotating `AUTH_SECRET`"). `BCRYPT_COST` (10 to 15, default 10) sets the password hashing cost.
 
 ### Quick Start (One Command)
 

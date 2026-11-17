@@ -237,6 +237,7 @@ lib/dashboard/use_entity_approval_actions.ts
 !lib/attachment/owner_cleanup.ts
 !lib/attachment/url.ts
 !lib/attachment/content-disposition.ts
+!lib/attachment/upload-scan-gate.ts
 !lib/attachment/*.test.ts
 !lib/approval_flow/autocomplete_filter.ts
 !lib/approval_flow/service_validation_custom.ts
@@ -286,6 +287,10 @@ app/\[locale\]/*/
 !app/\[locale\]/mfa-challenge/**
 !app/\[locale\]/register/
 !app/\[locale\]/register/**
+!app/\[locale\]/forgot-password/
+!app/\[locale\]/forgot-password/**
+!app/\[locale\]/reset-password/
+!app/\[locale\]/reset-password/**
 !app/\[locale\]/setting/
 !app/\[locale\]/setting/**
 app/\[locale\]/setting/edit/
@@ -403,6 +408,8 @@ cypress/e2e/api/*.cy.ts
 !cypress/e2e/api/setting_credential_confirmation.cy.ts
 !cypress/e2e/api/api_key_storage.cy.ts
 !cypress/e2e/api/permission_cache_invalidation.cy.ts
+!cypress/e2e/api/sql_parameter_binding.cy.ts
+!cypress/e2e/api/runtime_field_rules.cy.ts
 
 # ── cypress/support/ ──
 cypress/support/*/

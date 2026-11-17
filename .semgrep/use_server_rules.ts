@@ -3,6 +3,7 @@
 declare const prisma: any;
 declare function getSessionUserIdOrThrow(): Promise<string>;
 declare function requireEntityPermission(...args: unknown[]): Promise<unknown>;
+declare function requireMfaSetupUserId(): Promise<string>;
 
 // ruleid: server-action-writes-without-authorization
 export async function unprotectedWrite(id: string) {
@@ -19,6 +20,13 @@ export async function permissionChecked(id: string) {
   await requireEntityPermission('ticket', 'create');
   // ok: server-action-writes-without-authorization
   await prisma.ticket.create({ data: { id } });
+}
+
+// The MFA settings page's own session accessor (Issue #1281) authorizes the caller too.
+export async function mfaSetupChecked() {
+  const userId = await requireMfaSetupUserId();
+  // ok: server-action-writes-without-authorization
+  await prisma.user.update({ where: { id: userId }, data: { mfa_secret: null } });
 }
 
 export async function readOnly(id: string) {

@@ -12,6 +12,7 @@ import {
   uploadMaxBytes,
 } from '@/lib/_upload_validation';
 import { storeUploadedFile } from '@/lib/attachment/upload_core';
+import { checkUploadScan } from '@/lib/attachment/upload-scan-gate';
 
 // POST /api/upload
 // Body: multipart form data with a `file` part.  ->  200 { id, name }
@@ -81,6 +82,19 @@ export async function POST(request: NextRequest) {
     const head = new Uint8Array(await file.slice(0, UPLOAD_SIGNATURE_BYTES).arrayBuffer());
     if (!matchesFileSignature(head, uploadCheck.extension)) {
       return NextResponse.json({ error: 'Invalid file type.' }, { status: 400 });
+    }
+
+    // Optional malware scan (Issue #1279): lib/upload-scan.ts accepts everything unless the deployment
+    // replaces it. A refusal is 422 and a scanner error 503; nothing is stored either way.
+    const scan = await checkUploadScan({
+      contentType: uploadCheck.contentType,
+      extension: uploadCheck.extension,
+      size: file.size,
+      userId,
+      bytes: async () => new Uint8Array(await file.arrayBuffer()),
+    });
+    if (!scan.ok) {
+      return NextResponse.json({ error: scan.error }, { status: scan.status });
     }
 
     const stored = await storeUploadedFile(file, uploadCheck.contentType, userId);

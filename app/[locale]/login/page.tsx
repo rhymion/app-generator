@@ -166,6 +166,13 @@ export default function LoginPage() {
           </AppBox>
         )}
 
+        {showCredentials && siteConfig.auth.registration?.emailVerification && (
+          // Password reset needs a mail transport, so it is offered only with email
+          // verification on (Issue #1282).
+          <AppText textAlign="center" mt={2} variant="body2">
+            <Link href="/forgot-password">{t("forgotPasswordLink")}</Link>
+          </AppText>
+        )}
         {showCredentials && (
           <AppText textAlign="center" mt={2} variant="body2">
             <Link href="/register">{t("noAccount")}</Link>

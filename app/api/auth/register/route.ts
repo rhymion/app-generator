@@ -2,7 +2,7 @@ import { logger } from '@/lib/logger';
 import { NextResponse } from "next/server";
 import { createHash } from "node:crypto";
 import { createId } from "@paralleldrive/cuid2";
-import bcrypt from "bcryptjs";
+import { hashPassword } from "@/lib/auth/bcrypt-cost";
 import prisma from "@/lib/prisma";
 import { getRateLimiter } from "@/lib/rate-limit";
 import { clientIp } from "@/lib/rate-limit/client-ip";
@@ -12,6 +12,11 @@ import { isMailConfigured, sendMail } from "@/lib/mail";
 import { issueRegistrationToken, normalizeEmail } from "@/lib/auth/registration-token";
 import { buildRegistrationMail, registrationLocale } from "@/lib/auth/registration-mail";
 import { resolveExternalUrl } from "@/lib/auth/external-url";
+import {
+  REGISTRATION_NOT_ALLOWED,
+  isRegistrationEmailAllowed,
+  registrationAllowedDomains,
+} from "@/lib/auth/domain-allow-list";
 
 // Self-registration. Two modes, chosen by siteConfig.auth.registration.emailVerification
 // (written by generate-code from x-generator.email-verification.enabled; Issue #1092):
@@ -23,7 +28,14 @@ import { resolveExternalUrl } from "@/lib/auth/external-url";
 //                  (finished at POST /api/auth/register/complete) or a notice that an
 //                  account already exists.
 //
+// In both modes an address outside siteConfig.auth.registrationAllowedDomains (when the
+// list is set) is refused with 403 before anything is read, written or mailed (Issue #1093).
+//
 // See docs/knowledge/authentication.md "Self-registration".
+
+function domainAllowed(email: string): boolean {
+  return isRegistrationEmailAllowed(email, registrationAllowedDomains(siteConfig.auth));
+}
 
 const MAX_EMAIL_LENGTH = 320;
 
@@ -46,6 +58,11 @@ async function requestSignUpLink(request: Request, body: { email?: unknown; loca
   const email = typeof body.email === "string" ? normalizeEmail(body.email) : "";
   if (!email || email.length > MAX_EMAIL_LENGTH || !email.includes("@")) {
     return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
+  }
+  // Before the mail transport, the rate limit and the account lookup: a refused
+  // domain never triggers an outbound message (Issue #1093).
+  if (!domainAllowed(email)) {
+    return NextResponse.json(REGISTRATION_NOT_ALLOWED, { status: 403 });
   }
   // A production deployment with verification on and no mail transport fails
   // loudly instead of answering 202 for links that are never sent.
@@ -102,6 +119,10 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
     }
 
+    if (typeof email !== "string" || !domainAllowed(email)) {
+      return NextResponse.json(REGISTRATION_NOT_ALLOWED, { status: 403 });
+    }
+
     const weak = passwordPolicyError(password);
     if (weak) {
       return NextResponse.json({ error: weak, code: "WEAK_PASSWORD" }, { status: 400 });
@@ -120,7 +141,7 @@ export async function POST(request: Request) {
         updater_id: userId,
         name: name ?? email,
         email,
-        password: await bcrypt.hash(password, 10),
+        password: await hashPassword(password),
       },
     });
 

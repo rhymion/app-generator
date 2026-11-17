@@ -1,12 +1,17 @@
 import { logger } from '@/lib/logger';
 import { NextResponse } from "next/server";
 import { createId } from "@paralleldrive/cuid2";
-import bcrypt from "bcryptjs";
+import { hashPassword } from "@/lib/auth/bcrypt-cost";
 import prisma from "@/lib/prisma";
 import { getRateLimiter } from "@/lib/rate-limit";
 import { clientIp } from "@/lib/rate-limit/client-ip";
 import { passwordPolicyError } from "@/lib/auth/password-policy";
 import { siteConfig } from "@/lib/site-config";
+import {
+  REGISTRATION_NOT_ALLOWED,
+  isRegistrationEmailAllowed,
+  registrationAllowedDomains,
+} from "@/lib/auth/domain-allow-list";
 import { consumeRegistrationToken } from "@/lib/auth/registration-token";
 
 // Second step of self-registration with email verification (Issue #1092): the
@@ -50,11 +55,13 @@ export async function POST(request: Request) {
     if (weak) {
       return NextResponse.json({ error: weak, code: "WEAK_PASSWORD" }, { status: 400 });
     }
-    const passwordHash = await bcrypt.hash(password, 10);
+    const passwordHash = await hashPassword(password);
 
     const created = await prisma.$transaction(async (tx) => {
       const email = await consumeRegistrationToken(tx, token);
       if (!email) return null;
+      // Re-checked here: the allow-list may have changed since the link was sent (Issue #1093).
+      if (!isRegistrationEmailAllowed(email, registrationAllowedDomains(siteConfig.auth))) return "not_allowed" as const;
       const existing = await tx.user.findUnique({ where: { email }, select: { id: true } });
       if (existing) return null;
       const userId = createId();
@@ -72,6 +79,7 @@ export async function POST(request: Request) {
       return email;
     });
     if (!created) return invalidToken();
+    if (created === "not_allowed") return NextResponse.json(REGISTRATION_NOT_ALLOWED, { status: 403 });
 
     // The address goes back to the page that holds the link (its owner) so it can
     // sign in with the password just chosen.

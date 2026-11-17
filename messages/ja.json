@@ -210,7 +210,21 @@
     "registerCompleteTitle": "登録の完了",
     "registerCompleteButton": "アカウントを作成",
     "registerLinkInvalid": "この登録用リンクは使用できません。有効期限が切れたか、すでに使用された可能性があります。",
-    "registerStartAgain": "もう一度登録する"
+    "registerStartAgain": "もう一度登録する",
+    "forgotPasswordLink": "パスワードをお忘れですか？",
+    "forgotPasswordTitle": "パスワードの再設定",
+    "forgotPasswordNotice": "アカウントのメールアドレスを入力してください。新しいパスワードを設定するためのリンクをメールでお送りします。",
+    "forgotPasswordSend": "再設定リンクを送信",
+    "forgotPasswordCheckEmailBody": "このアドレスでパスワードを使うアカウントがある場合、リンク付きのメールを送信しました。1時間以内にリンクを開いてください。",
+    "forgotPasswordFailed": "再設定リンクを要求できませんでした。しばらくしてからもう一度お試しください。",
+    "resetPasswordTitle": "新しいパスワードの設定",
+    "resetPasswordButton": "新しいパスワードを設定",
+    "resetPasswordMfaHelper": "このアカウントは二要素認証を使用しています。認証アプリの現在のコード、またはリカバリーコードを入力してください。",
+    "resetPasswordDone": "パスワードを変更しました。新しいパスワードでサインインしてください。",
+    "resetPasswordLinkInvalid": "この再設定リンクは使用できません。有効期限が切れているか、すでに使用されています。",
+    "resetPasswordStartAgain": "新しいリンクを要求",
+    "resetPasswordFailed": "パスワードを変更できませんでした。",
+    "backToSignIn": "サインインに戻る"
   },
   "Legal": {
     "termsTitle": "利用規約",
@@ -461,5 +475,9 @@
     "newBody": "このメールアドレスで {app} のアカウント作成が申請されました。\n\n24時間以内に次のリンクを開いて登録を完了してください。\n{link}\n\n心当たりがない場合は、このメールを無視してください。アカウントは作成されません。",
     "existingSubject": "{app} への登録申請について",
     "existingBody": "このメールアドレスで {app} のアカウント作成が申請されましたが、このアドレスのアカウントはすでに存在します。\n\nご本人の場合は、次のリンクからサインインしてください。\n{loginLink}\n\n心当たりがない場合は、このメールを無視してください。何も変更されていません。"
+  },
+  "PasswordResetMail": {
+    "subject": "{app} のパスワード再設定",
+    "body": "{app} のアカウントのパスワード再設定が要求されました。\n\n新しいパスワードを設定するには、1時間以内に次のリンクを開いてください:\n{link}\n\n心当たりがない場合は、このメールを無視してください。パスワードは変更されていません。"
   }
 }

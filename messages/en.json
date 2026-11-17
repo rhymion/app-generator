@@ -210,7 +210,21 @@
     "registerCompleteTitle": "Finish signing up",
     "registerCompleteButton": "Create account",
     "registerLinkInvalid": "This sign-up link cannot be used. It may have expired or been used already.",
-    "registerStartAgain": "Sign up again"
+    "registerStartAgain": "Sign up again",
+    "forgotPasswordLink": "Forgot your password?",
+    "forgotPasswordTitle": "Reset your password",
+    "forgotPasswordNotice": "Enter the email address of your account. We will email you a link to choose a new password.",
+    "forgotPasswordSend": "Send reset link",
+    "forgotPasswordCheckEmailBody": "If an account with a password uses this address, a message with a link is on its way. Open the link within one hour.",
+    "forgotPasswordFailed": "The reset link could not be requested. Try again later.",
+    "resetPasswordTitle": "Choose a new password",
+    "resetPasswordButton": "Set new password",
+    "resetPasswordMfaHelper": "Your account uses two-factor authentication: enter the current code from your authenticator app, or a recovery code.",
+    "resetPasswordDone": "Your password has been changed. Sign in with the new password.",
+    "resetPasswordLinkInvalid": "This reset link cannot be used. It may have expired or been used already.",
+    "resetPasswordStartAgain": "Request a new link",
+    "resetPasswordFailed": "The password could not be changed.",
+    "backToSignIn": "Back to sign in"
   },
   "Legal": {
     "termsTitle": "Terms of Service",
@@ -461,5 +475,9 @@
     "newBody": "Someone asked to create an account on {app} with this email address.\n\nTo finish signing up, open this link within 24 hours:\n{link}\n\nIf this was not you, ignore this message. No account is created.",
     "existingSubject": "Sign-up request for {app}",
     "existingBody": "Someone asked to create an account on {app} with this email address, but an account already exists for it.\n\nIf this was you, sign in instead:\n{loginLink}\n\nIf this was not you, ignore this message. Nothing has changed."
+  },
+  "PasswordResetMail": {
+    "subject": "Reset your password for {app}",
+    "body": "Someone asked to reset the password of your account on {app}.\n\nTo choose a new password, open this link within one hour:\n{link}\n\nIf this was not you, ignore this message. Your password has not changed."
   }
 }

@@ -18,7 +18,7 @@ const { bcryptCompare } = vi.hoisted(() => ({ bcryptCompare: vi.fn() }));
 vi.mock('bcryptjs', () => ({
   default: { compare: bcryptCompare, hash: vi.fn().mockResolvedValue('dummy-hash') },
 }));
-vi.mock('@/lib/mfa/crypto', () => ({ decryptSecret: (s: string) => s }));
+vi.mock('@/lib/mfa/crypto', () => ({ decryptSecret: (s: string) => s, reencryptedSecret: () => null }));
 vi.mock('@/lib/mfa/totp', () => ({ verifyTotpStep }));
 vi.mock('@/lib/mfa/recovery', () => ({ verifyRecoveryCode: vi.fn().mockResolvedValue(false) }));
 

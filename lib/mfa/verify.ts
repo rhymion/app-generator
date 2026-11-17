@@ -20,7 +20,8 @@
  */
 import prisma from '@/lib/prisma';
 import { getRateLimiter } from '@/lib/rate-limit';
-import { decryptSecret } from './crypto';
+import { decryptSecret, reencryptedSecret } from './crypto';
+import { logger } from '@/lib/logger';
 import { MfaRateLimitedError } from './errors';
 import { verifyRecoveryCode } from './recovery';
 import { verifyTotpStep } from './totp';
@@ -30,10 +31,12 @@ type MfaRecoveryRow = { id: string; code_hash: string };
 type MfaPrismaClient = {
   user: {
     findUnique: (args: { where: { id: string }; select: { id: true; mfa_secret: true; mfa_enabled: true; mfa_last_totp_step: true } }) => Promise<MfaUser | null>;
-    updateMany: (args: {
-      where: { id: string; OR: Array<{ mfa_last_totp_step: null } | { mfa_last_totp_step: { lt: number } }> };
-      data: { mfa_last_totp_step: number };
-    }) => Promise<{ count: number }>;
+    updateMany: (args:
+      | {
+          where: { id: string; OR: Array<{ mfa_last_totp_step: null } | { mfa_last_totp_step: { lt: number } }> };
+          data: { mfa_last_totp_step: number };
+        }
+      | { where: { id: string; mfa_secret: string }; data: { mfa_secret: string } }) => Promise<{ count: number }>;
   };
   mfa_recovery_code: {
     findMany: (args: { where: { user_id: string; used_at: null }; select: { id: true; code_hash: true } }) => Promise<MfaRecoveryRow[]>;
@@ -72,7 +75,9 @@ export async function verifyMfaCode(userId: string, code: string): Promise<boole
       where: { id: userId, OR: [{ mfa_last_totp_step: null }, { mfa_last_totp_step: { lt: step } }] },
       data: { mfa_last_totp_step: step },
     });
-    return claimed.count === 1;
+    if (claimed.count !== 1) return false;
+    await reencryptIfStale(userId, user.mfa_secret, secret);
+    return true;
   }
 
   // Recovery code fallback. Single-use: the first matching row gets `used_at` stamped
@@ -92,4 +97,19 @@ export async function verifyMfaCode(userId: string, code: string): Promise<boole
     }
   }
   return false;
+}
+
+/**
+ * Issue #1291: after a successful TOTP check, a secret stored under an old format or the previous
+ * `AUTH_SECRET` is rewritten under the current key. The write is conditional on the stored value
+ * being unchanged; a failure is logged and the sign-in goes on (the value still decrypts).
+ */
+async function reencryptIfStale(userId: string, stored: string, secret: string): Promise<void> {
+  try {
+    const next = reencryptedSecret(stored, secret);
+    if (next === null) return;
+    await client().user.updateMany({ where: { id: userId, mfa_secret: stored }, data: { mfa_secret: next } });
+  } catch (err) {
+    logger.warn('[mfa] re-encrypting the stored secret failed', { name: err instanceof Error ? err.name : typeof err });
+  }
 }

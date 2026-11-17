@@ -129,6 +129,13 @@ const PRODUCTION_BUCKETS: Record<string, RateLimitBucketConfig> = {
   // 10 attempts to finish a sign-up per IP per 10 minutes. The link token has
   // 256 bits, so this is defence in depth against guessing.
   'auth:register:complete':  { limit: 10, windowMs: 10 * 60_000 },
+  // Password reset (Issue #1282): 5 requests per IP per 10 minutes, 3 reset
+  // mails per address per hour (keyed by a hash of the address; past it the
+  // route still answers 202 and sends nothing), and 10 attempts to finish a
+  // reset per IP per 10 minutes. The second factor has its own per-user bucket.
+  'auth:password-reset':           { limit: 5, windowMs: 10 * 60_000 },
+  'auth:password-reset:email':     { limit: 3, windowMs: 60 * 60_000 },
+  'auth:password-reset:complete':  { limit: 10, windowMs: 10 * 60_000 },
   // 10 failed API-key lookups per presented key per minute, keyed by a hash
   // of the key (never the raw secret). Only failures are counted, so a valid
   // key is never throttled by this bucket.

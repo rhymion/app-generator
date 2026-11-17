@@ -58,8 +58,8 @@ as the adapter requires. The other three are PascalCase NextAuth-only
 tables at the bottom of `prisma/schema.prisma`, a deliberate exception to
 the snake_case convention. `Account` is populated on every OAuth sign-in;
 `Session` is **unused today** (we run on `session.strategy = "jwt"` —
-see "Session strategy" below); `VerificationToken` lights up if/when a
-magic-link provider is added.
+see "Session strategy" below); `VerificationToken` holds the sign-up and
+password-reset link tokens (hashed), see "Self-registration" and "Password reset".
 
 Two gates have to agree before a provider button works:
 
@@ -551,6 +551,68 @@ one person with several addresses can still register one account per address
 issuing a token, so the two cases differ by two small database writes in
 response time, while the mail send, done in both, dominates.
 
+**Registration domain allow-list** (Issue #1093). `siteConfig.auth.registrationAllowedDomains`
+in `lib/site-config.ts` (a site-config setting, not a schema key) restricts who may
+register. Empty (the default) allows every address. Otherwise the part of the address
+after the last `@` must equal one listed domain, case-insensitively; subdomains do not
+match (`sub.example.com` is not `example.com`). Both registration modes refuse another
+address with `403 { code: "REGISTRATION_NOT_ALLOWED" }`, a message that does not name the
+list, before any account lookup, token or mail, so a refused domain never triggers an
+outbound message. `POST /api/auth/register/complete` checks again, because the list may
+have changed since the link was sent. The OAuth list `allowedDomains` is separate (it
+matches Google's `hd` claim) and unchanged. Helpers: `isRegistrationEmailAllowed()` and
+`registrationAllowedDomains()` in `lib/auth/domain-allow-list.ts` (the latter reads an
+older site config without the property as an empty list). Tests:
+`lib/auth/domain-allow-list.test.ts`, `app/api/auth/register/route.test.ts`,
+`app/api/auth/register/complete/route.test.ts`.
+
+**Password reset** (Issue #1282). Self-service reset by emailed link, available **only
+with email verification on** (`siteConfig.auth.registration.emailVerification`): the
+deployment then has a mail transport and proven addresses. With verification off both
+routes answer `404`, the login page shows no link and `/forgot-password` shows no form;
+a lost password is then an operator task (below).
+
+| Step | Route | Behavior |
+|---|---|---|
+| Request | `/forgot-password` -> `POST /api/auth/password-reset` `{ email, locale? }` | `202 { ok: true }` for every well-formed address. Only an address with a password account that is not anonymized receives a link `/{locale}/reset-password?token=…`; OAuth-only, erased and unknown addresses receive nothing. |
+| Complete | `/reset-password` -> `POST /api/auth/password-reset/complete` `{ token, password, mfaCode? }` | Password policy first (`400 WEAK_PASSWORD`, link kept). A user with MFA enabled must also give a current TOTP code or an unused recovery code: `401 MFA_REQUIRED` without one, `401 INVALID_MFA_CODE` for a wrong one, `429 MFA_RATE_LIMITED` past `auth:mfa:challenge`; the code is checked before the link is used up. Then, in one transaction: the token is consumed (conditional delete, so a link works once), the password replaced, the user's mobile sessions revoked and `auth:passwordReset` audited. The sign-in lockout counters of the address are cleared. `200 { ok: true }`; the page asks the user to sign in. |
+
+Tokens (`lib/auth/password-reset-token.ts`): same storage as sign-up tokens,
+`identifier = password-reset:<email>`, `token = sha256(token)`, valid **one hour**, only
+the newest link works. The prefixes keep the kinds apart: a sign-up link never resets a
+password and a reset link never finishes a sign-up. An unknown, expired, used or
+replaced token answers `400 INVALID_TOKEN`. Limits: `auth:password-reset` (5 / 10 min
+per IP), `auth:password-reset:email` (3 mails / hour per address; past it still `202`),
+`auth:password-reset:complete` (10 / 10 min per IP). Link host from
+`resolveExternalUrl()`; `/reset-password` sends `Referrer-Policy: no-referrer` and drops
+the token from the address bar once read. Mail text: the `PasswordResetMail` messages.
+
+Not done by a reset: **web sessions are not ended**. They are JWTs with no server-side
+revocation (#1127) and end at their configured lifetime (`SESSION_MAX_AGE_SECONDS`,
+optionally `SESSION_ABSOLUTE_MAX_AGE_SECONDS`). API keys are not rotated. Tests:
+`app/api/auth/password-reset/route.test.ts`,
+`app/api/auth/password-reset/complete/route.test.ts`,
+`app/[locale]/forgot-password/page.test.tsx`,
+`app/[locale]/reset-password/ResetPasswordForm.test.tsx`,
+`app/[locale]/login/page.test.tsx`.
+
+**Lost password without email verification, and a lost second factor** (operator
+procedure, ASVS V6.4.3, V6.4.4). A user who lost the authenticator first uses a
+recovery code (accepted wherever a TOTP code is) and can then re-enrol at
+`/setting/mfa`. When no recovery code is left, or a password must be reset on a
+deployment without email verification, an administrator:
+
+1. proves the requester's identity outside the app with the deployment's own procedure
+   (for example a call-back to a number on file, or confirmation by the user's manager);
+   the app does not decide what is sufficient;
+2. as the database owner clears the factor (`mfa_enabled = false`, `mfa_secret = NULL`,
+   `mfa_last_totp_step = NULL`, delete the user's `mfa_recovery_code` rows, increment
+   `mfa_token_version`) and/or sets a temporary password hash, in one transaction;
+3. records the action outside `audit_log` (the table takes no operator writes), with who
+   asked, who approved, and when;
+4. asks the user to sign in, change the password and enrol MFA again; with
+   `MFA_REQUIRED_ROLES` covering the user, the app enforces the re-enrolment.
+
 **Password strength.** `lib/auth/password-policy.ts` requires at least 8
 characters (ASVS V6.2.1) and no composition rules (V6.2.5). Registration, the
 settings password form and the REST and bulk credential change all apply it, so no
@@ -674,6 +736,77 @@ that logic is extracted into standalone modules the way the mock-OAuth
 gate was.
 
 ---
+
+## Required MFA (`MFA_REQUIRED_ROLES`)
+
+MFA is opt-in per user unless `MFA_REQUIRED_ROLES` says otherwise (Issue #1281, ASVS V6.3.3; `lib/auth/mfa-required.ts`):
+
+| Value | Who must enrol |
+|---|---|
+| unset or empty (default) | nobody: behavior unchanged |
+| `*` | every user |
+| `Admin,Approver` | a user holding at least one of the named roles (`role.name`, exact and case-sensitive) |
+
+A required user who has not enrolled still signs in normally, with any sign-in method (password or OAuth), but the session is restricted until enrolment completes:
+
+- `jwt()` in `auth.ts` sets `token.mfa_enrollment_required` at sign-in and re-evaluates it on every request, so enrolling, a role change or a change of the variable takes effect on the next request. The extra query (the user's role names) runs only for a user who is not enrolled while the variable is set; `*` needs no query.
+- `proxy.ts` redirects every page except `/setting/mfa` and `/mfa-challenge` to `/setting/mfa`.
+- `getSessionUserId()` (`lib/authz.ts`) answers `null` for the restricted session, so a Server Action (whichever page it is posted to) and a cookie-authenticated API route act for nobody. Only the MFA settings page and its Server Actions read the user, through `getSessionUserIdForMfaSetup()` / `requireMfaSetupUserId()`; do not use those anywhere else. Generated templates never call `auth()` directly for the same reason (`code_generator/tests/test_session_reads_through_authz.py`); the search route reads the session through `getSessionUserId()`.
+- After enrolment the MFA version bump re-arms `mfa_pending` (see above), so the user is asked for the new factor once on `/mfa-challenge`, then continues normally.
+- API-key and mobile-token callers are not affected: the policy is about interactive web sessions.
+- A required user who disables MFA is restricted again on the next request.
+- There is no exemption list. A service or demo account that must not be forced should not hold a listed role; use an API key for automation.
+
+Tests: `lib/auth/mfa-required.test.ts`, `auth.mfa-required.test.ts`, `lib/authz_mfa_enrollment.test.ts`.
+
+## Password hashing cost (`BCRYPT_COST`)
+
+Password hashes are bcrypt (bcryptjs). `BCRYPT_COST` sets the cost (Issue #1291, ASVS V11.4.2; `lib/auth/bcrypt-cost.ts`):
+
+- Unset or empty: 10. Allowed: an integer from 10 to 15. Any other value makes every password write (registration, password reset, password change, seeding) fail with `BCRYPT_COST must be an integer from 10 to 15`; there is no silent fallback to a weaker cost.
+- Every path that stores a password hash uses `hashPassword()`, and the throwaway hash used for unknown accounts (`lib/auth/password-check.ts`) has the same cost, so timing stays equal after a change.
+- **Rehash on sign-in.** A successful password sign-in (web `authorize()` in `auth.ts` and `POST /api/mobile/auth/token`) replaces a stored hash whose cost differs from the setting (`lib/auth/password-rehash.ts`). The write is conditional on the stored hash being unchanged, and a failure is logged without failing the sign-in. Raising the cost therefore upgrades each account at its next sign-in; accounts that never sign in keep the old hash, which still verifies. Lowering it (not below 10) works the same way.
+- MFA recovery codes keep cost 10 (random, single-use, up to eight compared per attempt).
+
+Each step of the cost doubles the time of a hash: measure a sign-in on the production instance size before raising it.
+
+Tests: `lib/auth/bcrypt-cost.test.ts`, `lib/auth/password-rehash.test.ts`.
+
+## Rotating `AUTH_SECRET`
+
+Values encrypted at rest use keys derived from `AUTH_SECRET`, one per kind of value (Issue #1291, ASVS V11.2.2; `lib/auth/secret-key-ring.ts`): `user.mfa_secret` (`lib/mfa/crypto.ts`) and `attachment.encrypted_original_name` (`lib/compliance/attachment_name_crypto.ts`). Each stored value names its key:
+
+| Format | Written by | Read with |
+|---|---|---|
+| `v2:<key_id>:<nonce>:<tag>:<ciphertext>` | everything since #1291 | the configured secret whose key id matches; the key id is authenticated with the ciphertext |
+| `v1:<nonce>:<tag>:<ciphertext>` | code before #1291 | `AUTH_SECRET`, then `AUTH_SECRET_PREVIOUS` |
+
+The key id is the first 8 hex characters of SHA-256(`key-id:` + secret); it identifies a secret without revealing it. A value whose key id matches no configured secret fails with `No configured secret has key id <id>`.
+
+`AUTH_SECRET_PREVIOUS` (optional) holds the old value during a rotation. While it is set:
+
+- values under either key decrypt; new values are written under `AUTH_SECRET`;
+- a successful TOTP check re-encrypts that user's MFA secret under the current key (conditional on the stored value, failures logged only);
+- web sessions issued under the old secret stay valid and are re-issued under the new one (`secret: [AUTH_SECRET, AUTH_SECRET_PREVIOUS]` in `auth.ts`).
+
+`npm run secrets:reencrypt` (`scripts/reencrypt-secrets.ts`, `lib/auth/reencrypt-stored-secrets.ts`) rewrites every stored value that is not under the current key, a page at a time with conditional writes, and prints how many it rewrote, found current, or could not decrypt (by row id; exit code 1 then). A second run changes nothing.
+
+**Planned rotation (sessions survive).**
+
+1. Deploy with `AUTH_SECRET=<new>` and `AUTH_SECRET_PREVIOUS=<old>`.
+2. Run `npm run secrets:reencrypt` with the same two variables until it reports no failures.
+3. After the web session lifetime (`SESSION_MAX_AGE_SECONDS`) has passed, remove `AUTH_SECRET_PREVIOUS` and redeploy.
+
+**Compromised secret (end every session).** `AUTH_SECRET_PREVIOUS` would keep the old sessions valid, so the app must not run with it:
+
+1. Deploy with `AUTH_SECRET=<new>` only. Every web session ends. Until step 2 finishes, a user whose MFA secret is under the old key cannot complete MFA, and an old attachment's original name is not shown.
+2. Immediately run `npm run secrets:reencrypt` with `AUTH_SECRET=<new>` and `AUTH_SECRET_PREVIOUS=<old>` in the script's environment only.
+
+**Not covered by the key ring.** These also use `AUTH_SECRET` and are not readable under the previous value after a rotation: the mobile access token (15 minutes) and refresh-token lookup hash (`lib/mobile-auth.ts`; mobile users sign in again), the CSV import token (5 minutes, `lib/_import.ts`) and the payment cancel-link signature (an in-flight checkout's cancel link stops working). None of them is stored encrypted data.
+
+Losing `AUTH_SECRET` without a copy makes the encrypted values unreadable: affected users re-enrol MFA (an operator clears it, see "Lost password without email verification, and a lost second factor" above) and old attachments show their stored UUID instead of the original name.
+
+Tests: `lib/auth/secret-key-ring.test.ts`, `lib/mfa/crypto.test.ts`, `lib/compliance/attachment_name_crypto.test.ts`, `lib/mfa/verify.test.ts`, `lib/auth/reencrypt-stored-secrets.test.ts`.
 
 ## Audit and log records carry no email address
 
@@ -852,7 +985,7 @@ https); a `__Host-` prefix is not applied.
 
 The following are explicitly out of scope for the current implementation:
 
-- **Server-side revocation for credentials users**: Not implemented for sign-in itself — a stolen JWT cookie is self-contained and rotating `AUTH_SECRET` is the only global invalidation. Custom `adapter.createSession()` shim deferred. See `auth.ts` `authorize()`. (MFA-state revocation is handled separately — see "MFA on the OAuth path" below.)
+- **Server-side revocation for credentials users**: Not implemented for sign-in itself — a stolen JWT cookie is self-contained and rotating `AUTH_SECRET` (without `AUTH_SECRET_PREVIOUS`, see "Rotating `AUTH_SECRET`") is the only global invalidation. Custom `adapter.createSession()` shim deferred. See `auth.ts` `authorize()`. (MFA-state revocation is handled separately — see "MFA on the OAuth path" below.)
 - **MFA / TOTP**: Shipped in v1 (S5 phase 5a) for the credentials provider, opt-in per user. Shipped for the OAuth path too as of S8 — see "MFA on the OAuth path" below. Admin-mandated MFA is still deferred.
 - **Account linking UI**: Shipped in v1 (S7). `/setting/accounts` lists and connects/detaches OAuth providers; linking needs a signed-in session and the same email, cross-email linking deferred. See `lib/account-link/`, `auth.ts`.
 - **Audit-log table**: Not implemented. Auth events log to `console.info` only. Prisma model with role/permission hooks deferred.

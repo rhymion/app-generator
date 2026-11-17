@@ -31,6 +31,13 @@ and the version comment, and keep them in step.
 `javascript-typescript` and `python` with the `security-extended` query suite,
 on pushes and pull requests to `develop` and `main`, and weekly.
 
+`.github/codeql/codeql-config.yml` (passed as `config-file`) excludes
+`code_generator/tests/**` from analysis. Those tests render Jinja2 templates
+into TypeScript source with `autoescape=False` on purpose, and
+`py/jinja2/autoescape-false` reported this again on each PR that added such a
+test (#1384, #1392). Generator code and templates are still analysed. Add a
+path to `paths-ignore` only for code that is neither shipped nor generated.
+
 GitHub's CodeQL *default setup* and an advanced workflow conflict, so the
 default setup must be switched off (`state: not-configured` on the
 `code-scanning/default-setup` endpoint) when the workflow lands. Alerts are

@@ -24,6 +24,8 @@ export type AuditRow = {
   target_table: string | null;
   target_id: string | null;
   metadata: unknown;
+  /** Issue #1306. Absent in archive files written before the column existed. */
+  request_id?: string | null;
   created_at: Date;
 };
 
@@ -52,9 +54,16 @@ function canonicalize(value: unknown): unknown {
   return value;
 }
 
-/** Fixed serialization of one row: every column, metadata with sorted keys. */
+/**
+ * Fixed serialization of one row: every column, metadata with sorted keys.
+ *
+ * `request_id` (Issue #1306) is appended only when it is set, so a row written
+ * before the column existed serializes exactly as it did then and every digest
+ * already stored keeps verifying. Setting it on such a row later changes the
+ * serialization and is reported like any other edit.
+ */
 export function serializeAuditRow(row: AuditRow): string {
-  return JSON.stringify([
+  const fields: unknown[] = [
     row.id,
     row.actor_user_id,
     row.action,
@@ -62,7 +71,9 @@ export function serializeAuditRow(row: AuditRow): string {
     row.target_id,
     row.metadata === null || row.metadata === undefined ? null : canonicalize(row.metadata),
     row.created_at.toISOString(),
-  ]);
+  ];
+  if (row.request_id !== null && row.request_id !== undefined) fields.push(row.request_id);
+  return JSON.stringify(fields);
 }
 
 export async function digestRows(
@@ -90,7 +101,7 @@ export function databaseRowSource(client: Pick<PrismaClient, '$queryRaw'>): Audi
     let cursorId = '';
     for (;;) {
       const batch = await client.$queryRaw<AuditRow[]>`
-        SELECT id, actor_user_id, action, target_table, target_id, metadata, created_at
+        SELECT id, actor_user_id, action, target_table, target_id, metadata, request_id, created_at
         FROM audit_log
         WHERE created_at >= ${start}::timestamptz AND created_at < ${end}::timestamptz
           AND (created_at, id COLLATE "C") > (${cursorAt}::timestamptz, ${cursorId}::text)

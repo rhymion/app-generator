@@ -7,6 +7,7 @@ import { clientIp } from '@/lib/rate-limit/client-ip';
 import { safeRedirectPath } from '@/lib/auth/safe-redirect';
 import { resolveExternalUrl } from '@/lib/auth/external-url';
 import { CSP_NONCE_HEADER, cspReportOnlyFromEnv, generateNonce } from '@/lib/csp';
+import { MFA_SETUP_PATH, isPathAllowedWhileEnrollmentRequired } from '@/lib/auth/mfa-required';
 
 const intlMiddleware = createIntlMiddleware(routing);
 
@@ -16,7 +17,7 @@ const CSP_REPORT_ONLY_HEADER = 'Content-Security-Policy-Report-Only';
 const CLEAR_SITE_DATA_ON_SIGN_OUT = '"cache", "cookies", "storage"';
 
 // Paths that do not require authentication (matched after stripping locale prefix)
-const PUBLIC_PATHS = ['/login', '/register', '/docs', '/legal'];
+const PUBLIC_PATHS = ['/login', '/register', '/forgot-password', '/reset-password', '/docs', '/legal'];
 
 // Map a request to the rate-limit bucket name. Returns null when the request
 // shouldn't be rate-limited (e.g. `/api/auth/session` is hit on every page
@@ -223,6 +224,16 @@ export const proxy = auth(async (req) => {
     const url = buildExternalUrl(req, `/${locale}/mfa-challenge`);
     url.searchParams.set('callbackUrl', pathname);
     return NextResponse.redirect(url);
+  }
+
+  // Required MFA enrolment (Issue #1281, MFA_REQUIRED_ROLES). A user whose
+  // role requires MFA and who has not enrolled may only use the MFA settings
+  // page (its Server Actions post to the same path). getSessionUserId() also
+  // answers null for this session, so a Server Action invoked from elsewhere or
+  // a cookie-authenticated API route does not act for the user either.
+  if (req.auth.mfa_enrollment_required && !isPathAllowedWhileEnrollmentRequired(pathnameWithoutLocale)) {
+    const locale = localePrefix ?? routing.defaultLocale;
+    return NextResponse.redirect(buildExternalUrl(req, `/${locale}${MFA_SETUP_PATH}`));
   }
 
   // Everything past this point is for a signed-in user: keep it out of

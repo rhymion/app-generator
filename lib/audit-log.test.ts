@@ -10,10 +10,15 @@ vi.mock('@/lib/prisma', () => ({
 }));
 
 import { recordAuditEvent } from './audit-log';
+import { __setHeadersSourceForTest } from './request-id';
 
 beforeEach(() => {
   create.mockReset();
   create.mockResolvedValue({ id: 'cuid-test' });
+  // Outside a request by default: headers() throws, as it does in a script.
+  __setHeadersSourceForTest(async () => {
+    throw new Error('headers() was called outside a request scope');
+  });
 });
 
 describe('recordAuditEvent', () => {
@@ -34,6 +39,7 @@ describe('recordAuditEvent', () => {
         target_table: 'role',
         target_id: 'role-99',
         metadata: { name: 'Admin' },
+        request_id: null,
       },
     });
   });
@@ -91,5 +97,38 @@ describe('recordAuditEvent', () => {
 
     expect(txCreate).toHaveBeenCalledTimes(1);
     expect(create).not.toHaveBeenCalled();
+  });
+
+  // Issue #1306: rows written while handling a request carry its server-generated id.
+  it('stores the same request id on every row of one request, and a new one for the next request', async () => {
+    let current: object = new Headers();
+    __setHeadersSourceForTest(async () => current);
+
+    await recordAuditEvent({ action: 'role:create' });
+    await recordAuditEvent({ action: 'role:update' });
+    current = new Headers();
+    await recordAuditEvent({ action: 'role:delete' });
+
+    const ids = create.mock.calls.map(([{ data }]) => data.request_id as string);
+    expect(ids[0]).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    expect(ids[1]).toBe(ids[0]);
+    expect(ids[2]).not.toBe(ids[0]);
+  });
+
+  it('ignores a client-supplied X-Request-Id', async () => {
+    const headers = new Headers({ 'x-request-id': 'chosen-by-client' });
+    __setHeadersSourceForTest(async () => headers);
+
+    await recordAuditEvent({ action: 'auth:signIn' });
+
+    const [{ data }] = create.mock.calls[0];
+    expect(data.request_id).not.toBe('chosen-by-client');
+    expect(typeof data.request_id).toBe('string');
+  });
+
+  it('stores null outside a request', async () => {
+    await recordAuditEvent({ action: 'auth:signOut' });
+    const [{ data }] = create.mock.calls[0];
+    expect(data.request_id).toBeNull();
   });
 });

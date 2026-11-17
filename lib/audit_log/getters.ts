@@ -94,6 +94,7 @@ export async function searchAuditLogOptions(
     action: auditLog.action,
     actor_user_id: auditLog.actor_user_id,
     metadata: auditLog.metadata as Record<string, unknown> | null,
+    request_id: auditLog.request_id,
     created_at: auditLog.created_at,
   }));
 }

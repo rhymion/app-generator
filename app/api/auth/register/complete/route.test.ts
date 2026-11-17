@@ -206,3 +206,31 @@ describe('POST /api/auth/register/complete', () => {
     errorSpy.mockRestore();
   });
 });
+
+describe('POST /api/auth/register/complete domain allow-list (Issue #1093)', () => {
+  const auth = siteConfig.auth as { registrationAllowedDomains: string[] };
+  const savedDomains = auth.registrationAllowedDomains;
+  afterEach(() => {
+    auth.registrationAllowedDomains = savedDomains;
+  });
+
+  it('refuses a link whose domain left the allow-list after it was sent, and creates nothing', async () => {
+    const token = await issueRegistrationToken(prisma, 'late@other.com');
+    auth.registrationAllowedDomains = ['example.com'];
+
+    const res = await POST(completeRequest({ token, name: 'A', password: GOOD_PASSWORD }));
+
+    expect(res.status).toBe(403);
+    expect((await res.json()).code).toBe('REGISTRATION_NOT_ALLOWED');
+    expect(userCreate).not.toHaveBeenCalled();
+  });
+
+  it('completes a link for a listed domain', async () => {
+    const token = await issueRegistrationToken(prisma, 'ok@example.com');
+    auth.registrationAllowedDomains = ['example.com'];
+
+    const res = await POST(completeRequest({ token, name: 'A', password: GOOD_PASSWORD }));
+
+    expect(res.status).toBe(201);
+  });
+});

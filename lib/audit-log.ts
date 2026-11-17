@@ -28,12 +28,18 @@
  *     New surfaces should follow the same pattern so query filters stay
  *     ergonomic.
  *
+ *   - **Request id.** `request_id` is the server-generated id of the request
+ *     that caused the event (lib/request-id.ts), so the rows written by one
+ *     request can be found together. It is null for events written outside a
+ *     request (scripts, scheduled jobs).
+ *
  *   - **No FK on `actor_user_id`.** The audit row must outlive the user it
  *     references. `actor_user_id` is also nullable — some auth-side events
  *     (rejected sign-in with an unknown email) have no resolved actor.
  */
 import { logger } from '@/lib/logger';
 import prisma from '@/lib/prisma';
+import { getRequestId } from '@/lib/request-id';
 
 /**
  * Transaction client passed by callers from inside `prisma.$transaction`.
@@ -75,9 +81,13 @@ type AuditLogClient = { audit_log: { create: (args: { data: Record<string, unkno
 export async function recordAuditEvent(event: AuditEvent): Promise<void> {
   const client = (event.tx ?? prisma) as unknown as AuditLogClient;
   try {
+    // Issue #1306: the server-generated id of the request that caused the event
+    // (null outside a request). No source address is stored: see lib/request-id.ts.
+    const request_id = await getRequestId();
     await client.audit_log.create({
       data: {
         action: event.action,
+        request_id,
         actor_user_id: event.actor_user_id ?? null,
         target_table: event.target_table ?? null,
         target_id: event.target_id ?? null,

@@ -2,6 +2,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { signIn } from "next-auth/react";
 import LoginPage from "./page";
+import { siteConfig } from "@/lib/site-config";
 import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
 
 // Mock @/i18n/navigation (used for the "no account? register" Link only —
@@ -28,6 +29,7 @@ vi.mock("next-intl", () => ({
       passwordPlaceholder: "Password",
       signInButton: "Sign in",
       noAccount: "No account? Register.",
+      forgotPasswordLink: "Forgot your password?",
       invalidCredentials: "Invalid credentials",
       loginError: "An error occurred during login",
       oauthAccountNotLinked: "Sign in with your existing account first, then connect Google from your settings.",
@@ -207,5 +209,22 @@ describe("LoginPage", () => {
   it("shows no linking hint without that error", () => {
     render(<LoginPage />);
     expect(screen.queryByText(/connect Google from your settings/)).toBeNull();
+  });
+
+  // Issue #1282: password reset needs a mail transport, so it is offered only with email verification on.
+  it("links to the password reset only with email verification on", () => {
+    const registration = siteConfig.auth.registration as { emailVerification: boolean };
+    const saved = registration.emailVerification;
+    try {
+      registration.emailVerification = false;
+      const { unmount } = render(<LoginPage />);
+      expect(screen.queryByRole("link", { name: "Forgot your password?" })).toBeNull();
+      unmount();
+      registration.emailVerification = true;
+      render(<LoginPage />);
+      expect(screen.getByRole("link", { name: "Forgot your password?" })).toHaveAttribute("href", "/forgot-password");
+    } finally {
+      registration.emailVerification = saved;
+    }
   });
 });

@@ -23,6 +23,7 @@ YAML スキーマ定義から本番対応の Web アプリケーションを生�
 - **REST API** — エンティティごとに API キー認証付き JSON エンドポイントを生成。加えて、その行について現在許される操作・書き込み・遷移を返す行単位の `GET /api/{entity}/[id]/capabilities` エンドポイントを生成。リレーション項目で選択できるレコードを検索・ID 参照する `GET /api/{entity}/options` エンドポイントも生成（Web のピッカーの REST 版で、権限と組織の範囲は同一）。コメントスレッドを持つエンティティには、コメントの追加・編集・削除の `POST` / `PATCH` / `DELETE` ルートと、`@` メンション候補を検索する `GET /api/mention/users` も生成（コメント欄の REST 版で、同じアクションを実行）— 詳細は [`docs/knowledge/comment-and-mention-rest-routes.md`](docs/knowledge/comment-and-mention-rest-routes.md) を参照
 - **API 冪等性キー + API キー単位の流量制限** — 単一レコード作成エンドポイントで任意の `Idempotency-Key` ヘッダーを送ると、`POST` の再送が安全になる（同じキー＋同じ本文なら元の結果を再送、同じキー＋異なる本文なら競合として拒否）。保持期間1日のDBテーブルに、対象レコードと同一トランザクションで書き込む。加えて `authenticateApiKey()` のみで認証する REST route はすべて、呼び出し元ごとの `api:read`/`api:write` 流量制限（いずれも環境変数で上書き可）を強制する — 詳細は [`docs/knowledge/api-idempotency-and-rate-limiting.md`](docs/knowledge/api-idempotency-and-rate-limiting.md) を参照
 - **セルフ登録のメール確認**（`x-generator.email-verification.enabled`、オプトイン、既定はオフ）— `/register` はメールアドレスだけを受け付け、1回限り・24時間有効の登録用リンクをメールで送る。アカウントはリンクを開いた時点で作成され、登録APIの応答はアドレスが登録済みかどうかに関係なく同じになる。メールは SMTP（`SMTP_URL`）で送信し、本番以外ではローカルの送信箱に書き出す — 詳細は [`docs/knowledge/authentication.md`](docs/knowledge/authentication.md)（"Self-registration"）を参照
+- **メールによるパスワード再設定**（メール確認がオンの場合のみ）— `/forgot-password` から1回限り・1時間有効の再設定リンクをメールで送り、応答はどのアドレスでも同じ。MFA を使うユーザーは TOTP またはリカバリーコードも必要。**登録ドメインの許可リスト** — `siteConfig.auth.registrationAllowedDomains`（空なら誰でも可）でセルフ登録を指定のメールドメインに限定する — 詳細は [`docs/knowledge/authentication.md`](docs/knowledge/authentication.md)（"Password reset"、"Registration domain allow-list"）を参照
 - **API キーの有効期限** — 任意設定のnullable列 `user.api_key_expires_at`（`null` は無期限、既存の全キーの挙動を変えない。キーの持ち主がアカウント設定画面で選び、新規キーの既定は90日で `siteConfig.auth.apiKeyDefaultExpiryDays` で変更できる）を、唯一の共通検証点 `authenticateApiKey()` でチェックする。期限切れのキーによるリクエストは `401 API key expired.` で拒否される — 詳細は [`docs/knowledge/api-key-expiry.md`](docs/knowledge/api-key-expiry.md) を参照
 - **生成ドキュメント + OpenAPI 3.1 仕様** — エンティティごとの人間可読ドキュメント（`docs/generated/{entity}.md`、`/en/docs` 配下にも反映）。承認フロー・書き込みロックを持つエンティティには「Constraints」節を含む。加えて機械可読な統合仕様 `docs/generated/openapi.json` をビルド成果物として生成し、`GET /api/openapi.json`（APIキーまたはセッション必須、全環境）で配信。`SWAGGER_UI_ENABLED` で有効化する対話的な `/swagger` 画面も用意（開発・ステージング限定、本番では有効化しない）— 詳細は [`docs/knowledge/generated-documentation-and-openapi-spec.md`](docs/knowledge/generated-documentation-and-openapi-spec.md) を参照
 - **エンティティごとに `properties:` 一つ** — スカラー列とリレーションオブジェクトを JSON Schema 標準の `properties:` にまとめて書きます。ビルダーが各エントリを、Prisma上でその名前が何であるかで振り分けます。モデル上のプロキシビューは `allOf` ラッパーではなく `x-view-of: <model>` で書きます。エンティティ直下の `fields:` キーが残る旧スキーマは `code_generator/migrate_fields_into_properties.py` で書き換えます — [`docs/knowledge/schema-yaml-configuration.md`](docs/knowledge/schema-yaml-configuration.md) を参照
@@ -60,7 +61,7 @@ YAML スキーマ定義から本番対応の Web アプリケーションを生�
 ### 組み込みシステム
 
 - **コメントスレッド** — ポリモーフィックブリッジパターンにより、任意のエンティティにコメントスレッドを付与。リアクションボタン対応（トグルエンドポイント・バッチ集計・親オーナー read 認可）
-- **添付ファイル管理** — ポリモーフィックブリッジ経由のファイル・画像アップロード；画像・ファイルのプレビューはエンティティごとに個別にオプトアウト可能（`AttachmentSection` の `showImages`/`showFiles` props、両方デフォルト `true`）
+- **添付ファイル管理** — ポリモーフィックブリッジ経由のファイル・画像アップロード；画像・ファイルのプレビューはエンティティごとに個別にオプトアウト可能（`AttachmentSection` の `showImages`/`showFiles` props、両方デフォルト `true`）。すべてのアップロードは任意のマルウェアスキャンフック（`lib/upload-scan.ts`、`prj/` で差し替え、既定はすべて許可）を通る — [`docs/knowledge/upload-limits-and-malicious-file-handling.md`](docs/knowledge/upload-limits-and-malicious-file-handling.md) を参照
 - **インベントリ予約** — スキーマレベルの `x-reservation` による容量・在庫管理（count モードと item モード）；予約元エンティティのライフサイクル遷移は独自の予約ライフサイクル機構ではなく承認フローシステムの承認/（terminal）却下を経由
 - **インベントリ台帳**（`x-ledger-source`） — スキーマにledgerトップレベル宣言がある場合に生成される `inventory_transaction` 台帳エンティティと `transactionable` ブリッジ；入荷伝票や請求明細エンティティに `x-ledger-source` を付与すると write/adjust/move のスタブテンプレートを生成
 - **分割アクション**（`x-splittable`） — エンティティに付与すると、一覧・編集ページからロット単位の分割操作を行う分割アクション UI セクションと API ルートを生成
@@ -95,7 +96,7 @@ YAML スキーマ定義から本番対応の Web アプリケーションを生�
 
 ### 監査・コンプライアンス
 
-- **監査ログ** — `x-audit: true` を宣言したエンティティについて記録された作成・更新・削除操作を表示する、スキーマ非依存の read-only ビューア（`app/[locale]/audit_log/page.tsx`）。テーブルは追記専用で、改ざん検知用に日次ダイジェストを連鎖させる（[`docs/knowledge/audit-log-append-only.md`](docs/knowledge/audit-log-append-only.md) を参照）
+- **監査ログ** — `x-audit: true` を宣言したエンティティについて記録された作成・更新・削除操作を表示する、スキーマ非依存の read-only ビューア（`app/[locale]/audit_log/page.tsx`）。テーブルは追記専用で、改ざん検知用に日次ダイジェストを連鎖させる。各行には書き込んだリクエストのサーバー生成 ID（`request_id`）を記録する（[`docs/knowledge/audit-log-append-only.md`](docs/knowledge/audit-log-append-only.md) を参照）
 - **GDPR / データ保護** — `x-pii` フィールド分類（`direct`/`sensitive`/`indirect`）、`anonymizeUser()` 消去関数、`x-gdpr-mode` によるデータ主体区分の分類（`internal`/`consumer`/`both`。スキーマ検証のみで生成コードへの影響なし）、添付ファイル名の AES-256-GCM 暗号化（データベース内）、コメント内の `x-mention` ユーザーメンション解析
 - **利用規約 / プライバシーポリシー**（`/[locale]/legal/terms`、`/[locale]/legal/privacy`）— 登録画面から導線を張ったMarkdown雛形文書。文書の言語追加は `content/legal/<doc>.<locale>.md` ファイルを追加するのみで、サイトUIの言語一覧とは独立（詳細は `docs/knowledge/legal-documents.md`）
 
@@ -119,7 +120,7 @@ YAML スキーマ定義から本番対応の Web アプリケーションを生�
 
 ### MFA / 二要素認証
 
-**動作するもの:** TOTP 認証ロジック、暗号化シークレットストレージ（AES-256-GCM）、リカバリーコード（登録ごとに 8 件、bcrypt ハッシュ化）が `lib/mfa/` に実装されています。セルフサービスによる登録と無効化は `/setting/mfa` で利用できます。
+**動作するもの:** TOTP 認証ロジック、暗号化シークレットストレージ（AES-256-GCM）、リカバリーコード（登録ごとに 8 件、bcrypt ハッシュ化）が `lib/mfa/` に実装されています。セルフサービスによる登録と無効化は `/setting/mfa` で利用できます。`MFA_REQUIRED_ROLES`（`*` またはロール名のカンマ区切り）を設定すると、該当ユーザーの登録が必須になり、登録が終わるまで `/setting/mfa` しか使えません（[`docs/knowledge/authentication.md`](docs/knowledge/authentication.md) の "Required MFA" を参照）。
 
 **注:** リカバリコードはログイン時の標準 MFA コード入力欄に入力できます。
 専用のリカバリコード専用フォームはなく、TOTP コードとリカバリコードの両方を
@@ -197,6 +198,8 @@ openssl rand -base64 32
 ```
 
 生成した値を `.env.development`（ローカル開発用）と `.env.test`（E2E テスト用）に追加してください。本番環境では Vercel ダッシュボードで設定します。
+
+`AUTH_SECRET` は MFA シークレットと添付ファイル名の暗号化にも使われます。これらを失わずに値を変更するには、旧い値を `AUTH_SECRET_PREVIOUS` に残したまま `npm run secrets:reencrypt` を実行してください（[`docs/knowledge/authentication.md`](docs/knowledge/authentication.md) の "Rotating `AUTH_SECRET`" を参照）。`BCRYPT_COST`（10〜15、既定値 10）はパスワードハッシュのコストを設定します。
 
 ### クイックスタート（コマンド一発）
 

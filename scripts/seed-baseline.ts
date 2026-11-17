@@ -4,7 +4,7 @@ import { loadEnvConfig } from '@next/env';
 loadEnvConfig(path.resolve(process.cwd()), process.env.NODE_ENV !== 'production');
 import { PrismaClient } from '@/app/generated/prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg'
-import * as bcrypt from 'bcryptjs';
+import { hashPassword } from '../lib/auth/bcrypt-cost';
 import { createId } from "@paralleldrive/cuid2";
 import { hashApiKey } from '../lib/api-key';
 import { secretsEqual } from '../lib/_secret_compare';
@@ -67,7 +67,7 @@ async function main() {
   // unchanged, since cypress specs and vitest fixtures are pinned to them.
   // See docs/knowledge/seed-baseline-credential-hardening.md.
   const credentials = resolveAdminCredentials(process.env);
-  const hashedPassword = await bcrypt.hash(credentials.password, 10);
+  const hashedPassword = await hashPassword(credentials.password);
   const adminId = createId();
   const admin = await prisma.user.upsert({
     where: { email: credentials.email },

@@ -15,11 +15,37 @@ import { AppError } from '@/lib/_errors';
 import { logAuthzDenied } from '@/lib/security-event';
 import { enterRequestScope, getActorOverride, memoizeInRequestScope } from '@/lib/_request_scope';
 
-const getCookieSessionUserId = cache(async function getCookieSessionUserId(): Promise<string | null> {
+const getCookieSession = cache(async function getCookieSession() {
   enterRequestScope();
-  const session = await auth();
+  return auth();
+});
+
+const getCookieSessionUserId = cache(async function getCookieSessionUserId(): Promise<string | null> {
+  const session = await getCookieSession();
+  // Issue #1281: a user who must enrol in MFA (MFA_REQUIRED_ROLES) and has not
+  // is treated as signed out everywhere except the MFA settings page.
+  if (session?.mfa_enrollment_required) return null;
   return session?.user?.id ?? null;
 });
+
+/**
+ * The session user for the MFA settings page and its Server Actions only. Unlike
+ * getSessionUserId(), it also answers for a session restricted by required MFA
+ * enrolment (Issue #1281), so that user can enrol. Never use it elsewhere.
+ */
+export async function getSessionUserIdForMfaSetup(): Promise<string | null> {
+  const session = await getCookieSession();
+  return session?.user?.id ?? null;
+}
+
+/** getSessionUserIdForMfaSetup(), throwing SESSION_EXPIRED when nobody is signed in. */
+export async function requireMfaSetupUserId(): Promise<string> {
+  const userId = await getSessionUserIdForMfaSetup();
+  if (!userId) {
+    throw new AppError('SESSION_EXPIRED', 'User not authenticated');
+  }
+  return userId;
+}
 
 /**
  * The signed-in user's id. Inside `runAsActor()` (lib/_request_scope.ts) this is

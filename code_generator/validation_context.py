@@ -2,6 +2,46 @@
 
 from helpers.naming import to_title_case
 from build_context import is_forced_required_field
+from helpers.string_limits import is_length_checked_string, string_max_length
+
+_RULE_TYPES = ('string', 'integer', 'number', 'boolean')
+_RULE_FORMATS = ('uri', 'email')
+_NUMERIC_BOUNDS = ('minimum', 'maximum', 'exclusiveMinimum', 'exclusiveMaximum')
+
+
+def build_field_rule(prop: str, defn: dict) -> dict | None:
+    """The runtime rule for one writable scalar field (Issue #1271), or None when it has none.
+
+    The JSON type is always checked; enum, numeric bounds, minLength, pattern and format only when
+    the schema declares them. Decimal and date/time columns keep their own dedicated checks, and a
+    foreign-key column's pattern is not enforced (its reachability check decides).
+    """
+    if defn.get('_prisma_decimal_type') or defn.get('format') in _DATE_FORMATS:
+        return None
+    types = defn.get('type')
+    if isinstance(types, str):
+        types = [types]
+    base = [t for t in (types or []) if t != 'null']
+    if len(base) != 1 or base[0] not in _RULE_TYPES:
+        return None
+    rule: dict = {'key': prop, 'label': _field_label(prop), 'type': base[0]}
+    enum = defn.get('enum')
+    if isinstance(enum, list) and enum and all(isinstance(v, (str, int, float, bool)) for v in enum):
+        rule['enum'] = enum
+    if base[0] in ('integer', 'number'):
+        for k in _NUMERIC_BOUNDS:
+            v = defn.get(k)
+            if isinstance(v, (int, float)) and not isinstance(v, bool):
+                rule[k] = v
+    if base[0] == 'string':
+        ml = defn.get('minLength')
+        if isinstance(ml, int) and not isinstance(ml, bool) and ml > 0:
+            rule['minLength'] = ml
+        if isinstance(defn.get('pattern'), str) and 'x-relationship' not in defn:
+            rule['pattern'] = defn['pattern']
+        if defn.get('format') in _RULE_FORMATS:
+            rule['format'] = defn['format']
+    return rule
 
 _DATE_FORMATS = ('date', 'date-time', 'time')
 _SYSTEM_FIELDS = {'id', 'created_at', 'updated_at', 'creator_id', 'updater_id'}
@@ -71,6 +111,14 @@ def build_validation_context(ctx: dict) -> dict:
     # lib/_date_value.ts, shared by the Web form, the service guard and the
     # mobile inputs.
     date_fields: list[dict] = []
+    # string_length_fields: every writable string column, with the schema's
+    # maxLength or the default cap (helpers/string_limits.py, Issue #1273).
+    # Only service_validation.ts uses it: the form keeps enforcing a declared
+    # maxLength only, and CSV import checks the same limit per cell.
+    string_length_fields: list[dict] = []
+    # field_rules: the runtime type / range / allowed-value rules of every writable
+    # scalar field (Issue #1271); service_validation.ts checks each supplied value.
+    field_rules: list[dict] = []
     for prop_info in parent_prop_infos:
         prop = prop_info['prop']
         if prop in _SYSTEM_FIELDS:
@@ -88,6 +136,11 @@ def build_validation_context(ctx: dict) -> dict:
             decimal_fields.append(entry)
         if defn.get('format') in _DATE_FORMATS:
             date_fields.append({**entry, 'format': defn['format']})
+        if is_length_checked_string(defn):
+            string_length_fields.append({**entry, 'max_length': string_max_length(defn)})
+        rule = build_field_rule(prop, defn)
+        if rule:
+            field_rules.append(rule)
 
     one_to_one_checks = []
     for rel in selector_oto_rels:
@@ -106,5 +159,7 @@ def build_validation_context(ctx: dict) -> dict:
         'client_required_fields': client_required_fields,
         'decimal_fields': decimal_fields,
         'date_fields': date_fields,
+        'string_length_fields': string_length_fields,
+        'field_rules': field_rules,
         'one_to_one_checks': one_to_one_checks,
     }

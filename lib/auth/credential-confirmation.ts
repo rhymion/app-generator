@@ -1,4 +1,4 @@
-import bcrypt from 'bcryptjs';
+import { hashPassword } from './bcrypt-cost';
 import prisma from '@/lib/prisma';
 import { ApiError } from '@/lib/api-auth';
 import { getRateLimiter } from '@/lib/rate-limit';
@@ -6,9 +6,6 @@ import { disableMfa } from '@/lib/mfa/enrollment';
 import { MfaRateLimitedError } from '@/lib/mfa/errors';
 import { verifyPassword } from './password-check';
 import { passwordPolicyError } from './password-policy';
-
-// Same cost factor the app uses when it stores a password hash.
-const BCRYPT_COST = 10;
 
 export type CredentialChangeInput = {
   /** New password in plain text, as submitted by the caller. Empty or absent leaves the password unchanged. */
@@ -76,7 +73,7 @@ export async function confirmCredentialChange(
       const weak = passwordPolicyError(input.password);
       if (weak) throw new ApiError(400, weak);
     }
-    if (changesPassword) password = await bcrypt.hash(input.password as string, BCRYPT_COST);
+    if (changesPassword) password = await hashPassword(input.password as string);
   }
 
   let mfaEnabled = user.mfa_enabled;
