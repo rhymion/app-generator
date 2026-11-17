@@ -24,3 +24,30 @@ export function isDomainAllowed(
   const domain = email.split("@")[1]?.toLowerCase();
   return !!domain && allowed.includes(domain);
 }
+
+/**
+ * Self-registration domain allow-list (Issue #1093): `siteConfig.auth.registrationAllowedDomains`.
+ *
+ * Separate from `allowedDomains` (OAuth only, matched on Google's `hd`), so a deployment that
+ * restricts Google sign-in is not affected. The address's domain must equal one listed domain,
+ * case-insensitively; subdomains do not match. An empty or absent list allows every address.
+ */
+export function isRegistrationEmailAllowed(email: string, allowedDomains: readonly string[]): boolean {
+  if (allowedDomains.length === 0) return true;
+  const at = email.lastIndexOf("@");
+  if (at < 1) return false;
+  const domain = email.slice(at + 1).trim().toLowerCase();
+  return domain !== "" && allowedDomains.some((d) => d.trim().toLowerCase() === domain);
+}
+
+/** The configured list, or empty when the site config predates the setting. */
+export function registrationAllowedDomains(auth: object): readonly string[] {
+  const list = (auth as { registrationAllowedDomains?: unknown }).registrationAllowedDomains;
+  return Array.isArray(list) ? list.filter((d): d is string => typeof d === "string") : [];
+}
+
+/** The answer when an address is outside the allow-list; it does not reveal the list. */
+export const REGISTRATION_NOT_ALLOWED = {
+  error: "Registration is not available for this email address.",
+  code: "REGISTRATION_NOT_ALLOWED",
+} as const;

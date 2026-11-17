@@ -254,3 +254,64 @@ describe('POST /api/auth/register with email verification on (Issue #1092)', () 
     expect(blocked.status).toBe(429);
   });
 });
+
+describe('POST /api/auth/register domain allow-list (Issue #1093)', () => {
+  const auth = siteConfig.auth as { registrationAllowedDomains: string[]; registration: { emailVerification: boolean } };
+  const savedDomains = auth.registrationAllowedDomains;
+  const savedVerification = auth.registration.emailVerification;
+
+  function req(body: Record<string, unknown>, ip: string) {
+    return new Request('http://localhost/api/auth/register', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-forwarded-for': ip },
+      body: JSON.stringify(body),
+    });
+  }
+
+  beforeEach(() => {
+    auth.registrationAllowedDomains = ['Example.com'];
+    sendMail.mockReset().mockResolvedValue(undefined);
+    tokenDeleteMany.mockReset().mockResolvedValue({ count: 0 });
+    tokenCreate.mockReset().mockResolvedValue({});
+    mailConfigured.value = true;
+  });
+
+  afterEach(() => {
+    auth.registrationAllowedDomains = savedDomains;
+    auth.registration.emailVerification = savedVerification;
+  });
+
+  it('accepts a listed domain, case-insensitively', async () => {
+    const res = await POST(req({ email: 'a@EXAMPLE.com', password: 'Passw0rd!' }, '203.0.113.90'));
+    expect(res.status).toBe(201);
+  });
+
+  it('refuses another domain or a subdomain with a generic 403 and creates nothing', async () => {
+    for (const [i, email] of ['a@other.com', 'a@sub.example.com', 'a@example.com.evil.net'].entries()) {
+      const res = await POST(req({ email, password: 'Passw0rd!' }, `203.0.113.${91 + i}`));
+      expect(res.status).toBe(403);
+      const body = await res.json();
+      expect(body.code).toBe('REGISTRATION_NOT_ALLOWED');
+      expect(JSON.stringify(body)).not.toContain('example.com');
+    }
+    expect(userFindUnique).not.toHaveBeenCalled();
+    expect(userCreate).not.toHaveBeenCalled();
+  });
+
+  it('with email verification on, refuses before any token or mail', async () => {
+    auth.registration.emailVerification = true;
+    const res = await POST(req({ email: 'a@other.com' }, '203.0.113.95'));
+    expect(res.status).toBe(403);
+    expect(tokenCreate).not.toHaveBeenCalled();
+    expect(sendMail).not.toHaveBeenCalled();
+    const ok = await POST(req({ email: 'b@example.com' }, '203.0.113.96'));
+    expect(ok.status).toBe(202);
+    expect(sendMail).toHaveBeenCalledTimes(1);
+  });
+
+  it('allows every address while the list is empty', async () => {
+    auth.registrationAllowedDomains = [];
+    const res = await POST(req({ email: 'a@anywhere.org', password: 'Passw0rd!' }, '203.0.113.97'));
+    expect(res.status).toBe(201);
+  });
+});

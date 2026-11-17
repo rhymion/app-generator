@@ -551,6 +551,21 @@ one person with several addresses can still register one account per address
 issuing a token, so the two cases differ by two small database writes in
 response time, while the mail send, done in both, dominates.
 
+**Registration domain allow-list** (Issue #1093). `siteConfig.auth.registrationAllowedDomains`
+in `lib/site-config.ts` (a site-config setting, not a schema key) restricts who may
+register. Empty (the default) allows every address. Otherwise the part of the address
+after the last `@` must equal one listed domain, case-insensitively; subdomains do not
+match (`sub.example.com` is not `example.com`). Both registration modes refuse another
+address with `403 { code: "REGISTRATION_NOT_ALLOWED" }`, a message that does not name the
+list, before any account lookup, token or mail, so a refused domain never triggers an
+outbound message. `POST /api/auth/register/complete` checks again, because the list may
+have changed since the link was sent. The OAuth list `allowedDomains` is separate (it
+matches Google's `hd` claim) and unchanged. Helpers: `isRegistrationEmailAllowed()` and
+`registrationAllowedDomains()` in `lib/auth/domain-allow-list.ts` (the latter reads an
+older site config without the property as an empty list). Tests:
+`lib/auth/domain-allow-list.test.ts`, `app/api/auth/register/route.test.ts`,
+`app/api/auth/register/complete/route.test.ts`.
+
 **Password strength.** `lib/auth/password-policy.ts` requires at least 8
 characters (ASVS V6.2.1) and no composition rules (V6.2.5). Registration, the
 settings password form and the REST and bulk credential change all apply it, so no
