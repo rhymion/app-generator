@@ -561,9 +561,13 @@ handful of pre-existing fields.
 
 ### 4.2 Validation constraints
 
-These are enforced only in the frontend form, except `maxLength`, which the server enforces
-too; the generator does not add Prisma-level constraints beyond what the Prisma schema already
-defines. All are Category C — write them under the column's entry in `properties:`.
+The generated form enforces these, and so does the server: the generated `service_validation.ts`
+checks every supplied value against the column's JSON type and against `enum`, `minimum`,
+`maximum`, `exclusiveMinimum`, `exclusiveMaximum`, `minLength`, `pattern` (not on foreign-key
+columns) and `format: uri` / `format: email` where declared (Issue #1271), with a `VALIDATION`
+error (HTTP 422 on REST). The generator does not add Prisma-level constraints beyond what the
+Prisma schema already defines. All are Category C — write them under the column's entry in
+`properties:`.
 
 Every writable string field has a server-side maximum length (Issue #1273): the declared
 `maxLength`, or 65535 characters when none is declared. The generated `service_validation.ts`
@@ -578,7 +582,7 @@ the generic "invalid value" error instead of a field-level message. See
 |---|---|
 | `minLength` | Input required to be at least N characters |
 | `maxLength` | Input capped at N characters; also enforced on the server (default 65535 when absent) |
-| `minimum` / `maximum` | Number field min/max (also used by legacy int-enum, §4.3) |
+| `minimum` / `maximum` | Number field min/max (also used by legacy int-enum, §4.3); also enforced on the server |
 | `pattern` | Regex pattern (mainly used for CUID id fields — not shown in form; auto-added for FK columns, see §2) |
 | `format: date-time` | Renders MUI X DateTimePicker |
 | `format: date` | Renders MUI X DatePicker |

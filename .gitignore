@@ -404,6 +404,7 @@ cypress/e2e/api/*.cy.ts
 !cypress/e2e/api/api_key_storage.cy.ts
 !cypress/e2e/api/permission_cache_invalidation.cy.ts
 !cypress/e2e/api/sql_parameter_binding.cy.ts
+!cypress/e2e/api/runtime_field_rules.cy.ts
 
 # ── cypress/support/ ──
 cypress/support/*/

@@ -2,6 +2,7 @@ import prisma from '@/lib/prisma';
 import { validateCustomRules } from '@/lib/{{ model }}/service_validation_custom';
 import { AppError } from '@/lib/_errors';
 import { isValidDateValue, type DateValueFormat } from '@/lib/_date_value';
+import { fieldRuleViolation, type FieldRule } from '@/lib/_field_rules';
 {% if direct_attachment_rels %}
 import { assertDirectAttachmentValue } from '@/lib/attachment/link';
 import { UNLINKED_ATTACHMENT_WHERE } from '@/lib/attachment/access';
@@ -53,6 +54,15 @@ const DATE_FIELDS: (RequiredField & { format: DateValueFormat })[] = [
 const STRING_LENGTH_FIELDS: (RequiredField & { maxLength: number })[] = [
 {% for field in string_length_fields %}
   { key: '{{ field.key }}', label: '{{ field.label }}', maxLength: {{ field.max_length }} },
+{% endfor %}
+] ;
+
+// Runtime rules of every writable scalar field (Issue #1271): the JSON type, plus
+// enum, numeric bounds, minLength, pattern and format where the schema declares
+// them. Checked for each supplied value; a missing value is the required rule's job.
+const FIELD_RULES: FieldRule[] = [
+{% for rule in field_rules %}
+  {{ rule | tojson }},
 {% endfor %}
 ] ;
 
@@ -138,6 +148,13 @@ async function validateSchemaRules(tx: TransactionClient, data: Record<string, u
   for (const field of REQUIRED_FIELDS) {
     if (isMissingValue(data[field.key])) {
       throw new AppError('VALIDATION', `${field.label} is required`, field.key, 'missing');
+    }
+  }
+
+  for (const rule of FIELD_RULES) {
+    const violation = fieldRuleViolation(rule, data[rule.key]);
+    if (violation) {
+      throw new AppError('VALIDATION', violation, rule.key, 'invalid');
     }
   }
 
