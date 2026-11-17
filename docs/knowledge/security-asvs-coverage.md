@@ -128,7 +128,7 @@ Chapter V17 (WebRTC) does not apply: the generated app has no real-time media, T
 | V5.3.2 | 1 | generator | lib/attachment/upload_core.ts newStorageKey; the original name is stored encrypted for display only | cypress/e2e/api/upload_path_safety.cy.ts, lib/attachment/storage.test.ts | - | - |
 | V5.4.1 | 2 | generator | lib/attachment/content-disposition.ts contentDisposition(), imported by attachment_serve_route.ts.jinja2; the name comes from the stored record, not the URL | cypress/e2e/api/upload_path_safety.cy.ts, lib/attachment/content-disposition.test.ts | - | - |
 | V5.4.2 | 2 | generator | lib/attachment/content-disposition.ts contentDisposition() sends an ASCII fallback plus filename*=UTF-8''; quotes, backslashes, CR, LF and non-ASCII characters are replaced in the fallback and percent-encoded in filename* | lib/attachment/content-disposition.test.ts | - | - |
-| V5.4.3 | 2 | gap | No antivirus scan or hook; docs/knowledge/upload-limits-and-malicious-file-handling.md states that scanning is the deployer's responsibility | none | #1279 | - |
+| V5.4.3 | 2 | generator | POST /api/upload calls the scan hook lib/upload-scan.ts (through lib/attachment/upload-scan-gate.ts) before storing; the default accepts every file and a deployment replaces it through prj/ to plug in its scanner; a refusal is 422, a scanner error 503 (fail closed); docs/knowledge/upload-limits-and-malicious-file-handling.md | lib/attachment/upload-scan-gate.test.ts, code_generator/tests/test_upload_route_content_type.py | - | - |
 
 ## V6 Authentication
 

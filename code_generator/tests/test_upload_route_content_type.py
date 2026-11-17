@@ -43,3 +43,12 @@ def test_upload_route_checks_the_content_signature_after_the_allow_lists():
     assert 'matchesFileSignature(head, uploadCheck.extension)' in src
     assert src.index('checkUpload(file, loadUploadPolicy())') < src.index('matchesFileSignature(')
     assert src.index('matchesFileSignature(') < src.index('storeUploadedFile(')
+
+
+def test_upload_route_runs_the_scan_hook_before_storing():
+    """Issue #1279: removing the scan call (or moving it after the store) fails here."""
+    src = (TEMPLATES / 'upload_route.ts.jinja2').read_text()
+    assert "import { checkUploadScan } from '@/lib/attachment/upload-scan-gate';" in src
+    assert 'const scan = await checkUploadScan(' in src
+    assert 'if (!scan.ok)' in src and 'status: scan.status' in src
+    assert src.index('matchesFileSignature(head') < src.index('checkUploadScan(') < src.index('storeUploadedFile(')

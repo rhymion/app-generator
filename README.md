@@ -57,7 +57,7 @@ Built with [Next.js](https://nextjs.org/), [Prisma](https://www.prisma.io/), and
 ### Built-in Systems
 
 - **Comment threads** — polymorphic bridge pattern for attaching comments to any entity, with reaction buttons (toggle endpoint, batched aggregation, parent-owner read authorization)
-- **Attachment management** — file and image upload via polymorphic bridge; image/file previews can be opted out independently per entity (`AttachmentSection` `showImages`/`showFiles` props, both default `true`)
+- **Attachment management** — file and image upload via polymorphic bridge; image/file previews can be opted out independently per entity (`AttachmentSection` `showImages`/`showFiles` props, both default `true`); every upload passes an optional malware scan hook (`lib/upload-scan.ts`, replaced through `prj/`; accepts everything by default) — see [`docs/knowledge/upload-limits-and-malicious-file-handling.md`](docs/knowledge/upload-limits-and-malicious-file-handling.md)
 - **Inventory reservation** — schema-level `x-reservation` for capacity and inventory management (count and item modes); lifecycle transitions for the owning entity go through the Approval Flow System's approve/(terminal) reject rather than a bespoke reservation-lifecycle mechanism
 - **Inventory ledger** (`x-ledger-source`) — an `inventory_transaction` ledger entity and `transactionable` bridge, generated when a ledger top-level declaration is present in the schema; annotate a receiving-receipt or billing-detail entity with `x-ledger-source` to emit write/adjust/move stub templates
 - **Split action** (`x-splittable`) — annotate an entity to generate a split-action UI section and API route for lot-level split operations from the list or edit page

@@ -61,7 +61,7 @@ YAML スキーマ定義から本番対応の Web アプリケーションを生�
 ### 組み込みシステム
 
 - **コメントスレッド** — ポリモーフィックブリッジパターンにより、任意のエンティティにコメントスレッドを付与。リアクションボタン対応（トグルエンドポイント・バッチ集計・親オーナー read 認可）
-- **添付ファイル管理** — ポリモーフィックブリッジ経由のファイル・画像アップロード；画像・ファイルのプレビューはエンティティごとに個別にオプトアウト可能（`AttachmentSection` の `showImages`/`showFiles` props、両方デフォルト `true`）
+- **添付ファイル管理** — ポリモーフィックブリッジ経由のファイル・画像アップロード；画像・ファイルのプレビューはエンティティごとに個別にオプトアウト可能（`AttachmentSection` の `showImages`/`showFiles` props、両方デフォルト `true`）。すべてのアップロードは任意のマルウェアスキャンフック（`lib/upload-scan.ts`、`prj/` で差し替え、既定はすべて許可）を通る — [`docs/knowledge/upload-limits-and-malicious-file-handling.md`](docs/knowledge/upload-limits-and-malicious-file-handling.md) を参照
 - **インベントリ予約** — スキーマレベルの `x-reservation` による容量・在庫管理（count モードと item モード）；予約元エンティティのライフサイクル遷移は独自の予約ライフサイクル機構ではなく承認フローシステムの承認/（terminal）却下を経由
 - **インベントリ台帳**（`x-ledger-source`） — スキーマにledgerトップレベル宣言がある場合に生成される `inventory_transaction` 台帳エンティティと `transactionable` ブリッジ；入荷伝票や請求明細エンティティに `x-ledger-source` を付与すると write/adjust/move のスタブテンプレートを生成
 - **分割アクション**（`x-splittable`） — エンティティに付与すると、一覧・編集ページからロット単位の分割操作を行う分割アクション UI セクションと API ルートを生成

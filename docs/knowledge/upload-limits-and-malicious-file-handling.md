@@ -25,16 +25,36 @@ Anything that unpacks or parses an uploaded archive or Office file (a consumer's
 | Type | Extension and declared type must both be allow-listed, and the leading bytes must match the format. SVG and HTML are not allowed. The stored type is derived from the extension, not taken from the request. |
 | Storage name | The stored object has a generated key. The original file name is stored encrypted and is not used as a path ([cryptographic-inventory-and-key-management.md](cryptographic-inventory-and-key-management.md)). |
 | Download | Served only through the authenticated attachment route, after a read-permission check; a file the caller may not read answers `404`. Every response carries `X-Content-Type-Options: nosniff`. Only JPEG, PNG, GIF and WebP are served `inline`; every other type is served as an `attachment`, so the browser downloads it instead of rendering it. |
-| Content | **Not scanned.** The app has no antivirus integration and no scan hook. A file that passes the checks above is stored and served as is. |
+| Content | **Not scanned by default.** The upload route calls an optional scan hook (below); the default accepts every file. A file that passes the checks above and the hook is stored and served as is. |
+
+## Scan hook (Issue #1279)
+
+`POST /api/upload` calls `scanUpload()` from `lib/upload-scan.ts` after the size, type and signature checks and before the file
+is stored, through `lib/attachment/upload-scan-gate.ts`:
+
+- The shipped `lib/upload-scan.ts` accepts every file (`UPLOAD_SCAN_IS_DEFAULT = true`), so nothing changes until a deployment
+  provides a scanner. To add one, put a replacement at `prj/lib/upload-scan.ts` (copied over the default by `prj:sync`) that
+  keeps the exported names and types and sets `UPLOAD_SCAN_IS_DEFAULT = false`. It receives the checked content type and
+  extension, the size, the uploader's id and `bytes()` for the whole file (already capped by `UPLOAD_MAX_BYTES`).
+- `{ ok: true }` stores the file. `{ ok: false, reason? }` refuses it with `422 The file was rejected by the malware scan.`;
+  the reason goes to the log (`[upload:scan_rejected]`), never to the caller, and the file name is never logged.
+- A hook that throws (scanner down, timeout) refuses the upload with `503`: the gate fails closed (`[upload:scan_failed]`).
+- The scan runs inline, so the scanner's latency is added to every upload; a scanner that needs minutes belongs at the storage
+  layer instead (below).
+
+Upload is the only route that accepts file bytes, so the hook covers every file the app stores. Tests:
+`lib/attachment/upload-scan-gate.test.ts`, `code_generator/tests/test_upload_route_content_type.py` (fails if the route stops
+calling the hook or calls it after storing). There is no quarantine state: a file is either refused at upload or stored.
 
 ## Malware scanning is the deployer's responsibility
 
-A deployment that accepts files from users who are not fully trusted must scan them outside the app. Two places work with the current code:
+Without a scanner behind the hook, a deployment that accepts files from users who are not fully trusted must scan them outside
+the app. Two places work with the current code:
 
 - at the storage layer, using the storage provider's malware scanning or an object-created trigger that scans a new object and quarantines or deletes it;
 - at the consumer's own download or processing path, before a file is opened by anything other than a browser download.
 
-The app does not wait for a scan result: a file is available to anyone allowed to read it as soon as it is stored. Closing that window in the app would need a scan status on the attachment and a hook in the upload route; neither exists, and this document makes no claim about them.
+With scanning outside the app, the app does not wait for a scan result: a file is available to anyone allowed to read it as soon as it is stored. The scan hook above closes that window for scanners fast enough to run inline; a stored quarantine state does not exist.
 
 ## Download file names
 
