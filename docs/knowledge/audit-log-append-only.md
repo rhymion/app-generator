@@ -145,7 +145,27 @@ What this means:
 - When all rows of a period are gone and an archive file exists for its month, `verify` recomputes the period from the file, so
   an export is treated as a retirement, not as a deletion. The archive file's own SHA-256 is checked on read.
 
+## Request id
+
+Every row carries `request_id` (Issue #1306, ASVS V16.2.1): the id of the request that wrote it, so the rows of one request
+can be found together (`GET /api/audit_log?filter=...` accepts `request_id`).
+
+- `lib/request-id.ts` generates a random UUID on the server the first time a request asks for it and memoizes it against the
+  request's `headers()` object, so every row of one request shares it. This covers Route Handlers (including `/api/*`, which
+  `proxy.ts` does not run for), Server Actions, Server Components and the Auth.js callbacks.
+- A client-sent `X-Request-Id` or other correlation header is ignored: a caller must not choose the id of its own rows.
+- Rows written outside a request (scripts, seeds, scheduled jobs) have `request_id` null.
+- No source address or user agent is stored (option A of #1306): the table is append-only, so a stored address could never be
+  redacted. Writing the id into the application log lines is part of the structured-logging work (#1323).
+- The digest serializes `request_id` only when it is set, so periods closed before the column existed keep verifying, and a
+  value added to an old row afterwards is reported like any other edit. Archive files written before the column existed have no
+  `request_id` key and are read as null.
+
 ## What a consumer sets up
+
+0. **Upgrading an existing database** (the major version that adds `request_id`): add the column in a migration,
+   `ALTER TABLE audit_log ADD COLUMN request_id TEXT;`. On a partitioned `audit_log` the statement runs on the parent and
+   reaches every partition; it needs no `UPDATE`, so the append-only trigger does not object. Run it as the owner.
 
 1. Add `prisma/sql/audit_log_append_only.sql` to one of your own Prisma migrations (a hand-edited `migration.sql`; the
    generator ships no migrations). Clean up any existing `audit_log.metadata` that holds personal data first.

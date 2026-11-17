@@ -646,6 +646,10 @@ model audit_log {
   target_table  String?
   target_id     String?
   metadata      Json?
+  // Issue #1306: server-generated id of the request that wrote the row
+  // (lib/request-id.ts); null for rows written outside a request. No source
+  // address is stored: the table is append-only, so it could never be redacted.
+  request_id    String?
   created_at    DateTime @default(now()) @db.Timestamptz(0)
 
   @@id([id, created_at])

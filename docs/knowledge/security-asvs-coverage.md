@@ -345,7 +345,7 @@ Chapter V17 (WebRTC) does not apply: the generated app has no real-time media, T
 | ID | Level | Status | Covered by | Verified by | Gap Issue | Source and version |
 |----|-------|--------|------------|-------------|-----------|--------------------|
 | V16.1.1 | 2 | generator | Logging layers, events, destinations, access and retention: docs/knowledge/logging-inventory.md | none | - | - |
-| V16.2.1 | 2 | gap | audit_log has no source IP, user agent or request id | lib/audit-log.test.ts | #1306 | - |
+| V16.2.1 | 2 | generator | audit_log.request_id: a server-generated id per request (lib/request-id.ts), shared by every row of one request; no source IP or user agent is stored, by decision (append-only rows cannot be redacted). Request id in the application log lines is tracked with structured logging | lib/audit-log.test.ts, lib/audit-log-integrity/digest.test.ts | #1323 | - |
 | V16.2.2 | 2 | generator | audit_log.created_at is Timestamptz and written in UTC | lib/audit-log.test.ts, lib/audit-log-integrity/digest.test.ts | - | - |
 | V16.2.3 | 2 | generator | Permitted log sinks are listed in docs/knowledge/logging-inventory.md; application code has no other sink (lint, check:generated) | none | - | - |
 | V16.2.4 | 2 | gap | Console output formats are mixed | none | #1237 | - |

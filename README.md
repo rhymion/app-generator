@@ -91,7 +91,7 @@ Built with [Next.js](https://nextjs.org/), [Prisma](https://www.prisma.io/), and
 
 ### Audit & Compliance
 
-- **Audit log** — schema-agnostic, read-only viewer (`app/[locale]/audit_log/page.tsx`) over the create/update/delete actions recorded for entities that opt in with `x-audit: true`; the table is append-only, with chained daily digests for tamper detection (see [`docs/knowledge/audit-log-append-only.md`](docs/knowledge/audit-log-append-only.md))
+- **Audit log** — schema-agnostic, read-only viewer (`app/[locale]/audit_log/page.tsx`) over the create/update/delete actions recorded for entities that opt in with `x-audit: true`; the table is append-only, with chained daily digests for tamper detection, and each row records the server-generated id of the request that wrote it (`request_id`) (see [`docs/knowledge/audit-log-append-only.md`](docs/knowledge/audit-log-append-only.md))
 - **GDPR / data protection** — `x-pii` field classification (`direct`/`sensitive`/`indirect`), an `anonymizeUser()` erasure function, `x-gdpr-mode` data-subject-scope label (`internal`/`consumer`/`both`; schema-validated, no generated effect), AES-256-GCM at-rest attachment filename encryption, and `x-mention` user-mention parsing in comments
 - **Terms of Service / Privacy Policy** (`/[locale]/legal/terms`, `/[locale]/legal/privacy`) — Markdown template documents linked from the registration page; adding a document language is dropping a `content/legal/<doc>.<locale>.md` file, independent of the site's UI locale list (see `docs/knowledge/legal-documents.md`)
 

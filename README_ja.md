@@ -95,7 +95,7 @@ YAML スキーマ定義から本番対応の Web アプリケーションを生�
 
 ### 監査・コンプライアンス
 
-- **監査ログ** — `x-audit: true` を宣言したエンティティについて記録された作成・更新・削除操作を表示する、スキーマ非依存の read-only ビューア（`app/[locale]/audit_log/page.tsx`）。テーブルは追記専用で、改ざん検知用に日次ダイジェストを連鎖させる（[`docs/knowledge/audit-log-append-only.md`](docs/knowledge/audit-log-append-only.md) を参照）
+- **監査ログ** — `x-audit: true` を宣言したエンティティについて記録された作成・更新・削除操作を表示する、スキーマ非依存の read-only ビューア（`app/[locale]/audit_log/page.tsx`）。テーブルは追記専用で、改ざん検知用に日次ダイジェストを連鎖させる。各行には書き込んだリクエストのサーバー生成 ID（`request_id`）を記録する（[`docs/knowledge/audit-log-append-only.md`](docs/knowledge/audit-log-append-only.md) を参照）
 - **GDPR / データ保護** — `x-pii` フィールド分類（`direct`/`sensitive`/`indirect`）、`anonymizeUser()` 消去関数、`x-gdpr-mode` によるデータ主体区分の分類（`internal`/`consumer`/`both`。スキーマ検証のみで生成コードへの影響なし）、添付ファイル名の AES-256-GCM 暗号化（データベース内）、コメント内の `x-mention` ユーザーメンション解析
 - **利用規約 / プライバシーポリシー**（`/[locale]/legal/terms`、`/[locale]/legal/privacy`）— 登録画面から導線を張ったMarkdown雛形文書。文書の言語追加は `content/legal/<doc>.<locale>.md` ファイルを追加するのみで、サイトUIの言語一覧とは独立（詳細は `docs/knowledge/legal-documents.md`）
 
