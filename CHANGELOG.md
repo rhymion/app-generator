@@ -4,7 +4,7 @@ The format is based on Keep a Changelog (https://keepachangelog.com/),
 and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
-### Changed
+### Security
 - **Stronger password policy** (Issue #1280). Every path that sets a password also refuses one over 72 bytes (bcrypt's
   limit; refused instead of truncated), a common password (`lib/auth/common-passwords.ts`, plus `PASSWORD_DENYLIST_FILE`)
   and one containing the app name or the user's name or email address (plus `PASSWORD_CONTEXT_WORDS`).
