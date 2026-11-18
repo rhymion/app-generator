@@ -20,7 +20,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   nothing changes. Regenerate so the settings update paths store the confirmed address. See
   `docs/knowledge/authentication.md` ("Changing the email address").
 
-## [7.0.0]
+## [7.0.0] - 2026-11-17
 ### Breaking changes
 Regenerate after upgrading. The generator ships no Prisma migrations; write the migration for the schema changes below
 yourself (`prisma migrate dev --create-only`, edit `migration.sql`, deploy with `prisma migrate deploy`), as described in
