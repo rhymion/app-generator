@@ -1967,6 +1967,8 @@ def generate(schema_path: str, output_dir: str) -> None:
             svc_ctx = {**ctx, **service_context(ctx, schema)}
             if can_new or can_edit or can_delete:
                 _write(lib_dir / 'service.ts', _render(env, 'service.ts.jinja2', svc_ctx))
+                # Permission-checked write entry points for hand-written code (Issue #1257).
+                _write(lib_dir / 'checked.ts', _render(env, 'checked_service.ts.jinja2', svc_ctx))
                 if can_new or can_edit:
                     val_ctx = {**ctx, **build_validation_context(ctx)}
                     _write(lib_dir / 'service_validation.ts', _render(env, 'service_validation.ts.jinja2', val_ctx))

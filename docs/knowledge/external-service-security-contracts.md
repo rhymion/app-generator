@@ -26,3 +26,8 @@ There is one: the Redis rate limiter. It fails open because a Redis outage must 
 ## Adding an integration
 
 Add a row with all five fields before the integration merges: who can read the data, the credential's scope and lifetime, what happens when configuration is wrong or the credential leaks, whether it fails open or closed, and the primary source with a version. A fail-open choice needs the reason and a link to the Issue or decision, as above.
+
+Two tests keep the tables complete:
+
+- `code_generator/tests/test_outbound_dependency_classification.py` (Issue #1399) fails when a runtime dependency of the web app (`package.json` `dependencies`) or of the generated mobile app (`code_generator/templates/mobile/package.json.jinja2`) is not classified. Put a new package in `OUTBOUND` with the name of its row in the outbound table of `outbound-communications.md`, or in `NOT_OUTBOUND` with the reason it never contacts another service. The same test fails on a hard-coded `http(s)://host` literal in shipped source (`lib/`, `app/`, `components/`, `auth.ts`, `proxy.ts`, templates) that is in neither `HOST_DESTINATION` (an outbound row) nor `HOST_NOT_A_DESTINATION` (with a reason), so a plain `fetch` to a fixed host is caught too. Entries for packages that are no longer dependencies also fail.
+- `code_generator/tests/test_external_service_contracts.py` (Issue #1241) then fails when a row of the outbound table has no row on this page.
