@@ -33,7 +33,8 @@ upload components load their URLs in the browser and never reach the optimizer.
 | Have I Been Pwned (password breach check) | only with `PASSWORD_BREACH_CHECK=hibp`, when a password is set | `PASSWORD_BREACH_CHECK`, `PASSWORD_BREACH_CHECK_URL` | `api.pwnedpasswords.com` (range API; only 5 hex characters of the password's SHA-1 are sent), or the mirror in the URL |
 | Stripe | only for a schema that declares `x-payment: true` | `STRIPE_SECRET_KEY` | the `stripe` SDK default (`api.stripe.com`); Stripe calls the webhook route inbound |
 
-Audit-log copies are described in `audit-log-append-only.md`, attachment storage in `attachment-storage.md`, Stripe in
+Which data class goes to which destination, and which API routes release which class, is in
+`data-egress-ledger.md`. Audit-log copies are described in `audit-log-append-only.md`, attachment storage in `attachment-storage.md`, Stripe in
 `stripe-payment-integration.md`. The default schema declares no `x-payment` entity and no audit-log bucket variable is set by default, so a default
 application talks to the database, optionally Redis, one attachment backend, and Google when sign-in is configured.
 The default schema leaves email verification off, so a default application sends no mail; outside production
