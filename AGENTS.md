@@ -347,9 +347,12 @@ Rules for routes, Server Actions and services you write in an app:
 1. **Use the wrappers.** Authenticate with `authenticate()`, check the permission with `requireApiPermission()` /
    `requireApiRecordPermission()` (`lib/api-auth.ts`) and rate-limit with `getRateLimiter()` in every route.
    `npm run check:handwritten-routes` flags a writing route without them.
-2. **Write only through the checked service entry points** (`lib/<entity>/service.ts`), never with a direct
-   `prisma.<model>.create/update/delete`; look rows up within the caller's organizations before changing them.
-   `npm run check:generated` enforces this for generated code; for your own code the review does.
+2. **Write entity rows only through the checked entry points** in `lib/<entity>/checked.ts`
+   (`checkedAdd<Entity>`, `checkedUpdate<Entity>`, `checkedDelete<Entity>`), which check the permission and the
+   organization before they call the service. Never call `lib/<entity>/service.ts` directly (it checks nothing) and
+   never write with a direct `prisma.<model>.create/update/delete`. `npm run check:handwritten-routes` flags a direct
+   write in hand-written code unless the file is listed under `direct_writes` with a reason; `npm run check:generated`
+   covers generated code.
 3. **Add a security matrix test for every new route**: an actor without the permission and an actor from another
    organization, with `expectDeniedFor` and a `security-cell:` marker; `npm run check:security-matrix` checks the claims.
 

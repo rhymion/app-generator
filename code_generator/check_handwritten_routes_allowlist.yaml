@@ -58,3 +58,54 @@ exemptions:
   - path: app/api/test-utils/reset-caches/route.ts
     skip: [permission, rate-limit]
     reason: Disabled unless a test token is configured; clears in-process caches only.
+
+# Hand-written files that write through Prisma directly (Issue #1257). Hand-written code writes entity rows
+# through lib/<entity>/checked.ts; these files write rows that no generated service owns (authentication,
+# sessions, notifications, the approval engine, attachments) or act on the caller's own account, and each
+# does its own check. A new file that writes directly fails check:handwritten-routes until it is listed here
+# with a reason. Consumer apps keep their own copy (--allowlist).
+direct_writes:
+  - path: app/[locale]/setting/mfa/actions.ts
+    reason: Turns MFA on/off for the signed-in user's own account (user.update on the session user only); requires a TOTP code.
+  - path: app/api/approval_request/[id]/approve/route.ts
+    reason: Approval engine; the caller must be a listed approver of the request (route check); writes approval_request/approval_history/approvable, which have no generated service.
+  - path: app/api/approval_request/[id]/reject/route.ts
+    reason: Approval engine; same approver check as approve.
+  - path: app/api/approval_request/[id]/withdraw/route.ts
+    reason: Approval engine; only the requester may withdraw their own request.
+  - path: app/api/auth/password-reset/complete/route.ts
+    reason: Public password reset; the single-use emailed token is the credential; updates that user's password and ends their mobile sessions.
+  - path: app/api/auth/register/complete/route.ts
+    reason: Public sign-up (second step); the single-use emailed token is the credential; creates the user.
+  - path: app/api/auth/register/route.ts
+    reason: Public sign-up; creates the user (rate limited per IP and per address).
+  - path: app/api/mobile/auth/refresh/route.ts
+    reason: Mobile token refresh; the refresh token is the credential; rotates that session's mobile_session row.
+  - path: app/api/mobile/auth/sessions/[id]/route.ts
+    reason: Revokes one of the caller's own mobile sessions (filtered by user_id).
+  - path: app/api/mobile/auth/token/route.ts
+    reason: Mobile sign-in; password (and MFA) is the credential; creates the caller's mobile_session row.
+  - path: app/api/notifications/mark-read/route.ts
+    reason: Marks the caller's own notifications as read (filtered by recipient).
+  - path: lib/_notifier.ts
+    reason: Notification fan-out called by the generated service after a checked write; notification has no generated service.
+  - path: lib/account-link/index.ts
+    reason: Unlinks an OAuth account from the signed-in user's own account (filtered by user_id).
+  - path: lib/approval_request/actions_core.ts
+    reason: Approval engine shared by the approval Server Actions and routes; approver/requester checks are done by the callers in the same module.
+  - path: lib/attachment/orphan_cleanup.ts
+    reason: Scheduled task attachment_orphan_cleanup removes uploads never linked to a record; no actor.
+  - path: lib/attachment/owner_cleanup.ts
+    reason: Removes the attachments of a row the generated service just deleted; called after the checked delete.
+  - path: lib/attachment/upload_core.ts
+    reason: POST /api/upload stores a not-yet-linked file for any authenticated caller (rate limited, size/type checked); it reaches a record only when that record is saved through its own permission-checked write path, and an unlinked upload is removed by the attachment_orphan_cleanup task.
+  - path: lib/auth/create-user.ts
+    reason: Auth.js account creation (OAuth first sign-in, sign-up); the identity provider or the sign-up flow is the credential.
+  - path: lib/auth/email-change.ts
+    reason: Completes a verified email change; the single-use emailed token is the credential.
+  - path: lib/idempotency.ts
+    reason: Stores the response of an already-authorized API request under its Idempotency-Key; idempotency_key has no generated service.
+  - path: lib/setting/api-key-actions.ts
+    reason: Issues or revokes the signed-in user's own API key (user.update on the session user only).
+  - path: lib/compliance/anonymize_user.ts
+    reason: Generated from templates/anonymize_user.ts.jinja2 (skipped after generate-code via the manifest); listed for runs without a manifest. Its caller, the user invalidate route, checks user.delete on the record first.

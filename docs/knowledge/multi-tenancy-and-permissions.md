@@ -411,6 +411,37 @@ Run it from the project root after `npm run generate-code` (the manifest is writ
 
 ---
 
+### Hand-written writes: `lib/<entity>/checked.ts`
+
+The generated service functions (`add<Entity>`, `update<Entity>`, `delete<Entity>` in `lib/<entity>/service.ts`) check
+no permission: the generated Server Actions and REST routes check before they call them. Hand-written code (a custom
+route, Server Action, job or integration) writes through the generated `lib/<entity>/checked.ts` instead (Issue #1257):
+
+```ts
+import { checkedUpdateOrder } from '@/lib/order/checked';
+
+const { userId: actorId } = await authenticate(request);
+await checkedUpdateOrder(actorId, id, /* same arguments as updateOrder after actorId, id */);
+```
+
+| Function | Checks, in order, before it calls the service |
+|----------|-----------------------------------------------|
+| `checkedAdd<Entity>(actorId, ...args)` | the entity's `create` permission (403). A client-supplied `organization_id` and foreign keys are then checked by `add<Entity>` itself. |
+| `checkedUpdate<Entity>(actorId, id, ...args)` | the entity's `update` permission (403), before the record is read; the record within the actor's organizations (404); an `x-filter-values` record outside the view (404); the record-scoped permission, so Creator/Assignee grants count only on their own records (403). For `x-self-only`, only the creator may write; another user's record is 404. |
+| `checkedDelete<Entity>(actorId, ids)` | the same checks for every id (all or nothing, duplicates checked once), then the references the records hold (`assertDeleteReferencesReachable<Entity>`), then `delete<Entity>`. |
+
+A denial throws `AppError` (`PERMISSION_DENIED`, `NOT_FOUND`), which `handleApiError` and the Server Action helpers
+translate to 403/404. The arguments after the actor (and id) are exactly the service function's, so the wrapper never
+drifts from the service. The checks live in `lib/_checked_write.ts` (unit-tested with denied, cross-organization,
+filtered-view and self-only cases in `lib/_checked_write.test.ts`); the generated wiring is pinned by
+`code_generator/tests/test_checked_service_template.py`. The module carries no `'use server'`, so it is never a
+client-callable action: resolve the actor from the session or API key first.
+
+`npm run check:handwritten-routes` fails on a direct `prisma.<model>.<write>(` or `tx.<model>.<write>(` in
+hand-written code under `lib/`, `app/`, `components/`, `auth.ts` or `proxy.ts`, unless the file is listed under
+`direct_writes` in `code_generator/check_handwritten_routes_allowlist.yaml` with a reason (authentication tokens,
+sessions, notifications, the approval engine and similar rows that no generated service owns).
+
 ## 4. Org-scoped filtering — when it fires
 
 The org filter is injected at **generation time** (not at runtime configuration). An entity either always has org filtering or never does, based on its schema definition.
