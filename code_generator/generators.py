@@ -1367,6 +1367,12 @@ def actions_context(ctx: dict) -> dict:
         re.sub(rf"\b{re.escape(credential_password_var)}\b", '_credential.password', parent_params)
         if credential_confirmation and credential_password_var else parent_params
     )
+    # Issue #1400: and the confirmed email address -- the current one while a
+    # change waits for the link sent to the new address (email verification on).
+    if credential_confirmation and credential_email_var:
+        _update_params = re.sub(
+            rf"(?<![\w.]){re.escape(credential_email_var)}(?![\w:])", '_credential.email', _update_params,
+        )
 
     def _credential_block(indent: str) -> str:
         if not credential_confirmation:

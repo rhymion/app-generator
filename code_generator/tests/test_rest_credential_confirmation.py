@@ -101,6 +101,14 @@ class TestContext:
         ctx = _ctx(model='account')
         assert ctx['credential_confirmation'] is False
 
+    def test_service_receives_the_confirmed_email(self):
+        # Issue #1400: with email verification on, a changed address waits for
+        # the link sent to it; the service stores what confirmCredentialChange()
+        # returns, never the submitted value.
+        args = _ctx()['service_args_for_update']
+        assert '_credential.email' in args
+        assert not re.search(r'(?<![\w.])email(?![\w:])', args), args
+
 
 class TestRoutes:
     def test_single_put_confirms_before_calling_the_service(self):
@@ -121,6 +129,13 @@ class TestRoutes:
         assert out.index('confirmCredentialChange(id') < out.index('await updateSetting(')
         call = out[out.index('confirmCredentialChange(id'):out.index('await updateSetting(')]
         assert re.search(r'\bemail: email,', call), call
+
+    @pytest.mark.parametrize('template', ['api_detail_route.ts.jinja2', 'api_bulk_route.ts.jinja2'])
+    def test_routes_store_the_confirmed_email(self, template):
+        out = _render(template, _ctx())
+        service_call = out[out.index('await updateSetting('):]
+        service_call = service_call[:service_call.index(';')]
+        assert '_credential.email' in service_call, service_call
 
     def test_other_entities_get_no_confirmation(self):
         ctx = _ctx(self_only=False)
@@ -216,3 +231,16 @@ class TestSettingsForm:
         assert f['credential_confirmation'] is False
         assert 'current_password' not in f['parent_form_data_sets']
         assert 'current_password' not in f['all_parent_fields_jsx']
+
+
+class TestServerAction:
+    def test_settings_action_stores_the_confirmed_email(self):
+        # Issue #1400: the settings screen's Server Action hands the service the
+        # address confirmCredentialChange() returns, as the REST routes do.
+        ctx = _ctx()
+        out = actions_context(ctx)
+        text = out if isinstance(out, str) else repr(out)
+        m = re.search(r'await updateSetting\(([^;]*)\);', text)
+        assert m, text[:2000]
+        assert '_credential.email' in m.group(1), m.group(1)
+        assert '_credential.password' in m.group(1), m.group(1)

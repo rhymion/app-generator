@@ -224,7 +224,14 @@
     "resetPasswordLinkInvalid": "This reset link cannot be used. It may have expired or been used already.",
     "resetPasswordStartAgain": "Request a new link",
     "resetPasswordFailed": "The password could not be changed.",
-    "backToSignIn": "Back to sign in"
+    "backToSignIn": "Back to sign in",
+    "confirmEmailTitle": "Confirm your new email address",
+    "confirmEmailHelper": "Select the button to use this address for your account.",
+    "confirmEmailButton": "Confirm email address",
+    "confirmEmailDone": "Your email address has been changed. Use the new address from now on.",
+    "confirmEmailLinkInvalid": "This confirmation link cannot be used. It may have expired, been used already or been replaced by a newer one.",
+    "confirmEmailTaken": "This address is already used by another account.",
+    "confirmEmailFailed": "The email address could not be changed."
   },
   "Legal": {
     "termsTitle": "Terms of Service",
@@ -479,5 +486,13 @@
   "PasswordResetMail": {
     "subject": "Reset your password for {app}",
     "body": "Someone asked to reset the password of your account on {app}.\n\nTo choose a new password, open this link within one hour:\n{link}\n\nIf this was not you, ignore this message. Your password has not changed."
+  },
+  "EmailChangeMail": {
+    "confirmSubject": "Confirm your new email address for {app}",
+    "confirmBody": "Someone asked to use this email address for an account on {app}.\n\nTo confirm the change, open this link within 24 hours:\n{link}\n\nIf this was not you, ignore this message. Nothing changes.",
+    "requestedSubject": "Email address change requested for {app}",
+    "requestedBody": "Someone asked to change the email address of your account on {app}. The change takes effect only after the link sent to the new address is used; until then this address stays in use.\n\nIf this was not you, sign in and change your password.",
+    "completedSubject": "Your email address for {app} was changed",
+    "completedBody": "The email address of your account on {app} was changed. This address is no longer used for the account.\n\nIf this was not you, contact your administrator."
   }
 }

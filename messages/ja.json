@@ -224,7 +224,14 @@
     "resetPasswordLinkInvalid": "この再設定リンクは使用できません。有効期限が切れているか、すでに使用されています。",
     "resetPasswordStartAgain": "新しいリンクを要求",
     "resetPasswordFailed": "パスワードを変更できませんでした。",
-    "backToSignIn": "サインインに戻る"
+    "backToSignIn": "サインインに戻る",
+    "confirmEmailTitle": "新しいメールアドレスの確認",
+    "confirmEmailHelper": "ボタンを押すと、このアドレスがアカウントのメールアドレスになります。",
+    "confirmEmailButton": "メールアドレスを確定",
+    "confirmEmailDone": "メールアドレスを変更しました。今後は新しいアドレスを使用してください。",
+    "confirmEmailLinkInvalid": "この確認リンクは使用できません。有効期限が切れているか、すでに使用されたか、新しいリンクに置き換えられています。",
+    "confirmEmailTaken": "このアドレスはすでに別のアカウントで使用されています。",
+    "confirmEmailFailed": "メールアドレスを変更できませんでした。"
   },
   "Legal": {
     "termsTitle": "利用規約",
@@ -479,5 +486,13 @@
   "PasswordResetMail": {
     "subject": "{app} のパスワード再設定",
     "body": "{app} のアカウントのパスワード再設定が要求されました。\n\n新しいパスワードを設定するには、1時間以内に次のリンクを開いてください:\n{link}\n\n心当たりがない場合は、このメールを無視してください。パスワードは変更されていません。"
+  },
+  "EmailChangeMail": {
+    "confirmSubject": "{app} の新しいメールアドレスの確認",
+    "confirmBody": "{app} のアカウントでこのメールアドレスを使用するよう依頼がありました。\n\n変更を確定するには、24 時間以内に次のリンクを開いてください。\n{link}\n\n心当たりがない場合は、このメールを無視してください。何も変更されません。",
+    "requestedSubject": "{app} のメールアドレス変更の依頼",
+    "requestedBody": "{app} のアカウントのメールアドレスを変更する依頼がありました。新しいアドレスに送ったリンクが使われるまで変更は反映されず、このアドレスが引き続き使われます。\n\n心当たりがない場合は、サインインしてパスワードを変更してください。",
+    "completedSubject": "{app} のメールアドレスが変更されました",
+    "completedBody": "{app} のアカウントのメールアドレスが変更されました。このアドレスは今後このアカウントでは使われません。\n\n心当たりがない場合は、管理者に連絡してください。"
   }
 }

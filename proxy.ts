@@ -17,7 +17,7 @@ const CSP_REPORT_ONLY_HEADER = 'Content-Security-Policy-Report-Only';
 const CLEAR_SITE_DATA_ON_SIGN_OUT = '"cache", "cookies", "storage"';
 
 // Paths that do not require authentication (matched after stripping locale prefix)
-const PUBLIC_PATHS = ['/login', '/register', '/forgot-password', '/reset-password', '/docs', '/legal'];
+const PUBLIC_PATHS = ['/login', '/register', '/forgot-password', '/reset-password', '/confirm-email', '/docs', '/legal'];
 
 // Map a request to the rate-limit bucket name. Returns null when the request
 // shouldn't be rate-limited (e.g. `/api/auth/session` is hit on every page

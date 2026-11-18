@@ -8,6 +8,11 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 - **Auth.js cookies use the `__Host-` prefix over https** (Issue #1274) when `AUTH_URL` / `NEXTAUTH_URL` is https. The
   session cookie is renamed, so every user signs in again once. `AUTH_COOKIE_HOST_PREFIX=false` keeps the `__Secure-`
   names for a deployment that shares the cookies across hosts. See `docs/knowledge/authentication.md` ("Cookie names").
+- **A new email address is verified before it is stored** when `x-generator.email-verification` is on (Issue #1400).
+  Saving a changed address mails a single-use link to the new address and a notice to the current one; the address
+  changes when the link is used (`/confirm-email`, `POST /api/auth/email-change/complete`). With email verification off
+  nothing changes. Regenerate so the settings update paths store the confirmed address. See
+  `docs/knowledge/authentication.md` ("Changing the email address").
 
 ## [7.0.0]
 ### Breaking changes

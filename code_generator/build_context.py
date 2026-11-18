@@ -4930,6 +4930,15 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
             '_credential.mfaEnabled',
             service_args_for_update,
         )
+        # Issue #1400: with email verification on, a changed address is stored
+        # only once the link sent to it is used; until then the service keeps
+        # the current one, which confirmCredentialChange() hands back.
+        if credential_email_var:
+            service_args_for_update = re.sub(
+                rf"(?<![\w.]){re.escape(credential_email_var)}(?![\w:])",
+                '_credential.email',
+                service_args_for_update,
+            )
 
     # CSV import -> service.ts convergence (cmd_996, Issue #93; widened by
     # cmd_1124 to also cover embedded DataGrid children -- a JSON Schema

@@ -29,7 +29,7 @@ upload components load their URLs in the browser and never reach the optimizer.
 | Google token exchange | with `AUDIT_LOG_GCS_AUTH=vercel-oidc` | `GCP_*` workload-identity variables | `sts.googleapis.com`, `iamcredentials.googleapis.com` |
 | Amazon S3 (audit-log copies) | when `AUDIT_LOG_S3_BUCKET` is set | `AUDIT_LOG_S3_*` | the `@aws-sdk/client-s3` default for `AUDIT_LOG_S3_REGION` |
 | Google sign-in | when `google` is listed in the site's auth providers and `GOOGLE_CLIENT_ID` is set | `siteConfig.auth.providers` | Google's OpenID Connect endpoints, through Auth.js |
-| SMTP server (mail) | when `SMTP_URL` is set; only self-registration with `x-generator.email-verification.enabled` sends mail today | `SMTP_URL`, `MAIL_FROM` | the host in the URL |
+| SMTP server (mail) | when `SMTP_URL` is set; only flows that need `x-generator.email-verification.enabled` send mail today: self-registration, password reset and the verified email change | `SMTP_URL`, `MAIL_FROM` | the host in the URL |
 | Stripe | only for a schema that declares `x-payment: true` | `STRIPE_SECRET_KEY` | the `stripe` SDK default (`api.stripe.com`); Stripe calls the webhook route inbound |
 
 Audit-log copies are described in `audit-log-append-only.md`, attachment storage in `attachment-storage.md`, Stripe in

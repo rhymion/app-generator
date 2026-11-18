@@ -1,10 +1,12 @@
 import bcrypt from 'bcryptjs';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { findUniqueMock, disableMfaMock, checkMock } = vi.hoisted(() => ({
+const { findUniqueMock, disableMfaMock, checkMock, verificationOn, startEmailChangeMock } = vi.hoisted(() => ({
   findUniqueMock: vi.fn(),
   disableMfaMock: vi.fn(),
   checkMock: vi.fn(),
+  verificationOn: { value: false },
+  startEmailChangeMock: vi.fn(),
 }));
 
 vi.mock('@/lib/prisma', () => ({ default: { user: { findUnique: findUniqueMock } } }));
@@ -18,6 +20,10 @@ vi.mock('@/lib/api-auth', () => ({
   },
 }));
 vi.mock('@/lib/rate-limit', () => ({ getRateLimiter: () => ({ check: checkMock }) }));
+vi.mock('./email-change', () => ({
+  emailChangeNeedsVerification: () => verificationOn.value,
+  startEmailChange: startEmailChangeMock,
+}));
 
 import { ApiError } from '@/lib/api-auth';
 import { MfaRateLimitedError } from '@/lib/mfa/errors';
@@ -42,6 +48,8 @@ describe('confirmCredentialChange', () => {
     findUniqueMock.mockResolvedValue({ password: hash, mfa_enabled: true, email: 'me@example.com' });
     checkMock.mockResolvedValue({ allowed: true });
     disableMfaMock.mockResolvedValue(undefined);
+    startEmailChangeMock.mockResolvedValue(undefined);
+    verificationOn.value = false;
   });
 
   it('changes nothing and asks for nothing when neither field is submitted', async () => {
@@ -96,12 +104,45 @@ describe('confirmCredentialChange', () => {
 
   it('accepts a changed email address once the current password is confirmed, without touching the password', async () => {
     const out = await confirmCredentialChange('u1', { email: 'other@example.com', currentPassword: 'current-pw' });
-    expect(out).toEqual({ password: '', mfaEnabled: true });
+    expect(out).toEqual({ password: '', mfaEnabled: true, email: 'other@example.com' });
+    expect(startEmailChangeMock).not.toHaveBeenCalled();
   });
 
   it('asks for nothing when the email is resent unchanged, whatever its case or padding', async () => {
-    expect(await confirmCredentialChange('u1', { email: ' ME@Example.com ' })).toEqual({ password: '', mfaEnabled: true });
+    expect(await confirmCredentialChange('u1', { email: ' ME@Example.com ' })).toEqual({ password: '', mfaEnabled: true, email: ' ME@Example.com ' });
     expect(checkMock).not.toHaveBeenCalled();
+  });
+
+  // Issue #1400: with email verification on, the new address waits for its link.
+  describe('with email verification on', () => {
+    beforeEach(() => {
+      verificationOn.value = true;
+    });
+
+    it('keeps the current address and mails a link to the new one', async () => {
+      const out = await confirmCredentialChange('u1', { email: 'other@example.com', currentPassword: 'current-pw' });
+      expect(out.email).toBe('me@example.com');
+      expect(startEmailChangeMock).toHaveBeenCalledWith({ userId: 'u1', currentEmail: 'me@example.com', newEmail: 'other@example.com' });
+    });
+
+    it('sends nothing when the current password is wrong', async () => {
+      await rejection(confirmCredentialChange('u1', { email: 'other@example.com', currentPassword: 'nope' }));
+      expect(startEmailChangeMock).not.toHaveBeenCalled();
+    });
+
+    it('sends nothing when the address is resent unchanged', async () => {
+      const out = await confirmCredentialChange('u1', { email: 'Me@Example.com' });
+      expect(out.email).toBe('Me@Example.com');
+      expect(startEmailChangeMock).not.toHaveBeenCalled();
+    });
+
+    it('sends nothing when another part of the save is refused', async () => {
+      disableMfaMock.mockRejectedValue(new Error('Invalid MFA code'));
+      await rejection(confirmCredentialChange('u1', {
+        email: 'other@example.com', currentPassword: 'current-pw', mfaEnabled: false, mfaCode: '000000',
+      }));
+      expect(startEmailChangeMock).not.toHaveBeenCalled();
+    });
   });
 
   it('answers 429 once the confirmation budget is spent, before comparing', async () => {

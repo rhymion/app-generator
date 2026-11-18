@@ -59,7 +59,7 @@ tables at the bottom of `prisma/schema.prisma`, a deliberate exception to
 the snake_case convention. `Account` is populated on every OAuth sign-in;
 `Session` is **unused today** (we run on `session.strategy = "jwt"` —
 see "Session strategy" below); `VerificationToken` holds the sign-up and
-password-reset link tokens (hashed), see "Self-registration" and "Password reset".
+password-reset and email-change link tokens (hashed), see "Self-registration", "Password reset" and "Changing the email address".
 
 Two gates have to agree before a provider button works:
 
@@ -595,6 +595,45 @@ optionally `SESSION_ABSOLUTE_MAX_AGE_SECONDS`). API keys are not rotated. Tests:
 `app/[locale]/forgot-password/page.test.tsx`,
 `app/[locale]/reset-password/ResetPasswordForm.test.tsx`,
 `app/[locale]/login/page.test.tsx`.
+
+**Changing the email address** (Issue #1400). Changing the address always needs the current
+password (Issue #1285; `confirmCredentialChange()` in `lib/auth/credential-confirmation.ts`, used by
+the settings screen's Server Action, `PUT /api/setting/:id` and `PUT /api/setting/bulk`). What
+happens next depends on email verification (`siteConfig.auth.registration.emailVerification`):
+
+| | Verification off (default) | Verification on |
+|---|---|---|
+| Stored address on save | the new address, at once (unchanged behavior) | the current address; the save succeeds and the other fields are stored |
+| Mail | none | a link `/{locale}/confirm-email?token=…` to the new address; a notice to the current address that a change was requested |
+| Address changes | at once | when the link is used: `/confirm-email` shows a button (opening the link alone changes nothing, so a mail scanner cannot use it) that posts to `POST /api/auth/email-change/complete` `{ token, locale? }`, which stores the new address with `emailVerified` set, audits `auth:emailChange.complete` and notifies the previous address |
+
+The generated update paths hand the service `_credential.email`, the address
+`confirmCredentialChange()` returns, never the submitted one; with verification on that is the
+current address while the change is pending, so a REST or settings save cannot store an unproven
+address. The current address keeps working for sign-in and mail until the link is used. The
+check runs last in `confirmCredentialChange()`, so a save refused for another reason (wrong
+password, wrong MFA code) sends no mail.
+
+`startEmailChange()` (`lib/auth/email-change.ts`) sends nothing, and the save answers the same,
+when the new address already belongs to another account or its per-address budget
+`auth:register:email` (3 / hour, shared with sign-up) is spent, so a save does not reveal which
+addresses are registered. Tokens (`lib/auth/email-change-token.ts`): same storage as sign-up and
+reset tokens, `identifier = email-change:<user id>:<new address>`, `token = sha256(token)`, valid
+**24 hours**; a new request of the same account replaces its earlier link, and a link works once
+(conditional delete inside the transaction that changes the address). The completion step
+answers `400 INVALID_TOKEN` for an unknown, expired, used or replaced token and for an erased
+account, `409 EMAIL_TAKEN` when another account took the address after the link was sent, and
+`404` while verification is off; it is limited per IP by `auth:register:complete`. Link host from
+`resolveExternalUrl()`; `/confirm-email` sends `Referrer-Policy: no-referrer` and drops the token
+from the address bar. Mail text: the `EmailChangeMail` messages; the notices to the current
+address do not name the new one. A failed notice is logged and does not undo the change.
+
+The settings screen does not yet show that a change is pending: after the save it still shows
+the current address. Tests: `lib/auth/credential-confirmation.test.ts`,
+`lib/auth/email-change.test.ts`, `app/api/auth/email-change/complete/route.test.ts`,
+`app/[locale]/confirm-email/ConfirmEmailForm.test.tsx`,
+`code_generator/tests/test_rest_credential_confirmation.py` (the generated paths store
+`_credential.email`).
 
 **Lost password without email verification, and a lost second factor** (operator
 procedure, ASVS V6.4.3, V6.4.4). A user who lost the authenticator first uses a

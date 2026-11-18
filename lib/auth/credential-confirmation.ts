@@ -6,6 +6,7 @@ import { disableMfa } from '@/lib/mfa/enrollment';
 import { MfaRateLimitedError } from '@/lib/mfa/errors';
 import { verifyPassword } from './password-check';
 import { passwordPolicyError } from './password-policy';
+import { emailChangeNeedsVerification, startEmailChange } from './email-change';
 
 export type CredentialChangeInput = {
   /** New password in plain text, as submitted by the caller. Empty or absent leaves the password unchanged. */
@@ -25,6 +26,11 @@ export type ConfirmedCredentialChange = {
   password: string;
   /** The MFA state to store. */
   mfaEnabled: boolean;
+  /**
+   * The email address to store. The submitted value, except while a changed address waits for its
+   * verification link (email verification on, Issue #1400): then the current address, unchanged.
+   */
+  email: string;
 };
 
 /**
@@ -35,7 +41,10 @@ export type ConfirmedCredentialChange = {
  * mobile token alone is not enough to change either.
  *
  * Returns the values to hand to the service layer: the new password already
- * hashed, and the MFA state to store. Turning MFA off goes through
+ * hashed, the MFA state to store and the email address to store. With email
+ * verification on, a changed address is not stored here: the new address gets
+ * a single-use link and the current one stays until the link is used
+ * (lib/auth/email-change.ts, Issue #1400). Turning MFA off goes through
  * `disableMfa`, which also clears the secret and the recovery codes, exactly as
  * the settings page does. Turning MFA on is rejected because it needs the
  * enrollment flow (secret, QR code, first code) on the settings page.
@@ -98,5 +107,12 @@ export async function confirmCredentialChange(
     mfaEnabled = false;
   }
 
-  return { password, mfaEnabled };
+  // Issue #1400: last, once every other check has passed, so a refused save sends no mail.
+  let email = input.email as string;
+  if (changesEmail && emailChangeNeedsVerification()) {
+    await startEmailChange({ userId, currentEmail: user.email, newEmail: input.email as string });
+    email = user.email;
+  }
+
+  return { password, mfaEnabled, email };
 }
