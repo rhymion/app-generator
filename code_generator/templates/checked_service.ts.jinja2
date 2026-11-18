@@ -7,7 +7,7 @@
 // service function with the same arguments. A denial throws AppError (PERMISSION_DENIED -> 403,
 // NOT_FOUND -> 404), which handleApiError and the Server Action helpers already translate.
 //
-// Plain module (no 'use server'): the actor id is a parameter, so these must never be client-callable.
+// Plain module, deliberately without the Server Action directive: the actor id is a parameter, so these must never be client-callable.
 // Resolve the actor from the session or the API key first (authenticate() / getSessionUserIdOrThrow()).
 {% if can_update or can_delete %}
 import prisma from '@/lib/prisma';

@@ -187,8 +187,10 @@ def test_entry_for_a_generated_file_is_not_stale(tmp_path):
 
 def test_every_tracked_direct_write_in_this_repository_is_listed():
     import subprocess
-    root = _ALLOWLIST_PATH.parents[1]
+    # Resolved from this file, not _ALLOWLIST_PATH: that one is relative when the module is imported through a
+    # relative sys.path entry, and another test may have changed the working directory.
+    root = Path(__file__).resolve().parents[2]
     tracked = set(subprocess.run(['git', 'ls-files'], cwd=root, capture_output=True, text=True, check=True).stdout.split())
-    violations, stale = check(root)
+    violations, stale = check(root, root / 'code_generator' / 'check_handwritten_routes_allowlist.yaml')
     assert not [v for v in violations if v.guard == 'direct-write' and v.path in tracked]
     assert not [s for s in stale if 'direct-write' in s]

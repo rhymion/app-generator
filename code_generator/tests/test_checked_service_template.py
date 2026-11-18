@@ -35,8 +35,8 @@ def _fn(out: str, name: str) -> str:
 
 def test_not_a_server_action_module():
     out = _render()
-    assert "'use server'" not in out.split('\n// Plain module')[0]
-    assert not re.search(r"^\s*['\"]use server['\"]", out, re.M)
+    assert 'use server' not in out
+    assert 'use server' not in (TEMPLATES_DIR / 'checked_service.ts.jinja2').read_text(encoding='utf-8')
 
 
 def test_each_function_checks_before_it_writes():

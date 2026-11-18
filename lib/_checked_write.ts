@@ -16,7 +16,7 @@
 // references held by a deleted record by `assertDeleteReferencesReachable<Entity>`, which the generated
 // `checkedDelete<Entity>` calls.
 //
-// Plain module (no 'use server'): exported functions take the actor id as a parameter and must never become
+// Plain module, deliberately without the Server Action directive: exported functions take the actor id as a parameter and must never become
 // client-callable Server Actions.
 import { AppError } from '@/lib/_errors';
 import { requireEntityPermission, requireRecordPermission, type RecordContext } from '@/lib/authz';
