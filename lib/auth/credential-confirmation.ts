@@ -10,9 +10,11 @@ import { verifyMfaCode } from '@/lib/mfa/verify';
 import type { ActionFailure } from '@/lib/_errors';
 import { emailChangeNeedsVerification, startEmailChange } from './email-change';
 import { endSessionsAfterChange } from './end-sessions';
+import { isRegistrationEmailAllowed, registrationAllowedDomains } from './domain-allow-list';
+import { siteConfig } from '@/lib/site-config';
 
 /** The form field a refusal is about, for the settings screen's Server Action. */
-export type CredentialField = 'current_password' | 'mfa_code' | 'password';
+export type CredentialField = 'current_password' | 'mfa_code' | 'password' | 'email';
 
 /**
  * A refused credential change. An `ApiError` (so the REST routes answer its status as before) that
@@ -39,6 +41,9 @@ export function credentialActionFailure(e: ApiError): ActionFailure {
   if (field === 'password') {
     return { ok: false, errorCode: 'VALIDATION', field, reason: 'invalid', messageKey: 'Errors.passwordTooWeak' };
   }
+  if (field === 'email') {
+    return { ok: false, errorCode: 'VALIDATION', field, reason: 'invalid', messageKey: 'Errors.emailDomainNotAllowed' };
+  }
   const prefix = field === 'mfa_code' ? 'Errors.mfaCode' : 'Errors.currentPassword';
   return {
     ok: false,
@@ -48,6 +53,9 @@ export function credentialActionFailure(e: ApiError): ActionFailure {
     messageKey: `${prefix}${status === 400 ? 'Required' : status === 429 ? 'RateLimited' : 'Incorrect'}`,
   };
 }
+
+/** The refusal for a new address outside the allow-list; like sign-up's, it does not name the list. */
+export const EMAIL_DOMAIN_NOT_ALLOWED = 'This email address cannot be used.';
 
 export type CredentialChangeInput = {
   /** New password in plain text, as submitted by the caller. Empty or absent leaves the password unchanged. */
@@ -92,6 +100,10 @@ export type ConfirmedCredentialChange = {
  * `disableMfa`, which also clears the secret and the recovery codes, exactly as
  * the settings page does. Turning MFA on is rejected because it needs the
  * enrollment flow (secret, QR code, first code) on the settings page.
+ *
+ * A new email address must pass the registration domain allow-list
+ * (`siteConfig.auth.registrationAllowedDomains`, Issue #1402), the same rule
+ * sign-up applies; an address outside it is refused before any other check.
  */
 export async function confirmCredentialChange(
   userId: string,
@@ -108,6 +120,13 @@ export async function confirmCredentialChange(
     typeof input.email === 'string' &&
     input.email.trim().toLowerCase() !== (user.email ?? '').trim().toLowerCase();
   const turnsMfaOff = typeof input.mfaEnabled === 'boolean' && !input.mfaEnabled && user.mfa_enabled;
+
+  // Issue #1402: a new address obeys the same domain allow-list as sign-up. Checked first, so a
+  // refused address uses no password or MFA attempt and sends no mail. An unchanged address is not
+  // re-checked, so an account registered before the list was narrowed can still save its settings.
+  if (changesEmail && !isRegistrationEmailAllowed(input.email as string, registrationAllowedDomains(siteConfig.auth))) {
+    throw new CredentialConfirmationError(400, EMAIL_DOMAIN_NOT_ALLOWED, 'email');
+  }
 
   if (typeof input.mfaEnabled === 'boolean' && input.mfaEnabled && !user.mfa_enabled) {
     throw new ApiError(400, 'MFA can only be turned on through the enrollment flow on the settings page');

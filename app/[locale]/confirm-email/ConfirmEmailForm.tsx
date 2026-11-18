@@ -48,6 +48,8 @@ export default function ConfirmEmailForm() {
         setLinkInvalid(true);
       } else if (data.code === "EMAIL_TAKEN") {
         setError(t("confirmEmailTaken"));
+      } else if (data.code === "EMAIL_NOT_ALLOWED") {
+        setError(t("confirmEmailNotAllowed"));
       } else {
         setError(t("confirmEmailFailed"));
       }

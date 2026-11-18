@@ -5,6 +5,12 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 ### Security
+- **The registration domain allow-list also applies to a changed email address** (Issue #1402). With
+  `registrationAllowedDomains` / `REGISTRATION_ALLOWED_DOMAINS` set, the settings screen and `PUT /api/setting/:id` /
+  `PUT /api/setting/bulk` refuse a new address outside the list (`400`; a `VALIDATION` failure on `email` on the
+  screen), before the password check and any mail. With email verification on, a pending change link to an address
+  that left the list since it was sent answers `403 EMAIL_NOT_ALLOWED`. An unchanged address is not re-checked. See
+  `docs/knowledge/authentication.md` ("Changing the email address").
 - **Stronger password policy** (Issue #1280). Every path that sets a password also refuses one over 72 bytes (bcrypt's
   limit; refused instead of truncated), a common password (`lib/auth/common-passwords.ts`, plus `PASSWORD_DENYLIST_FILE`)
   and one containing the app name or the user's name or email address (plus `PASSWORD_CONTEXT_WORDS`).

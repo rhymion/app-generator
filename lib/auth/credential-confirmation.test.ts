@@ -1,5 +1,5 @@
 import bcrypt from 'bcryptjs';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { findUniqueMock, disableMfaMock, verifyMfaCodeMock, checkMock, verificationOn, startEmailChangeMock, endSessionsMock } =
   vi.hoisted(() => ({
@@ -32,6 +32,7 @@ vi.mock('./email-change', () => ({
 
 import { ApiError } from '@/lib/api-auth';
 import { MfaRateLimitedError } from '@/lib/mfa/errors';
+import { siteConfig } from '@/lib/site-config';
 import { CredentialConfirmationError, confirmCredentialChange, credentialActionFailure } from './credential-confirmation';
 
 async function rejection(promise: Promise<unknown>): Promise<ApiError> {
@@ -161,6 +162,58 @@ describe('confirmCredentialChange', () => {
         email: 'other@example.com', currentPassword: 'current-pw', mfaEnabled: false, mfaCode: '000000',
       }));
       expect(startEmailChangeMock).not.toHaveBeenCalled();
+    });
+  });
+
+  // Issue #1402: a new address obeys the registration domain allow-list, as sign-up does.
+  describe('with a registration domain allow-list', () => {
+    const auth = siteConfig.auth as { registrationAllowedDomains: readonly string[] };
+    let savedDomains: readonly string[];
+
+    beforeEach(() => {
+      savedDomains = auth.registrationAllowedDomains;
+      auth.registrationAllowedDomains = ['example.com'];
+    });
+    afterEach(() => {
+      auth.registrationAllowedDomains = savedDomains;
+    });
+
+    it.each([false, true])('refuses an address outside the list on the email field (verification %s)', async (on) => {
+      verificationOn.value = on;
+      const err = await rejection(confirmCredentialChange('u1', { email: 'me@evil.net', currentPassword: 'current-pw' }));
+      expect(err).toBeInstanceOf(CredentialConfirmationError);
+      expect((err as CredentialConfirmationError).field).toBe('email');
+      expect(err.statusCode).toBe(400);
+      // The message does not name the list.
+      expect(err.message).not.toContain('example.com');
+      expect(startEmailChangeMock).not.toHaveBeenCalled();
+      expect(endSessionsMock).not.toHaveBeenCalled();
+    });
+
+    it('refuses a subdomain or a look-alike domain', async () => {
+      for (const email of ['me@sub.example.com', 'me@example.com.evil.net', '"me@example.com"@evil.net']) {
+        const err = await rejection(confirmCredentialChange('u1', { email, currentPassword: 'current-pw' }));
+        expect((err as CredentialConfirmationError).field).toBe('email');
+      }
+    });
+
+    it('refuses before the password check, so no confirmation attempt or MFA code is used', async () => {
+      findUniqueMock.mockResolvedValue({ password: hash, mfa_enabled: true, email: 'me@example.com' });
+      await rejection(confirmCredentialChange('u1', { email: 'me@evil.net', currentPassword: 'nope', mfaCode: '123456' }));
+      expect(checkMock).not.toHaveBeenCalled();
+      expect(verifyMfaCodeMock).not.toHaveBeenCalled();
+    });
+
+    it('accepts an address in a listed domain, whatever its case', async () => {
+      const out = await confirmCredentialChange('u1', { email: 'Other@EXAMPLE.com', currentPassword: 'current-pw' });
+      expect(out.email).toBe('Other@EXAMPLE.com');
+    });
+
+    it('does not re-check an unchanged address, so an account outside a narrowed list can still save', async () => {
+      findUniqueMock.mockResolvedValue({ password: hash, mfa_enabled: false, email: 'me@legacy.org' });
+      expect(await confirmCredentialChange('u1', { email: 'me@legacy.org' })).toMatchObject({ email: 'me@legacy.org' });
+      const out = await confirmCredentialChange('u1', { email: 'me@legacy.org', password: 'new-pw-123', currentPassword: 'current-pw' });
+      expect(out.password).not.toBe('');
     });
   });
 
@@ -298,6 +351,9 @@ describe('credentialActionFailure', () => {
     });
     expect(credentialActionFailure(new CredentialConfirmationError(400, 'x', 'password'))).toMatchObject({
       field: 'password', messageKey: 'Errors.passwordTooWeak',
+    });
+    expect(credentialActionFailure(new CredentialConfirmationError(400, 'x', 'email'))).toMatchObject({
+      errorCode: 'VALIDATION', field: 'email', reason: 'invalid', messageKey: 'Errors.emailDomainNotAllowed',
     });
   });
 

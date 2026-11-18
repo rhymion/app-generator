@@ -164,6 +164,42 @@ describe('POST /api/auth/email-change/complete', () => {
     expect(userUpdate).not.toHaveBeenCalled();
   });
 
+  // Issue #1402: the list may be narrowed after the link was sent.
+  it('answers 403 when the new address left the registration domain allow-list after the link was sent', async () => {
+    const auth = siteConfig.auth as { registrationAllowedDomains: readonly string[] };
+    const savedDomains = auth.registrationAllowedDomains;
+    try {
+      const token = await issueEmailChangeToken(prisma, 'u1', 'new@example.com');
+      auth.registrationAllowedDomains = ['corp.example'];
+      const res = await POST(req({ token }));
+      expect(res.status).toBe(403);
+      const body = await res.json();
+      expect(body.code).toBe('EMAIL_NOT_ALLOWED');
+      expect(JSON.stringify(body)).not.toContain('corp.example');
+      expect(userUpdate).not.toHaveBeenCalled();
+      expect(sendMail).not.toHaveBeenCalled();
+      // The link is used up.
+      auth.registrationAllowedDomains = savedDomains;
+      expect((await POST(req({ token }))).status).toBe(400);
+      expect(userUpdate).not.toHaveBeenCalled();
+    } finally {
+      auth.registrationAllowedDomains = savedDomains;
+    }
+  });
+
+  it('stores an address in a listed domain', async () => {
+    const auth = siteConfig.auth as { registrationAllowedDomains: readonly string[] };
+    const savedDomains = auth.registrationAllowedDomains;
+    try {
+      auth.registrationAllowedDomains = ['example.com'];
+      const token = await issueEmailChangeToken(prisma, 'u1', 'new@example.com');
+      expect((await POST(req({ token }))).status).toBe(200);
+      expect(userUpdate).toHaveBeenCalledTimes(1);
+    } finally {
+      auth.registrationAllowedDomains = savedDomains;
+    }
+  });
+
   it('refuses the link of an erased account', async () => {
     const token = await issueEmailChangeToken(prisma, 'u1', 'new@example.com');
     users[0].anonymized_at = new Date();
