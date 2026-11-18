@@ -8,6 +8,7 @@ import { siteConfig } from "@/lib/site-config";
 import { passwordPolicyError } from "@/lib/auth/password-policy";
 import { consumeResetLink, peekResetLinkEmail } from "@/lib/auth/password-reset-token";
 import { clearFailedSignIns } from "@/lib/auth/account-lockout";
+import { revokeUserWebSessions } from "@/lib/auth/web-session";
 import { verifyMfaCode } from "@/lib/mfa/verify";
 import { MfaRateLimitedError } from "@/lib/mfa/errors";
 import { recordAuditEvent } from "@/lib/audit-log";
@@ -86,6 +87,8 @@ export async function POST(request: Request) {
         where: { user_id: user.id, revoked_at: null },
         data: { revoked_at: new Date() },
       });
+      // Issue #1127: every web session of the account ends as well.
+      await revokeUserWebSessions(user.id, {}, tx);
       await recordAuditEvent({
         action: "auth:passwordReset",
         actor_user_id: user.id,

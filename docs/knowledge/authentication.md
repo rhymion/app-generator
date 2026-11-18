@@ -9,7 +9,8 @@ The auth stack is **Auth.js v5** (`next-auth@5.0.0-beta`) on top of
 — Auth.js v5's mixed-strategy story doesn't survive runtime when both
 Credentials and OAuth are configured (see "Session strategy" below).
 The adapter still writes `User` / `Account` rows on OAuth sign-in for
-identity stability, just not `Session` rows. MFA / TOTP is shipped for
+identity stability, just not `Session` rows; server-side revocation uses the
+app's own `web_session` rows instead (see "Server-side session revocation"). MFA / TOTP is shipped for
 both the credentials provider and the OAuth path (opt-in per user, see
 `lib/mfa/` and "MFA on the OAuth path" below); admin-mandated MFA is
 not in scope for this iteration.
@@ -101,8 +102,8 @@ applies to the web (Auth.js) session only; mobile access and refresh tokens have
 
 Not implemented today, and tracked in Issue #1284:
 
-- **Concurrent-session policy.** The JWT strategy keeps no server-side session row (see below), so the number of
-  simultaneous web sessions per user is neither counted nor capped. A cap depends on Issue #1127.
+- **Concurrent-session policy.** Each web session has a `web_session` row (see "Server-side session revocation"
+  below), so the simultaneous sessions of a user can be counted, but nothing caps their number yet.
 - **Identity-provider session.** Signing out of the app ends the app cookie only. A Google session stays signed in at
   Google, and the app does not read or end it. The app session (relying party) and the provider session are independent.
 
@@ -151,8 +152,55 @@ Two paths to recover server-side revocation when needed:
    Auth.js repo trail this pattern; brittle and not officially
    supported.
 
-Server-side revocation for the credentials boundary is therefore
-explicitly **not** delivered by this iteration.
+Neither path is taken. Server-side revocation is delivered for both
+providers by the `web_session` record described next, on top of the JWT.
+
+### Server-side session revocation (`web_session`)
+
+Issue #1127. The web session is still the signed JWT cookie, but every
+sign-in (credentials, Google, any provider) also writes a `web_session` row
+(`prisma/schema.prisma`; `id`, `user_id`, `expires_at`, `created_at`, no
+device or address data) and `jwt()` stamps its id into the token as `sid`.
+On every later session read `jwt()` loads the row **in the user lookup it
+already makes** (`prisma.user.findUnique` with
+`relationLoadStrategy: "join"` and `web_sessions: { where: { id: sid } }`;
+the `relationJoins` preview feature turns this into one SQL statement with
+a lateral join), so the check adds no database round trip. When the row is
+missing, `jwt()` returns `null` and Auth.js clears the cookie: the request
+is unauthenticated.
+
+| To end | Call (`lib/auth/web-session.ts`) |
+|--------|-----------------------------------|
+| one session | `revokeWebSession(sessionId)` |
+| every session of a user | `revokeUserWebSessions(userId)` |
+| every session but the current one | `revokeUserWebSessions(userId, { exceptSessionId })` |
+
+Wired in today: **sign-out** (`events.signOut` deletes the session's row, so
+a copy of the cookie taken before sign-out stops working) and **password
+reset** (`/api/auth/password-reset/complete` deletes every row of the user in
+its transaction). An erased user's sessions already end through
+`anonymized_at`. Not wired in yet: a settings password change, an MFA change,
+an administrator "end this user's sessions" action and a list of a user's
+own web sessions; they can call the functions above.
+
+Row lifetime. `expires_at` only decides when an unused row may be deleted;
+the cookie's expiry (`SESSION_MAX_AGE_SECONDS`) and the absolute lifetime
+still end the session. A row is written to outlive the cookie by one refresh
+interval (`maxAge + updateAge`) and pushed forward once less than `maxAge` is
+left, which an active session reaches at most once per
+`SESSION_UPDATE_AGE_SECONDS` (default once a day): that `UPDATE` and the
+`INSERT` at sign-in are the only writes. A sign-in deletes that user's
+expired rows; `purgeExpiredWebSessions()` deletes everyone's (call it from a
+scheduled job if many users stop signing in).
+
+A token without `sid` (issued before this release) is treated as no session,
+so every user signs in again once after the upgrade. The `trigger: "update"`
+call that completes the MFA challenge goes through the same check, so it
+cannot revive a revoked session.
+
+Cost: the revocation check adds no query to a session read; the user lookup
+`jwt()` already made carries it (`auth.web-session.test.ts` asserts the query
+shape and that no other call is made when no extension is due).
 
 `AUTH_SECRET` is required and must be distinct per environment — the
 test env has a generated 64-char hex; production must set its own.
@@ -587,9 +635,9 @@ per IP), `auth:password-reset:email` (3 mails / hour per address; past it still 
 `resolveExternalUrl()`; `/reset-password` sends `Referrer-Policy: no-referrer` and drops
 the token from the address bar once read. Mail text: the `PasswordResetMail` messages.
 
-Not done by a reset: **web sessions are not ended**. They are JWTs with no server-side
-revocation (#1127) and end at their configured lifetime (`SESSION_MAX_AGE_SECONDS`,
-optionally `SESSION_ABSOLUTE_MAX_AGE_SECONDS`). API keys are not rotated. Tests:
+A reset also ends every web session of the account (its `web_session` rows are deleted in
+the same transaction, Issue #1127; see "Server-side session revocation"). API keys are not
+rotated. Tests:
 `app/api/auth/password-reset/route.test.ts`,
 `app/api/auth/password-reset/complete/route.test.ts`,
 `app/[locale]/forgot-password/page.test.tsx`,
@@ -1044,7 +1092,7 @@ session cookie, so every user signs in again once after the deploy.
 
 The following are explicitly out of scope for the current implementation:
 
-- **Server-side revocation for credentials users**: Not implemented for sign-in itself — a stolen JWT cookie is self-contained and rotating `AUTH_SECRET` (without `AUTH_SECRET_PREVIOUS`, see "Rotating `AUTH_SECRET`") is the only global invalidation. Custom `adapter.createSession()` shim deferred. See `auth.ts` `authorize()`. (MFA-state revocation is handled separately — see "MFA on the OAuth path" below.)
+- **Server-side revocation**: Delivered for every provider by `web_session` (Issue #1127, see "Server-side session revocation"). Ending sessions on a settings password change or MFA change, an administrator action and a session list are not wired in yet. Rotating `AUTH_SECRET` (without `AUTH_SECRET_PREVIOUS`, see "Rotating `AUTH_SECRET`") remains the global invalidation of every token.
 - **MFA / TOTP**: Shipped in v1 (S5 phase 5a) for the credentials provider, opt-in per user. Shipped for the OAuth path too as of S8 — see "MFA on the OAuth path" below. Admin-mandated MFA is still deferred.
 - **Account linking UI**: Shipped in v1 (S7). `/setting/accounts` lists and connects/detaches OAuth providers; linking needs a signed-in session and the same email, cross-email linking deferred. See `lib/account-link/`, `auth.ts`.
 - **Audit-log table**: Not implemented. Auth events log to `console.info` only. Prisma model with role/permission hooks deferred.

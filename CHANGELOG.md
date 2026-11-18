@@ -5,6 +5,12 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 ### Changed
+- **Web sessions are revocable server-side** (Issue #1127). New table `web_session`: write the migration for it
+  (`prisma migrate dev --create-only`) as described in `docs/knowledge/migration-guide.md`. Each sign-in writes a row and
+  binds the session to it; sign-out and a password reset delete rows, and `lib/auth/web-session.ts` ends one session or
+  all of a user's sessions on demand. The check rides on the user lookup each session read already made, so it adds no
+  query. Sessions issued before the upgrade have no row, so every user signs in again once. See
+  `docs/knowledge/authentication.md` ("Server-side session revocation").
 - **Auth.js cookies use the `__Host-` prefix over https** (Issue #1274) when `AUTH_URL` / `NEXTAUTH_URL` is https. The
   session cookie is renamed, so every user signs in again once. `AUTH_COOKIE_HOST_PREFIX=false` keeps the `__Secure-`
   names for a deployment that shares the cookies across hosts. See `docs/knowledge/authentication.md` ("Cookie names").

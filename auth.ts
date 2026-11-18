@@ -22,6 +22,7 @@ import { isPastAbsoluteLifetime, resolveSessionPolicy } from "@/lib/session-poli
 import { logSignInRejected } from "@/lib/security-event";
 import { isMfaEnrollmentRequired } from "@/lib/auth/mfa-required";
 import { resolveAuthCookies } from "@/lib/auth/cookie-policy";
+import { createWebSession, extendWebSession, revokeWebSession, webSessionNeedsExtension } from "@/lib/auth/web-session";
 
 // Custom CredentialsSignin subclasses so @auth/core re-throws them as-is
 // (plain Error gets wrapped in CallbackRouteError and the code is lost).
@@ -455,9 +456,10 @@ export const authConfig: NextAuthConfig = {
 
       // MFA challenge completion: /mfa-challenge calls
       // `update({ mfa_pending: false })` after a valid TOTP/recovery code.
+      // Falls through to the checks below, so a revoked or expired session
+      // cannot be revived by an update call.
       if (trigger === "update" && (updateData as { mfa_pending?: boolean } | undefined)?.mfa_pending === false) {
         token.mfa_pending = false;
-        return token;
       }
 
       // Absolute session lifetime (SESSION_ABSOLUTE_MAX_AGE_SECONDS, off by default): end the session once it is
@@ -484,19 +486,41 @@ export const authConfig: NextAuthConfig = {
         // Issue #1281: any sign-in method. A role listed in MFA_REQUIRED_ROLES
         // without enrolment restricts the session to the MFA settings page.
         token.mfa_enrollment_required = await isMfaEnrollmentRequired(token.id, dbUser?.mfa_enabled ?? false);
+        // Issue #1127: the server-side record that makes this session revocable.
+        token.sid = await createWebSession(token.id, sessionPolicy);
         return token;
       }
 
       // Plain session read (no fresh sign-in). Re-check the version so an
       // MFA-state change mid-session takes effect on the very next request.
       if (token.id) {
+        // Issue #1127: a token without a server-side session (issued before
+        // revocation existed) is no session; its user signs in again once.
+        const sid = typeof token.sid === "string" && token.sid ? token.sid : null;
+        if (!sid) return null;
+        // One round trip: the session row is a joined relation of the user
+        // lookup this callback has always made (relationJoins).
         const dbUser = await prisma.user.findUnique({
+          relationLoadStrategy: "join",
           where: { id: token.id },
-          select: { mfa_enabled: true, mfa_token_version: true, anonymized_at: true },
+          select: {
+            mfa_enabled: true,
+            mfa_token_version: true,
+            anonymized_at: true,
+            web_sessions: { where: { id: sid }, select: { expires_at: true } },
+          },
         });
-        // An erased user's session ends here: returning null makes Auth.js
-        // treat the cookie as no session and clear it.
-        if (dbUser?.anonymized_at) return null;
+        // A revoked session (row deleted), or a deleted user, ends here:
+        // returning null makes Auth.js treat the cookie as no session and clear it.
+        const webSession = dbUser?.web_sessions[0];
+        if (!dbUser || !webSession) return null;
+        // An erased user's session ends here too.
+        if (dbUser.anonymized_at) return null;
+        // At most once per SESSION_UPDATE_AGE_SECONDS per session: keep the row
+        // from being purged while the session is in use.
+        if (webSessionNeedsExtension(webSession.expires_at, sessionPolicy)) {
+          await extendWebSession(sid, sessionPolicy);
+        }
         const dbVersion = dbUser?.mfa_token_version ?? 0;
         const tokenVersion = token.mfa_token_version ?? 0;
         if (dbUser?.mfa_enabled && dbVersion > tokenVersion) {
@@ -545,6 +569,10 @@ export const authConfig: NextAuthConfig = {
         (token as { id?: string } | null)?.id ??
         (session as { userId?: string } | null)?.userId ??
         null;
+      // Issue #1127: sign-out revokes the session server-side, so a copy of the
+      // cookie taken before sign-out stops working too.
+      const sid = (token as { sid?: unknown } | null)?.sid;
+      if (typeof sid === "string" && sid) await revokeWebSession(sid);
       logger.info(
         "[auth:signOut]",
         JSON.stringify({
@@ -600,5 +628,7 @@ declare module "@auth/core/jwt" {
     mfa_token_version?: number;
     /** Unix seconds at sign-in; the absolute session lifetime counts from here. */
     session_started_at?: number;
+    /** Id of the web_session row (Issue #1127); the session ends when the row is deleted. */
+    sid?: string;
   }
 }
