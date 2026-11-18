@@ -52,7 +52,7 @@
     "mfaCodeRequired": "Enter a code from your authenticator app (or a recovery code) to confirm this change.",
     "notFound": "The record could not be found. It may have been deleted.",
     "pageError": "Something went wrong.",
-    "passwordTooWeak": "The new password must be at least 8 characters long.",
+    "passwordTooWeak": "Choose a different new password: at least 8 characters and at most 72 bytes, not a common or breached password, and not containing your name, your email address or the name of the application.",
     "permissionDenied": "You do not have permission to perform this action.",
     "relatedRecordInvalid": "This action cannot be completed because a related record does not meet the required condition.",
     "rateLimited": "Too many requests. Please wait a moment and try again.",

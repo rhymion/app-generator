@@ -8,7 +8,7 @@ code in this repository; read the code paths named here before relying on a row.
 
 The application server issues no HTTP request whose target comes from a user or from stored data. Searching `lib/`,
 `app/`, `proxy.ts` and the non-test generator templates finds no server-side `fetch(`, `axios`, `undici` or
-`http(s).request` call; the only `fetch(` calls run in the browser or a test helper against the application's own
+`http(s).request` call other than the opt-in password breach check (`lib/auth/password-policy.ts`, a fixed host); the only `fetch(` calls run in the browser or a test helper against the application's own
 `/api/` routes. The destinations below are fixed by environment variables set by the operator or by an SDK's built-in
 endpoint.
 
@@ -30,6 +30,7 @@ upload components load their URLs in the browser and never reach the optimizer.
 | Amazon S3 (audit-log copies) | when `AUDIT_LOG_S3_BUCKET` is set | `AUDIT_LOG_S3_*` | the `@aws-sdk/client-s3` default for `AUDIT_LOG_S3_REGION` |
 | Google sign-in | when `google` is listed in the site's auth providers and `GOOGLE_CLIENT_ID` is set | `siteConfig.auth.providers` | Google's OpenID Connect endpoints, through Auth.js |
 | SMTP server (mail) | when `SMTP_URL` is set; only flows that need `x-generator.email-verification.enabled` send mail today: self-registration, password reset and the verified email change | `SMTP_URL`, `MAIL_FROM` | the host in the URL |
+| Have I Been Pwned (password breach check) | only with `PASSWORD_BREACH_CHECK=hibp`, when a password is set | `PASSWORD_BREACH_CHECK`, `PASSWORD_BREACH_CHECK_URL` | `api.pwnedpasswords.com` (range API; only 5 hex characters of the password's SHA-1 are sent), or the mirror in the URL |
 | Stripe | only for a schema that declares `x-payment: true` | `STRIPE_SECRET_KEY` | the `stripe` SDK default (`api.stripe.com`); Stripe calls the webhook route inbound |
 
 Audit-log copies are described in `audit-log-append-only.md`, attachment storage in `attachment-storage.md`, Stripe in

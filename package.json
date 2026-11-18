@@ -29,6 +29,7 @@
     "db:apply-audit-log-sql": "tsx scripts/apply-audit-log-sql.ts",
     "audit-log:digest": "tsx scripts/audit-log-digest.ts",
     "secrets:reencrypt": "tsx scripts/reencrypt-secrets.ts",
+    "db:purge-expired": "tsx scripts/purge-expired.ts",
     "task:run": "tsx scripts/scheduled-task-run.ts",
     "task:run-all": "tsx scripts/scheduled-task-run.ts --all",
     "dev": "node scripts/run-next-dev.js",

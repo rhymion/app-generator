@@ -51,13 +51,21 @@ roll back.
   assignee-notification triggers) run again.
 - Same key + a *different* body hash → rejected as `AppError('CONFLICT')`
   (HTTP 409) — never silently replayed.
-- Retention: one day, enforced **logically** at lookup time
+- Retention: one day, enforced at lookup time
   (`lib/idempotency.ts`'s `checkIdempotencyKey` treats a row older than 24h
-  as absent), not by a scheduled deletion job — the design ruling
-  deliberately does not add a new scheduling mechanism for a housekeeping
-  delete. A stale row is simply overwritten in place the next time its
+  as absent). A stale row is overwritten in place the next time its
   `(key, actor_user_id, target_entity)` tuple is reused
   (`recordIdempotencyKey`'s `upsert`).
+- Purge (Issue #1299, ASVS V14.2.2): `response_body` keeps the API response,
+  so expired rows are also deleted. `npm run db:purge-expired`
+  (`scripts/purge-expired.ts` → `purgeExpiredRows()` in `lib/housekeeping.ts`)
+  deletes every idempotency row older than the retention
+  (`purgeExpiredIdempotencyKeys()`) and every expired `web_session` row
+  (`purgeExpiredWebSessions()`), and prints the counts. It deletes by expiry
+  only, so running it at any time or twice changes no answer. The app ships no
+  scheduler for it: run it from the platform's cron (for example a daily Cloud
+  Scheduler job or a cron container with `DATABASE_URL`/`DIRECT_URL`). Until it
+  runs, an expired row stays readable in the database but is never served.
 
 ### Where the logic actually lives
 

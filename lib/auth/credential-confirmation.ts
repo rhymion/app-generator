@@ -5,7 +5,7 @@ import { getRateLimiter } from '@/lib/rate-limit';
 import { disableMfa } from '@/lib/mfa/enrollment';
 import { MfaRateLimitedError } from '@/lib/mfa/errors';
 import { verifyPassword } from './password-check';
-import { passwordPolicyError } from './password-policy';
+import { checkPassword } from './password-policy';
 import { verifyMfaCode } from '@/lib/mfa/verify';
 import type { ActionFailure } from '@/lib/_errors';
 import { emailChangeNeedsVerification, startEmailChange } from './email-change';
@@ -99,7 +99,7 @@ export async function confirmCredentialChange(
 ): Promise<ConfirmedCredentialChange> {
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { password: true, mfa_enabled: true, email: true },
+    select: { password: true, mfa_enabled: true, email: true, name: true },
   });
   if (!user) throw new ApiError(404, 'Not found');
 
@@ -128,7 +128,7 @@ export async function confirmCredentialChange(
       throw new CredentialConfirmationError(403, 'Current password is incorrect', 'current_password');
     }
     if (changesPassword) {
-      const weak = passwordPolicyError(input.password);
+      const weak = await checkPassword(input.password, { email: user.email, name: user.name });
       if (weak) throw new CredentialConfirmationError(400, weak, 'password');
     }
   }

@@ -5,6 +5,14 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 ### Changed
+- **Stronger password policy** (Issue #1280). Every path that sets a password also refuses one over 72 bytes (bcrypt's
+  limit; refused instead of truncated), a common password (`lib/auth/common-passwords.ts`, plus `PASSWORD_DENYLIST_FILE`)
+  and one containing the app name or the user's name or email address (plus `PASSWORD_CONTEXT_WORDS`).
+  `PASSWORD_BREACH_CHECK=hibp` adds an opt-in Have I Been Pwned check (k-anonymity range query). Existing passwords are
+  not re-checked. See `docs/knowledge/authentication.md` ("Password strength").
+- **Expired idempotency rows can be purged** (Issue #1299). `npm run db:purge-expired` deletes idempotency rows past their
+  one-day retention (with the stored response bodies) and expired `web_session` rows; schedule it with your platform's
+  cron. See `docs/knowledge/api-idempotency-and-rate-limiting.md`.
 - **Web sessions are revocable server-side** (Issue #1127). New table `web_session`: write the migration for it
   (`prisma migrate dev --create-only`) as described in `docs/knowledge/migration-guide.md`. Each sign-in writes a row and
   binds the session to it; sign-out and a password reset delete rows, and `lib/auth/web-session.ts` ends one session or

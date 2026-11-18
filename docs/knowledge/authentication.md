@@ -228,8 +228,8 @@ interval (`maxAge + updateAge`) and pushed forward once less than `maxAge` is
 left, which an active session reaches at most once per
 `SESSION_UPDATE_AGE_SECONDS` (default once a day): that `UPDATE` and the
 `INSERT` at sign-in are the only writes. A sign-in deletes that user's
-expired rows; `purgeExpiredWebSessions()` deletes everyone's (call it from a
-scheduled job if many users stop signing in).
+expired rows; `purgeExpiredWebSessions()` deletes everyone's (`npm run db:purge-expired`
+runs it; schedule that if many users stop signing in).
 
 A token without `sid` (issued before this release) is treated as no session,
 so every user signs in again once after the upgrade. The `trigger: "update"`
@@ -781,11 +781,23 @@ deployment without email verification, an administrator:
 4. asks the user to sign in, change the password and enrol MFA again; with
    `MFA_REQUIRED_ROLES` covering the user, the app enforces the re-enrolment.
 
-**Password strength.** `lib/auth/password-policy.ts` requires at least 8
-characters (ASVS V6.2.1) and no composition rules (V6.2.5). Registration, the
-settings password form and the REST and bulk credential change all apply it, so no
-path can set a weaker password. Maximum length and common or breached passwords are
-tracked in #1280.
+**Password strength** (Issues #1125, #1280). `lib/auth/password-policy.ts` has no
+composition rules (V6.2.5) and applies one policy on every path that sets a password
+(registration, both steps; the settings form and the REST/bulk credential change through
+`confirmCredentialChange()`; the password reset), so no path can set a weaker password:
+
+| Rule | ASVS | Detail |
+|------|------|--------|
+| at least 8 characters | V6.2.1 | counted as Unicode characters, not UTF-16 units |
+| at most 72 bytes of UTF-8 | V6.2.9 | bcrypt reads only the first 72 bytes, so a longer password is refused instead of cut silently. 72 ASCII characters are allowed (V6.2.9 asks for at least 64); a password in a three-byte script such as Japanese is limited to 24 characters. Pre-hashing would lift that limit but changes the stored hash format, so it is not done |
+| not a common password | V6.2.4 | `lib/auth/common-passwords.ts`, a built-in floor of frequent passwords of 8+ characters, compared case-insensitively, plus `PASSWORD_DENYLIST_FILE` (one password per line, `#` comments; an unreadable configured file throws instead of silently checking nothing). The built-in list is shorter than the top 3000 that V6.2.4 names; a deployment that needs the full list supplies it as the file or turns on the breach check |
+| no context word | V6.2.11 | the password must not contain (case-insensitive) the app title's words, the user's name words, the email local part and its pieces, the domain name labels (webmail names and the last label skipped), or `PASSWORD_CONTEXT_WORDS` (comma-separated); only words of 4+ characters. The address is checked where it is known: registration, the settings change and the reset (after the link names the account); the second registration step checks the name and the title |
+| not breached (opt-in) | V6.2.12 | `PASSWORD_BREACH_CHECK=hibp`: a k-anonymity range query to `api.pwnedpasswords.com` (or `PASSWORD_BREACH_CHECK_URL`) with `Add-Padding`; only the first 5 hex characters of the SHA-1 leave the server. When the service fails or takes over 3 seconds the check is skipped and a warning logged (fail open), so a third-party outage does not stop password changes. Off by default (no outbound call) |
+
+`passwordPolicyError()` is the synchronous part; `checkPassword()` adds the breach check
+and is what the routes call. A refusal answers `400` with `code: "WEAK_PASSWORD"` and the
+rule's message on the register and reset routes, `400` on the REST setting update, and
+`Errors.passwordTooWeak` on the settings screen. Existing passwords are not re-checked.
 
 **Self-registration and API keys.** `POST /api/auth/register` is limited per
 client IP by the `auth:register` bucket (5 requests / 10 min) and answers
