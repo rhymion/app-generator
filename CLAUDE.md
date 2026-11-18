@@ -20,6 +20,8 @@ your change.
 - `docs/knowledge/appendix/approval-flow.md` - Approval Flow System detail
 - `docs/knowledge/appendix/comment-bridge.md` - Comment Bridge System detail
 - `docs/knowledge/virtual-resolver-guide.md` - virtual display columns spec
+- `docs/knowledge/claude-code-hooks-and-agents.md` - `.claude/` hooks, `gate-runner` /
+  `schema-consistency-reviewer` subagents, `learning-observer` skill
 - Other `docs/knowledge/*.md` - topical references (i18n, dark mode, datagrid, timezone, etc.)
 
 ## Docker Compose Setup
@@ -112,7 +114,8 @@ Run in the order listed above (pytest → build → component test → e2e API �
 4. Follow model and field naming conventions (e.g., no models ending with `_detail`).
    See `docs/knowledge/prisma-schema-conventions.md`.
 5. Follow the docs (`docs/knowledge/` is the source of truth).
-6. If you discover a new rule or useful skill, update the rule/skill documentation.
+6. If you discover a new rule or useful skill, update the rule/skill documentation
+   (the `learning-observer` skill says where it goes and when to propose instead of apply).
 7. Read the docs before acting: at minimum CLAUDE.md, and relevant `docs/knowledge/` files.
 
 ## Debug priority

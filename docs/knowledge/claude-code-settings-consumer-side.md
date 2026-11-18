@@ -220,3 +220,13 @@ legitimate question to the user into a loop. A personal opt-out is
 `"disableAllHooks": true` in your own `.claude/settings.local.json` (it
 disables every hook). The Codex counterpart, `.codex/hooks/stop-sanity-check.sh`,
 only adds a reminder (`"continue": true`) and cannot loop.
+
+## 7. Command hooks and subagents
+
+Besides the Stop prompt, `settings.json` registers command hooks
+(`.claude/hooks/project_hooks.py`): venv on `PATH`, a block on edits to
+generated code, template-MUI / raw-SQL / intent-to-add checks after edits,
+and a no-edit check for investigate tasks. `.claude/agents/` holds the
+`gate-runner` and `schema-consistency-reviewer` subagents. Like everything
+else in §1, none of this reaches a consumer session started from its own
+root. See `claude-code-hooks-and-agents.md` ("Consumers") for what to copy.
