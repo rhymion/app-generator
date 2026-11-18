@@ -473,7 +473,7 @@ A role, permission or role-membership write clears the permission cache of the p
 
 ### API key cache has a 5-minute lag
 
-Issuing a new key through the settings page (`issueApiKey()` in `lib/setting/api-key-actions.ts`) calls `invalidateApiKeyCache(oldHash)` in the same process, so the old key stops working there at once. Another server process keeps accepting the old key until its own cache entry ages out, up to 5 minutes in production. Erasing a user (`anonymizeUser()`) drops the cached entry for the removed key the same way. Any other code that replaces or clears `user.api_key_hash` must call `invalidateApiKeyCache()` with the old hash.
+Issuing a new key through the settings page (`issueApiKey()` in `lib/setting/api-key-actions.ts`) calls `invalidateApiKeyCache(oldHash)` in the same process, so the old key stops working there at once. Another server process keeps accepting the old key until its own cache entry ages out, up to 5 minutes in production. Erasing a user (`anonymizeUser()`) drops the cached entry for the removed key the same way, and so does deleting a `user` row through the generated service (`deleteUser()`, which collects the deleted rows' `api_key_hash` inside the transaction and drops them after it commits; `API_KEY_CACHE_MODELS` in `code_generator/build_context.py`, Issue #1397). Any other code that replaces or clears `user.api_key_hash` must call `invalidateApiKeyCache()` with the old hash.
 
 ### No approval-flow permission integration
 

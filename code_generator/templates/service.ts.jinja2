@@ -544,6 +544,11 @@ export async function delete{{ parent_pascal }}(actorId: string | null, ids: str
 {% if bridge_attachment_cleanup %}
   const _removedAttachmentKeys: string[] = [];
 {% endif %}
+{% if invalidates_api_key_cache %}
+  // API key hashes of the deleted rows, dropped from the API key cache once the
+  // delete commits (Issue #1397).
+  const _deletedApiKeyHashes: string[] = [];
+{% endif %}
   await prisma.$transaction(async (tx) => {
     // cmd_923b: fetched once, before any write -- reused for both the
     // (optional) post-approval delete guard and the (always emitted)
@@ -575,6 +580,11 @@ export async function delete{{ parent_pascal }}(actorId: string | null, ids: str
 {% if bridge_post_delete_cleanups %}
 {{ bridge_post_delete_cleanups | replace('await prisma.', '    await tx.') }}
 {% endif %}
+{% if invalidates_api_key_cache %}
+    for (const _row of _deleteRows) {
+      if (_row.api_key_hash) _deletedApiKeyHashes.push(_row.api_key_hash);
+    }
+{% endif %}
     for (const { id } of _deleteRows) {
       await recordAuditEvent({
         action: '{{ parent }}:delete',
@@ -594,6 +604,12 @@ export async function delete{{ parent_pascal }}(actorId: string | null, ids: str
   // instead of after the cache TTL.
   await invalidatePermissionCache();
 {% endif %}
+{% if invalidates_api_key_cache %}
+  // The delete is committed: a deleted user's API key must stop authenticating
+  // on this instance at once, not after the cache TTL (Issue #1397). Other
+  // instances keep their entry until it expires (API_KEY_TTL_MS in lib/api-auth.ts).
+  for (const _hash of _deletedApiKeyHashes) invalidateApiKeyCache(_hash);
+{% endif %}
 {% if bridge_attachment_cleanup %}
   // The rows are gone and the delete committed; remove the stored files too.
   await removeStoredObjects(_removedAttachmentKeys);
@@ -606,6 +622,11 @@ export async function delete{{ parent_pascal }}(ids: string[]): Promise<void> {
 {% endif %}
 {% if bridge_attachment_cleanup %}
   const _removedAttachmentKeys: string[] = [];
+{% endif %}
+{% if invalidates_api_key_cache %}
+  // API key hashes of the deleted rows, dropped from the API key cache once the
+  // delete commits (Issue #1397).
+  const _deletedApiKeyHashes: string[] = [];
 {% endif %}
   // cmd_923b: wrapped in a transaction (previously several independent
   // prisma.* calls with no rollback relationship between them) so
@@ -641,6 +662,11 @@ export async function delete{{ parent_pascal }}(ids: string[]): Promise<void> {
     // side effects exactly once.
     if (_deleted.count === 0) return;
 {% endif %}
+{% if invalidates_api_key_cache %}
+    for (const _row of _deleteRows) {
+      if (_row.api_key_hash) _deletedApiKeyHashes.push(_row.api_key_hash);
+    }
+{% endif %}
     for (const { id } of _deleteRows) {
       await afterDelete(tx, id);
     }
@@ -650,6 +676,12 @@ export async function delete{{ parent_pascal }}(ids: string[]): Promise<void> {
   // permission or role-membership change applies on this instance at once
   // instead of after the cache TTL.
   await invalidatePermissionCache();
+{% endif %}
+{% if invalidates_api_key_cache %}
+  // The delete is committed: a deleted user's API key must stop authenticating
+  // on this instance at once, not after the cache TTL (Issue #1397). Other
+  // instances keep their entry until it expires (API_KEY_TTL_MS in lib/api-auth.ts).
+  for (const _hash of _deletedApiKeyHashes) invalidateApiKeyCache(_hash);
 {% endif %}
 {% if bridge_attachment_cleanup %}
   // The rows are gone and the delete committed; remove the stored files too.
