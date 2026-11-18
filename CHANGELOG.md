@@ -3,6 +3,12 @@ All notable changes to this project will be documented in this file.
 The format is based on Keep a Changelog (https://keepachangelog.com/),
 and this project adheres to Semantic Versioning (https://semver.org/).
 
+## [Unreleased]
+### Changed
+- **Auth.js cookies use the `__Host-` prefix over https** (Issue #1274) when `AUTH_URL` / `NEXTAUTH_URL` is https. The
+  session cookie is renamed, so every user signs in again once. `AUTH_COOKIE_HOST_PREFIX=false` keeps the `__Secure-`
+  names for a deployment that shares the cookies across hosts. See `docs/knowledge/authentication.md` ("Cookie names").
+
 ## [7.0.0]
 ### Breaking changes
 Regenerate after upgrading. The generator ships no Prisma migrations; write the migration for the schema changes below

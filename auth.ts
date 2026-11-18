@@ -21,6 +21,7 @@ import { isDomainAllowed } from "@/lib/auth/domain-allow-list";
 import { isPastAbsoluteLifetime, resolveSessionPolicy } from "@/lib/session-policy";
 import { logSignInRejected } from "@/lib/security-event";
 import { isMfaEnrollmentRequired } from "@/lib/auth/mfa-required";
+import { resolveAuthCookies } from "@/lib/auth/cookie-policy";
 
 // Custom CredentialsSignin subclasses so @auth/core re-throws them as-is
 // (plain Error gets wrapped in CallbackRouteError and the code is lost).
@@ -273,6 +274,9 @@ export const authConfig: NextAuthConfig = {
   // (Phase 2 #9 from performance-plan-session.md).
   // maxAge / updateAge come from SESSION_MAX_AGE_SECONDS / SESSION_UPDATE_AGE_SECONDS (lib/session-policy.ts).
   session: { strategy: sessionStrategy, maxAge: sessionPolicy.maxAge, updateAge: sessionPolicy.updateAge },
+  // __Host- prefix on the session, callback-url, PKCE, state and nonce cookies when the configured URL is
+  // https (Issue #1274, lib/auth/cookie-policy.ts). Undefined keeps the Auth.js defaults.
+  cookies: resolveAuthCookies(),
   providers: buildProviders(),
   pages: {
     signIn: "/login",

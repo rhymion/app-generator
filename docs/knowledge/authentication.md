@@ -978,8 +978,28 @@ Four small controls sit around the session cookie:
   `Clear-Site-Data: "cache", "cookies", "storage"`, so the browser drops cached
   pages and local storage for the origin.
 
-The session cookie keeps the Auth.js name (`__Secure-authjs.session-token` over
-https); a `__Host-` prefix is not applied.
+### Cookie names (`__Host-` prefix)
+
+Over https the Auth.js cookies carry the `__Host-` prefix (Issue #1274, ASVS V3.3.3):
+`__Host-authjs.session-token`, `__Host-authjs.callback-url`, `__Host-authjs.pkce.code_verifier`,
+`__Host-authjs.state` and `__Host-authjs.nonce` (Auth.js already names the CSRF cookie
+`__Host-authjs.csrf-token`). A browser accepts a `__Host-` cookie only with `Secure`, `Path=/` and no
+`Domain`, so a sibling host under the same parent domain cannot plant or overwrite one. The default
+`__Secure-` prefix does not forbid `Domain`.
+
+`resolveAuthCookies()` in `lib/auth/cookie-policy.ts` builds the `cookies` option `auth.ts` passes to
+Auth.js. The names are fixed when `auth.ts` loads, so the prefix follows the configured application URL:
+
+| `AUTH_URL` / `NEXTAUTH_URL` | `AUTH_COOKIE_HOST_PREFIX` | Cookie names |
+|------------------------------|---------------------------|--------------|
+| https | unset (default) | `__Host-authjs.*` |
+| https | `false` | Auth.js default, `__Secure-authjs.*` |
+| http (local development, the test server) | any | Auth.js default, `authjs.*` |
+| unset | any | Auth.js default, decided per request from the protocol |
+
+Set `AUTH_COOKIE_HOST_PREFIX=false` only for a deployment that has to share these cookies across hosts
+(a `Domain` attribute set through a customised `cookies` option). Turning the prefix on renames the
+session cookie, so every user signs in again once after the deploy.
 
 ## Out of scope
 
