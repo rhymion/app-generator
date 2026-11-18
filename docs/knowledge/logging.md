@@ -9,7 +9,27 @@ logger.error('[orders] export failed', err);              // Error objects are s
 logger.warn('[webhook] rejected', { headers, body });      // so are request headers and bodies
 ```
 
-`logger.debug`, `logger.info`, `logger.warn` and `logger.error` take the same arguments as the matching `console` method and call it with the redacted values, so hosting log drains keep working unchanged. The module has no server-only imports and also works in client components (`app/**/error.tsx`).
+`logger.debug`, `logger.info`, `logger.warn` and `logger.error` take the same arguments as the matching `console` method and write to that method, so stdout/stderr and hosting log drains keep working. The module has no server-only imports and also works in client components (`app/**/error.tsx`).
+
+## Output format
+
+On the server every call writes **one JSON object per line** (Issue #1323), so a log processor can parse and correlate it:
+
+```json
+{"timestamp":"2026-11-18T01:02:03.000Z","level":"warn","severity":"WARNING","message":"[security-event]","context":{"at":"...","event":"authz.denied","status":403}}
+```
+
+| Field | Content |
+|---|---|
+| `timestamp` | ISO 8601, UTC |
+| `level` | `debug`, `info`, `warn` or `error` |
+| `severity` | `DEBUG`, `INFO`, `WARNING`, `ERROR` (the field Google Cloud Logging reads) |
+| `message` | the first argument when it is a string, else `""` |
+| `context` | the remaining arguments: one value as is, several as an array; absent when there are none |
+
+A string argument that holds a JSON object or array (`logger.warn('[tag]', JSON.stringify(x))`) is embedded as the parsed value, so it is not double-encoded and its keys are redacted like any other object. Prefer passing the object itself in new code.
+
+In the browser the redacted arguments go to the console method unchanged. `LOG_FORMAT=text` does the same on the server, for reading logs in a local terminal. The format is built by `formatLogLine()` and tested in `lib/logger.test.ts` and `lib/logger.server.test.ts`.
 
 ## What is redacted
 
