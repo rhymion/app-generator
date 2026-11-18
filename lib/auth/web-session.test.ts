@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
   createWebSession,
+  endOtherSessions,
   extendWebSession,
   purgeExpiredWebSessions,
   revokeUserWebSessions,
@@ -76,5 +77,35 @@ describe('writes', () => {
     const now = new Date();
     await purgeExpiredWebSessions(now, db as never);
     expect(db.web_session.deleteMany).toHaveBeenCalledWith({ where: { expires_at: { lt: now } } });
+  });
+});
+
+describe('endOtherSessions', () => {
+  function sessionsDb() {
+    return {
+      web_session: { deleteMany: vi.fn(async () => ({ count: 3 })) },
+      mobile_session: { updateMany: vi.fn(async () => ({ count: 2 })) },
+    };
+  }
+
+  it('ends every web and mobile session of the user but the current ones', async () => {
+    const sdb = sessionsDb();
+    const ended = await endOtherSessions('u1', { webSessionId: 'w1', mobileSessionId: 'm1' }, sdb as never);
+    expect(ended).toEqual({ web: 3, mobile: 2 });
+    expect(sdb.web_session.deleteMany).toHaveBeenCalledWith({ where: { user_id: 'u1', id: { not: 'w1' } } });
+    expect(sdb.mobile_session.updateMany).toHaveBeenCalledWith({
+      where: { user_id: 'u1', revoked_at: null, id: { not: 'm1' } },
+      data: { revoked_at: expect.any(Date) },
+    });
+  });
+
+  it('ends every session when the request has none of its own (an API key)', async () => {
+    const sdb = sessionsDb();
+    await endOtherSessions('u1', {}, sdb as never);
+    expect(sdb.web_session.deleteMany).toHaveBeenCalledWith({ where: { user_id: 'u1' } });
+    expect(sdb.mobile_session.updateMany).toHaveBeenCalledWith({
+      where: { user_id: 'u1', revoked_at: null },
+      data: { revoked_at: expect.any(Date) },
+    });
   });
 });

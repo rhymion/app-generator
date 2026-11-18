@@ -19,6 +19,20 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   changes when the link is used (`/confirm-email`, `POST /api/auth/email-change/complete`). With email verification off
   nothing changes. Regenerate so the settings update paths store the confirmed address. See
   `docs/knowledge/authentication.md` ("Changing the email address").
+- **The notice of a requested email change carries a cancel link.** The current address can cancel the pending change
+  (`/cancel-email-change`, `POST /api/auth/email-change/cancel`), which deletes its link so the new address can no
+  longer be confirmed. See `docs/knowledge/authentication.md` ("Changing the email address").
+- **A changed password, email address or MFA state ends the user's other sessions.** Every web and mobile session but
+  the one that made the change ends (`lib/auth/end-sessions.ts`, audited as `auth:sessions.endOthers`); a verified
+  email change ends them when its link is used. See `docs/knowledge/authentication.md` ("Ending the other sessions on a
+  credential change").
+- **With MFA on, changing the password or the email address needs a TOTP or recovery code** (`mfa_code`) on the settings
+  screen, `PUT /api/setting/:id` and `PUT /api/setting/bulk`; a request without it answers 400, a wrong code 403.
+  Regenerate so the settings form shows the code field and its Server Action passes it. API clients that change a
+  password or address of an MFA account must now send `mfa_code`.
+- **The domain allow-lists can be set by environment variable**: `AUTH_ALLOWED_DOMAINS` (OAuth) and
+  `REGISTRATION_ALLOWED_DOMAINS` (self-registration), comma-separated. A set variable replaces the list in
+  `lib/site-config.ts`; unset keeps it. See `.env.example` and `docs/knowledge/authentication.md`.
 
 ## [7.0.0] - 2026-11-17
 ### Breaking changes

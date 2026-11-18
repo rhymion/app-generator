@@ -293,6 +293,8 @@ app/\[locale\]/*/
 !app/\[locale\]/reset-password/**
 !app/\[locale\]/confirm-email/
 !app/\[locale\]/confirm-email/**
+!app/\[locale\]/cancel-email-change/
+!app/\[locale\]/cancel-email-change/**
 !app/\[locale\]/setting/
 !app/\[locale\]/setting/**
 app/\[locale\]/setting/edit/

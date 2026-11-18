@@ -37,6 +37,9 @@ exemptions:
   - path: app/api/auth/email-change/complete/route.ts
     skip: [permission]
     reason: Second step of a verified email change (Issue #1400); the single-use token mailed to the new address is the credential and names the account; rate limited per IP (auth:register:complete); 404 while email verification is off.
+  - path: app/api/auth/email-change/cancel/route.ts
+    skip: [permission]
+    reason: Cancels a pending email change from the link in the notice to the current address; the single-use cancel token is the credential and names the account; rate limited per IP (auth:register:complete); 404 while email verification is off.
   - path: app/api/security/csp-report/route.ts
     skip: [permission]
     reason: The browser posts policy violation reports without a session; rate limited per IP (csp:report) and the route only writes a log line.

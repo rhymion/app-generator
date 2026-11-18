@@ -51,6 +51,20 @@ export type NavGroup = {
  */
 export type AuthProviderId = 'credentials' | 'google';
 
+/**
+ * A comma-separated domain list from an environment variable (Issue #1093 /
+ * OAuth domain allow-list). Unset or blank = `fallback`, so the list written
+ * here applies when the variable is not set. Entries are trimmed, lower-cased
+ * and de-duplicated; empty entries are dropped. Read on the server only: these
+ * variables have no NEXT_PUBLIC_ prefix, so the client bundle sees `fallback`,
+ * which is fine because only server code (auth.ts, the register routes)
+ * consults the lists.
+ */
+export function domainListFromEnv(value: string | undefined, fallback: readonly string[] = []): string[] {
+  const source = value === undefined || value.trim() === '' ? fallback : value.split(',');
+  return [...new Set(source.map((d) => d.trim().toLowerCase()).filter((d) => d !== ''))];
+}
+
 // ─── App Identity ────────────────────────────────────────────────────────────
 
 export const siteConfig = {
@@ -72,6 +86,13 @@ export const siteConfig = {
    * email's `@domain`. Empty array = allow all. The check only runs for OAuth providers — credentials accounts are
    * created by an admin path, not self-service, so a domain filter there
    * would be defence-in-depth at best.
+   *
+   * Both domain lists are set by environment variable without editing this
+   * file: `AUTH_ALLOWED_DOMAINS` (OAuth) and `REGISTRATION_ALLOWED_DOMAINS`
+   * (self-registration), comma-separated, e.g. `example.com,example.co.jp`.
+   * A set variable replaces the list written here; unset or blank keeps it.
+   * They are read when the server starts, so a change needs a restart (a
+   * redeploy on Vercel), not a rebuild.
    */
   auth: {
     /**
@@ -83,14 +104,15 @@ export const siteConfig = {
       emailVerification: false,
     },
     providers: ['credentials', 'google'] as AuthProviderId[],
-    allowedDomains: [] as string[],
+    allowedDomains: domainListFromEnv(process.env.AUTH_ALLOWED_DOMAINS, []),
     /**
      * Self-registration domain allow-list (Issue #1093). Empty = anyone may
      * register. Otherwise the email's domain must equal one entry
      * (case-insensitive, no subdomain wildcard); other addresses get 403 before
      * any mail is sent. Independent of `allowedDomains` (OAuth only).
+     * Environment variable: `REGISTRATION_ALLOWED_DOMAINS` (see above).
      */
-    registrationAllowedDomains: [] as string[],
+    registrationAllowedDomains: domainListFromEnv(process.env.REGISTRATION_ALLOWED_DOMAINS, []),
     /**
      * Days until a newly issued API key expires, counted from the moment it is
      * issued. `null` makes new keys never expire. Removing this property applies

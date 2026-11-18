@@ -1,7 +1,8 @@
 // Hand-written -- not part of the generated entity test set.
 // PUT /api/setting/:id and PUT /api/setting/bulk need the same proof the account settings page asks
 // for: the current password to change the password or the email address (Issue #1285), a current TOTP
-// or recovery code to turn MFA off (Issue #1188). An API key alone is not enough to change any of them.
+// or recovery code to turn MFA off (Issue #1188) and, on an account with MFA on (the seeded user), to
+// change the password or the email address too. An API key alone is not enough to change any of them.
 type CredentialState = {
   passwordIsNull: boolean;
   apiKeyIsNull: boolean;
@@ -57,8 +58,16 @@ describe('API: setting update confirms password and MFA changes', () => {
       state().then((st) => expect(st.passwordHash).to.eq(originalHash));
     });
 
-    it('changes the password, stored as a hash, once the current password is confirmed', () => {
-      put({ password: 'a-brand-new-pw1', current_password: seed.password }).its('status').should('eq', 200);
+    it('rejects a new password without an MFA code while MFA is on', () => {
+      put({ password: 'a-brand-new-pw1', current_password: seed.password }).its('status').should('eq', 400);
+      put({ password: 'a-brand-new-pw1', current_password: seed.password, mfa_code: '000000' }).its('status').should('eq', 403);
+      state().then((st) => expect(st.passwordHash).to.eq(originalHash));
+    });
+
+    it('changes the password, stored as a hash, once the current password and an MFA code are confirmed', () => {
+      put({ password: 'a-brand-new-pw1', current_password: seed.password, mfa_code: seed.recoveryCode })
+        .its('status')
+        .should('eq', 200);
       state().then((st) => {
         expect(st.passwordHash).to.not.eq(originalHash);
         expect(st.passwordHash).to.not.eq('a-brand-new-pw1');
@@ -83,6 +92,10 @@ describe('API: setting update confirms password and MFA changes', () => {
       });
       state().then((st) => expect(st.passwordHash).to.eq(originalHash));
       bulk({ password: 'a-brand-new-pw1', current_password: seed.password }).then((res) => {
+        expect(res.body.results[0].success).to.eq(false);
+      });
+      state().then((st) => expect(st.passwordHash).to.eq(originalHash));
+      bulk({ password: 'a-brand-new-pw1', current_password: seed.password, mfa_code: seed.recoveryCode }).then((res) => {
         expect(res.body.results[0].success).to.eq(true);
       });
       state().then((st) => expect(st.passwordHash).to.not.eq(originalHash));
@@ -108,8 +121,13 @@ describe('API: setting update confirms password and MFA changes', () => {
       storedEmail().then((email) => expect(email).to.eq(seed.email));
     });
 
-    it('changes the email address once the current password is confirmed, leaving the password alone', () => {
-      put({ email: NEW_EMAIL, current_password: seed.password }).its('status').should('eq', 200);
+    it('rejects a new email address without an MFA code while MFA is on', () => {
+      put({ email: NEW_EMAIL, current_password: seed.password }).its('status').should('eq', 400);
+      storedEmail().then((email) => expect(email).to.eq(seed.email));
+    });
+
+    it('changes the email address once the current password and an MFA code are confirmed, leaving the password alone', () => {
+      put({ email: NEW_EMAIL, current_password: seed.password, mfa_code: seed.recoveryCode }).its('status').should('eq', 200);
       storedEmail().then((email) => expect(email).to.eq(NEW_EMAIL));
       cy.task<CredentialState>('db:getCredentialState', NEW_EMAIL).then((st) => expect(st.passwordHash).to.eq(originalHash));
     });
@@ -125,7 +143,11 @@ describe('API: setting update confirms password and MFA changes', () => {
         });
       bulk({}).then((res) => expect(res.body.results[0].success).to.eq(false));
       storedEmail().then((email) => expect(email).to.eq(seed.email));
-      bulk({ current_password: seed.password }).then((res) => expect(res.body.results[0].success).to.eq(true));
+      bulk({ current_password: seed.password }).then((res) => expect(res.body.results[0].success).to.eq(false));
+      storedEmail().then((email) => expect(email).to.eq(seed.email));
+      bulk({ current_password: seed.password, mfa_code: seed.recoveryCode }).then((res) =>
+        expect(res.body.results[0].success).to.eq(true),
+      );
       storedEmail().then((email) => expect(email).to.eq(NEW_EMAIL));
     });
   });

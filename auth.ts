@@ -9,7 +9,7 @@ import { PrismaAdapter } from "@auth/prisma-adapter";
 import prisma from "@/lib/prisma";
 import { verifyPassword } from "@/lib/auth/password-check";
 import { rehashPasswordIfNeeded } from "@/lib/auth/password-rehash";
-import { secretsEqual } from "@/lib/_secret_compare";
+import { sessionSecrets } from "@/lib/auth/session-secrets";
 import { clearFailedSignIns, getAccountLockState, recordFailedSignIn } from "@/lib/auth/account-lockout";
 import { siteConfig } from "@/lib/site-config";
 import { recordAuditEvent } from "@/lib/audit-log";
@@ -256,14 +256,7 @@ const sessionStrategy = "jwt" as const;
 // Read once at load. The absolute lifetime is enforced in jwt() below.
 const sessionPolicy = resolveSessionPolicy();
 
-// While AUTH_SECRET is being rotated, AUTH_SECRET_PREVIOUS holds the old value: sessions issued
-// under it stay valid and are re-issued under the new one (Auth.js tries each secret in turn and
-// signs with the first). See docs/knowledge/authentication.md "Rotating AUTH_SECRET" (#1291).
-function sessionSecrets(): string | string[] | undefined {
-  const current = process.env.AUTH_SECRET;
-  const previous = (process.env.AUTH_SECRET_PREVIOUS ?? "").trim();
-  return current && previous && !secretsEqual(previous, current) ? [current, previous] : current;
-}
+// Rotation of AUTH_SECRET (AUTH_SECRET_PREVIOUS): lib/auth/session-secrets.ts (#1291).
 
 export const authConfig: NextAuthConfig = {
   secret: sessionSecrets(),

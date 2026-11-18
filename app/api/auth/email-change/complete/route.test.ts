@@ -9,12 +9,14 @@ type Row = { identifier: string; token: string; expires: Date };
 type UserRow = { id: string; email: string; anonymized_at: Date | null };
 type TokenWhere = { identifier?: string | { startsWith: string }; token?: string; expires?: { gt: Date } };
 
-const { tokens, users, userUpdate, recordAuditEvent, sendMail } = vi.hoisted(() => ({
+const { tokens, users, userUpdate, recordAuditEvent, sendMail, webSessionDeleteMany, mobileSessionUpdateMany } = vi.hoisted(() => ({
   tokens: [] as Row[],
   users: [] as UserRow[],
   userUpdate: vi.fn(),
   recordAuditEvent: vi.fn(),
   sendMail: vi.fn(),
+  webSessionDeleteMany: vi.fn(),
+  mobileSessionUpdateMany: vi.fn(),
 }));
 
 vi.mock('@/lib/prisma', () => {
@@ -46,7 +48,12 @@ vi.mock('@/lib/prisma', () => {
       users.find((u) => (where.id !== undefined ? u.id === where.id : u.email === where.email)) ?? null,
     update: userUpdate,
   };
-  const tx = { verificationToken, user };
+  const tx = {
+    verificationToken,
+    user,
+    web_session: { deleteMany: webSessionDeleteMany },
+    mobile_session: { updateMany: mobileSessionUpdateMany },
+  };
   return { default: { ...tx, $transaction: async (fn: (t: unknown) => unknown) => fn(tx) } };
 });
 vi.mock('@/lib/audit-log', () => ({ recordAuditEvent }));
@@ -58,7 +65,11 @@ vi.mock('@/lib/rate-limit', async () => (await import('@/test/helpers/real-rate-
 import { _resetForTests } from '@/lib/rate-limit';
 import { siteConfig } from '@/lib/site-config';
 import prisma from '@/lib/prisma';
-import { issueEmailChangeToken, EMAIL_CHANGE_TOKEN_TTL_MS } from '@/lib/auth/email-change-token';
+import {
+  issueEmailChangeCancelToken,
+  issueEmailChangeToken,
+  EMAIL_CHANGE_TOKEN_TTL_MS,
+} from '@/lib/auth/email-change-token';
 import { issueRegistrationToken } from '@/lib/auth/registration-token';
 import { issuePasswordResetToken } from '@/lib/auth/password-reset-token';
 import { POST } from './route';
@@ -82,6 +93,8 @@ beforeEach(() => {
   users.length = 0;
   users.push({ id: 'u1', email: 'old@example.com', anonymized_at: null });
   vi.clearAllMocks();
+  webSessionDeleteMany.mockResolvedValue({ count: 2 });
+  mobileSessionUpdateMany.mockResolvedValue({ count: 1 });
 });
 
 afterEach(() => {
@@ -169,5 +182,27 @@ describe('POST /api/auth/email-change/complete', () => {
     const token = await issueEmailChangeToken(prisma, 'u1', 'new@example.com');
     expect((await POST(req({ token }))).status).toBe(200);
     expect(userUpdate).toHaveBeenCalledTimes(1);
+  });
+
+  it("ends the user's other sessions and removes the cancel link with the change", async () => {
+    const token = await issueEmailChangeToken(prisma, 'u1', 'new@example.com');
+    await issueEmailChangeCancelToken(prisma, 'u1');
+    expect((await POST(req({ token }))).status).toBe(200);
+    // No session cookie on this request: every web and mobile session of the user ends.
+    expect(webSessionDeleteMany).toHaveBeenCalledWith({ where: { user_id: 'u1' } });
+    expect(mobileSessionUpdateMany).toHaveBeenCalledWith({
+      where: { user_id: 'u1', revoked_at: null },
+      data: { revoked_at: expect.any(Date) },
+    });
+    expect(recordAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+      action: 'auth:sessions.endOthers', target_id: 'u1', metadata: { web: 2, mobile: 1 },
+    }));
+    expect(tokens).toEqual([]);
+  });
+
+  it('ends no session when the link is refused', async () => {
+    expect((await POST(req({ token: 'unknown' }))).status).toBe(400);
+    expect(webSessionDeleteMany).not.toHaveBeenCalled();
+    expect(mobileSessionUpdateMany).not.toHaveBeenCalled();
   });
 });

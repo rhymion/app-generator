@@ -75,3 +75,29 @@ export async function purgeExpiredWebSessions(now: Date = new Date(), db: Db = p
   const { count } = await db.web_session.deleteMany({ where: { expires_at: { lt: now } } });
   return count;
 }
+
+type SessionsDb = Pick<typeof prisma, 'web_session' | 'mobile_session'>;
+
+/**
+ * Ends every session of `userId` except the ones that made the request: the web sessions but
+ * `keep.webSessionId` and the mobile sessions (revoked, as on sign-out) but `keep.mobileSessionId`.
+ * Called when the password, the email address or the MFA state changes, so a session opened by
+ * someone who knew the old credential does not outlive the change. Returns how many web and mobile
+ * sessions were ended.
+ */
+export async function endOtherSessions(
+  userId: string,
+  keep: { webSessionId?: string; mobileSessionId?: string } = {},
+  db: SessionsDb = prisma,
+): Promise<{ web: number; mobile: number }> {
+  const web = await revokeUserWebSessions(userId, { exceptSessionId: keep.webSessionId }, db);
+  const { count: mobile } = await db.mobile_session.updateMany({
+    where: {
+      user_id: userId,
+      revoked_at: null,
+      ...(keep.mobileSessionId ? { id: { not: keep.mobileSessionId } } : {}),
+    },
+    data: { revoked_at: new Date() },
+  });
+  return { web, mobile };
+}

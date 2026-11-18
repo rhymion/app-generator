@@ -176,12 +176,50 @@ is unauthenticated.
 | every session but the current one | `revokeUserWebSessions(userId, { exceptSessionId })` |
 
 Wired in today: **sign-out** (`events.signOut` deletes the session's row, so
-a copy of the cookie taken before sign-out stops working) and **password
+a copy of the cookie taken before sign-out stops working), **password
 reset** (`/api/auth/password-reset/complete` deletes every row of the user in
-its transaction). An erased user's sessions already end through
-`anonymized_at`. Not wired in yet: a settings password change, an MFA change,
-an administrator "end this user's sessions" action and a list of a user's
-own web sessions; they can call the functions above.
+its transaction) and **a changed password, email address or MFA state**,
+which ends every other session of the user (see "Ending the other sessions on
+a credential change" below). An erased user's sessions already end through
+`anonymized_at`. Not wired in yet: an administrator "end this user's sessions"
+action and a list of a user's own web sessions; they can call the functions
+above.
+
+### Ending the other sessions on a credential change
+
+A session opened by someone who knew the old password, controlled the old
+address or got past the old second factor must not outlive the change. So
+when the **password**, the **email address** or the **MFA state** changes,
+every web session (`web_session` rows) and every mobile session
+(`mobile_session.revoked_at`) of the user ends, except the one that made the
+change:
+
+| Change | Where | Kept |
+|--------|-------|------|
+| Password (settings screen, `PUT /api/setting/:id`, `PUT /api/setting/bulk`) | `confirmCredentialChange()` once every check passed | the web session (settings screen) or the mobile session (mobile token) that sent it; none for an API key |
+| Email address, verification off | `confirmCredentialChange()` | as above |
+| Email address, verification on | `completeEmailChange()` when the link is used, in its transaction (not on the request: nothing changed yet) | the browser that used the link, when it is signed in as the user |
+| MFA turned off (`PUT /api/setting/:id`, `PUT /api/setting/bulk`, `/setting/mfa`) or on (`/setting/mfa`) | `confirmCredentialChange()`, `disableMfaAction()`, `completeEnrollmentAction()` | the session that made the change |
+
+`lib/auth/end-sessions.ts` `endSessionsAfterChange()` does it and audits
+`auth:sessions.endOthers` with the number of web and mobile sessions ended
+(no address or device data). `lib/auth/current-session.ts`
+`currentSessionRef()` finds the session to keep: the `sid` of the Auth.js
+session cookie, decoded on the server with the same secret(s)
+(`lib/auth/session-secrets.ts`, also used by `auth.ts`) and cookie name
+(`__Host-` when configured, else the Auth.js `__Secure-`/plain names), and
+the `session_id` of a mobile access token. The session object given to the
+browser does not carry `sid`. A cookie of another user, a forged or
+unreadable cookie, or a call outside a request keeps nothing, so every
+session ends: the safe direction. `endOtherSessions()` in
+`lib/auth/web-session.ts` is the database step.
+
+The settings `PUT` ends the sessions before the service writes the record (the
+confirmation runs first, the write last): a save that the service then
+refuses for another reason has already ended them. Ending sessions early is
+the safe side of that trade. A mobile access token stays valid for the rest of
+its ~15-minute lifetime after its session is revoked (see `lib/mobile-auth.ts`);
+its refresh token stops working at once.
 
 Row lifetime. `expires_at` only decides when an unused row may be deleted;
 the cookie's expiry (`SESSION_MAX_AGE_SECONDS`) and the absolute lifetime
@@ -253,6 +291,12 @@ On the first Google sign-in for a given email:
      (case-insensitive); a personal Google account has no `hd` and is
      rejected, whatever its email address looks like. Other providers
      are matched on the email's `@domain`. Empty list = allow all.
+     Set it without editing `lib/site-config.ts` through
+     `AUTH_ALLOWED_DOMAINS` (comma-separated, e.g. `example.com,example.co.jp`):
+     a set variable replaces the list written in the file, unset or blank
+     keeps it. It is read at server start, so a change needs a restart
+     (a redeploy on Vercel), not a rebuild (`domainListFromEnv()` in
+     `lib/site-config.ts`).
    - The **credentials↔OAuth collision rule**: if a `user` row already
      exists for this email with `password !== null`, that account was
      created via `/register`. SSO sign-in is rejected with reason
@@ -415,7 +459,9 @@ presenting the same code cannot both succeed. A recovery code is stamped used wi
 
 **Confirming a password change or an MFA disable over REST (Issue #1188):**
 the account settings page asks for the current password before it accepts a new
-one and for a TOTP or recovery code before it turns MFA off. The REST update
+one and for a TOTP or recovery code before it turns MFA off. On an account with
+MFA on, a password or email address change also needs a TOTP or recovery code
+(`mfa_code`), on every path below and on the settings screen. The REST update
 routes of the self-only account view (`PUT /api/setting/:id` and
 `PUT /api/setting/bulk`, generated for a self-only view of the `user` model that
 has both `password` and `mfa_enabled`) ask for the same proof through
@@ -448,6 +494,19 @@ key or a mobile token alone cannot change either:
   TOTP or recovery code (HTTP 400 when missing, 403 when invalid). It runs
   `disableMfa()`, so the secret and the recovery codes are cleared exactly as on
   the settings page, and shares the `auth:mfa:challenge` budget.
+- **With MFA on, a password or email change needs `mfa_code` too**, checked after
+  the current password (so a wrong password answers 403 before any code is
+  spent): HTTP 400 when missing, 403 when invalid, 429 when the
+  `auth:mfa:challenge` budget is spent. A code is single use (the last accepted
+  TOTP step, or the recovery code, is consumed); when the same request also turns
+  MFA off, `disableMfa()` checks the code once for both. The settings screen shows
+  an "Authentication code" field (`mfa_code`) when the stored account has MFA on;
+  the Server Action maps each refusal to a `VALIDATION` failure on its field
+  through `credentialActionFailure()` (`current_password` with
+  `Errors.currentPassword*`, `mfa_code` with `Errors.mfaCodeRequired` /
+  `Errors.mfaCodeIncorrect` / `Errors.mfaCodeRateLimited`, `password` with
+  `Errors.passwordTooWeak`). The refusals are `CredentialConfirmationError`, an
+  `ApiError` that names the field, so the REST answers are unchanged.
 - `mfa_enabled: true` on an account that has MFA off answers 400: MFA is turned
   on only through the enrollment flow on the settings page.
 - Omitting `password`, sending it empty, omitting `mfa_enabled` or repeating the
@@ -601,7 +660,10 @@ response time, while the mail send, done in both, dominates.
 
 **Registration domain allow-list** (Issue #1093). `siteConfig.auth.registrationAllowedDomains`
 in `lib/site-config.ts` (a site-config setting, not a schema key) restricts who may
-register. Empty (the default) allows every address. Otherwise the part of the address
+register. It is also set without editing the file through `REGISTRATION_ALLOWED_DOMAINS`
+(comma-separated; a set variable replaces the list written in the file, unset or blank keeps
+it; read at server start, so a change needs a restart or redeploy, not a rebuild; parsed by
+`domainListFromEnv()`, which trims, lower-cases and de-duplicates the entries). Empty (the default) allows every address. Otherwise the part of the address
 after the last `@` must equal one listed domain, case-insensitively; subdomains do not
 match (`sub.example.com` is not `example.com`). Both registration modes refuse another
 address with `403 { code: "REGISTRATION_NOT_ALLOWED" }`, a message that does not name the
@@ -652,7 +714,7 @@ happens next depends on email verification (`siteConfig.auth.registration.emailV
 | | Verification off (default) | Verification on |
 |---|---|---|
 | Stored address on save | the new address, at once (unchanged behavior) | the current address; the save succeeds and the other fields are stored |
-| Mail | none | a link `/{locale}/confirm-email?token=…` to the new address; a notice to the current address that a change was requested |
+| Mail | none | a link `/{locale}/confirm-email?token=…` to the new address; a notice to the current address that a change was requested, with a link `/{locale}/cancel-email-change?token=…` that cancels it |
 | Address changes | at once | when the link is used: `/confirm-email` shows a button (opening the link alone changes nothing, so a mail scanner cannot use it) that posts to `POST /api/auth/email-change/complete` `{ token, locale? }`, which stores the new address with `emailVerified` set, audits `auth:emailChange.complete` and notifies the previous address |
 
 The generated update paths hand the service `_credential.email`, the address
@@ -676,10 +738,29 @@ account, `409 EMAIL_TAKEN` when another account took the address after the link 
 from the address bar. Mail text: the `EmailChangeMail` messages; the notices to the current
 address do not name the new one. A failed notice is logged and does not undo the change.
 
+**Cancelling a pending change.** The notice to the current address carries a cancel link,
+so the owner of that address can stop a change they did not ask for (for example one made
+from a stolen session). Its token is stored like the change link (`identifier =
+email-change-cancel:<user id>`, SHA-256, 24 hours, `lib/auth/email-change-token.ts`), is
+replaced together with it by a new request, and works once. `/cancel-email-change` shows a
+button (opening the link alone cancels nothing) that posts `{ token }` to
+`POST /api/auth/email-change/cancel`: `cancelPendingEmailChange()` consumes the cancel token,
+deletes the account's pending change link, so the new address can no longer be confirmed,
+and audits `auth:emailChange.cancel`. It answers `400 INVALID_TOKEN` for an unknown, expired
+or used token, when the change was already completed or replaced (completing a change deletes
+the cancel token), for an erased account and for a token of another kind, and `404` while
+verification is off; it is limited per IP by `auth:register:complete`. The token names the
+account, so it cannot reach another account's change. Cancelling does not end sessions or
+change the password; the page and the notice tell the user to sign in and change the password
+if they did not ask for the change. Completing a change ends the user's other sessions (see
+"Ending the other sessions on a credential change").
+
 The settings screen does not yet show that a change is pending: after the save it still shows
 the current address. Tests: `lib/auth/credential-confirmation.test.ts`,
 `lib/auth/email-change.test.ts`, `app/api/auth/email-change/complete/route.test.ts`,
+`app/api/auth/email-change/cancel/route.test.ts`,
 `app/[locale]/confirm-email/ConfirmEmailForm.test.tsx`,
+`app/[locale]/cancel-email-change/CancelEmailChangeForm.test.tsx`,
 `code_generator/tests/test_rest_credential_confirmation.py` (the generated paths store
 `_credential.email`).
 

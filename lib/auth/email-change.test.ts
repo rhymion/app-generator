@@ -34,19 +34,28 @@ beforeEach(() => {
   vi.clearAllMocks();
   userFindUnique.mockResolvedValue(null);
   check.mockResolvedValue({ allowed: true });
+  tokenDeleteMany.mockResolvedValue({ count: 0 });
 });
 
 describe('startEmailChange', () => {
   it('mails a link to the new address and a notice to the current one, and never writes the account', async () => {
     await startEmailChange(input);
     expect(tokenDeleteMany).toHaveBeenCalledWith({ where: { identifier: { startsWith: 'email-change:u1:' } } });
+    expect(tokenDeleteMany).toHaveBeenCalledWith({ where: { identifier: 'email-change-cancel:u1' } });
     expect(tokenCreate.mock.calls[0][0].data.identifier).toBe('email-change:u1:new@example.com');
+    expect(tokenCreate.mock.calls[1][0].data.identifier).toBe('email-change-cancel:u1');
     expect(sendMail).toHaveBeenCalledTimes(2);
     const [link, notice] = sendMail.mock.calls.map((c) => c[0]);
     expect(link.to).toBe('new@example.com');
     expect(link.text).toMatch(/http:\/\/localhost:3000\/ja\/confirm-email\?token=/);
     expect(notice.to).toBe('old@example.com');
     expect(notice.text).not.toContain('new@example.com');
+    // The notice carries a link that cancels the change.
+    expect(notice.text).toMatch(/http:\/\/localhost:3000\/ja\/cancel-email-change\?token=[A-Za-z0-9_-]{43}/);
+    // The two links are different tokens.
+    const confirmToken = /token=([A-Za-z0-9_-]+)/.exec(link.text)?.[1];
+    const cancelToken = /token=([A-Za-z0-9_-]+)/.exec(notice.text)?.[1];
+    expect(confirmToken).not.toBe(cancelToken);
     expect(userUpdate).not.toHaveBeenCalled();
     expect(check).toHaveBeenCalledWith('auth:register:email', expect.stringMatching(/^[0-9a-f]{64}$/));
   });

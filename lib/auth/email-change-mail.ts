@@ -23,6 +23,7 @@ export async function buildEmailChangeMail(input: {
   to: string;
   locale: string;
   origin: string;
+  /** `confirm`: the change link token. `requested`: the cancel link token. */
   token?: string;
 }): Promise<MailMessage> {
   const t = (await translatorFor(input.locale)) as unknown as (key: string, values?: Record<string, string>) => string;
@@ -33,7 +34,9 @@ export async function buildEmailChangeMail(input: {
     return { to: input.to, subject: t('confirmSubject', { app }), text: t('confirmBody', { app, link }) };
   }
   if (input.kind === 'requested') {
-    return { to: input.to, subject: t('requestedSubject', { app }), text: t('requestedBody', { app }) };
+    if (!input.token) throw new Error('An email change notice needs a cancel token');
+    const link = `${input.origin}/${input.locale}/cancel-email-change?token=${encodeURIComponent(input.token)}`;
+    return { to: input.to, subject: t('requestedSubject', { app }), text: t('requestedBody', { app, link }) };
   }
   return { to: input.to, subject: t('completedSubject', { app }), text: t('completedBody', { app }) };
 }

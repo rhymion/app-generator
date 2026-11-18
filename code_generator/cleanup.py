@@ -93,6 +93,10 @@ HANDWRITTEN_ALLOWLIST: frozenset[str] = frozenset([
     "app/[locale]/confirm-email/page.tsx",
     "app/[locale]/confirm-email/ConfirmEmailForm.tsx",
     "app/[locale]/confirm-email/ConfirmEmailForm.test.tsx",
+    # email change cancel page (handwritten auth flow; link in the notice to the current address)
+    "app/[locale]/cancel-email-change/page.tsx",
+    "app/[locale]/cancel-email-change/CancelEmailChangeForm.tsx",
+    "app/[locale]/cancel-email-change/CancelEmailChangeForm.test.tsx",
     # mobile layout test (handwritten e2e)
     "cypress/e2e/mobile/layout.cy.ts",
     # setting page (handwritten; coexists with generated edit/view)
