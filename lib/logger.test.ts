@@ -150,7 +150,7 @@ describe('formatLogLine', () => {
   });
 
   it('stays valid JSON for cycles, bigint and symbols', () => {
-    const cyclic: Record<string, unknown> = { n: 1n, s: Symbol('x') };
+    const cyclic: Record<string, unknown> = { n: BigInt(1), s: Symbol('x') };
     cyclic.self = cyclic;
     expect(JSON.parse(formatLogLine('info', ['m', cyclic], NOW)).context).toEqual({ n: '1', s: 'Symbol(x)', self: '[Circular]' });
   });
