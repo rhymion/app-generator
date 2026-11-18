@@ -184,6 +184,9 @@ bash scripts/gcp-deploy.sh  # Run Step 3 only
 gcp-setup.sh is idempotent so re-running is safe,
 but if there are no infrastructure changes, gcp-deploy.sh alone is sufficient.
 
+After a deploy, `bash scripts/gcp-verify.sh` checks, read-only, that the buckets are private and the required
+secrets exist (`docs/knowledge/deployed-config-verification.md`).
+
 ### Nightly scheduled tasks (optional)
 
 `bash scripts/gcp-task-runner.sh` provisions a Cloud Scheduler job and a

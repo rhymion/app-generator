@@ -33,3 +33,6 @@ one-line reference" pattern already used for
 `.claude/commands/investigate.md`. Do not reintroduce a standalone
 consumer-side copy; edit here and let the submodule bump carry the
 update downstream.
+
+After a deploy, `scripts/vercel-verify.sh` checks, read-only and by variable name, that Production has its required
+variables and that Production and Preview do not share a secret entry (`deployed-config-verification.md`).
