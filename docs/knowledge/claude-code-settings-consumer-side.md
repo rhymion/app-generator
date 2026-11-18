@@ -192,3 +192,31 @@ fact. Treat validation as two separate checks, both required:
 Do this after any edit to either `.claude/settings.json` file in this
 project pair, and after adding/editing your own
 `.claude/settings.local.json`.
+
+## 6. The Stop hook must let Claude wait for the user
+
+`.claude/settings.json` has a `type: "prompt"` Stop hook: before each stop, a
+model reads the transcript and answers `{"ok": true}` or `{"ok": false,
+"reason": ...}`; `ok: false` shows "Stop hook reported a problem" and sends
+the reason back, so Claude keeps working.
+
+The first version asked "nothing in the original request is still
+outstanding" with no exceptions. When Claude stopped to ask for approval
+(for example "Should I push?"), the judge counted the push as outstanding and
+blocked the stop again and again; it also invented goals the user never
+stated ("get CI passing" after a plain question). The prompt now:
+
+- judges only the user's own words in the latest request;
+- treats as satisfied an answered question, a step that needs the user's
+  decision or approval (push, merge, deploy, issue comments, dismissing an
+  alert, choosing an option) once Claude asked for it, a result Claude cannot
+  observe (CI after a push) once Claude said so, and a reported
+  environmental failure;
+- returns `ok: true` when the stop was already blocked and Claude only
+  repeats that it is waiting for the user.
+
+When editing the prompt, keep those exceptions: without them the hook turns a
+legitimate question to the user into a loop. A personal opt-out is
+`"disableAllHooks": true` in your own `.claude/settings.local.json` (it
+disables every hook). The Codex counterpart, `.codex/hooks/stop-sanity-check.sh`,
+only adds a reminder (`"continue": true`) and cannot loop.
