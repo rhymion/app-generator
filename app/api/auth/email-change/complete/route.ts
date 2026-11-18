@@ -11,13 +11,19 @@ import { completeEmailChange } from "@/lib/auth/email-change";
 // The single-use token is the credential: it names the account and the new address, and holding
 // it proves control of that address. 200 stores the new address (marked verified) and notifies the
 // previous one. An unknown, expired or used token, or an erased account, answers 400
-// INVALID_TOKEN; an address another account took after the link was sent answers 409 EMAIL_TAKEN.
+// INVALID_TOKEN; an address another account took after the link was sent answers 409 EMAIL_TAKEN;
+// an address whose domain left the registration allow-list since the link was sent answers 403
+// EMAIL_NOT_ALLOWED (Issue #1402).
 // The route does not exist (404) while email verification is off.
 //
 // See docs/knowledge/authentication.md "Changing the email address".
 
 function invalidToken() {
   return NextResponse.json({ error: "Invalid or expired link", code: "INVALID_TOKEN" }, { status: 400 });
+}
+
+function emailNotAllowed() {
+  return NextResponse.json({ error: "This email address cannot be used.", code: "EMAIL_NOT_ALLOWED" }, { status: 403 });
 }
 
 function emailTaken() {
@@ -50,7 +56,9 @@ export async function POST(request: Request) {
     });
     const result = await completeEmailChange(token, registrationLocale(body.locale), `${protocol}://${host}`);
     if (result.ok) return NextResponse.json({ ok: true }, { status: 200 });
-    return result.reason === "taken" ? emailTaken() : invalidToken();
+    if (result.reason === "taken") return emailTaken();
+    if (result.reason === "not_allowed") return emailNotAllowed();
+    return invalidToken();
   } catch (err) {
     // Another account took the address between the check and the write.
     if ((err as { code?: unknown } | null)?.code === "P2002") return emailTaken();

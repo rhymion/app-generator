@@ -20,6 +20,7 @@ vi.mock("next-intl", () => {
     confirmEmailDone: "Your email address has been changed.",
     confirmEmailLinkInvalid: "This confirmation link cannot be used.",
     confirmEmailTaken: "This address is already used by another account.",
+    confirmEmailNotAllowed: "This address can no longer be used.",
     confirmEmailFailed: "The email address could not be changed.",
     backToSignIn: "Back to sign in",
   };
@@ -72,6 +73,13 @@ describe("ConfirmEmailForm (Issue #1400)", () => {
     render(<ConfirmEmailForm />);
     await confirm();
     await waitFor(() => expect(screen.getByText("This address is already used by another account.")).toBeInTheDocument());
+  });
+
+  it("says when the address left the domain allow-list (Issue #1402)", async () => {
+    vi.stubGlobal("fetch", respond(403, { code: "EMAIL_NOT_ALLOWED" }));
+    render(<ConfirmEmailForm />);
+    await confirm();
+    await waitFor(() => expect(screen.getByText("This address can no longer be used.")).toBeInTheDocument());
   });
 
   it("shows the link as unusable when it has no token", () => {

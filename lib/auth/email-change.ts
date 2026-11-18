@@ -31,6 +31,7 @@ import {
 import { currentSessionRef } from '@/lib/auth/current-session';
 import { endOtherSessions } from '@/lib/auth/web-session';
 import { buildEmailChangeMail } from '@/lib/auth/email-change-mail';
+import { isRegistrationEmailAllowed, registrationAllowedDomains } from '@/lib/auth/domain-allow-list';
 
 const MAX_EMAIL_LENGTH = 320;
 
@@ -108,18 +109,24 @@ async function notify(
   }
 }
 
-export type EmailChangeResult = { ok: true } | { ok: false; reason: 'invalid' | 'taken' };
+export type EmailChangeResult = { ok: true } | { ok: false; reason: 'invalid' | 'taken' | 'not_allowed' };
 
 /**
  * Uses an email change link: stores the new address (marked verified) on the account the link was
  * issued for and notifies the previous address. `invalid` covers an unknown, expired or used link
  * and an account that no longer exists or was erased; `taken` means another account got the
- * address after the link was sent.
+ * address after the link was sent; `not_allowed` means the new address's domain is no longer on the
+ * registration domain allow-list (Issue #1402), which may have changed since the link was sent.
  */
 export async function completeEmailChange(token: unknown, locale: string, origin: string): Promise<EmailChangeResult> {
   const outcome = await prisma.$transaction(async (tx) => {
     const request = await consumeEmailChangeToken(tx, token);
     if (!request) return { ok: false as const, reason: 'invalid' as const };
+    // Issue #1402: the settings save already refused such an address; the list may have been
+    // narrowed since the link was sent. The link is used up either way.
+    if (!isRegistrationEmailAllowed(request.newEmail, registrationAllowedDomains(siteConfig.auth))) {
+      return { ok: false as const, reason: 'not_allowed' as const };
+    }
     const user = await tx.user.findUnique({
       where: { id: request.userId },
       select: { id: true, email: true, anonymized_at: true },

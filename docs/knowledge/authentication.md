@@ -669,12 +669,15 @@ match (`sub.example.com` is not `example.com`). Both registration modes refuse a
 address with `403 { code: "REGISTRATION_NOT_ALLOWED" }`, a message that does not name the
 list, before any account lookup, token or mail, so a refused domain never triggers an
 outbound message. `POST /api/auth/register/complete` checks again, because the list may
-have changed since the link was sent. The OAuth list `allowedDomains` is separate (it
+have changed since the link was sent. The same list applies to a changed email address
+(Issue #1402; see "Changing the email address" below), so an account cannot move to a
+domain it could not have registered with. The OAuth list `allowedDomains` is separate (it
 matches Google's `hd` claim) and unchanged. Helpers: `isRegistrationEmailAllowed()` and
 `registrationAllowedDomains()` in `lib/auth/domain-allow-list.ts` (the latter reads an
 older site config without the property as an empty list). Tests:
 `lib/auth/domain-allow-list.test.ts`, `app/api/auth/register/route.test.ts`,
-`app/api/auth/register/complete/route.test.ts`.
+`app/api/auth/register/complete/route.test.ts`, `lib/auth/credential-confirmation.test.ts`,
+`app/api/auth/email-change/complete/route.test.ts`.
 
 **Password reset** (Issue #1282). Self-service reset by emailed link, available **only
 with email verification on** (`siteConfig.auth.registration.emailVerification`): the
@@ -710,6 +713,19 @@ rotated. Tests:
 password (Issue #1285; `confirmCredentialChange()` in `lib/auth/credential-confirmation.ts`, used by
 the settings screen's Server Action, `PUT /api/setting/:id` and `PUT /api/setting/bulk`). What
 happens next depends on email verification (`siteConfig.auth.registration.emailVerification`):
+
+**Domain allow-list** (Issue #1402). Whatever the verification setting, a new address must pass
+the registration domain allow-list (`siteConfig.auth.registrationAllowedDomains`, "Registration
+domain allow-list" above), with the same matching rule as sign-up. `confirmCredentialChange()`
+checks it first, before the current password, the MFA code, the rate limit and any mail, and
+refuses another address with a `CredentialConfirmationError` on the `email` field: `400` with a
+message that does not name the list on the REST routes, a `VALIDATION` failure with
+`messageKey: 'Errors.emailDomainNotAllowed'` on the settings screen. An address resent unchanged is
+not checked, so an account whose domain left the list can still save its other settings. With
+verification on, `POST /api/auth/email-change/complete` checks the list again, because it may have
+been narrowed since the link was sent: such a link is used up and answers
+`403 { code: "EMAIL_NOT_ALLOWED" }` (the `/confirm-email` page shows
+`Auth.confirmEmailNotAllowed`), and the address is not changed.
 
 | | Verification off (default) | Verification on |
 |---|---|---|
