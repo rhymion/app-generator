@@ -65,7 +65,6 @@ NOT_OUTBOUND = {
     '@prisma/extension-accelerate': 'only reaches Prisma Accelerate through a prisma:// DATABASE_URL, which is the PostgreSQL row',
     '@react-pdf/renderer': 'renders PDF files in process',
     '@tailwindcss/typography': 'build-time CSS',
-    '@tailwindcss/vite': 'build-time CSS',
     '@types/mdx': 'type definitions only',
     '@types/papaparse': 'type definitions only',
     '@vercel/oidc': 'reads the Vercel OIDC token from the request environment; the exchange itself is the Google token exchange row (google-auth-library)',

@@ -73,6 +73,8 @@ function expectNoValues(out: string) {
 }
 
 const SAFE_POLICY = JSON.stringify({ bindings: [{ role: 'roles/storage.objectAdmin', members: ['serviceAccount:app@demo.iam.gserviceaccount.com'] }] });
+// A public bucket policy is the fixture gcp-verify.sh must reject; nothing is made public.
+// nosemgrep: public-object-storage-access
 const PUBLIC_POLICY = JSON.stringify({ bindings: [{ role: 'roles/storage.objectViewer', members: ['allUsers'] }] });
 const ALL_SECRETS = ['app-database-url', 'app-direct-database-url', 'app-auth-secret', 'app-nextauth-secret', 'app-gcs-bucket-name', 'app-cron-secret']
   .map((n) => `projects/123/secrets/${n}`)
