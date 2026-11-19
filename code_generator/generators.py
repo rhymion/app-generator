@@ -1355,7 +1355,8 @@ def actions_context(ctx: dict) -> dict:
     # The self-only account view: changing the password needs the current
     # password on the settings screen, exactly as on the REST
     # routes. The form posts the new password in plain text and the current one
-    # as `current_password`; the same confirmCredentialChange() the routes use
+    # as `current_password` (plus `mfa_code` when the account has MFA on);
+    # the same confirmCredentialChange() the routes use
     # decides, and only the hash it returns is stored. It runs after the
     # permission check and before any write.
     credential_password_var = ctx.get('credential_password_var')
@@ -1367,6 +1368,12 @@ def actions_context(ctx: dict) -> dict:
         re.sub(rf"\b{re.escape(credential_password_var)}\b", '_credential.password', parent_params)
         if credential_confirmation and credential_password_var else parent_params
     )
+    # Issue #1400: and the confirmed email address -- the current one while a
+    # change waits for the link sent to the new address (email verification on).
+    if credential_confirmation and credential_email_var:
+        _update_params = re.sub(
+            rf"(?<![\w.]){re.escape(credential_email_var)}(?![\w:])", '_credential.email', _update_params,
+        )
 
     def _credential_block(indent: str) -> str:
         if not credential_confirmation:
@@ -1378,18 +1385,13 @@ def actions_context(ctx: dict) -> dict:
             f"{indent}    password: {credential_password_var},\n"
             f"{(indent + '    email: ' + credential_email_var + ',' + chr(10)) if credential_email_var else ''}"
             f"{indent}    currentPassword: data.get('current_password'),\n"
+            f"{indent}    mfaCode: data.get('mfa_code'),\n"
             f"{indent}  }});\n"
             f"{indent}}} catch (e) {{\n"
             f"{indent}  logSecurityEventForError(e);\n"
-            f"{indent}  if (e instanceof ApiError) {{\n"
-            f"{indent}    return {{\n"
-            f"{indent}      ok: false,\n"
-            f"{indent}      errorCode: 'VALIDATION',\n"
-            f"{indent}      field: 'current_password',\n"
-            f"{indent}      reason: e.statusCode === 400 ? 'missing' : 'invalid',\n"
-            f"{indent}      messageKey: e.statusCode === 400 ? 'Errors.currentPasswordRequired' : e.statusCode === 429 ? 'Errors.currentPasswordRateLimited' : 'Errors.currentPasswordIncorrect',\n"
-            f"{indent}    }} satisfies ActionFailure;\n"
-            f"{indent}  }}\n"
+            f"{indent}  // A VALIDATION failure on the field the refusal is about: current_password,\n"
+            f"{indent}  // mfa_code (MFA on) or password (too weak).\n"
+            f"{indent}  if (e instanceof ApiError) return credentialActionFailure(e) satisfies ActionFailure;\n"
             f"{indent}  throw e;\n"
             f"{indent}}}\n"
         )
@@ -3544,6 +3546,7 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
     lockdown_field          = ctx.get('lockdown_field')
     is_audited              = ctx.get('is_audited', False)
     invalidates_permission_cache = bool(ctx.get('invalidates_permission_cache'))
+    invalidates_api_key_cache = bool(ctx.get('invalidates_api_key_cache')) and can_delete
     should_filter_by_org    = bool(ctx.get('should_filter_by_org'))
     org_id_client_writable  = bool(ctx.get('org_id_client_writable'))
     fk_write_checks         = ctx.get('fk_write_checks') or []
@@ -4201,6 +4204,7 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
                or approval_edge_trigger_update_code) else '')
         + (f"\nimport {{ recordAuditEvent }} from '@/lib/audit-log';" if is_audited else '')
         + ("\nimport { invalidatePermissionCache } from '@/lib/authz';" if invalidates_permission_cache else '')
+        + ("\nimport { invalidateApiKeyCache } from '@/lib/api-auth';" if invalidates_api_key_cache else '')
         + (f"\nimport {{ getAssociatedOrganizations }} from '@/lib/organization/associated_internal';" if org_id_client_writable and (can_create or can_update) else '')
         + ("\nimport { assertFkReferencesUsable } from '@/lib/_fk_reference';" if (fk_write_checks or child_fk_check_create or child_fk_check_update) and (can_create or can_update) else '')
         + ("\nimport { assertStoredFkReferencesReachable } from '@/lib/_fk_reference';" if ctx.get('delete_reference_check') and can_delete else '')
@@ -7573,10 +7577,12 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         all_states_merged = '\n'.join(filter(None, [
             all_states_merged,
             "  const [currentPassword, setCurrentPassword] = useState('');",
+            "  const [mfaCode, setMfaCode] = useState('');",
         ]))
         parent_form_data_sets_merged = '\n'.join(filter(None, [
             parent_form_data_sets_merged,
             "    formData.set('current_password', currentPassword);",
+            "    formData.set('mfa_code', mfaCode);",
         ]))
         all_parent_fields_jsx = '\n'.join(filter(None, [
             all_parent_fields_jsx,
@@ -7591,6 +7597,21 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             "        fullWidth\n"
             "        margin=\"normal\"\n"
             "      />",
+            # With MFA on, a password or email change also needs a TOTP or
+            # recovery code (confirmCredentialChange()); the field shows only
+            # for an account whose stored state has MFA on.
+            "      {Boolean(src.mfa_enabled) && (\n"
+            "        <AppFieldInput\n"
+            "          label={tcred('mfaCode')}\n"
+            "          name=\"mfa_code\"\n"
+            "          autoComplete=\"one-time-code\"\n"
+            "          helperText={tcred('mfaCodeHelp')}\n"
+            "          value={mfaCode}\n"
+            "          onChange={setMfaCode}\n"
+            "          fullWidth\n"
+            "          margin=\"normal\"\n"
+            "        />\n"
+            "      )}",
         ]))
 
     # AppFieldText / AppFieldBoolean / useCallback / useRef are imported unconditionally

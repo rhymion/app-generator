@@ -101,6 +101,14 @@ class TestContext:
         ctx = _ctx(model='account')
         assert ctx['credential_confirmation'] is False
 
+    def test_service_receives_the_confirmed_email(self):
+        # Issue #1400: with email verification on, a changed address waits for
+        # the link sent to it; the service stores what confirmCredentialChange()
+        # returns, never the submitted value.
+        args = _ctx()['service_args_for_update']
+        assert '_credential.email' in args
+        assert not re.search(r'(?<![\w.])email(?![\w:])', args), args
+
 
 class TestRoutes:
     def test_single_put_confirms_before_calling_the_service(self):
@@ -121,6 +129,13 @@ class TestRoutes:
         assert out.index('confirmCredentialChange(id') < out.index('await updateSetting(')
         call = out[out.index('confirmCredentialChange(id'):out.index('await updateSetting(')]
         assert re.search(r'\bemail: email,', call), call
+
+    @pytest.mark.parametrize('template', ['api_detail_route.ts.jinja2', 'api_bulk_route.ts.jinja2'])
+    def test_routes_store_the_confirmed_email(self, template):
+        out = _render(template, _ctx())
+        service_call = out[out.index('await updateSetting('):]
+        service_call = service_call[:service_call.index(';')]
+        assert '_credential.email' in service_call, service_call
 
     def test_other_entities_get_no_confirmation(self):
         ctx = _ctx(self_only=False)
@@ -156,13 +171,15 @@ class TestServerAction:
 
     def test_update_confirms_the_password_change_before_writing(self):
         out = _render_actions(_ctx())
-        assert "import { confirmCredentialChange } from '@/lib/auth/credential-confirmation';" in out
+        assert "import { confirmCredentialChange, credentialActionFailure } from '@/lib/auth/credential-confirmation';" in out
         assert "import { ApiError } from '@/lib/api-auth';" in out
         body = _upsert_body(out)
         assert 'confirmCredentialChange(id' in body
         call = body[body.index('confirmCredentialChange(id'):body.index('await updateSetting(')]
         assert re.search(r'\bemail: email,', call), call
         assert "currentPassword: data.get('current_password')" in call
+        # With MFA on, a password or email change also needs a TOTP/recovery code.
+        assert "mfaCode: data.get('mfa_code')" in call
         # Permission is decided first, the write comes last.
         assert body.index('requireRecordPermission') < body.index('confirmCredentialChange(id')
         assert body.index('confirmCredentialChange(id') < body.index('await updateSetting(')
@@ -178,11 +195,10 @@ class TestServerAction:
 
     def test_a_refusal_comes_back_as_a_field_error_not_a_throw(self):
         body = _upsert_body(_render_actions(_ctx()))
-        assert 'e instanceof ApiError' in body
-        assert "field: 'current_password'" in body
-        assert 'Errors.currentPasswordRequired' in body
-        assert 'Errors.currentPasswordIncorrect' in body
-        assert 'Errors.currentPasswordRateLimited' in body
+        # The field (current_password / mfa_code / password) and message key are
+        # chosen by credentialActionFailure() in lib/auth/credential-confirmation.ts
+        # (vitest covers the mapping).
+        assert 'if (e instanceof ApiError) return credentialActionFailure(e) satisfies ActionFailure;' in body
         # Anything that is not an ApiError is unexpected and propagates.
         assert 'throw e;' in body
 
@@ -205,6 +221,16 @@ class TestSettingsForm:
         assert 'type="password"' in f['all_parent_fields_jsx']
         assert 'name="current_password"' in f['all_parent_fields_jsx']
 
+    def test_form_posts_an_mfa_code_for_an_account_with_mfa_on(self):
+        f = self._form()
+        assert "formData.set('mfa_code', mfaCode);" in f['parent_form_data_sets']
+        assert 'setMfaCode' in f['all_states']
+        jsx = f['all_parent_fields_jsx']
+        assert 'name="mfa_code"' in jsx
+        assert 'autoComplete="one-time-code"' in jsx
+        # Shown only when the stored account has MFA on.
+        assert jsx.index('{Boolean(src.mfa_enabled) && (') < jsx.index('name="mfa_code"')
+
     def test_form_template_imports_the_input_and_translator(self):
         ctx = _ctx()
         out = _render('form_upsert.tsx.jinja2', {**ctx, **form_upsert_context(ctx, _schema())})
@@ -216,3 +242,18 @@ class TestSettingsForm:
         assert f['credential_confirmation'] is False
         assert 'current_password' not in f['parent_form_data_sets']
         assert 'current_password' not in f['all_parent_fields_jsx']
+        assert 'mfa_code' not in f['parent_form_data_sets']
+        assert 'mfa_code' not in f['all_parent_fields_jsx']
+
+
+class TestServerAction:
+    def test_settings_action_stores_the_confirmed_email(self):
+        # Issue #1400: the settings screen's Server Action hands the service the
+        # address confirmCredentialChange() returns, as the REST routes do.
+        ctx = _ctx()
+        out = actions_context(ctx)
+        text = out if isinstance(out, str) else repr(out)
+        m = re.search(r'await updateSetting\(([^;]*)\);', text)
+        assert m, text[:2000]
+        assert '_credential.email' in m.group(1), m.group(1)
+        assert '_credential.password' in m.group(1), m.group(1)

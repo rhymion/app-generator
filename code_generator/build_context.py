@@ -53,6 +53,11 @@ _EXCLUDE_FIELDS = {'created_at', 'updated_at'}
 # permission rows, and the user's role membership. The generated service layer
 # drops the per-process permission cache after each of their writes commit.
 PERMISSION_CACHE_MODELS = frozenset({'role', 'permission', 'user'})
+# Entities whose rows hold an API key hash (Issue #1397). Deleting a row through
+# the generated service drops its key from the per-process API key cache
+# (lib/api-auth.ts) once the delete commits, as anonymizeUser() and a key
+# reissue already do.
+API_KEY_CACHE_MODELS = frozenset({'user'})
 _EXCLUDE_ID_TS  = {'id', 'created_at', 'updated_at', 'creator_id'}
 _SCALAR_TYPES   = {'string', 'integer', 'number', 'boolean'}
 
@@ -4930,6 +4935,15 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
             '_credential.mfaEnabled',
             service_args_for_update,
         )
+        # Issue #1400: with email verification on, a changed address is stored
+        # only once the link sent to it is used; until then the service keeps
+        # the current one, which confirmCredentialChange() hands back.
+        if credential_email_var:
+            service_args_for_update = re.sub(
+                rf"(?<![\w.]){re.escape(credential_email_var)}(?![\w:])",
+                '_credential.email',
+                service_args_for_update,
+            )
 
     # CSV import -> service.ts convergence (cmd_996, Issue #93; widened by
     # cmd_1124 to also cover embedded DataGrid children -- a JSON Schema
@@ -5075,6 +5089,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         has_assignee_id=has_assignee_id,
         is_audited=is_audited,
         invalidates_permission_cache=model in PERMISSION_CACHE_MODELS,
+        invalidates_api_key_cache=model in API_KEY_CACHE_MODELS,
         item_context_select=item_context_select,
         sortable_fields_quoted=sortable_fields_quoted,
         filterable_fields_quoted=filterable_fields_quoted,

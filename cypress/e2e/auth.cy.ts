@@ -58,7 +58,11 @@ describe('Authentication E2E Tests', () => {
     cy.contains('Invalid credentials').should('be.visible');
   });
 
-  it('should fail registration with existing email and correct password', () => {
+  it('should refuse a common password before looking up an existing email', () => {
+    // The seed password is on the common-password list (lib/auth/common-passwords.ts, Issue #1280), and the
+    // register route checks the password before the email: the answer is the policy error, so a weak password
+    // cannot be used to learn whether an address has an account. The existing-email case with an acceptable
+    // password is the next test.
     cy.visit('/en/register');
 
     cy.get('input[name="name"]').type('Test User');
@@ -68,7 +72,8 @@ describe('Authentication E2E Tests', () => {
 
     cy.get('button[type="submit"]').click();
 
-    cy.contains('Email already in use').should('be.visible');
+    cy.contains('This password is too common; choose another one').should('be.visible');
+    cy.contains('Email already in use').should('not.exist');
   });
 
   it('should fail registration with existing email and different password', () => {

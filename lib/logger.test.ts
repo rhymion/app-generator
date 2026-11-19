@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { isRedactedKey, logger, redact, redactString } from './logger';
+import { formatLogLine, isRedactedKey, logger, redact, redactString } from './logger';
 
 describe('isRedactedKey', () => {
   it.each([
@@ -105,7 +105,58 @@ describe('redact', () => {
   });
 });
 
-describe('logger', () => {
+describe('formatLogLine', () => {
+  const NOW = new Date('2026-11-18T01:02:03.000Z');
+
+  it('writes one JSON object with timestamp, level, severity, message and context', () => {
+    const line = formatLogLine('warn', ['[tag] for a@b.com', { password: 'p', id: 1 }], NOW);
+    expect(line).not.toContain('\n');
+    expect(JSON.parse(line)).toEqual({
+      timestamp: '2026-11-18T01:02:03.000Z',
+      level: 'warn',
+      severity: 'WARNING',
+      message: '[tag] for [REDACTED:email]',
+      context: { password: '[REDACTED]', id: 1 },
+    });
+  });
+
+  it.each([
+    ['debug', 'DEBUG'],
+    ['info', 'INFO'],
+    ['warn', 'WARNING'],
+    ['error', 'ERROR'],
+  ] as const)('maps %s to severity %s', (level, severity) => {
+    expect(JSON.parse(formatLogLine(level, ['m'], NOW))).toMatchObject({ level, severity });
+  });
+
+  it('omits context without extra arguments and keeps several as an array', () => {
+    expect(JSON.parse(formatLogLine('info', ['only'], NOW))).not.toHaveProperty('context');
+    const rec = JSON.parse(formatLogLine('error', ['[x] failed', 'P2002', new Error('boom')], NOW));
+    expect(rec.context[0]).toBe('P2002');
+    expect(rec.context[1]).toMatchObject({ name: 'Error', message: 'boom' });
+  });
+
+  it('embeds a JSON-encoded argument as an object and redacts its keys', () => {
+    const rec = JSON.parse(formatLogLine('warn', ['[security-event]', JSON.stringify({ event: 'authz.denied', token: 't' })], NOW));
+    expect(rec.context).toEqual({ event: 'authz.denied', token: '[REDACTED]' });
+  });
+
+  it('keeps a string that only looks like JSON as a string', () => {
+    expect(JSON.parse(formatLogLine('info', ['m', '{not json}'], NOW)).context).toBe('{not json}');
+  });
+
+  it('puts a non-string first argument into the context with an empty message', () => {
+    expect(JSON.parse(formatLogLine('error', [{ code: 1 }], NOW))).toMatchObject({ message: '', context: { code: 1 } });
+  });
+
+  it('stays valid JSON for cycles, bigint and symbols', () => {
+    const cyclic: Record<string, unknown> = { n: BigInt(1), s: Symbol('x') };
+    cyclic.self = cyclic;
+    expect(JSON.parse(formatLogLine('info', ['m', cyclic], NOW)).context).toEqual({ n: '1', s: 'Symbol(x)', self: '[Circular]' });
+  });
+});
+
+describe('logger (browser)', () => {
   afterEach(() => vi.restoreAllMocks());
 
   it.each([

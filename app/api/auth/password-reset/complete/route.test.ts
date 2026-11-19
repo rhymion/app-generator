@@ -8,11 +8,12 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 type Row = { identifier: string; token: string; expires: Date };
 type UserRow = { id: string; password: string | null; mfa_enabled: boolean; anonymized_at: Date | null };
 
-const { tokens, users, userUpdate, sessionRevoke, verifyMfaCode, recordAuditEvent, clearFailedSignIns } = vi.hoisted(() => ({
+const { tokens, users, userUpdate, sessionRevoke, webSessionDelete, verifyMfaCode, recordAuditEvent, clearFailedSignIns } = vi.hoisted(() => ({
   tokens: [] as Row[],
   users: new Map<string, UserRow>(),
   userUpdate: vi.fn(),
   sessionRevoke: vi.fn(),
+  webSessionDelete: vi.fn(),
   verifyMfaCode: vi.fn(),
   recordAuditEvent: vi.fn(),
   clearFailedSignIns: vi.fn(),
@@ -45,7 +46,8 @@ vi.mock('@/lib/prisma', () => {
     update: userUpdate,
   };
   const mobile_session = { updateMany: sessionRevoke };
-  const tx = { verificationToken, user, mobile_session };
+  const web_session = { deleteMany: webSessionDelete };
+  const tx = { verificationToken, user, mobile_session, web_session };
   return { default: { ...tx, $transaction: async (fn: (t: unknown) => unknown) => fn(tx) } };
 });
 vi.mock('@/lib/mfa/verify', () => ({ verifyMfaCode }));
@@ -80,7 +82,8 @@ beforeEach(() => {
   users.clear();
   users.set('a@example.com', { id: 'u1', password: '$2a$10$old', mfa_enabled: false, anonymized_at: null });
   users.set('m@example.com', { id: 'u2', password: '$2a$10$old', mfa_enabled: true, anonymized_at: null });
-  for (const f of [userUpdate, sessionRevoke, verifyMfaCode, recordAuditEvent, clearFailedSignIns]) f.mockReset();
+  for (const f of [userUpdate, sessionRevoke, webSessionDelete, verifyMfaCode, recordAuditEvent, clearFailedSignIns]) f.mockReset();
+  webSessionDelete.mockResolvedValue({ count: 1 });
   userUpdate.mockResolvedValue({});
   sessionRevoke.mockResolvedValue({ count: 1 });
 });
@@ -99,6 +102,8 @@ describe('POST /api/auth/password-reset/complete', () => {
     expect(data.data.password).toMatch(/^\$2[aby]\$/);
     expect(data.data.password).not.toBe(NEW_PASSWORD);
     expect(sessionRevoke).toHaveBeenCalledWith(expect.objectContaining({ where: { user_id: 'u1', revoked_at: null } }));
+    // Issue #1127: the account's web sessions end too.
+    expect(webSessionDelete).toHaveBeenCalledWith({ where: { user_id: 'u1' } });
     expect(recordAuditEvent).toHaveBeenCalledWith(expect.objectContaining({ action: 'auth:passwordReset', actor_user_id: 'u1' }));
     expect(clearFailedSignIns).toHaveBeenCalledWith('a@example.com', expect.anything());
     expect(tokens).toHaveLength(0);

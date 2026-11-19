@@ -39,4 +39,7 @@ force TLS on a connection string that does not ask for it.
 | File names do not leak personal data from a database dump | attachment name encryption and opaque storage keys | `attachment-storage.md` |
 | The audit trail cannot be rewritten | append-only table and optional write-once copies | `audit-log-append-only.md` |
 
+Where each class can leave the application (API responses, exports, downloads, mail, logs, storage, third-party
+services) is listed per route in [data-egress-ledger.md](data-egress-ledger.md).
+
 The ASVS rows for this area (V14.1.1, V14.1.2, V14.2.4) are in `security-asvs-coverage.md`.

@@ -39,6 +39,7 @@
     "currentPasswordIncorrect": "現在のパスワードが正しくありません。",
     "currentPasswordRateLimited": "試行回数が多すぎます。数分待ってからもう一度お試しください。",
     "currentPasswordRequired": "この変更を確認するため、現在のパスワードを入力してください。",
+    "emailDomainNotAllowed": "このメールアドレスは使用できません。組織で許可されているドメインのアドレスを使用してください。",
     "exclusiveParentsInvalid": "{fields}は一つだけ設定でき、他は空にしてください。",
     "exclusiveParentsMissing": "{fields}のうち、ちょうど一つを設定してください。",
     "fieldAlreadyLinked": "{field}は既に他のレコードにリンクされています。",
@@ -47,8 +48,12 @@
     "fkPermissionDenied": "{entity}の選択肢を閲覧する権限がありません。",
     "fkPermissionDeniedHint": "管理者に{entity}の閲覧権限付与を依頼してください。",
     "invalidSnapshot": "フォームのデータが古くなっています。ページを再読み込みしてください。",
+    "mfaCodeIncorrect": "認証コードが正しくありません。",
+    "mfaCodeRateLimited": "試行回数が多すぎます。数分待ってからもう一度お試しください。",
+    "mfaCodeRequired": "この変更を確認するため、認証アプリのコード（またはリカバリーコード）を入力してください。",
     "notFound": "レコードが見つかりませんでした。削除された可能性があります。",
     "pageError": "問題が発生しました。",
+    "passwordTooWeak": "別の新しいパスワードを選んでください。8 文字以上 72 バイト以内で、よく使われるパスワードや漏えいが知られているパスワードではなく、氏名・メールアドレス・アプリ名を含まないものにしてください。",
     "permissionDenied": "この操作を行う権限がありません。",
     "relatedRecordInvalid": "関連するレコードが必要な条件を満たしていないため、この操作を完了できません。",
     "rateLimited": "リクエストが多すぎます。しばらく待ってからもう一度お試しください。",
@@ -224,7 +229,21 @@
     "resetPasswordLinkInvalid": "この再設定リンクは使用できません。有効期限が切れているか、すでに使用されています。",
     "resetPasswordStartAgain": "新しいリンクを要求",
     "resetPasswordFailed": "パスワードを変更できませんでした。",
-    "backToSignIn": "サインインに戻る"
+    "backToSignIn": "サインインに戻る",
+    "confirmEmailTitle": "新しいメールアドレスの確認",
+    "confirmEmailHelper": "ボタンを押すと、このアドレスがアカウントのメールアドレスになります。",
+    "confirmEmailButton": "メールアドレスを確定",
+    "confirmEmailDone": "メールアドレスを変更しました。今後は新しいアドレスを使用してください。",
+    "confirmEmailLinkInvalid": "この確認リンクは使用できません。有効期限が切れているか、すでに使用されたか、新しいリンクに置き換えられています。",
+    "confirmEmailTaken": "このアドレスはすでに別のアカウントで使用されています。",
+    "confirmEmailNotAllowed": "このアドレスは現在使用できません。メールアドレスは変更されていません。",
+    "confirmEmailFailed": "メールアドレスを変更できませんでした。",
+    "cancelEmailChangeTitle": "メールアドレス変更の取り消し",
+    "cancelEmailChangeHelper": "アカウントのメールアドレスを変更する依頼がありました。心当たりがない場合は取り消してください。現在のアドレスが引き続き使われます。",
+    "cancelEmailChangeButton": "変更を取り消す",
+    "cancelEmailChangeDone": "変更を取り消しました。メールアドレスは変更されていません。心当たりがない場合は、サインインしてパスワードを変更してください。",
+    "cancelEmailChangeLinkInvalid": "このリンクは無効か期限切れです。または、変更はすでに完了したか取り消されています。",
+    "cancelEmailChangeFailed": "変更を取り消せませんでした。もう一度お試しください。"
   },
   "Legal": {
     "termsTitle": "利用規約",
@@ -294,7 +313,9 @@
     "accountsTitle": "連携アカウント",
     "accountsBody": "このアカウントへサインインできるプロバイダーを管理します。",
     "currentPassword": "現在のパスワード",
-    "currentPasswordHelp": "パスワードまたはメールアドレスを変更する場合に必要です。"
+    "currentPasswordHelp": "パスワードまたはメールアドレスを変更する場合に必要です。",
+    "mfaCode": "認証コード",
+    "mfaCodeHelp": "二要素認証が有効なため、パスワードまたはメールアドレスを変更する場合は認証アプリのコード（またはリカバリーコード）が必要です。"
   },
   "LinkedAccounts": {
     "title": "連携アカウント",
@@ -479,5 +500,13 @@
   "PasswordResetMail": {
     "subject": "{app} のパスワード再設定",
     "body": "{app} のアカウントのパスワード再設定が要求されました。\n\n新しいパスワードを設定するには、1時間以内に次のリンクを開いてください:\n{link}\n\n心当たりがない場合は、このメールを無視してください。パスワードは変更されていません。"
+  },
+  "EmailChangeMail": {
+    "confirmSubject": "{app} の新しいメールアドレスの確認",
+    "confirmBody": "{app} のアカウントでこのメールアドレスを使用するよう依頼がありました。\n\n変更を確定するには、24 時間以内に次のリンクを開いてください。\n{link}\n\n心当たりがない場合は、このメールを無視してください。何も変更されません。",
+    "requestedSubject": "{app} のメールアドレス変更の依頼",
+    "requestedBody": "{app} のアカウントのメールアドレスを変更する依頼がありました。新しいアドレスに送ったリンクが使われるまで変更は反映されず、このアドレスが引き続き使われます。\n\n心当たりがない場合は、次のリンク（24 時間有効）から変更を取り消し、サインインしてパスワードを変更してください。\n{link}",
+    "completedSubject": "{app} のメールアドレスが変更されました",
+    "completedBody": "{app} のアカウントのメールアドレスが変更されました。このアドレスは今後このアカウントでは使われません。\n\n心当たりがない場合は、管理者に連絡してください。"
   }
 }

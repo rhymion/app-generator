@@ -372,7 +372,7 @@ def build_entity_openapi(ctx: dict) -> dict:
         create_properties['mfa_code'] = {
             'type': 'string',
             'writeOnly': True,
-            'description': 'A current TOTP or recovery code. Required on update to set `mfa_enabled` to false.',
+            'description': 'A current TOTP or recovery code. Required on update to set `mfa_enabled` to false, and, for an account with MFA on, when `password` is sent or `email` differs from the stored address.',
         }
     # Relation/child-list inputs the REST routes read (Issue #777): a
     # connect-style relation takes a flat id list (`<child>_ids`), an owned

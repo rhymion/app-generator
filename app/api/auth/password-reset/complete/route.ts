@@ -5,9 +5,10 @@ import prisma from "@/lib/prisma";
 import { getRateLimiter } from "@/lib/rate-limit";
 import { clientIp } from "@/lib/rate-limit/client-ip";
 import { siteConfig } from "@/lib/site-config";
-import { passwordPolicyError } from "@/lib/auth/password-policy";
+import { checkPassword, passwordPolicyError } from "@/lib/auth/password-policy";
 import { consumeResetLink, peekResetLinkEmail } from "@/lib/auth/password-reset-token";
 import { clearFailedSignIns } from "@/lib/auth/account-lockout";
+import { revokeUserWebSessions } from "@/lib/auth/web-session";
 import { verifyMfaCode } from "@/lib/mfa/verify";
 import { MfaRateLimitedError } from "@/lib/mfa/errors";
 import { recordAuditEvent } from "@/lib/audit-log";
@@ -60,6 +61,11 @@ export async function POST(request: Request) {
       select: { id: true, password: true, mfa_enabled: true, anonymized_at: true },
     });
     if (!user || !user.password || user.anonymized_at) return invalidToken();
+    // Now that the account is known: its address as context words, and the optional breach check.
+    const weakForUser = await checkPassword(password, { email });
+    if (weakForUser) {
+      return NextResponse.json({ error: weakForUser, code: "WEAK_PASSWORD" }, { status: 400 });
+    }
 
     if (user.mfa_enabled) {
       const code = typeof body.mfaCode === "string" ? body.mfaCode.trim() : "";
@@ -86,6 +92,8 @@ export async function POST(request: Request) {
         where: { user_id: user.id, revoked_at: null },
         data: { revoked_at: new Date() },
       });
+      // Issue #1127: every web session of the account ends as well.
+      await revokeUserWebSessions(user.id, {}, tx);
       await recordAuditEvent({
         action: "auth:passwordReset",
         actor_user_id: user.id,

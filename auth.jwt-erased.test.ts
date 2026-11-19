@@ -14,6 +14,12 @@ vi.mock("@/lib/audit-log", () => ({ recordAuditEvent: vi.fn() }));
 vi.mock("@/lib/mfa/verify", () => ({ verifyMfaCode: vi.fn() }));
 vi.mock("@/lib/auth/create-user", () => ({ createTenantBoundUser: vi.fn() }));
 vi.mock("@/lib/auth/mock-oauth-gate", () => ({ isMockGoogleOAuthTestEnabled: () => false }));
+vi.mock("@/lib/auth/web-session", () => ({
+  createWebSession: vi.fn(async () => "s1"),
+  extendWebSession: vi.fn(),
+  revokeWebSession: vi.fn(),
+  webSessionNeedsExtension: () => false,
+}));
 
 import { authConfig } from "./auth";
 
@@ -24,19 +30,19 @@ beforeEach(() => userFindUnique.mockReset());
 
 describe("jwt() callback after erasure", () => {
   it("ends the session of an anonymized user", async () => {
-    userFindUnique.mockResolvedValue({ mfa_enabled: false, mfa_token_version: 0, anonymized_at: new Date() });
-    await expect(jwt({ token: { id: "u1", mfa_token_version: 0 } })).resolves.toBeNull();
+    userFindUnique.mockResolvedValue({ mfa_enabled: false, mfa_token_version: 0, anonymized_at: new Date(), web_sessions: [{ expires_at: new Date(Date.now() + 86_400_000) }] });
+    await expect(jwt({ token: { id: "u1", sid: "s1", mfa_token_version: 0 } })).resolves.toBeNull();
   });
 
   it("keeps the session of a live user", async () => {
-    userFindUnique.mockResolvedValue({ mfa_enabled: false, mfa_token_version: 0, anonymized_at: null });
-    const token = { id: "u1", mfa_token_version: 0 };
+    userFindUnique.mockResolvedValue({ mfa_enabled: false, mfa_token_version: 0, anonymized_at: null, web_sessions: [{ expires_at: new Date(Date.now() + 86_400_000) }] });
+    const token = { id: "u1", sid: "s1", mfa_token_version: 0 };
     await expect(jwt({ token })).resolves.toMatchObject({ id: "u1" });
   });
 });
 
 describe("jwt() callback absolute session lifetime", () => {
-  const live = { mfa_enabled: false, mfa_token_version: 0, anonymized_at: null };
+  const live = { mfa_enabled: false, mfa_token_version: 0, anonymized_at: null, web_sessions: [{ expires_at: new Date(Date.now() + 86_400_000) }] };
   const now = () => Math.floor(Date.now() / 1000);
 
   async function loadJwt(limit: string | undefined) {
@@ -54,25 +60,25 @@ describe("jwt() callback absolute session lifetime", () => {
   it("ends a session older than the limit even though it is active", async () => {
     userFindUnique.mockResolvedValue(live);
     const cb = await loadJwt("3600");
-    await expect(cb({ token: { id: "u1", mfa_token_version: 0, session_started_at: now() - 7200 } })).resolves.toBeNull();
+    await expect(cb({ token: { id: "u1", sid: "s1", mfa_token_version: 0, session_started_at: now() - 7200 } })).resolves.toBeNull();
   });
 
   it("keeps a session younger than the limit", async () => {
     userFindUnique.mockResolvedValue(live);
     const cb = await loadJwt("3600");
-    await expect(cb({ token: { id: "u1", mfa_token_version: 0, session_started_at: now() - 60 } })).resolves.toMatchObject({ id: "u1" });
+    await expect(cb({ token: { id: "u1", sid: "s1", mfa_token_version: 0, session_started_at: now() - 60 } })).resolves.toMatchObject({ id: "u1" });
   });
 
   it("ends a session whose token has no start time once a limit is set", async () => {
     userFindUnique.mockResolvedValue(live);
     const cb = await loadJwt("3600");
-    await expect(cb({ token: { id: "u1", mfa_token_version: 0 } })).resolves.toBeNull();
+    await expect(cb({ token: { id: "u1", sid: "s1", mfa_token_version: 0 } })).resolves.toBeNull();
   });
 
   it("leaves old sessions alone when no limit is set", async () => {
     userFindUnique.mockResolvedValue(live);
     const cb = await loadJwt(undefined);
-    await expect(cb({ token: { id: "u1", mfa_token_version: 0, session_started_at: 1 } })).resolves.toMatchObject({ id: "u1" });
+    await expect(cb({ token: { id: "u1", sid: "s1", mfa_token_version: 0, session_started_at: 1 } })).resolves.toMatchObject({ id: "u1" });
   });
 
   it("stamps the start time at sign-in", async () => {

@@ -173,6 +173,7 @@ def _generated_files_for_entity(entity: dict, root: Path) -> list[Path]:
         files.append(lib_dir / 'service.ts')
         files.append(lib_dir / 'actions.ts')
         files.append(lib_dir / 'service_validation.ts')
+        files.append(lib_dir / 'checked.ts')
     if can_new:
         files.append(lib_dir / 'service_after_create.ts')
 

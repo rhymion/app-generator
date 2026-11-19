@@ -39,6 +39,7 @@
     "currentPasswordIncorrect": "The current password is incorrect.",
     "currentPasswordRateLimited": "Too many attempts. Please wait a few minutes and try again.",
     "currentPasswordRequired": "Enter your current password to confirm this change.",
+    "emailDomainNotAllowed": "This email address cannot be used. Use an address in a domain your organization allows.",
     "exclusiveParentsInvalid": "Only one of {fields} can be set; the others must be empty.",
     "exclusiveParentsMissing": "Exactly one of {fields} must be set.",
     "fieldAlreadyLinked": "{field} is already linked to another record.",
@@ -47,8 +48,12 @@
     "fkPermissionDenied": "You do not have permission to view {entity} options.",
     "fkPermissionDeniedHint": "Contact your administrator to request read access to {entity}.",
     "invalidSnapshot": "The form data is outdated. Please reload the page.",
+    "mfaCodeIncorrect": "The authentication code is incorrect.",
+    "mfaCodeRateLimited": "Too many attempts. Please wait a few minutes and try again.",
+    "mfaCodeRequired": "Enter a code from your authenticator app (or a recovery code) to confirm this change.",
     "notFound": "The record could not be found. It may have been deleted.",
     "pageError": "Something went wrong.",
+    "passwordTooWeak": "Choose a different new password: at least 8 characters and at most 72 bytes, not a common or breached password, and not containing your name, your email address or the name of the application.",
     "permissionDenied": "You do not have permission to perform this action.",
     "relatedRecordInvalid": "This action cannot be completed because a related record does not meet the required condition.",
     "rateLimited": "Too many requests. Please wait a moment and try again.",
@@ -224,7 +229,21 @@
     "resetPasswordLinkInvalid": "This reset link cannot be used. It may have expired or been used already.",
     "resetPasswordStartAgain": "Request a new link",
     "resetPasswordFailed": "The password could not be changed.",
-    "backToSignIn": "Back to sign in"
+    "backToSignIn": "Back to sign in",
+    "confirmEmailTitle": "Confirm your new email address",
+    "confirmEmailHelper": "Select the button to use this address for your account.",
+    "confirmEmailButton": "Confirm email address",
+    "confirmEmailDone": "Your email address has been changed. Use the new address from now on.",
+    "confirmEmailLinkInvalid": "This confirmation link cannot be used. It may have expired, been used already or been replaced by a newer one.",
+    "confirmEmailTaken": "This address is already used by another account.",
+    "confirmEmailNotAllowed": "This address can no longer be used. Your email address was not changed.",
+    "confirmEmailFailed": "The email address could not be changed.",
+    "cancelEmailChangeTitle": "Cancel the email address change",
+    "cancelEmailChangeHelper": "A change of the email address of your account was requested. Cancel it if you did not ask for it; your current address stays in use.",
+    "cancelEmailChangeButton": "Cancel the change",
+    "cancelEmailChangeDone": "The change was cancelled. Your email address was not changed. If you did not request the change, sign in and change your password.",
+    "cancelEmailChangeLinkInvalid": "This link is invalid or has expired, or the change was already completed or cancelled.",
+    "cancelEmailChangeFailed": "The change could not be cancelled. Please try again."
   },
   "Legal": {
     "termsTitle": "Terms of Service",
@@ -294,7 +313,9 @@
     "accountsTitle": "Connected accounts",
     "accountsBody": "Manage which providers can sign you into this account.",
     "currentPassword": "Current password",
-    "currentPasswordHelp": "Required when you change your password or email address."
+    "currentPasswordHelp": "Required when you change your password or email address.",
+    "mfaCode": "Authentication code",
+    "mfaCodeHelp": "Two-factor authentication is on: a code from your authenticator app (or a recovery code) is required when you change your password or email address."
   },
   "LinkedAccounts": {
     "title": "Connected accounts",
@@ -479,5 +500,13 @@
   "PasswordResetMail": {
     "subject": "Reset your password for {app}",
     "body": "Someone asked to reset the password of your account on {app}.\n\nTo choose a new password, open this link within one hour:\n{link}\n\nIf this was not you, ignore this message. Your password has not changed."
+  },
+  "EmailChangeMail": {
+    "confirmSubject": "Confirm your new email address for {app}",
+    "confirmBody": "Someone asked to use this email address for an account on {app}.\n\nTo confirm the change, open this link within 24 hours:\n{link}\n\nIf this was not you, ignore this message. Nothing changes.",
+    "requestedSubject": "Email address change requested for {app}",
+    "requestedBody": "Someone asked to change the email address of your account on {app}. The change takes effect only after the link sent to the new address is used; until then this address stays in use.\n\nIf this was not you, cancel the change with this link (valid for 24 hours), then sign in and change your password:\n{link}",
+    "completedSubject": "Your email address for {app} was changed",
+    "completedBody": "The email address of your account on {app} was changed. This address is no longer used for the account.\n\nIf this was not you, contact your administrator."
   }
 }

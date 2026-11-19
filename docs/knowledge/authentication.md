@@ -9,7 +9,8 @@ The auth stack is **Auth.js v5** (`next-auth@5.0.0-beta`) on top of
 — Auth.js v5's mixed-strategy story doesn't survive runtime when both
 Credentials and OAuth are configured (see "Session strategy" below).
 The adapter still writes `User` / `Account` rows on OAuth sign-in for
-identity stability, just not `Session` rows. MFA / TOTP is shipped for
+identity stability, just not `Session` rows; server-side revocation uses the
+app's own `web_session` rows instead (see "Server-side session revocation"). MFA / TOTP is shipped for
 both the credentials provider and the OAuth path (opt-in per user, see
 `lib/mfa/` and "MFA on the OAuth path" below); admin-mandated MFA is
 not in scope for this iteration.
@@ -59,7 +60,7 @@ tables at the bottom of `prisma/schema.prisma`, a deliberate exception to
 the snake_case convention. `Account` is populated on every OAuth sign-in;
 `Session` is **unused today** (we run on `session.strategy = "jwt"` —
 see "Session strategy" below); `VerificationToken` holds the sign-up and
-password-reset link tokens (hashed), see "Self-registration" and "Password reset".
+password-reset and email-change link tokens (hashed), see "Self-registration", "Password reset" and "Changing the email address".
 
 Two gates have to agree before a provider button works:
 
@@ -101,8 +102,8 @@ applies to the web (Auth.js) session only; mobile access and refresh tokens have
 
 Not implemented today, and tracked in Issue #1284:
 
-- **Concurrent-session policy.** The JWT strategy keeps no server-side session row (see below), so the number of
-  simultaneous web sessions per user is neither counted nor capped. A cap depends on Issue #1127.
+- **Concurrent-session policy.** Each web session has a `web_session` row (see "Server-side session revocation"
+  below), so the simultaneous sessions of a user can be counted, but nothing caps their number yet.
 - **Identity-provider session.** Signing out of the app ends the app cookie only. A Google session stays signed in at
   Google, and the app does not read or end it. The app session (relying party) and the provider session are independent.
 
@@ -151,8 +152,93 @@ Two paths to recover server-side revocation when needed:
    Auth.js repo trail this pattern; brittle and not officially
    supported.
 
-Server-side revocation for the credentials boundary is therefore
-explicitly **not** delivered by this iteration.
+Neither path is taken. Server-side revocation is delivered for both
+providers by the `web_session` record described next, on top of the JWT.
+
+### Server-side session revocation (`web_session`)
+
+Issue #1127. The web session is still the signed JWT cookie, but every
+sign-in (credentials, Google, any provider) also writes a `web_session` row
+(`prisma/schema.prisma`; `id`, `user_id`, `expires_at`, `created_at`, no
+device or address data) and `jwt()` stamps its id into the token as `sid`.
+On every later session read `jwt()` loads the row **in the user lookup it
+already makes** (`prisma.user.findUnique` with
+`relationLoadStrategy: "join"` and `web_sessions: { where: { id: sid } }`;
+the `relationJoins` preview feature turns this into one SQL statement with
+a lateral join), so the check adds no database round trip. When the row is
+missing, `jwt()` returns `null` and Auth.js clears the cookie: the request
+is unauthenticated.
+
+| To end | Call (`lib/auth/web-session.ts`) |
+|--------|-----------------------------------|
+| one session | `revokeWebSession(sessionId)` |
+| every session of a user | `revokeUserWebSessions(userId)` |
+| every session but the current one | `revokeUserWebSessions(userId, { exceptSessionId })` |
+
+Wired in today: **sign-out** (`events.signOut` deletes the session's row, so
+a copy of the cookie taken before sign-out stops working), **password
+reset** (`/api/auth/password-reset/complete` deletes every row of the user in
+its transaction) and **a changed password, email address or MFA state**,
+which ends every other session of the user (see "Ending the other sessions on
+a credential change" below). An erased user's sessions already end through
+`anonymized_at`. Not wired in yet: an administrator "end this user's sessions"
+action and a list of a user's own web sessions; they can call the functions
+above.
+
+### Ending the other sessions on a credential change
+
+A session opened by someone who knew the old password, controlled the old
+address or got past the old second factor must not outlive the change. So
+when the **password**, the **email address** or the **MFA state** changes,
+every web session (`web_session` rows) and every mobile session
+(`mobile_session.revoked_at`) of the user ends, except the one that made the
+change:
+
+| Change | Where | Kept |
+|--------|-------|------|
+| Password (settings screen, `PUT /api/setting/:id`, `PUT /api/setting/bulk`) | `confirmCredentialChange()` once every check passed | the web session (settings screen) or the mobile session (mobile token) that sent it; none for an API key |
+| Email address, verification off | `confirmCredentialChange()` | as above |
+| Email address, verification on | `completeEmailChange()` when the link is used, in its transaction (not on the request: nothing changed yet) | the browser that used the link, when it is signed in as the user |
+| MFA turned off (`PUT /api/setting/:id`, `PUT /api/setting/bulk`, `/setting/mfa`) or on (`/setting/mfa`) | `confirmCredentialChange()`, `disableMfaAction()`, `completeEnrollmentAction()` | the session that made the change |
+
+`lib/auth/end-sessions.ts` `endSessionsAfterChange()` does it and audits
+`auth:sessions.endOthers` with the number of web and mobile sessions ended
+(no address or device data). `lib/auth/current-session.ts`
+`currentSessionRef()` finds the session to keep: the `sid` of the Auth.js
+session cookie, decoded on the server with the same secret(s)
+(`lib/auth/session-secrets.ts`, also used by `auth.ts`) and cookie name
+(`__Host-` when configured, else the Auth.js `__Secure-`/plain names), and
+the `session_id` of a mobile access token. The session object given to the
+browser does not carry `sid`. A cookie of another user, a forged or
+unreadable cookie, or a call outside a request keeps nothing, so every
+session ends: the safe direction. `endOtherSessions()` in
+`lib/auth/web-session.ts` is the database step.
+
+The settings `PUT` ends the sessions before the service writes the record (the
+confirmation runs first, the write last): a save that the service then
+refuses for another reason has already ended them. Ending sessions early is
+the safe side of that trade. A mobile access token stays valid for the rest of
+its ~15-minute lifetime after its session is revoked (see `lib/mobile-auth.ts`);
+its refresh token stops working at once.
+
+Row lifetime. `expires_at` only decides when an unused row may be deleted;
+the cookie's expiry (`SESSION_MAX_AGE_SECONDS`) and the absolute lifetime
+still end the session. A row is written to outlive the cookie by one refresh
+interval (`maxAge + updateAge`) and pushed forward once less than `maxAge` is
+left, which an active session reaches at most once per
+`SESSION_UPDATE_AGE_SECONDS` (default once a day): that `UPDATE` and the
+`INSERT` at sign-in are the only writes. A sign-in deletes that user's
+expired rows; `purgeExpiredWebSessions()` deletes everyone's (`npm run db:purge-expired`
+runs it; schedule that if many users stop signing in).
+
+A token without `sid` (issued before this release) is treated as no session,
+so every user signs in again once after the upgrade. The `trigger: "update"`
+call that completes the MFA challenge goes through the same check, so it
+cannot revive a revoked session.
+
+Cost: the revocation check adds no query to a session read; the user lookup
+`jwt()` already made carries it (`auth.web-session.test.ts` asserts the query
+shape and that no other call is made when no extension is due).
 
 `AUTH_SECRET` is required and must be distinct per environment — the
 test env has a generated 64-char hex; production must set its own.
@@ -205,6 +291,12 @@ On the first Google sign-in for a given email:
      (case-insensitive); a personal Google account has no `hd` and is
      rejected, whatever its email address looks like. Other providers
      are matched on the email's `@domain`. Empty list = allow all.
+     Set it without editing `lib/site-config.ts` through
+     `AUTH_ALLOWED_DOMAINS` (comma-separated, e.g. `example.com,example.co.jp`):
+     a set variable replaces the list written in the file, unset or blank
+     keeps it. It is read at server start, so a change needs a restart
+     (a redeploy on Vercel), not a rebuild (`domainListFromEnv()` in
+     `lib/site-config.ts`).
    - The **credentials↔OAuth collision rule**: if a `user` row already
      exists for this email with `password !== null`, that account was
      created via `/register`. SSO sign-in is rejected with reason
@@ -367,7 +459,9 @@ presenting the same code cannot both succeed. A recovery code is stamped used wi
 
 **Confirming a password change or an MFA disable over REST (Issue #1188):**
 the account settings page asks for the current password before it accepts a new
-one and for a TOTP or recovery code before it turns MFA off. The REST update
+one and for a TOTP or recovery code before it turns MFA off. On an account with
+MFA on, a password or email address change also needs a TOTP or recovery code
+(`mfa_code`), on every path below and on the settings screen. The REST update
 routes of the self-only account view (`PUT /api/setting/:id` and
 `PUT /api/setting/bulk`, generated for a self-only view of the `user` model that
 has both `password` and `mfa_enabled`) ask for the same proof through
@@ -400,6 +494,19 @@ key or a mobile token alone cannot change either:
   TOTP or recovery code (HTTP 400 when missing, 403 when invalid). It runs
   `disableMfa()`, so the secret and the recovery codes are cleared exactly as on
   the settings page, and shares the `auth:mfa:challenge` budget.
+- **With MFA on, a password or email change needs `mfa_code` too**, checked after
+  the current password (so a wrong password answers 403 before any code is
+  spent): HTTP 400 when missing, 403 when invalid, 429 when the
+  `auth:mfa:challenge` budget is spent. A code is single use (the last accepted
+  TOTP step, or the recovery code, is consumed); when the same request also turns
+  MFA off, `disableMfa()` checks the code once for both. The settings screen shows
+  an "Authentication code" field (`mfa_code`) when the stored account has MFA on;
+  the Server Action maps each refusal to a `VALIDATION` failure on its field
+  through `credentialActionFailure()` (`current_password` with
+  `Errors.currentPassword*`, `mfa_code` with `Errors.mfaCodeRequired` /
+  `Errors.mfaCodeIncorrect` / `Errors.mfaCodeRateLimited`, `password` with
+  `Errors.passwordTooWeak`). The refusals are `CredentialConfirmationError`, an
+  `ApiError` that names the field, so the REST answers are unchanged.
 - `mfa_enabled: true` on an account that has MFA off answers 400: MFA is turned
   on only through the enrollment flow on the settings page.
 - Omitting `password`, sending it empty, omitting `mfa_enabled` or repeating the
@@ -553,18 +660,24 @@ response time, while the mail send, done in both, dominates.
 
 **Registration domain allow-list** (Issue #1093). `siteConfig.auth.registrationAllowedDomains`
 in `lib/site-config.ts` (a site-config setting, not a schema key) restricts who may
-register. Empty (the default) allows every address. Otherwise the part of the address
+register. It is also set without editing the file through `REGISTRATION_ALLOWED_DOMAINS`
+(comma-separated; a set variable replaces the list written in the file, unset or blank keeps
+it; read at server start, so a change needs a restart or redeploy, not a rebuild; parsed by
+`domainListFromEnv()`, which trims, lower-cases and de-duplicates the entries). Empty (the default) allows every address. Otherwise the part of the address
 after the last `@` must equal one listed domain, case-insensitively; subdomains do not
 match (`sub.example.com` is not `example.com`). Both registration modes refuse another
 address with `403 { code: "REGISTRATION_NOT_ALLOWED" }`, a message that does not name the
 list, before any account lookup, token or mail, so a refused domain never triggers an
 outbound message. `POST /api/auth/register/complete` checks again, because the list may
-have changed since the link was sent. The OAuth list `allowedDomains` is separate (it
+have changed since the link was sent. The same list applies to a changed email address
+(Issue #1402; see "Changing the email address" below), so an account cannot move to a
+domain it could not have registered with. The OAuth list `allowedDomains` is separate (it
 matches Google's `hd` claim) and unchanged. Helpers: `isRegistrationEmailAllowed()` and
 `registrationAllowedDomains()` in `lib/auth/domain-allow-list.ts` (the latter reads an
 older site config without the property as an empty list). Tests:
 `lib/auth/domain-allow-list.test.ts`, `app/api/auth/register/route.test.ts`,
-`app/api/auth/register/complete/route.test.ts`.
+`app/api/auth/register/complete/route.test.ts`, `lib/auth/credential-confirmation.test.ts`,
+`app/api/auth/email-change/complete/route.test.ts`.
 
 **Password reset** (Issue #1282). Self-service reset by emailed link, available **only
 with email verification on** (`siteConfig.auth.registration.emailVerification`): the
@@ -587,14 +700,85 @@ per IP), `auth:password-reset:email` (3 mails / hour per address; past it still 
 `resolveExternalUrl()`; `/reset-password` sends `Referrer-Policy: no-referrer` and drops
 the token from the address bar once read. Mail text: the `PasswordResetMail` messages.
 
-Not done by a reset: **web sessions are not ended**. They are JWTs with no server-side
-revocation (#1127) and end at their configured lifetime (`SESSION_MAX_AGE_SECONDS`,
-optionally `SESSION_ABSOLUTE_MAX_AGE_SECONDS`). API keys are not rotated. Tests:
+A reset also ends every web session of the account (its `web_session` rows are deleted in
+the same transaction, Issue #1127; see "Server-side session revocation"). API keys are not
+rotated. Tests:
 `app/api/auth/password-reset/route.test.ts`,
 `app/api/auth/password-reset/complete/route.test.ts`,
 `app/[locale]/forgot-password/page.test.tsx`,
 `app/[locale]/reset-password/ResetPasswordForm.test.tsx`,
 `app/[locale]/login/page.test.tsx`.
+
+**Changing the email address** (Issue #1400). Changing the address always needs the current
+password (Issue #1285; `confirmCredentialChange()` in `lib/auth/credential-confirmation.ts`, used by
+the settings screen's Server Action, `PUT /api/setting/:id` and `PUT /api/setting/bulk`). What
+happens next depends on email verification (`siteConfig.auth.registration.emailVerification`):
+
+**Domain allow-list** (Issue #1402). Whatever the verification setting, a new address must pass
+the registration domain allow-list (`siteConfig.auth.registrationAllowedDomains`, "Registration
+domain allow-list" above), with the same matching rule as sign-up. `confirmCredentialChange()`
+checks it first, before the current password, the MFA code, the rate limit and any mail, and
+refuses another address with a `CredentialConfirmationError` on the `email` field: `400` with a
+message that does not name the list on the REST routes, a `VALIDATION` failure with
+`messageKey: 'Errors.emailDomainNotAllowed'` on the settings screen. An address resent unchanged is
+not checked, so an account whose domain left the list can still save its other settings. With
+verification on, `POST /api/auth/email-change/complete` checks the list again, because it may have
+been narrowed since the link was sent: such a link is used up and answers
+`403 { code: "EMAIL_NOT_ALLOWED" }` (the `/confirm-email` page shows
+`Auth.confirmEmailNotAllowed`), and the address is not changed.
+
+| | Verification off (default) | Verification on |
+|---|---|---|
+| Stored address on save | the new address, at once (unchanged behavior) | the current address; the save succeeds and the other fields are stored |
+| Mail | none | a link `/{locale}/confirm-email?token=…` to the new address; a notice to the current address that a change was requested, with a link `/{locale}/cancel-email-change?token=…` that cancels it |
+| Address changes | at once | when the link is used: `/confirm-email` shows a button (opening the link alone changes nothing, so a mail scanner cannot use it) that posts to `POST /api/auth/email-change/complete` `{ token, locale? }`, which stores the new address with `emailVerified` set, audits `auth:emailChange.complete` and notifies the previous address |
+
+The generated update paths hand the service `_credential.email`, the address
+`confirmCredentialChange()` returns, never the submitted one; with verification on that is the
+current address while the change is pending, so a REST or settings save cannot store an unproven
+address. The current address keeps working for sign-in and mail until the link is used. The
+check runs last in `confirmCredentialChange()`, so a save refused for another reason (wrong
+password, wrong MFA code) sends no mail.
+
+`startEmailChange()` (`lib/auth/email-change.ts`) sends nothing, and the save answers the same,
+when the new address already belongs to another account or its per-address budget
+`auth:register:email` (3 / hour, shared with sign-up) is spent, so a save does not reveal which
+addresses are registered. Tokens (`lib/auth/email-change-token.ts`): same storage as sign-up and
+reset tokens, `identifier = email-change:<user id>:<new address>`, `token = sha256(token)`, valid
+**24 hours**; a new request of the same account replaces its earlier link, and a link works once
+(conditional delete inside the transaction that changes the address). The completion step
+answers `400 INVALID_TOKEN` for an unknown, expired, used or replaced token and for an erased
+account, `409 EMAIL_TAKEN` when another account took the address after the link was sent, and
+`404` while verification is off; it is limited per IP by `auth:register:complete`. Link host from
+`resolveExternalUrl()`; `/confirm-email` sends `Referrer-Policy: no-referrer` and drops the token
+from the address bar. Mail text: the `EmailChangeMail` messages; the notices to the current
+address do not name the new one. A failed notice is logged and does not undo the change.
+
+**Cancelling a pending change.** The notice to the current address carries a cancel link,
+so the owner of that address can stop a change they did not ask for (for example one made
+from a stolen session). Its token is stored like the change link (`identifier =
+email-change-cancel:<user id>`, SHA-256, 24 hours, `lib/auth/email-change-token.ts`), is
+replaced together with it by a new request, and works once. `/cancel-email-change` shows a
+button (opening the link alone cancels nothing) that posts `{ token }` to
+`POST /api/auth/email-change/cancel`: `cancelPendingEmailChange()` consumes the cancel token,
+deletes the account's pending change link, so the new address can no longer be confirmed,
+and audits `auth:emailChange.cancel`. It answers `400 INVALID_TOKEN` for an unknown, expired
+or used token, when the change was already completed or replaced (completing a change deletes
+the cancel token), for an erased account and for a token of another kind, and `404` while
+verification is off; it is limited per IP by `auth:register:complete`. The token names the
+account, so it cannot reach another account's change. Cancelling does not end sessions or
+change the password; the page and the notice tell the user to sign in and change the password
+if they did not ask for the change. Completing a change ends the user's other sessions (see
+"Ending the other sessions on a credential change").
+
+The settings screen does not yet show that a change is pending: after the save it still shows
+the current address. Tests: `lib/auth/credential-confirmation.test.ts`,
+`lib/auth/email-change.test.ts`, `app/api/auth/email-change/complete/route.test.ts`,
+`app/api/auth/email-change/cancel/route.test.ts`,
+`app/[locale]/confirm-email/ConfirmEmailForm.test.tsx`,
+`app/[locale]/cancel-email-change/CancelEmailChangeForm.test.tsx`,
+`code_generator/tests/test_rest_credential_confirmation.py` (the generated paths store
+`_credential.email`).
 
 **Lost password without email verification, and a lost second factor** (operator
 procedure, ASVS V6.4.3, V6.4.4). A user who lost the authenticator first uses a
@@ -613,11 +797,23 @@ deployment without email verification, an administrator:
 4. asks the user to sign in, change the password and enrol MFA again; with
    `MFA_REQUIRED_ROLES` covering the user, the app enforces the re-enrolment.
 
-**Password strength.** `lib/auth/password-policy.ts` requires at least 8
-characters (ASVS V6.2.1) and no composition rules (V6.2.5). Registration, the
-settings password form and the REST and bulk credential change all apply it, so no
-path can set a weaker password. Maximum length and common or breached passwords are
-tracked in #1280.
+**Password strength** (Issues #1125, #1280). `lib/auth/password-policy.ts` has no
+composition rules (V6.2.5) and applies one policy on every path that sets a password
+(registration, both steps; the settings form and the REST/bulk credential change through
+`confirmCredentialChange()`; the password reset), so no path can set a weaker password:
+
+| Rule | ASVS | Detail |
+|------|------|--------|
+| at least 8 characters | V6.2.1 | counted as Unicode characters, not UTF-16 units |
+| at most 72 bytes of UTF-8 | V6.2.9 | bcrypt reads only the first 72 bytes, so a longer password is refused instead of cut silently. 72 ASCII characters are allowed (V6.2.9 asks for at least 64); a password in a three-byte script such as Japanese is limited to 24 characters. Pre-hashing would lift that limit but changes the stored hash format, so it is not done |
+| not a common password | V6.2.4 | `lib/auth/common-passwords.ts`, a built-in floor of frequent passwords of 8+ characters, compared case-insensitively, plus `PASSWORD_DENYLIST_FILE` (one password per line, `#` comments; an unreadable configured file throws instead of silently checking nothing). The built-in list is shorter than the top 3000 that V6.2.4 names; a deployment that needs the full list supplies it as the file or turns on the breach check |
+| no context word | V6.2.11 | the password must not contain (case-insensitive) the app title's words, the user's name words, the email local part and its pieces, the domain name labels (webmail names and the last label skipped), or `PASSWORD_CONTEXT_WORDS` (comma-separated); only words of 4+ characters. The address is checked where it is known: registration, the settings change and the reset (after the link names the account); the second registration step checks the name and the title |
+| not breached (opt-in) | V6.2.12 | `PASSWORD_BREACH_CHECK=hibp`: a k-anonymity range query to `api.pwnedpasswords.com` (or `PASSWORD_BREACH_CHECK_URL`) with `Add-Padding`; only the first 5 hex characters of the SHA-1 leave the server. When the service fails or takes over 3 seconds the check is skipped and a warning logged (fail open), so a third-party outage does not stop password changes. Off by default (no outbound call) |
+
+`passwordPolicyError()` is the synchronous part; `checkPassword()` adds the breach check
+and is what the routes call. A refusal answers `400` with `code: "WEAK_PASSWORD"` and the
+rule's message on the register and reset routes, `400` on the REST setting update, and
+`Errors.passwordTooWeak` on the settings screen. Existing passwords are not re-checked.
 
 **Self-registration and API keys.** `POST /api/auth/register` is limited per
 client IP by the `auth:register` bucket (5 requests / 10 min) and answers
@@ -978,14 +1174,34 @@ Four small controls sit around the session cookie:
   `Clear-Site-Data: "cache", "cookies", "storage"`, so the browser drops cached
   pages and local storage for the origin.
 
-The session cookie keeps the Auth.js name (`__Secure-authjs.session-token` over
-https); a `__Host-` prefix is not applied.
+### Cookie names (`__Host-` prefix)
+
+Over https the Auth.js cookies carry the `__Host-` prefix (Issue #1274, ASVS V3.3.3):
+`__Host-authjs.session-token`, `__Host-authjs.callback-url`, `__Host-authjs.pkce.code_verifier`,
+`__Host-authjs.state` and `__Host-authjs.nonce` (Auth.js already names the CSRF cookie
+`__Host-authjs.csrf-token`). A browser accepts a `__Host-` cookie only with `Secure`, `Path=/` and no
+`Domain`, so a sibling host under the same parent domain cannot plant or overwrite one. The default
+`__Secure-` prefix does not forbid `Domain`.
+
+`resolveAuthCookies()` in `lib/auth/cookie-policy.ts` builds the `cookies` option `auth.ts` passes to
+Auth.js. The names are fixed when `auth.ts` loads, so the prefix follows the configured application URL:
+
+| `AUTH_URL` / `NEXTAUTH_URL` | `AUTH_COOKIE_HOST_PREFIX` | Cookie names |
+|------------------------------|---------------------------|--------------|
+| https | unset (default) | `__Host-authjs.*` |
+| https | `false` | Auth.js default, `__Secure-authjs.*` |
+| http (local development, the test server) | any | Auth.js default, `authjs.*` |
+| unset | any | Auth.js default, decided per request from the protocol |
+
+Set `AUTH_COOKIE_HOST_PREFIX=false` only for a deployment that has to share these cookies across hosts
+(a `Domain` attribute set through a customised `cookies` option). Turning the prefix on renames the
+session cookie, so every user signs in again once after the deploy.
 
 ## Out of scope
 
 The following are explicitly out of scope for the current implementation:
 
-- **Server-side revocation for credentials users**: Not implemented for sign-in itself — a stolen JWT cookie is self-contained and rotating `AUTH_SECRET` (without `AUTH_SECRET_PREVIOUS`, see "Rotating `AUTH_SECRET`") is the only global invalidation. Custom `adapter.createSession()` shim deferred. See `auth.ts` `authorize()`. (MFA-state revocation is handled separately — see "MFA on the OAuth path" below.)
+- **Server-side revocation**: Delivered for every provider by `web_session` (Issue #1127, see "Server-side session revocation"). Ending sessions on a settings password change or MFA change, an administrator action and a session list are not wired in yet. Rotating `AUTH_SECRET` (without `AUTH_SECRET_PREVIOUS`, see "Rotating `AUTH_SECRET`") remains the global invalidation of every token.
 - **MFA / TOTP**: Shipped in v1 (S5 phase 5a) for the credentials provider, opt-in per user. Shipped for the OAuth path too as of S8 — see "MFA on the OAuth path" below. Admin-mandated MFA is still deferred.
 - **Account linking UI**: Shipped in v1 (S7). `/setting/accounts` lists and connects/detaches OAuth providers; linking needs a signed-in session and the same email, cross-email linking deferred. See `lib/account-link/`, `auth.ts`.
 - **Audit-log table**: Not implemented. Auth events log to `console.info` only. Prisma model with role/permission hooks deferred.

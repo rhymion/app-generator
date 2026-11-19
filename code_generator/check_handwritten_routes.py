@@ -35,6 +35,18 @@ names the route `path`, the `skip` list (`permission`, `rate-limit`) and a
 required `reason`. An entry that no longer matches a flagged route is reported
 as stale, so the list cannot drift from the tree.
 
+Direct writes in hand-written code (Issue #1257)
+-----------------------------------------------
+The same run also scans every hand-written TypeScript file under `lib/`, `app/`
+and `components/` (plus `auth.ts` and `proxy.ts`; test files excluded) for a
+direct `prisma.<model>.<write>(` or `tx.<model>.<write>(` call. Hand-written
+code writes entity rows through the permission-checked entry points in
+`lib/<entity>/checked.ts`; a file that legitimately writes directly
+(authentication tokens, sessions, notifications, the approval engine, ...) is
+listed under `direct_writes:` in the allowlist with a `reason`. Generated files
+are skipped as above; an entry for a file the manifest records as generated is
+not reported as stale, so the list works with and without a generate-code run.
+
 Usage:
     python check_handwritten_routes.py [<project-root>] [--allowlist <file>]
 
@@ -68,6 +80,14 @@ _PERMISSION_CALL = re.compile(
     r'\b(requireApiPermission|requireApiRecordPermission|requireEntityPermission|requireRecordPermission|requireScheduledTaskRole)\s*\('
 )
 _RATE_LIMIT_CALL = re.compile(r'\bgetRateLimiter\s*\(')
+# Issue #1257: a direct write anywhere in hand-written code, inside a transaction too.
+_ANY_DIRECT_WRITE = re.compile(
+    r'\b(?:prisma|tx)\.[A-Za-z_]\w*\.(create|update|delete|upsert|createMany|updateMany|deleteMany)\s*\('
+)
+_DIRECT_WRITE_GUARD = 'direct-write'
+_SOURCE_DIRS = ('lib', 'app', 'components')
+_SOURCE_ROOT_FILES = ('auth.ts', 'proxy.ts')
+_TEST_FILE = re.compile(r'\.test\.tsx?$|/__tests__/')
 
 _GUARDS = {
     'permission': _PERMISSION_CALL,
@@ -81,6 +101,9 @@ class Violation:
     guard: str  # 'permission' | 'rate-limit'
 
     def __str__(self) -> str:
+        if self.guard == _DIRECT_WRITE_GUARD:
+            return (f'{self.path}: writes through Prisma directly; write through lib/<entity>/checked.ts, '
+                    'or list the file under direct_writes with a reason')
         return f'{self.path}: writes but has no {self.guard} check'
 
 
@@ -112,6 +135,32 @@ def _manifest_paths(root: Path) -> tuple[set[str], set[str]]:
 def _route_files(root: Path) -> list[Path]:
     api = root / 'app' / 'api'
     return sorted(api.rglob('route.ts')) if api.is_dir() else []
+
+
+def _source_files(root: Path) -> list[Path]:
+    files: list[Path] = []
+    for d in _SOURCE_DIRS:
+        base = root / d
+        if base.is_dir():
+            files.extend(p for p in base.rglob('*') if p.suffix in ('.ts', '.tsx') and p.is_file())
+    files.extend(root / f for f in _SOURCE_ROOT_FILES if (root / f).is_file())
+    return sorted(
+        p for p in files
+        if not _TEST_FILE.search(p.relative_to(root).as_posix())
+        and '/generated/' not in f'/{p.relative_to(root).as_posix()}'
+        and 'node_modules' not in p.parts
+    )
+
+
+def _load_direct_write_allowlist(path: Path) -> list[dict]:
+    if not path.is_file():
+        return []
+    data = yaml.safe_load(path.read_text(encoding='utf-8')) or {}
+    entries = data.get('direct_writes') or []
+    for e in entries:
+        if not e.get('path') or not e.get('reason'):
+            raise ValueError(f'direct_writes entry needs `path` and `reason`: {e!r}')
+    return entries
 
 
 def _load_allowlist(path: Path) -> list[dict]:
@@ -149,6 +198,21 @@ def check(root: Path, allowlist_path: Path = _ALLOWLIST_PATH) -> tuple[list[Viol
     violations = [v for v in flagged if (v.path, v.guard) not in exempt]
     flagged_keys = {(v.path, v.guard) for v in flagged}
     stale = sorted(f'{p} ({g})' for p, g in exempt if (p, g) not in flagged_keys)
+
+    # Issue #1257: direct Prisma writes anywhere in hand-written code.
+    direct_allowed = {e['path'] for e in _load_direct_write_allowlist(allowlist_path)}
+    direct_flagged: set[str] = set()
+    generated: set[str] = set()
+    for file in _source_files(root):
+        rel = file.relative_to(root).as_posix()
+        raw = file.read_text(encoding='utf-8')
+        if rel in overwritten or (_GENERATED_MARKER in raw and rel not in stubs):
+            generated.add(rel)
+            continue
+        if _ANY_DIRECT_WRITE.search(_strip_comments(raw)):
+            direct_flagged.add(rel)
+    violations += [Violation(p, _DIRECT_WRITE_GUARD) for p in sorted(direct_flagged - direct_allowed)]
+    stale += sorted(f'{p} ({_DIRECT_WRITE_GUARD})' for p in direct_allowed - direct_flagged - generated)
     return violations, stale
 
 

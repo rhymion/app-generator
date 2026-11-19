@@ -101,6 +101,7 @@ model user {
   mfa_enabled               Boolean             @default(false)
   mfa_recovery_codes        mfa_recovery_code[]
   mobile_sessions           mobile_session[]    @relation("UserMobileSessions")
+  web_sessions              web_session[]       @relation("UserWebSessions")
   // Bumped whenever MFA is enabled (lib/mfa/enrollment.ts completeEnrollment).
   // auth.ts's jwt() callback snapshots this into the JWT at sign-in and
   // re-compares it on every subsequent request; a mismatch re-arms
@@ -745,6 +746,25 @@ model mobile_session {
   @@index([user_id])
 }
 
+// Server-side record of a web (Auth.js) session (Issue #1127). The session
+// itself stays a signed JWT cookie; auth.ts stamps this row's id into the
+// token at sign-in (`sid`) and every session read joins the row into the user
+// lookup it already makes, so a missing row ends the session: deleting a row
+// revokes that session, deleting a user's rows signs the user out everywhere
+// (lib/auth/web-session.ts). `expires_at` only bounds how long a row is kept;
+// it is pushed forward while the session is used and expired rows are purged.
+// No device or address data is stored.
+model web_session {
+  id         String   @id @default(cuid())
+  user_id    String
+  user       user     @relation("UserWebSessions", fields: [user_id], references: [id], onDelete: Cascade)
+  expires_at DateTime @db.Timestamptz(0)
+  created_at DateTime @default(now()) @db.Timestamptz(0)
+
+  @@index([user_id])
+  @@index([expires_at])
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // NextAuth (@next-auth/prisma-adapter) auxiliary tables.
 //
@@ -764,7 +784,8 @@ model mobile_session {
 //   - `Account` rows are written on every OAuth sign-in (identity stability
 //     by providerAccountId).
 //   - `Session` is unused today; lights up under Auth.js v5 (database
-//     sessions).
+//     sessions). Server-side revocation of the JWT sessions uses
+//     `web_session` above instead (Issue #1127).
 //   - `VerificationToken` is unused until an Email/magic-link provider is
 //     added.
 // ─────────────────────────────────────────────────────────────────────────────

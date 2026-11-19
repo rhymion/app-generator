@@ -5,6 +5,11 @@
 //   * Error objects are reduced to name, message, stack, cause and their own enumerable fields,
 //     all redacted by the same rules.
 // Usage: `logger.error('[orders] export failed', err)`. Do not call `console.*` directly; ESLint fails on it.
+//
+// On the server each call writes one JSON object per line (Issue #1323), so a log processor can
+// parse and correlate it: `{"timestamp","level","severity","message","context"}`. In the browser
+// the redacted arguments go to the matching console method unchanged. `LOG_FORMAT=text` keeps the
+// plain console arguments on the server too (local development).
 import {
   MAX_REDACTION_DEPTH,
   REDACTED_KEY_EXACT,
@@ -68,11 +73,55 @@ export function redact(value: unknown): unknown {
   return redactInner(value, 0, new WeakSet());
 }
 
-type Level = 'debug' | 'info' | 'warn' | 'error';
+export type Level = 'debug' | 'info' | 'warn' | 'error';
+
+// Cloud Logging reads `severity`; other processors read `level`.
+const SEVERITY: Record<Level, string> = { debug: 'DEBUG', info: 'INFO', warn: 'WARNING', error: 'ERROR' };
+
+// A string argument that holds a JSON object or array (`logger.warn('[tag]', JSON.stringify(x))`)
+// is embedded as the parsed value, so the line is not double-encoded and its keys are redacted
+// like any other object.
+function embedJson(value: unknown): unknown {
+  if (typeof value !== 'string') return value;
+  const t = value.trim();
+  if (!((t.startsWith('{') && t.endsWith('}')) || (t.startsWith('[') && t.endsWith(']')))) return value;
+  try {
+    return JSON.parse(t) as unknown;
+  } catch {
+    return value;
+  }
+}
+
+/**
+ * One log record as a single JSON line. The first argument is the message when it is a string;
+ * the remaining arguments are the context (one value as is, several as an array). Every value is
+ * redacted first.
+ */
+export function formatLogLine(level: Level, args: unknown[], now: Date = new Date()): string {
+  const [first, ...rest] = args;
+  const hasMessage = typeof first === 'string';
+  const contextArgs = (hasMessage ? rest : args).map((a) => redact(embedJson(a)));
+  const record: Record<string, unknown> = {
+    timestamp: now.toISOString(),
+    level,
+    severity: SEVERITY[level],
+    message: hasMessage ? redactString(first) : '',
+  };
+  if (contextArgs.length === 1) record.context = contextArgs[0];
+  else if (contextArgs.length > 1) record.context = contextArgs;
+  // redact() already turned cycles, bigints and symbols into strings, so this cannot throw.
+  return JSON.stringify(record);
+}
+
+function jsonLines(): boolean {
+  if (typeof window !== 'undefined') return false;
+  return (typeof process === 'undefined' ? '' : (process.env.LOG_FORMAT ?? '')).trim().toLowerCase() !== 'text';
+}
 
 function write(level: Level, args: unknown[]): void {
   // The only direct console call in application code (allowlisted in eslint.config.mjs).
-  console[level](...args.map((a) => redact(a)));
+  if (jsonLines()) console[level](formatLogLine(level, args));
+  else console[level](...args.map((a) => redact(a)));
 }
 
 export const logger = {

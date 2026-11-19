@@ -44,7 +44,7 @@ A failed audit write outside a transaction is logged and does not fail the reque
 | `authz.denied` | 403 | The caller is known but may not perform the operation (`PERMISSION_DENIED`, cross-site write refused, a wrong current password when changing a credential), on a REST route or in a Server Action |
 | `rate_limit.hit` | 429 | A rate-limit bucket is spent, including the repeated-invalid-API-key bucket |
 
-A line is JSON with `at`, `event`, `status` and, for an `AppError`, `code`. It carries no user id, email, address, credential, request path or error message.
+The line's `context` is an object with `at`, `event`, `status` and, for an `AppError`, `code`. It carries no user id, email, address, credential, request path or error message.
 
 Where the line is written:
 
@@ -59,7 +59,7 @@ Not covered: a sign-in refused by the domain allow-list (audited as `auth:signIn
 
 ### Application log
 
-Messages carry a bracketed tag naming the source, for example `[audit_log:write_failed]`, `[rate-limit:fail_open]`, `[auth:signIn:reject]`, `[auth:createUser]`, `[register]`, `[anonymizeUser]`, `[_notifier:write_failed]`. They record failures that were swallowed so the request could continue (audit write, rate-limit store, notification write, search index creation), rejected sign-ins, account creation, API errors and which database adapter was chosen at start-up. Severities are `debug`, `info`, `warn` and `error`. Format varies: some records are single-line JSON, others a message plus an object. Normalizing it is tracked in the coverage table (V16.2.4).
+Messages carry a bracketed tag naming the source, for example `[audit_log:write_failed]`, `[rate-limit:fail_open]`, `[auth:signIn:reject]`, `[auth:createUser]`, `[register]`, `[anonymizeUser]`, `[_notifier:write_failed]`. They record failures that were swallowed so the request could continue (audit write, rate-limit store, notification write, search index creation), rejected sign-ins, account creation, API errors and which database adapter was chosen at start-up. Severities are `debug`, `info`, `warn` and `error`. On the server every record is one JSON line with `timestamp`, `level`, `severity`, `message` and `context` (`docs/knowledge/logging.md` "Output format"); the tag is the `message`.
 
 ### Slow-query log
 

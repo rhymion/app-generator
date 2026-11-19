@@ -9,7 +9,7 @@ import { PrismaAdapter } from "@auth/prisma-adapter";
 import prisma from "@/lib/prisma";
 import { verifyPassword } from "@/lib/auth/password-check";
 import { rehashPasswordIfNeeded } from "@/lib/auth/password-rehash";
-import { secretsEqual } from "@/lib/_secret_compare";
+import { sessionSecrets } from "@/lib/auth/session-secrets";
 import { clearFailedSignIns, getAccountLockState, recordFailedSignIn } from "@/lib/auth/account-lockout";
 import { siteConfig } from "@/lib/site-config";
 import { recordAuditEvent } from "@/lib/audit-log";
@@ -21,6 +21,8 @@ import { isDomainAllowed } from "@/lib/auth/domain-allow-list";
 import { isPastAbsoluteLifetime, resolveSessionPolicy } from "@/lib/session-policy";
 import { logSignInRejected } from "@/lib/security-event";
 import { isMfaEnrollmentRequired } from "@/lib/auth/mfa-required";
+import { resolveAuthCookies } from "@/lib/auth/cookie-policy";
+import { createWebSession, extendWebSession, revokeWebSession, webSessionNeedsExtension } from "@/lib/auth/web-session";
 
 // Custom CredentialsSignin subclasses so @auth/core re-throws them as-is
 // (plain Error gets wrapped in CallbackRouteError and the code is lost).
@@ -254,14 +256,7 @@ const sessionStrategy = "jwt" as const;
 // Read once at load. The absolute lifetime is enforced in jwt() below.
 const sessionPolicy = resolveSessionPolicy();
 
-// While AUTH_SECRET is being rotated, AUTH_SECRET_PREVIOUS holds the old value: sessions issued
-// under it stay valid and are re-issued under the new one (Auth.js tries each secret in turn and
-// signs with the first). See docs/knowledge/authentication.md "Rotating AUTH_SECRET" (#1291).
-function sessionSecrets(): string | string[] | undefined {
-  const current = process.env.AUTH_SECRET;
-  const previous = (process.env.AUTH_SECRET_PREVIOUS ?? "").trim();
-  return current && previous && !secretsEqual(previous, current) ? [current, previous] : current;
-}
+// Rotation of AUTH_SECRET (AUTH_SECRET_PREVIOUS): lib/auth/session-secrets.ts (#1291).
 
 export const authConfig: NextAuthConfig = {
   secret: sessionSecrets(),
@@ -273,6 +268,9 @@ export const authConfig: NextAuthConfig = {
   // (Phase 2 #9 from performance-plan-session.md).
   // maxAge / updateAge come from SESSION_MAX_AGE_SECONDS / SESSION_UPDATE_AGE_SECONDS (lib/session-policy.ts).
   session: { strategy: sessionStrategy, maxAge: sessionPolicy.maxAge, updateAge: sessionPolicy.updateAge },
+  // __Host- prefix on the session, callback-url, PKCE, state and nonce cookies when the configured URL is
+  // https (Issue #1274, lib/auth/cookie-policy.ts). Undefined keeps the Auth.js defaults.
+  cookies: resolveAuthCookies(),
   providers: buildProviders(),
   pages: {
     signIn: "/login",
@@ -451,9 +449,10 @@ export const authConfig: NextAuthConfig = {
 
       // MFA challenge completion: /mfa-challenge calls
       // `update({ mfa_pending: false })` after a valid TOTP/recovery code.
+      // Falls through to the checks below, so a revoked or expired session
+      // cannot be revived by an update call.
       if (trigger === "update" && (updateData as { mfa_pending?: boolean } | undefined)?.mfa_pending === false) {
         token.mfa_pending = false;
-        return token;
       }
 
       // Absolute session lifetime (SESSION_ABSOLUTE_MAX_AGE_SECONDS, off by default): end the session once it is
@@ -480,19 +479,41 @@ export const authConfig: NextAuthConfig = {
         // Issue #1281: any sign-in method. A role listed in MFA_REQUIRED_ROLES
         // without enrolment restricts the session to the MFA settings page.
         token.mfa_enrollment_required = await isMfaEnrollmentRequired(token.id, dbUser?.mfa_enabled ?? false);
+        // Issue #1127: the server-side record that makes this session revocable.
+        token.sid = await createWebSession(token.id, sessionPolicy);
         return token;
       }
 
       // Plain session read (no fresh sign-in). Re-check the version so an
       // MFA-state change mid-session takes effect on the very next request.
       if (token.id) {
+        // Issue #1127: a token without a server-side session (issued before
+        // revocation existed) is no session; its user signs in again once.
+        const sid = typeof token.sid === "string" && token.sid ? token.sid : null;
+        if (!sid) return null;
+        // One round trip: the session row is a joined relation of the user
+        // lookup this callback has always made (relationJoins).
         const dbUser = await prisma.user.findUnique({
+          relationLoadStrategy: "join",
           where: { id: token.id },
-          select: { mfa_enabled: true, mfa_token_version: true, anonymized_at: true },
+          select: {
+            mfa_enabled: true,
+            mfa_token_version: true,
+            anonymized_at: true,
+            web_sessions: { where: { id: sid }, select: { expires_at: true } },
+          },
         });
-        // An erased user's session ends here: returning null makes Auth.js
-        // treat the cookie as no session and clear it.
-        if (dbUser?.anonymized_at) return null;
+        // A revoked session (row deleted), or a deleted user, ends here:
+        // returning null makes Auth.js treat the cookie as no session and clear it.
+        const webSession = dbUser?.web_sessions[0];
+        if (!dbUser || !webSession) return null;
+        // An erased user's session ends here too.
+        if (dbUser.anonymized_at) return null;
+        // At most once per SESSION_UPDATE_AGE_SECONDS per session: keep the row
+        // from being purged while the session is in use.
+        if (webSessionNeedsExtension(webSession.expires_at, sessionPolicy)) {
+          await extendWebSession(sid, sessionPolicy);
+        }
         const dbVersion = dbUser?.mfa_token_version ?? 0;
         const tokenVersion = token.mfa_token_version ?? 0;
         if (dbUser?.mfa_enabled && dbVersion > tokenVersion) {
@@ -541,6 +562,10 @@ export const authConfig: NextAuthConfig = {
         (token as { id?: string } | null)?.id ??
         (session as { userId?: string } | null)?.userId ??
         null;
+      // Issue #1127: sign-out revokes the session server-side, so a copy of the
+      // cookie taken before sign-out stops working too.
+      const sid = (token as { sid?: unknown } | null)?.sid;
+      if (typeof sid === "string" && sid) await revokeWebSession(sid);
       logger.info(
         "[auth:signOut]",
         JSON.stringify({
@@ -596,5 +621,7 @@ declare module "@auth/core/jwt" {
     mfa_token_version?: number;
     /** Unix seconds at sign-in; the absolute session lifetime counts from here. */
     session_started_at?: number;
+    /** Id of the web_session row (Issue #1127); the session ends when the row is deleted. */
+    sid?: string;
   }
 }

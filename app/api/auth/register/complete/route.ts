@@ -5,7 +5,7 @@ import { hashPassword } from "@/lib/auth/bcrypt-cost";
 import prisma from "@/lib/prisma";
 import { getRateLimiter } from "@/lib/rate-limit";
 import { clientIp } from "@/lib/rate-limit/client-ip";
-import { passwordPolicyError } from "@/lib/auth/password-policy";
+import { checkPassword } from "@/lib/auth/password-policy";
 import { siteConfig } from "@/lib/site-config";
 import {
   REGISTRATION_NOT_ALLOWED,
@@ -51,7 +51,8 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
     }
     // Checked before the token is used, so a weak password does not burn the link.
-    const weak = passwordPolicyError(password);
+    // The address is known only once the token is used; the name and the app name are checked here.
+    const weak = await checkPassword(password, { name });
     if (weak) {
       return NextResponse.json({ error: weak, code: "WEAK_PASSWORD" }, { status: 400 });
     }
