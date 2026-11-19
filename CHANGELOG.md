@@ -3,7 +3,7 @@ All notable changes to this project will be documented in this file.
 The format is based on Keep a Changelog (https://keepachangelog.com/),
 and this project adheres to Semantic Versioning (https://semver.org/).
 
-## [Unreleased]
+## [7.0.1] - 2026-11-19
 ### Security
 - **The registration domain allow-list also applies to a changed email address** (Issue #1402). With
   `registrationAllowedDomains` / `REGISTRATION_ALLOWED_DOMAINS` set, the settings screen and `PUT /api/setting/:id` /
