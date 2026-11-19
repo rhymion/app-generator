@@ -12,17 +12,20 @@
  * must be called from inside `add{{Entity}}`'s existing transaction
  * (service.ts.jinja2), never in a separate one.
  *
- * Retention (one day) is enforced logically at lookup time, not by a
- * scheduled deletion job -- the design ruling deliberately does not add a
- * new scheduling mechanism for a housekeeping delete. A row past its
- * retention window is treated as absent by {@link checkIdempotencyKey},
- * and {@link recordIdempotencyKey}'s upsert then overwrites it in place.
+ * Retention (one day) is enforced at lookup time: a row past its retention
+ * window is treated as absent by {@link checkIdempotencyKey}, and
+ * {@link recordIdempotencyKey}'s upsert then overwrites it in place. The
+ * stored response bodies of expired rows are deleted by
+ * {@link purgeExpiredIdempotencyKeys}, which `npm run db:purge-expired`
+ * (scripts/purge-expired.ts) runs; schedule it with the platform's cron
+ * (Issue #1299, ASVS V14.2.2).
  */
 import crypto from 'crypto';
 import type { Prisma } from '@/app/generated/prisma/client';
 import { AppError } from '@/lib/_errors';
 
-const RETENTION_MS = 24 * 60 * 60 * 1000; // one day (design ruling)
+export const IDEMPOTENCY_RETENTION_MS = 24 * 60 * 60 * 1000; // one day (design ruling)
+const RETENTION_MS = IDEMPOTENCY_RETENTION_MS;
 
 /** Stable SHA-256 hex digest of a request body, used to detect an
  * Idempotency-Key reused for a materially different request. */
@@ -103,4 +106,20 @@ export async function recordIdempotencyKey(
       created_at: new Date(),
     },
   });
+}
+
+type IdempotencyPurgeDb = {
+  idempotency_key: { deleteMany: (args: { where: { created_at: { lt: Date } } }) => Promise<{ count: number }> };
+};
+
+/**
+ * Deletes every idempotency row past the retention window, with the response body it stored
+ * (Issue #1299). Such a row is already treated as absent, so deleting it changes no answer.
+ * Returns how many rows were deleted.
+ */
+export async function purgeExpiredIdempotencyKeys(db: IdempotencyPurgeDb, now: Date = new Date()): Promise<number> {
+  const { count } = await db.idempotency_key.deleteMany({
+    where: { created_at: { lt: new Date(now.getTime() - IDEMPOTENCY_RETENTION_MS) } },
+  });
+  return count;
 }

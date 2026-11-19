@@ -30,13 +30,14 @@ export async function resetTestDatabase() {
   // no TRUNCATE privilege. See docs/knowledge/audit-log-append-only.md.
   await prisma.$executeRaw`TRUNCATE TABLE audit_log, audit_log_digest`;
 
-  // Level 1: account, session, approval_history, audit_log, idempotency_key, mfa_recovery_code, mobile_session
+  // Level 1: account, session, approval_history, audit_log, idempotency_key, mfa_recovery_code, mobile_session, web_session
   await prisma.account.deleteMany();
   await prisma.session.deleteMany();
   await prisma.approval_history.deleteMany();
   await prisma.idempotency_key.deleteMany();
   await prisma.mfa_recovery_code.deleteMany();
   await prisma.mobile_session.deleteMany();
+  await prisma.web_session.deleteMany();
 
   // Level 2: app_setting, approval_request, attachment, dashboard_widget, notification, permission, reaction
   await prisma.app_setting.deleteMany();
@@ -438,6 +439,7 @@ export const ALL_PRISMA_MODELS = [
   'idempotency_key',
   'mfa_recovery_code',
   'mobile_session',
+  'web_session',
   'app_setting',
   'approval_request',
   'attachment',

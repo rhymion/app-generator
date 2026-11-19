@@ -89,6 +89,14 @@ HANDWRITTEN_ALLOWLIST: frozenset[str] = frozenset([
     "app/[locale]/reset-password/page.tsx",
     "app/[locale]/reset-password/ResetPasswordForm.tsx",
     "app/[locale]/reset-password/ResetPasswordForm.test.tsx",
+    # email change confirmation page (handwritten auth flow, Issue #1400)
+    "app/[locale]/confirm-email/page.tsx",
+    "app/[locale]/confirm-email/ConfirmEmailForm.tsx",
+    "app/[locale]/confirm-email/ConfirmEmailForm.test.tsx",
+    # email change cancel page (handwritten auth flow; link in the notice to the current address)
+    "app/[locale]/cancel-email-change/page.tsx",
+    "app/[locale]/cancel-email-change/CancelEmailChangeForm.tsx",
+    "app/[locale]/cancel-email-change/CancelEmailChangeForm.test.tsx",
     # mobile layout test (handwritten e2e)
     "cypress/e2e/mobile/layout.cy.ts",
     # setting page (handwritten; coexists with generated edit/view)
@@ -516,7 +524,7 @@ def _prune_orphans(out: Path, entities: list, keep_stubs: bool = False) -> None:
             if not any((lib_dir / f).exists() for f in ('types.ts', 'getters.ts')):
                 continue  # not an entity lib dir
             orphan_lib_dirs.add(parent)
-            for fname in ('types.ts', 'getters.ts', 'getters_internal.ts', 'actions.ts', 'service.ts', 'chart-getters.ts'):
+            for fname in ('types.ts', 'getters.ts', 'getters_internal.ts', 'actions.ts', 'service.ts', 'checked.ts', 'chart-getters.ts'):
                 f = lib_dir / fname
                 if not _is_protected(f):
                     _delete(f)
@@ -643,6 +651,7 @@ def _clean_schema_driven(out: Path, entities: list, test_entities: list,
         _delete(lib_dir / 'getters_internal.ts')
         if can_new or can_edit or can_delete:
             _delete(lib_dir / 'service.ts')
+            _delete(lib_dir / 'checked.ts')
             _delete(lib_dir / 'actions.ts')
             if not keep_stubs:
                 _delete(lib_dir / 'service_validation.ts')

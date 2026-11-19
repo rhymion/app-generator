@@ -1,0 +1,117 @@
+# egress_ledger_classes.yaml -- data classes for the generated part of docs/knowledge/data-egress-ledger.md
+# (code_generator/egress_ledger.py, Issue #1240).
+#
+# Classes are those of docs/knowledge/data-classification.md: secret, personal, business, operational.
+#
+# openapi_default / openapi_prefixes: the class of each GET operation of the generated OpenAPI document. The longest
+# matching path prefix wins; anything else is business data.
+#
+# routes: every API route the OpenAPI document does not describe -- generated routes outside it and hand-written
+# routes. Keys are route files (`*` matches one path segment). `classes` lists what the route's response releases
+# (one ledger row each); `classes: []` means it releases no protected data, and `data` says why. A route with no
+# entry, or an entry that matches no route, fails test_egress_ledger.py.
+
+openapi_default: business
+
+openapi_prefixes:
+  /api/user: personal            # user columns marked x-pii (name, email, ...)
+  /api/setting: personal         # the caller's own account settings (name, email, preferences)
+  /api/mention/users: personal   # names of the users the caller may @-mention
+
+routes:
+  # --- generated routes outside the OpenAPI document ---
+  app/api/*/[id]/capabilities/route.ts:
+    classes: []
+    data: The caller's operation flags for one record (can update, can delete, ...); no field values.
+  app/api/attachments/[id]/route.ts:
+    classes: [business, personal]
+    data: Attachment file content, and its original file name (personal data) in Content-Disposition; served only to a caller who may read the owner record.
+  app/api/attachment/direct/route.ts:
+    classes: [personal]
+    data: The stored attachment record after a direct upload, including the original file name.
+  app/api/upload/route.ts:
+    classes: [personal]
+    data: The stored attachment record after an upload, including the original file name.
+  app/api/search/route.ts:
+    classes: [business]
+    data: Global search hits (record labels of the searchable entities the caller may read; in the default schema dashboard, dashboard_widget, organization and role).
+  app/api/comment/[commentId]/reactions/toggle/route.ts:
+    classes: []
+    data: Reaction counts and the caller's own reaction types on a comment; no user names.
+  app/api/scheduled-tasks/[task]/route.ts:
+    classes: []
+    data: Task name and outcome for the scheduler (CRON_SECRET); no record data.
+  app/api/user/[id]/actions/invalidate/route.ts:
+    classes: []
+    data: Status of a user erasure; no field values.
+
+  # --- hand-written routes ---
+  app/api/approval_request/[id]/approve/route.ts:
+    classes: []
+    data: Status of the approval decision.
+  app/api/approval_request/[id]/reject/route.ts:
+    classes: []
+    data: Status of the rejection.
+  app/api/approval_request/[id]/withdraw/route.ts:
+    classes: []
+    data: Status of the withdrawal.
+  app/api/audit_log/route.ts:
+    classes: [operational, personal]
+    data: Audit log rows (action, actor user id, target, request id, metadata without emails or free text).
+  app/api/audit_log/[id]/route.ts:
+    classes: [operational, personal]
+    data: One audit log row, as above.
+  app/api/auth/[...nextauth]/route.ts:
+    classes: [secret, personal]
+    data: Auth.js session cookie and CSRF token (secret); the session endpoint returns the signed-in user's name and email (personal).
+  app/api/auth/email-change/cancel/route.ts:
+    classes: []
+    data: Status only; the cancel link itself is sent by mail (see the mail row).
+  app/api/auth/email-change/complete/route.ts:
+    classes: []
+    data: Status only.
+  app/api/auth/password-reset/route.ts:
+    classes: []
+    data: The same answer for every address; the reset link is sent by mail (see the mail row).
+  app/api/auth/password-reset/complete/route.ts:
+    classes: []
+    data: Status only.
+  app/api/auth/register/route.ts:
+    classes: []
+    data: Status only; the verification link is sent by mail (see the mail row).
+  app/api/auth/register/complete/route.ts:
+    classes: []
+    data: Status only.
+  app/api/mobile/auth/token/route.ts:
+    classes: [secret]
+    data: Mobile access and refresh token pair (POST); DELETE answers with status only.
+  app/api/mobile/auth/refresh/route.ts:
+    classes: [secret]
+    data: A rotated mobile access and refresh token pair.
+  app/api/mobile/auth/sessions/route.ts:
+    classes: [personal]
+    data: The caller's own mobile sessions with device names.
+  app/api/mobile/auth/sessions/[id]/route.ts:
+    classes: []
+    data: Status only.
+  app/api/mobile/nav/route.ts:
+    classes: []
+    data: Navigation structure of the app; no record data.
+  app/api/mobile/permissions/route.ts:
+    classes: []
+    data: The caller's own permission flags per entity.
+  app/api/notifications/route.ts:
+    classes: [business]
+    data: The caller's own notifications (title, link, record type and id).
+  app/api/notifications/mark-read/route.ts:
+    classes: []
+    data: Status only.
+  app/api/openapi.json/route.ts:
+    classes: []
+    data: The API description, filtered to the caller's permissions; no record data.
+  app/api/security/csp-report/route.ts:
+    classes: []
+    data: Inbound CSP violation reports; answers 204.
+  app/api/test-utils/reset-caches/route.ts:
+    classes: []
+    data: Test-only cache reset; 404 unless the test flag is set.

@@ -6,7 +6,7 @@ import { hashPassword } from "@/lib/auth/bcrypt-cost";
 import prisma from "@/lib/prisma";
 import { getRateLimiter } from "@/lib/rate-limit";
 import { clientIp } from "@/lib/rate-limit/client-ip";
-import { passwordPolicyError } from "@/lib/auth/password-policy";
+import { checkPassword } from "@/lib/auth/password-policy";
 import { siteConfig } from "@/lib/site-config";
 import { isMailConfigured, sendMail } from "@/lib/mail";
 import { issueRegistrationToken, normalizeEmail } from "@/lib/auth/registration-token";
@@ -123,7 +123,7 @@ export async function POST(request: Request) {
       return NextResponse.json(REGISTRATION_NOT_ALLOWED, { status: 403 });
     }
 
-    const weak = passwordPolicyError(password);
+    const weak = await checkPassword(password, { email, name: typeof name === "string" ? name : null });
     if (weak) {
       return NextResponse.json({ error: weak, code: "WEAK_PASSWORD" }, { status: 400 });
     }

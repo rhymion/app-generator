@@ -3,7 +3,52 @@ All notable changes to this project will be documented in this file.
 The format is based on Keep a Changelog (https://keepachangelog.com/),
 and this project adheres to Semantic Versioning (https://semver.org/).
 
-## [7.0.0]
+## [Unreleased]
+### Security
+- **The registration domain allow-list also applies to a changed email address** (Issue #1402). With
+  `registrationAllowedDomains` / `REGISTRATION_ALLOWED_DOMAINS` set, the settings screen and `PUT /api/setting/:id` /
+  `PUT /api/setting/bulk` refuse a new address outside the list (`400`; a `VALIDATION` failure on `email` on the
+  screen), before the password check and any mail. With email verification on, a pending change link to an address
+  that left the list since it was sent answers `403 EMAIL_NOT_ALLOWED`. An unchanged address is not re-checked. See
+  `docs/knowledge/authentication.md` ("Changing the email address").
+- **Stronger password policy** (Issue #1280). Every path that sets a password also refuses one over 72 bytes (bcrypt's
+  limit; refused instead of truncated), a common password (`lib/auth/common-passwords.ts`, plus `PASSWORD_DENYLIST_FILE`)
+  and one containing the app name or the user's name or email address (plus `PASSWORD_CONTEXT_WORDS`).
+  `PASSWORD_BREACH_CHECK=hibp` adds an opt-in Have I Been Pwned check (k-anonymity range query). Existing passwords are
+  not re-checked. See `docs/knowledge/authentication.md` ("Password strength").
+- **Expired idempotency rows can be purged** (Issue #1299). `npm run db:purge-expired` deletes idempotency rows past their
+  one-day retention (with the stored response bodies) and expired `web_session` rows; schedule it with your platform's
+  cron. See `docs/knowledge/api-idempotency-and-rate-limiting.md`.
+- **Web sessions are revocable server-side** (Issue #1127). New table `web_session`: write the migration for it
+  (`prisma migrate dev --create-only`) as described in `docs/knowledge/migration-guide.md`. Each sign-in writes a row and
+  binds the session to it; sign-out and a password reset delete rows, and `lib/auth/web-session.ts` ends one session or
+  all of a user's sessions on demand. The check rides on the user lookup each session read already made, so it adds no
+  query. Sessions issued before the upgrade have no row, so every user signs in again once. See
+  `docs/knowledge/authentication.md` ("Server-side session revocation").
+- **Auth.js cookies use the `__Host-` prefix over https** (Issue #1274) when `AUTH_URL` / `NEXTAUTH_URL` is https. The
+  session cookie is renamed, so every user signs in again once. `AUTH_COOKIE_HOST_PREFIX=false` keeps the `__Secure-`
+  names for a deployment that shares the cookies across hosts. See `docs/knowledge/authentication.md` ("Cookie names").
+- **A new email address is verified before it is stored** when `x-generator.email-verification` is on (Issue #1400).
+  Saving a changed address mails a single-use link to the new address and a notice to the current one; the address
+  changes when the link is used (`/confirm-email`, `POST /api/auth/email-change/complete`). With email verification off
+  nothing changes. Regenerate so the settings update paths store the confirmed address. See
+  `docs/knowledge/authentication.md` ("Changing the email address").
+- **The notice of a requested email change carries a cancel link.** The current address can cancel the pending change
+  (`/cancel-email-change`, `POST /api/auth/email-change/cancel`), which deletes its link so the new address can no
+  longer be confirmed. See `docs/knowledge/authentication.md` ("Changing the email address").
+- **A changed password, email address or MFA state ends the user's other sessions.** Every web and mobile session but
+  the one that made the change ends (`lib/auth/end-sessions.ts`, audited as `auth:sessions.endOthers`); a verified
+  email change ends them when its link is used. See `docs/knowledge/authentication.md` ("Ending the other sessions on a
+  credential change").
+- **With MFA on, changing the password or the email address needs a TOTP or recovery code** (`mfa_code`) on the settings
+  screen, `PUT /api/setting/:id` and `PUT /api/setting/bulk`; a request without it answers 400, a wrong code 403.
+  Regenerate so the settings form shows the code field and its Server Action passes it. API clients that change a
+  password or address of an MFA account must now send `mfa_code`.
+- **The domain allow-lists can be set by environment variable**: `AUTH_ALLOWED_DOMAINS` (OAuth) and
+  `REGISTRATION_ALLOWED_DOMAINS` (self-registration), comma-separated. A set variable replaces the list in
+  `lib/site-config.ts`; unset keeps it. See `.env.example` and `docs/knowledge/authentication.md`.
+
+## [7.0.0] - 2026-11-17
 ### Breaking changes
 Regenerate after upgrading. The generator ships no Prisma migrations; write the migration for the schema changes below
 yourself (`prisma migrate dev --create-only`, edit `migration.sql`, deploy with `prisma migrate deploy`), as described in

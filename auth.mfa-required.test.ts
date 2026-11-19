@@ -16,6 +16,12 @@ vi.mock("@/lib/audit-log", () => ({ recordAuditEvent: vi.fn() }));
 vi.mock("@/lib/mfa/verify", () => ({ verifyMfaCode: vi.fn() }));
 vi.mock("@/lib/auth/create-user", () => ({ createTenantBoundUser: vi.fn() }));
 vi.mock("@/lib/auth/mock-oauth-gate", () => ({ isMockGoogleOAuthTestEnabled: () => false }));
+vi.mock("@/lib/auth/web-session", () => ({
+  createWebSession: vi.fn(async () => "s1"),
+  extendWebSession: vi.fn(),
+  revokeWebSession: vi.fn(),
+  webSessionNeedsExtension: () => false,
+}));
 
 import { authConfig } from "./auth";
 
@@ -28,7 +34,7 @@ function stubUser(mfaEnabled: boolean, roles: string[]) {
   userFindUnique.mockImplementation(async (args?: { select?: Record<string, unknown> }) =>
     args?.select && "roles" in args.select
       ? { roles: roles.map((name) => ({ name })) }
-      : { mfa_enabled: mfaEnabled, mfa_token_version: 0, anonymized_at: null },
+      : { mfa_enabled: mfaEnabled, mfa_token_version: 0, anonymized_at: null, web_sessions: [{ expires_at: new Date(Date.now() + 86_400_000) }] },
   );
 }
 
@@ -65,7 +71,7 @@ describe("jwt() with MFA_REQUIRED_ROLES", () => {
   it("does not restrict an enrolled user", async () => {
     process.env.MFA_REQUIRED_ROLES = "*";
     stubUser(true, ["Admin"]);
-    await expect(jwt({ token: { id: "u1", mfa_token_version: 0 } })).resolves.toMatchObject({
+    await expect(jwt({ token: { id: "u1", sid: "s1", mfa_token_version: 0 } })).resolves.toMatchObject({
       mfa_enrollment_required: false,
     });
   });
@@ -78,14 +84,14 @@ describe("jwt() with MFA_REQUIRED_ROLES", () => {
   it("lifts the restriction on the next request once the user has enrolled", async () => {
     process.env.MFA_REQUIRED_ROLES = "*";
     stubUser(true, []);
-    const token = { id: "u1", mfa_token_version: 0, mfa_enrollment_required: true };
+    const token = { id: "u1", sid: "s1", mfa_token_version: 0, mfa_enrollment_required: true };
     await expect(jwt({ token })).resolves.toMatchObject({ mfa_enrollment_required: false });
   });
 
   it("restricts an existing session when the policy starts applying to it", async () => {
     process.env.MFA_REQUIRED_ROLES = "Admin";
     stubUser(false, ["Admin"]);
-    await expect(jwt({ token: { id: "u1", mfa_token_version: 0 } })).resolves.toMatchObject({
+    await expect(jwt({ token: { id: "u1", sid: "s1", mfa_token_version: 0 } })).resolves.toMatchObject({
       mfa_enrollment_required: true,
     });
   });

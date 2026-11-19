@@ -11,6 +11,7 @@ import {
   startEnrollment,
 } from '@/lib/mfa/enrollment';
 import { recordAuditEvent } from '@/lib/audit-log';
+import { endSessionsAfterChange } from '@/lib/auth/end-sessions';
 
 /**
  * Server actions that back `/setting/mfa`. Each one re-fetches the session
@@ -73,6 +74,8 @@ export async function completeEnrollmentAction(code: string): Promise<ActionResu
       target_table: 'user',
       target_id: userId,
     });
+    // A changed MFA state ends the user's other sessions (this one stays).
+    await endSessionsAfterChange(userId);
     revalidatePath('/setting/mfa');
     return { ok: true, recoveryCodes };
   } catch (err) {
@@ -90,6 +93,8 @@ export async function disableMfaAction(code: string): Promise<ActionResult> {
       target_table: 'user',
       target_id: userId,
     });
+    // A changed MFA state ends the user's other sessions (this one stays).
+    await endSessionsAfterChange(userId);
     revalidatePath('/setting/mfa');
     return { ok: true };
   } catch (err) {

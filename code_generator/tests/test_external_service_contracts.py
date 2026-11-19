@@ -27,6 +27,7 @@ CONTRACT_ROW = {
     'Google sign-in': 'Google OAuth',
     'Stripe': 'Stripe',
     'SMTP server (mail)': 'SMTP server (mail',
+    'Have I Been Pwned (password breach check)': 'Have I Been Pwned password range API',
 }
 
 

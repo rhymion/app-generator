@@ -47,6 +47,10 @@ _ALTERNATE_CREDENTIAL = {
         None, 'public password reset request (Issue #1282), same answer for every address, rate limited per IP and per address'),
     'app/api/auth/password-reset/complete/route.ts': (
         r'consumeResetLink', 'the single-use emailed reset token is the credential, plus TOTP or a recovery code for an MFA user'),
+    'app/api/auth/email-change/complete/route.ts': (
+        r'completeEmailChange', 'the single-use token mailed to the new address is the credential and names the account (Issue #1400)'),
+    'app/api/auth/email-change/cancel/route.ts': (
+        r'cancelPendingEmailChange', 'the single-use cancel token mailed to the current address is the credential and names the account'),
     'app/api/security/csp-report/route.ts': (
         None, 'the browser posts policy violation reports without a session; rate limited per IP, log line only'),
     'app/api/mobile/auth/refresh/route.ts': (

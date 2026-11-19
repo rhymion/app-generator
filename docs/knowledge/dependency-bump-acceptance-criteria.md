@@ -368,6 +368,45 @@ are captured in the corresponding design record for this task.
 
 ---
 
+## Advisories without a fixed release
+
+`npm audit` has no ignore list, so an advisory with no patched version
+cannot be waved through the blocking gate. Work through it in this order:
+
+1. **Is the vulnerable copy reachable from `dependencies` at all?** Trace
+   it with `npm ls <pkg>` or the lockfile's `dev` flags. A production
+   dependency that no code imports is removed. One that is used only at
+   build time moves to `devDependencies`; the Vercel build installs those.
+2. **If it stays in production**, check whether attacker-controlled input
+   can reach the vulnerable function. Record the answer in the PR.
+3. **For a dev-only chain**, a scoped `overrides` entry (parent → child) can
+   lift the child past the vulnerable range when the parent's own latest
+   release still pins it. Smoke-test the parent's CLI after the override.
+
+### Worked example: picomatch CVE-2026-112366 (2026-11)
+
+GHSA-fc5q-39xc-vjpf (high, ReDoS, `picomatch <= 4.0.7`, no patched
+version) was published on 2026-10-19 and **withdrawn on 2026-11-18**. The
+picomatch maintainer's position is that a glob is a regular expression and
+untrusted users must not supply one. `npm audit` no longer reports it. Two
+copies were in production:
+
+- `@tailwindcss/vite` → `vite`: nothing imported `@tailwindcss/vite`
+  (Tailwind runs through `@tailwindcss/postcss`), so it was removed.
+- `next-intl` → `@parcel/watcher`: `next-intl/plugin` loads the watcher,
+  but only starts it when message extraction is configured, which
+  `next.config.ts` does not do. Its globs come from the configuration,
+  never from a request. The copy is not reachable by an attacker and was
+  left in place.
+
+### Current scoped overrides for dev-only chains
+
+| Override | Why | Remove when |
+|---|---|---|
+| `@marp-team/marp-cli` → `puppeteer-core: ^25.18.1` | marp-cli 4.5.1 (latest) pins `puppeteer-core ^24`, which pulls `extract-zip` (GHSA-jmr9-qjv8-65gv, GHSA-7pqw-9j4j-h8q3, no fixed release) and `zod` 3 (GHSA-mrhx-c7xc-m3w5, fixed only in 4.6.6). `puppeteer-core` 25 drops `extract-zip` and uses `zod` 4. HTML and PDF export were checked with `marp` after the override. | marp-cli's own range admits `puppeteer-core >= 25.12.1`. |
+
+---
+
 ## Related Documents
 
 - `docs/knowledge/submodule-pointer-bump-policy.md` — analogous policy

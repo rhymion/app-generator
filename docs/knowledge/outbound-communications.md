@@ -8,7 +8,7 @@ code in this repository; read the code paths named here before relying on a row.
 
 The application server issues no HTTP request whose target comes from a user or from stored data. Searching `lib/`,
 `app/`, `proxy.ts` and the non-test generator templates finds no server-side `fetch(`, `axios`, `undici` or
-`http(s).request` call; the only `fetch(` calls run in the browser or a test helper against the application's own
+`http(s).request` call other than the opt-in password breach check (`lib/auth/password-policy.ts`, a fixed host); the only `fetch(` calls run in the browser or a test helper against the application's own
 `/api/` routes. The destinations below are fixed by environment variables set by the operator or by an SDK's built-in
 endpoint.
 
@@ -29,10 +29,12 @@ upload components load their URLs in the browser and never reach the optimizer.
 | Google token exchange | with `AUDIT_LOG_GCS_AUTH=vercel-oidc` | `GCP_*` workload-identity variables | `sts.googleapis.com`, `iamcredentials.googleapis.com` |
 | Amazon S3 (audit-log copies) | when `AUDIT_LOG_S3_BUCKET` is set | `AUDIT_LOG_S3_*` | the `@aws-sdk/client-s3` default for `AUDIT_LOG_S3_REGION` |
 | Google sign-in | when `google` is listed in the site's auth providers and `GOOGLE_CLIENT_ID` is set | `siteConfig.auth.providers` | Google's OpenID Connect endpoints, through Auth.js |
-| SMTP server (mail) | when `SMTP_URL` is set; only self-registration with `x-generator.email-verification.enabled` sends mail today | `SMTP_URL`, `MAIL_FROM` | the host in the URL |
+| SMTP server (mail) | when `SMTP_URL` is set; only flows that need `x-generator.email-verification.enabled` send mail today: self-registration, password reset and the verified email change | `SMTP_URL`, `MAIL_FROM` | the host in the URL |
+| Have I Been Pwned (password breach check) | only with `PASSWORD_BREACH_CHECK=hibp`, when a password is set | `PASSWORD_BREACH_CHECK`, `PASSWORD_BREACH_CHECK_URL` | `api.pwnedpasswords.com` (range API; only 5 hex characters of the password's SHA-1 are sent), or the mirror in the URL |
 | Stripe | only for a schema that declares `x-payment: true` | `STRIPE_SECRET_KEY` | the `stripe` SDK default (`api.stripe.com`); Stripe calls the webhook route inbound |
 
-Audit-log copies are described in `audit-log-append-only.md`, attachment storage in `attachment-storage.md`, Stripe in
+Which data class goes to which destination, and which API routes release which class, is in
+`data-egress-ledger.md`. Audit-log copies are described in `audit-log-append-only.md`, attachment storage in `attachment-storage.md`, Stripe in
 `stripe-payment-integration.md`. The default schema declares no `x-payment` entity and no audit-log bucket variable is set by default, so a default
 application talks to the database, optionally Redis, one attachment backend, and Google when sign-in is configured.
 The default schema leaves email verification off, so a default application sends no mail; outside production
@@ -64,5 +66,5 @@ is a platform setting the operator applies to the destinations in the table abov
 - Whichever platform is used, include the token-exchange hosts when `AUDIT_LOG_GCS_AUTH=vercel-oidc` is on, and the
   Google sign-in hosts when Google sign-in is on.
 
-The per-service credential and permission contract is in `external-service-security-contracts.md`; a row of the first table above without a row there fails `code_generator/tests/test_external_service_contracts.py`. The coverage table row for each ASVS
+The per-service credential and permission contract is in `external-service-security-contracts.md`; a row of the first table above without a row there fails `code_generator/tests/test_external_service_contracts.py`. A runtime dependency or a hard-coded external host that is not classified against the first table fails `code_generator/tests/test_outbound_dependency_classification.py`. The coverage table row for each ASVS
 requirement is in `security-asvs-coverage.md` (V13.1.1, V13.2.4, V13.2.5).
