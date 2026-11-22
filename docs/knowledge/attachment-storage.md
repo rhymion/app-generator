@@ -84,6 +84,18 @@ Responses carry `X-Content-Type-Options: nosniff` and `Cache-Control: private, n
 `inline`; every other type is `attachment`. The content type is derived from the extension of the decrypted name
 (`UPLOAD_CONTENT_TYPE_BY_EXTENSION` in `lib/_upload_validation.ts`).
 
+### Uploading several files at once
+
+The edit-form attachment lists (`AttachmentSection`'s images and files, and a generated `itemType="file"` list child)
+take several files in one Add dialog (#1411). The file input is `multiple`, a second pick adds to the selection
+(an identical file is skipped), and each selected file can be removed before uploading. On Add, the files are sent to
+`POST /api/upload` one request per file, one after another, so each upload goes through the same per-file size,
+type and rate-limit checks (`upload:file`, 30 per 10 minutes per user) as a single upload. A file over the client
+size limit stops the whole batch before anything is sent. When some uploads fail (for example the rate limit), the
+files that uploaded are added to the list, the dialog stays open with only the failed files selected, and one
+error line per failed file is shown. As before, nothing is linked to the record until **Save attachments** (or the
+form's Save) runs. Logic: `components/_standard/editableListAdd.ts`.
+
 ## Schema prerequisites
 
 `prisma/schema.prisma`'s `attachment` model needs the two provenance columns (`generate-code` fails with the lines
