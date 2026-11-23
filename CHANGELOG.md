@@ -3,6 +3,16 @@ All notable changes to this project will be documented in this file.
 The format is based on Keep a Changelog (https://keepachangelog.com/),
 and this project adheres to Semantic Versioning (https://semver.org/).
 
+## [Unreleased]
+### Fixed
+- **Write-only entities (`x-generate` `list: false, view: false, api: true`) work again.** The generated API spec no
+  longer calls routes such an entity does not have (7.0 sent 6.1 / 6.2 / 7.1 to `GET /api/<entity>` and re-read rows
+  for 4.2 / 7.4 / 7.10 through `GET /api/<entity>/:id`, which answer 405): authentication is probed on `/options`, 7.1
+  is emitted only with `list`, and rows are re-read from the database. `GET /api/openapi.json` shows a write-only
+  entity to a caller who holds a permission one of its write operations needs, instead of hiding it from every caller
+  (grant-all-permissions never grants `read` on it). Specs of entities with `view: true` are unchanged. See
+  `docs/knowledge/testing-cypress.md` and `docs/knowledge/generated-documentation-and-openapi-spec.md`.
+
 ## [7.0.1] - 2026-11-19
 ### Security
 - **The registration domain allow-list also applies to a changed email address** (Issue #1402). With
