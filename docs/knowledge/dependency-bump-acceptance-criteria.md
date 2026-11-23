@@ -404,6 +404,26 @@ copies were in production:
 | Override | Why | Remove when |
 |---|---|---|
 | `@marp-team/marp-cli` → `puppeteer-core: ^25.18.1` | marp-cli 4.5.1 (latest) pins `puppeteer-core ^24`, which pulls `extract-zip` (GHSA-jmr9-qjv8-65gv, GHSA-7pqw-9j4j-h8q3, no fixed release) and `zod` 3 (GHSA-mrhx-c7xc-m3w5, fixed only in 4.6.6). `puppeteer-core` 25 drops `extract-zip` and uses `zod` 4. HTML and PDF export were checked with `marp` after the override. | marp-cli's own range admits `puppeteer-core >= 25.12.1`. |
+| `@prisma/config` → `effect: ^3.22.1` | `@prisma/config` 7.10.1 (latest 7.x) pins `effect` at exactly `3.20.0`, which is in the range of GHSA-7589-6fvf-x4pw (high, ReDoS in `Schema.TemplateLiteral`, `effect <= 3.22.0`, fixed in 3.22.1). The chain is dev-only (`prisma` CLI). `prisma validate` and the `test:e2e:build` gate (generate, `db push`, `db generate`, seed) were run after the override. | A stable `@prisma/config` release depends on `effect >= 3.22.1`. |
+
+### Dependabot cannot fix an exact pin, and may hide the alert
+
+Dependabot security updates only bump the parent package. When the parent's
+latest release pins the vulnerable child **exactly** (as `@prisma/config`
+does with `effect`), no PR can be raised, and the scoped override above is
+the only fix.
+
+GitHub's auto-triage rules can also dismiss an alert before anyone sees it.
+GHSA-7589-6fvf-x4pw (alert #14) was `auto_dismissed` one second after it was
+created, with an empty reason, because its dependency was
+`scope: development`. An auto-dismissed alert gets no security-update PR
+and does not show among open alerts, while `npm audit` still reports it.
+When an audit warning has no matching open alert, check
+`gh api 'repos/{owner}/{repo}/dependabot/alerts?state=auto_dismissed'`.
+The rules are set in the repository settings (Dependabot rules under the
+code security section), not in `.github/dependabot.yml`. This repository
+keeps the "dismiss low-impact alerts for development-scoped dependencies"
+preset **off**, so a high alert in a dev-only chain stays open.
 
 ---
 

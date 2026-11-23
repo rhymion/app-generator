@@ -449,4 +449,160 @@ describe('EditableListWrapper', () => {
     expect(screen.queryByRole('link', { name: 'Item Two' })).not.toBeInTheDocument();
     expect(screen.getByText('Item Two')).toBeInTheDocument();
   });
+
+  // Issue #1411: several items can be added from one Add dialog.
+  describe('Adding several items in one go', () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it('adds several autocomplete options picked in one dialog', async () => {
+      const user = userEvent.setup();
+      render(
+        <EditableListWrapper
+          itemType="autocomplete"
+          allAutocompleteOptions={[
+            { id: '1', label: 'Alpha' },
+            { id: '2', label: 'Beta' },
+            { id: '3', label: 'Gamma' },
+          ]}
+        />
+      );
+
+      await user.click(screen.getByRole('button', { name: /add item/i }));
+      const addDialog = screen.getByRole('dialog', { name: /add items/i });
+      const combo = within(addDialog).getByLabelText(/select/i);
+      await user.click(combo);
+      await user.click(screen.getByRole('option', { name: 'Alpha' }));
+      await user.click(combo);
+      // An option already picked in this dialog is not offered again.
+      expect(screen.queryByRole('option', { name: 'Alpha' })).not.toBeInTheDocument();
+      await user.click(screen.getByRole('option', { name: 'Gamma' }));
+      await user.click(within(addDialog).getByRole('button', { name: /add/i }));
+
+      await waitFor(() => {
+        expect(screen.queryByRole('dialog', { name: /add items/i })).not.toBeInTheDocument();
+      });
+      const rows = screen.getAllByRole('listitem').map((li) => li.textContent);
+      expect(rows).toEqual([expect.stringContaining('Alpha'), expect.stringContaining('Gamma')]);
+      expect(screen.queryByText('Beta')).not.toBeInTheDocument();
+    });
+
+    it('adds nothing when one picked option fails validation', async () => {
+      const user = userEvent.setup();
+      render(
+        <EditableListWrapper
+          itemType="autocomplete"
+          allAutocompleteOptions={[
+            { id: '1', label: 'Alpha' },
+            { id: '2', label: 'Beta' },
+          ]}
+          validateItem={(v) => (v === '2' ? 'Not allowed' : null)}
+        />
+      );
+
+      await user.click(screen.getByRole('button', { name: /add item/i }));
+      const addDialog = screen.getByRole('dialog', { name: /add items/i });
+      const combo = within(addDialog).getByLabelText(/select/i);
+      await user.click(combo);
+      await user.click(screen.getByRole('option', { name: 'Alpha' }));
+      await user.click(combo);
+      await user.click(screen.getByRole('option', { name: 'Beta' }));
+      await user.click(within(addDialog).getByRole('button', { name: /add/i }));
+
+      expect(await within(addDialog).findByText('Beta: Not allowed')).toBeInTheDocument();
+      expect(screen.getByRole('dialog', { name: /add items/i })).toBeInTheDocument();
+      expect(screen.getByText('No items yet')).toBeInTheDocument();
+    });
+
+    it('uploads several files chosen in one dialog', async () => {
+      const user = userEvent.setup();
+      let n = 0;
+      vi.spyOn(global, 'fetch').mockImplementation(async () => {
+        n += 1;
+        return { ok: true, json: () => Promise.resolve({ id: `att-${n}` }) } as Response;
+      });
+
+      render(<EditableListWrapper itemType="file" fileVariant="file" initialItems={[]} />);
+
+      await user.click(screen.getByRole('button', { name: /add item/i }));
+      const addDialog = screen.getByRole('dialog', { name: /add items/i });
+      const fileInput = addDialog.querySelector('input[type="file"]') as HTMLInputElement;
+      expect(fileInput).toHaveAttribute('multiple');
+
+      const a = new File(['a'], 'a.pdf', { type: 'application/pdf' });
+      const b = new File(['bb'], 'b.pdf', { type: 'application/pdf' });
+      const c = new File(['ccc'], 'c.pdf', { type: 'application/pdf' });
+      fireEvent.change(fileInput, { target: { files: [a, b] } });
+      // A second pick adds to the selection instead of replacing it; a duplicate is ignored.
+      fireEvent.change(fileInput, { target: { files: [b, c] } });
+      // A file can be dropped from the selection before uploading.
+      await user.click(within(addDialog).getByRole('button', { name: 'Remove b.pdf' }));
+
+      await user.click(within(addDialog).getByRole('button', { name: /add/i }));
+
+      await waitFor(() => {
+        expect(screen.queryByRole('dialog', { name: /add items/i })).not.toBeInTheDocument();
+      });
+      expect(global.fetch).toHaveBeenCalledTimes(2);
+      expect(screen.getByRole('link', { name: 'a.pdf' })).toHaveAttribute('href', '/api/attachments/att-1');
+      expect(screen.getByRole('link', { name: 'c.pdf' })).toHaveAttribute('href', '/api/attachments/att-2');
+      expect(screen.queryByRole('link', { name: 'b.pdf' })).not.toBeInTheDocument();
+    });
+
+    it('keeps the uploaded files and leaves only the failed one selected when one upload fails', async () => {
+      const user = userEvent.setup();
+      vi.spyOn(global, 'fetch').mockImplementation(async (_url, init) => {
+        const file = (init?.body as FormData).get('file') as File;
+        if (file.name === 'bad.pdf') {
+          return { ok: false, json: () => Promise.resolve({ error: 'rate_limited' }) } as Response;
+        }
+        return { ok: true, json: () => Promise.resolve({ id: `att-${file.name}` }) } as Response;
+      });
+
+      render(<EditableListWrapper itemType="file" fileVariant="file" initialItems={[]} />);
+
+      await user.click(screen.getByRole('button', { name: /add item/i }));
+      const addDialog = screen.getByRole('dialog', { name: /add items/i });
+      const fileInput = addDialog.querySelector('input[type="file"]') as HTMLInputElement;
+      fireEvent.change(fileInput, {
+        target: {
+          files: [
+            new File(['1'], 'good.pdf', { type: 'application/pdf' }),
+            new File(['2'], 'bad.pdf', { type: 'application/pdf' }),
+          ],
+        },
+      });
+      await user.click(within(addDialog).getByRole('button', { name: /add/i }));
+
+      expect(await within(addDialog).findByText('bad.pdf: rate_limited')).toBeInTheDocument();
+      expect(screen.getByRole('link', { name: 'good.pdf', hidden: true })).toHaveAttribute('href', '/api/attachments/att-good.pdf');
+      expect(within(addDialog).getByRole('button', { name: 'Remove bad.pdf' })).toBeInTheDocument();
+      expect(within(addDialog).queryByRole('button', { name: 'Remove good.pdf' })).not.toBeInTheDocument();
+    });
+
+    it('refuses the whole batch without uploading when a file is too large', async () => {
+      const user = userEvent.setup();
+      const fetchSpy = vi.spyOn(global, 'fetch');
+
+      render(<EditableListWrapper itemType="file" fileVariant="file" maxFileSize={1024 * 1024} />);
+
+      await user.click(screen.getByRole('button', { name: /add item/i }));
+      const addDialog = screen.getByRole('dialog', { name: /add items/i });
+      const fileInput = addDialog.querySelector('input[type="file"]') as HTMLInputElement;
+      fireEvent.change(fileInput, {
+        target: {
+          files: [
+            new File(['x'], 'small.pdf', { type: 'application/pdf' }),
+            new File([new Uint8Array(2 * 1024 * 1024)], 'huge.pdf', { type: 'application/pdf' }),
+          ],
+        },
+      });
+      await user.click(within(addDialog).getByRole('button', { name: /add/i }));
+
+      expect(await within(addDialog).findByText('huge.pdf: File size must be less than 1MB')).toBeInTheDocument();
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(screen.getByText('No items yet')).toBeInTheDocument();
+    });
+  });
 });

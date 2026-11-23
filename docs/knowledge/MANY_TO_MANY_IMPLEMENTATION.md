@@ -118,6 +118,17 @@ handling — `x-relationships.<prop>.type: many-to-many` alone drives it
   />
   ```
 
+- **Several items in one go (#1411).** The Add dialog's picker is a multi-select
+  (`Autocomplete multiple filterSelectedOptions`): the user picks any number of
+  targets, shown as chips, and one click on the Add button appends them all.
+  Options already in the list, options already picked in the dialog and
+  `excludeOptionIds` are not offered. If `validateItem` rejects one picked
+  option, nothing is added and the error names that option. The same applies
+  to every other `itemType="autocomplete"` list (an optional-FK one-to-many
+  list child, see `schema-yaml-configuration.md`) and to
+  `OrderedEditableListWrapper`. The shared logic is in
+  `components/_standard/editableListAdd.ts`; no generator change is involved.
+
 ### 4. New Page (`app/[locale]/{entity}/new/page.tsx`, `code_generator/templates/page_new.tsx.jinja2`)
 - Does **not** fetch the full target list. It fetches only an initial page (50
   rows) via the search action, in parallel with other selector targets:

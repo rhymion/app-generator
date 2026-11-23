@@ -70,6 +70,9 @@ export default defineConfig({
       "mobile/**",
       "**/dist/**",
       "**/utils/templates/**",
+      // Claude Code git worktrees: other branches' checkouts with their own
+      // tree state. Collecting their tests reports their failures as ours.
+      ".claude/worktrees/**",
       // dev-full.test.ts: CI integration test requiring full docker stack + generate-code run.
       // cleanup.test.ts: excluded from normal suite because cleanup:all deletes
       //   lib/dashboard/catalog.ts, causing subsequent DashboardWidget.test imports to fail.

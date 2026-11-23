@@ -160,6 +160,9 @@
     "@marp-team/marp-cli": {
       "puppeteer-core": "^25.18.1"
     },
+    "@prisma/config": {
+      "effect": "^3.22.1"
+    },
     "deepmerge-ts": "^8.0.1",
     "mysql2": ">=3.22.0",
     "@xmldom/xmldom": "^0.9.12",

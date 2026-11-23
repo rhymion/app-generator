@@ -1448,21 +1448,29 @@ data: {
 }
 ```
 
-**`FormUpsert.tsx`** — renders a multi-select autocomplete (same pattern as many-to-many):
+**`FormUpsert.tsx`** — renders a multi-select autocomplete (same pattern as many-to-many). The Add
+dialog takes several records at once and appends them together (#1411, see
+`MANY_TO_MANY_IMPLEMENTATION.md` §3):
 ```tsx
 <EditableListWrapper
-  items={bugsItems}
+  ref={bugsRef}
+  initialItems={localInitialBugs}
   itemType="autocomplete"
-  allAutocompleteOptions={allBugs.map(item => ({ value: item.id, label: item.name }))}
-  onAdd={...}
-  onDelete={...}
+  addButtonLabel="Add Bug"
+  title={tf('bugs')}
+  searchOptions={async (query, includeIds) => {
+    const rows = (await searchBugOptions?.(query, includeIds, undefined, { callerEntity: 'feature' })) ?? [];
+    return rows.map(item => ({ id: item.id, label: item.name }));
+  }}
+  initialAutocompleteOptions={(initialBugs ?? []).map(item => ({ id: item.id, label: item.name }))}
+  excludeOptionIds={[src.id]}
 />
 ```
 
-**`FormUpsertProps`** in `types.ts` — includes `allBugs` for the autocomplete:
+**`FormUpsertProps`** in `types.ts` — includes `initialBugs` (the first page of options) for the autocomplete:
 ```typescript
 export type FormUpsertProps = Readonly<FormViewProps & {
-  allBugs?: Bug[];
+  initialBugs?: Bug[];
   bugPermissions?: ModelPermissions;
 }>;
 ```
