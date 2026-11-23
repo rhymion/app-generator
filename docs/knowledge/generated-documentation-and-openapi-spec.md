@@ -249,6 +249,14 @@ when no entry is left). A caller who can read every entity receives the full
 document, equal to `docs/generated/openapi.json`, which stays the unfiltered
 source the generator writes.
 
+- A write-only entity (`list: false, view: false, api: true`) has no GET besides
+  `/api/<entity>/options`, and grant-all-permissions never gives `read` on it
+  (`_seed_entity_grant_flags`: `read = list or view`). `permissionsGoverning()`
+  therefore governs such an entity by the permissions its documented write
+  operations need (POST: `create`, the `/import` POST: `import`, PUT / PATCH:
+  `update`, DELETE: `delete`); the caller sees it when any one is granted. Every
+  entity with another GET (list, detail, export, a self-only `/self`) is governed
+  by `read` alone, as above.
 - Operations are not removed one by one. A caller who can read but not write an
   entity still sees its create, update and delete operations: the document says
   which endpoints exist and what shape they have, per-record abilities come from
