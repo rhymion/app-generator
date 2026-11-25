@@ -92,6 +92,25 @@ Run with: `npm run test:e2e:cy:api`
 | 7.1 | 403 GET (deny role) | GET | 403 |
 | 7.2 | 403 POST (deny role) | POST | 403 |
 
+#### Entities without a list or detail route (`list: false` / `view: false`)
+
+Next.js answers 405 for a method a route file does not export, so a generated API spec
+never calls a route its entity does not generate. This covers the write-only shape
+(`list: false, view: false, api: true`, e.g. a POST/DELETE-only inbox):
+
+- `list: false`: 1.x and 7.1 (`operation=list`, a cell the security matrix only lists
+  with `can_list`) are not emitted; 6.1 / 6.2 probe authentication on
+  `GET /api/<entity>/options`, the one GET every API entity has.
+- `view: false`: 2.x and 7.7 are not emitted; 3.1 and 4.1 check the write response only;
+  every other test that re-reads a row (4.2, 4.3, 4.4, 10.1, and the denied writes
+  7.3 / 7.4 / 7.9 / 7.10 that must prove the database is unchanged) reads it through the
+  `security:snapshot` task (`cypress.config.ts`) on the entity's Prisma model, not through
+  `GET /api/<entity>/:id`. 4.5 only calls the GET routes that exist.
+
+Entities with `view: true` render exactly as before (the same tests, the same GET
+re-reads). `code_generator/tests/test_api_spec_write_only_entity.py` fails if a write-only
+entity's spec calls any GET other than `/options`.
+
 #### Permission testing approach
 The `db:createLimitedApiUser(modelName)` task creates a user with a DenyRole that has
 all permissions set to `false`. This triggers `authz.ts`'s explicit-match path (no

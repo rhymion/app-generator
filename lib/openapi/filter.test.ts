@@ -9,6 +9,7 @@ import {
   entityTagsOf,
   filterOpenApiDocument,
   filterOpenApiDocumentForUser,
+  permissionsGoverning,
   unclassifiedTags,
 } from './filter';
 import { findOpenApiProblems } from './validate';
@@ -174,6 +175,74 @@ describe('filterOpenApiDocumentForUser', () => {
   it('returns the full document for a caller who can read every entity', async () => {
     canAccessEntity.mockResolvedValue(true);
     expect(await filterOpenApiDocumentForUser(fixture(), 'admin')).toEqual(fixture());
+  });
+});
+
+describe('a write-only entity (list: false, view: false, api: true)', () => {
+  /**
+   * The fixture plus an entity shaped like the generated one for list/view off:
+   * create and delete (single and bulk) and the options GET, no list or detail GET.
+   * The seeded grants give it create/delete but never read.
+   */
+  function withWriteOnlyEntity(): Record<string, unknown> {
+    const doc = fixture();
+    (doc.tags as unknown[]).push({ name: 'inbox' });
+    const op = { tags: ['inbox'], responses: okResponse(ref('Inbox')) };
+    Object.assign(doc.paths as Record<string, unknown>, {
+      '/api/inbox': { post: op },
+      '/api/inbox/bulk': { post: op, delete: op },
+      '/api/inbox/options': { get: op },
+      '/api/inbox/{id}': { parameters: [], delete: op },
+    });
+    (doc.components as { schemas: Record<string, unknown> }).schemas.Inbox = { type: 'object' };
+    return doc;
+  }
+
+  beforeEach(() => canAccessEntity.mockReset());
+
+  it('is governed by the permissions its write operations need, not by read', () => {
+    expect(permissionsGoverning(withWriteOnlyEntity(), 'inbox').sort()).toEqual(['create', 'delete']);
+  });
+
+  it('keeps read for an entity with a GET besides options, and for a self-only entity', () => {
+    const doc = withWriteOnlyEntity();
+    (doc.paths as Record<string, unknown>)['/api/setting/self'] = { get: { tags: ['setting'], responses: okResponse(ref('Error')) } };
+    expect(permissionsGoverning(doc, 'widget')).toEqual(['read']);
+    expect(permissionsGoverning(doc, 'role')).toEqual(['read']);
+    expect(permissionsGoverning(doc, 'setting')).toEqual(['read']);
+  });
+
+  it('maps the import POST to the import permission', () => {
+    const doc = withWriteOnlyEntity();
+    (doc.paths as Record<string, Record<string, unknown>>)['/api/inbox/import'] = { post: { tags: ['inbox'], responses: okResponse(ref('Inbox')) } };
+    expect(permissionsGoverning(doc, 'inbox').sort()).toEqual(['create', 'delete', 'import']);
+  });
+
+  it('gives a caller with every seeded grant (no read on the write-only entity) the full document', async () => {
+    canAccessEntity.mockImplementation(async (entity: string, op: string) => entity !== 'inbox' || op !== 'read');
+    const doc = withWriteOnlyEntity();
+    const filtered = await filterOpenApiDocumentForUser(doc, 'admin');
+    expect(filtered).toEqual(doc);
+    expect(canAccessEntity).not.toHaveBeenCalledWith('inbox', 'read', 'admin');
+  });
+
+  it('shows the entity to a caller who may only create it', async () => {
+    canAccessEntity.mockImplementation(async (entity: string, op: string) => entity === 'inbox' && op === 'create');
+    const filtered = await filterOpenApiDocumentForUser(withWriteOnlyEntity(), 'writer');
+    expect(tagNames(filtered)).toEqual(['inbox']);
+    expect(Object.keys(filtered.paths as object).sort()).toEqual(
+      ['/api/inbox', '/api/inbox/bulk', '/api/inbox/options', '/api/inbox/{id}'],
+    );
+    expect(schemaNames(filtered)).toContain('Inbox');
+    expect(findOpenApiProblems(filtered)).toEqual([]);
+  });
+
+  it('hides the entity from a caller with no permission on it', async () => {
+    canAccessEntity.mockImplementation(async (entity: string) => entity === 'widget');
+    const filtered = await filterOpenApiDocumentForUser(withWriteOnlyEntity(), 'other');
+    expect(tagNames(filtered)).toEqual(['widget']);
+    expect(Object.keys(filtered.paths as object).some((p) => p.startsWith('/api/inbox'))).toBe(false);
+    expect(schemaNames(filtered)).not.toContain('Inbox');
   });
 });
 

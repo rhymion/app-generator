@@ -26,7 +26,7 @@ done
 
 # Fail closed: a missing semgrep must never look like a clean scan (or be skipped).
 if ! command -v semgrep >/dev/null 2>&1; then
-  echo "semgrep is not installed, so the project Semgrep rules cannot run. Install it (python3 -m pip install 'semgrep==1.183.0', the version CI pins) and rerun. This step is part of the update-generator Completion gate and is never skipped." >&2
+  echo "semgrep is not installed, so the project Semgrep rules cannot run. Install it in its own environment (pipx install 'semgrep==1.183.0', the version CI pins; installing it next to the pinned requirements.txt conflicts) and rerun. This step is part of the update-generator Completion gate and is never skipped." >&2
   exit 3
 fi
 

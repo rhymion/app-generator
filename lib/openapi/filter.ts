@@ -1,4 +1,4 @@
-import { canAccessEntity } from '@/lib/authz';
+import { canAccessEntity, type Operation } from '@/lib/authz';
 
 /**
  * Per-caller filtering of the generated OpenAPI document (Issue #1161).
@@ -7,8 +7,15 @@ import { canAccessEntity } from '@/lib/authz';
  * returns, for each caller, only the entities that caller may READ: the tag,
  * the paths and the component schemas of every other entity are removed, and
  * the `x-relationships` entries that point at a removed entity are dropped
- * (the key is removed when no entry is left). A caller who may read every
+ * (the key is removed when no entry is left). A caller who may see every
  * entity receives the full document unchanged.
+ *
+ * A write-only entity (`x-generate` with `list: false` and `view: false` but
+ * `api: true`) has no GET besides `/options`, and the seeded grants never give
+ * `read` on it (an operation the app cannot perform). Such an entity is shown
+ * to a caller who holds a permission one of its documented write operations
+ * needs (POST: create, `/import` POST: import, PUT / PATCH: update,
+ * DELETE: delete); see {@link permissionsGoverning}.
  *
  * Operations are never removed one by one: a caller who can read but not write
  * an entity still sees its create / update / delete operations. The document
@@ -70,7 +77,47 @@ export function unclassifiedTags(document: JsonObject): string[] {
   return documentTags(document).filter((tag) => !entities.has(tag) && !(tag in NON_ENTITY_TAGS));
 }
 
-/** Every distinct entity whose read permission decides what the caller sees. */
+/** Paths of the document at or below `/api/<tag>`. */
+function pathsOf(document: JsonObject, tag: string): [string, unknown][] {
+  return Object.entries(isObject(document.paths) ? document.paths : {}).filter(
+    ([path]) => path === `/api/${tag}` || path.startsWith(`/api/${tag}/`),
+  );
+}
+
+const WRITE_METHOD_OPERATION: Readonly<Record<string, Operation>> = {
+  post: 'create',
+  put: 'update',
+  patch: 'update',
+  delete: 'delete',
+};
+
+/**
+ * The permissions of which the caller needs at least one to see `entity`:
+ * `read` when the document has a GET for it (list, detail, export, ...),
+ * otherwise (a write-only entity) the permissions its documented write
+ * operations need. `/api/<entity>/options` is a GET that every API entity has,
+ * also a write-only one (it serves pickers on other entities' forms), so it
+ * does not count as a read operation here.
+ */
+export function permissionsGoverning(document: JsonObject, entity: string): Operation[] {
+  const paths = pathsOf(document, entity);
+  const hasRead = paths.some(
+    ([path, item]) => isObject(item) && isObject(item.get) && path !== `/api/${entity}/options`,
+  );
+  if (hasRead || paths.length === 0) return ['read'];
+  const needed = new Set<Operation>();
+  for (const [path, item] of paths) {
+    if (!isObject(item)) continue;
+    for (const [method, operation] of Object.entries(item)) {
+      const op = WRITE_METHOD_OPERATION[method];
+      if (!op || !isObject(operation)) continue;
+      needed.add(method === 'post' && path === `/api/${entity}/import` ? 'import' : op);
+    }
+  }
+  return needed.size > 0 ? [...needed] : ['read'];
+}
+
+/** Every distinct entity whose permissions decide what the caller sees. */
 export function entitiesToCheck(document: JsonObject): string[] {
   const names = new Set<string>();
   for (const tag of documentTags(document)) {
@@ -117,14 +164,15 @@ function reachableSchemas(roots: unknown[], schemas: JsonObject): Set<string> {
 }
 
 /**
- * Returns the document limited to the entities in `readable` (entity model
- * names the caller may read). The input is not modified. When nothing has to
- * be removed the result is deep-equal to the input.
+ * Returns the document limited to the entities in `visible` (entity model
+ * names the caller may see: see {@link permissionsGoverning}). The input is
+ * not modified. When nothing has to be removed the result is deep-equal to the
+ * input.
  */
-export function filterOpenApiDocument(document: JsonObject, readable: ReadonlySet<string>): JsonObject {
+export function filterOpenApiDocument(document: JsonObject, visible: ReadonlySet<string>): JsonObject {
   const visibleTag = (tag: string): boolean => {
     const entity = governingEntity(document, tag);
-    return entity !== null && readable.has(entity);
+    return entity !== null && visible.has(entity);
   };
   const hiddenTags = new Set(documentTags(document).filter((tag) => !visibleTag(tag)));
   if (hiddenTags.size === 0) return structuredClone(document);
@@ -200,14 +248,20 @@ function scrubRelationships(schema: unknown, hiddenEntities: ReadonlySet<string>
 
 /**
  * The document as `userId` may see it: limited to the entities the user may
- * read, using the same permission check as every entity route (so the 30 s
- * permission cache and the single permission query per request are reused).
+ * read (or, for a write-only entity, write), using the same permission check
+ * as every entity route (so the 30 s permission cache and the single
+ * permission query per request are reused).
  */
 export async function filterOpenApiDocumentForUser(document: JsonObject, userId: string): Promise<JsonObject> {
   const entities = entitiesToCheck(document);
   const verdicts = await Promise.all(
-    entities.map(async (entity) => [entity, await canAccessEntity(entity, 'read', userId)] as const),
+    entities.map(async (entity) => {
+      const allowed = await Promise.all(
+        permissionsGoverning(document, entity).map((op) => canAccessEntity(entity, op, userId)),
+      );
+      return [entity, allowed.some(Boolean)] as const;
+    }),
   );
-  const readable = new Set(verdicts.filter(([, allowed]) => allowed).map(([entity]) => entity));
-  return filterOpenApiDocument(document, readable);
+  const visible = new Set(verdicts.filter(([, allowed]) => allowed).map(([entity]) => entity));
+  return filterOpenApiDocument(document, visible);
 }

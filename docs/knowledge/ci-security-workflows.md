@@ -48,7 +48,12 @@ reviewed by maintainers before anyone discusses their content publicly.
 `.github/workflows/osv-scanner.yml` gives a second opinion next to `npm audit`
 and `pip-audit`. It scans `package-lock.json` and `requirements.txt` only; the
 generated mobile app's dependencies are covered by the mobile dependency audit
-and are out of scope.
+and are out of scope. `requirements.txt` must stay a full pip-compile lock:
+given only lower bounds, OSV-Scanner resolves the transitive tree itself and
+reports versions CI never installs (see "Python lock file" in
+[dependency-and-resource-controls.md](dependency-and-resource-controls.md)).
+Each finding is reported once per dependency path, so one vulnerable package
+can raise two or more alerts.
 
 | Trigger | Behaviour |
 |---|---|
@@ -72,6 +77,66 @@ Scorecard API. It is report-only. Its job holds `security-events: write` and
 `id-token: write` (the latter for result publishing); the workflow default
 stays `contents: read`. A check that scores below 5 is either opened as a
 follow-up Issue or recorded as accepted, with a reason, on the tracking Issue.
+
+### Accepted Scorecard findings
+
+Recorded 2026-11-25 from the first run (alerts #161–#168). Review each entry
+when its condition changes, or by 2027-05-31 at the latest.
+
+| Check (alert) | Score | Status and reason |
+|---|---|---|
+| Code-Review (#166) | 0 | **Accepted for now.** The project has one active maintainer, so changes merge through the admin bypass of the `main` ruleset without a second approval. Compensating controls: required CI, CodeQL, Semgrep and workflow-lint checks, and the per-task gates in `CLAUDE.md`. Revisit when a second reviewer is available (CODEOWNERS for security-critical paths). |
+| Branch-Protection (#161) | 5 | **Partly accepted.** Required status checks and stale-review dismissal are now in place (see "Branch rulesets"). The admin bypass of the review rule follows from Code-Review above. |
+| Fuzzing (#165) | 0 | **Accepted.** No fuzzer integration. The candidate with real value is property-based testing (Hypothesis) of the YAML/schema parsers in `code_generator/`. |
+| CII-Best-Practices (#167) | 0 | **Open.** The OpenSSF Best Practices "passing" badge is a self-assessment form; no code change. |
+| SAST (#163) | 8 | **Open.** CodeQL runs on every push and PR to `main`/`develop`; Scorecard counts commits whose PR had no completed SAST run. |
+| CI-Tests (#168) | 6 | **Addressed.** The CI checks are required by the *Required checks* ruleset, which has no bypass. The score rises as new PRs merge. |
+| Security-Policy (#162) | 4 | Fixed: `SECURITY.md` now links the private reporting URL. |
+| Vulnerabilities (#164) | 9 | Fixed: minimatch override raised to `^11.0.9` (GHSA-g3hv-75wg-m249). |
+
+## Dependabot auto-merge
+
+`.github/workflows/dependabot-auto-merge.yml` turns on auto-merge (squash) for
+a Dependabot PR to `main` or `develop` when `dependabot/fetch-metadata`
+reports a semver patch or minor update. A grouped PR is reported with its
+highest update type. Major updates get no auto-merge. The PR then merges by
+itself once a maintainer approves it and every required check passes, so
+handling a routine update takes one click.
+
+The workflow does not approve. The organization's Actions policy does not let
+workflows approve pull requests, and GitHub rejects the built-in GitHub
+Actions app as a ruleset bypass actor ("must be part of the ruleset source or
+owner organization"). Making it fully automatic would need a dedicated GitHub
+App as the bypass actor, with its key stored as a Dependabot secret.
+
+The switch is `AUTOMERGE_ENABLED` in the job's `env`. It depends on:
+
+1. **Settings → General → Pull Requests → Allow auto-merge** (enabled).
+2. The required checks on `main` and `develop` (ruleset *Required checks*,
+   below). Without them, auto-merge would merge as soon as the approval lands.
+
+A merge made through auto-merge enabled with the `GITHUB_TOKEN` does not
+trigger other workflows, so the `push` runs on the target branch (CI, CodeQL)
+do not start for an auto-merged Dependabot PR. The same checks already ran on
+the PR head.
+
+## Branch rulesets
+
+Two repository rulesets cover `main` and `develop`, kept apart so that the
+status checks have no bypass at all:
+
+| Ruleset | Rules | Bypass |
+|---|---|---|
+| *Required checks* | required status checks: `Lint`, `Unit Tests`, `Python Generator Tests`, `E2E Tests`, `Dependency Audit`, `Hand-written Route Guards`, `Semgrep`, `Dependency Review`, `Secret Scan (gitleaks)`, `Analyze (javascript-typescript)`, `Analyze (python)`, `Analyze (actions)` | none, admins included |
+| *Master protection* | no deletion, no force push, pull request with 1 approval, stale approvals dismissed on push | admin role, through a pull request only |
+
+A required check must come from a workflow with no trigger-level `paths:`
+filter. Otherwise a PR that does not touch those paths waits forever for a
+check that never starts. `Workflow Lint` and `OSV-Scanner` are path-filtered
+and must stay out of the list. Renaming a job in `ci.yml`,
+`security-checks.yml` or `codeql.yml` changes its check name, so update the
+ruleset in the same change. Read the current list with
+`gh api repos/rhymion/app-generator/rulesets`.
 
 ## Dynamic Scans workflow
 

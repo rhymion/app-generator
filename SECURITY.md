@@ -3,9 +3,14 @@
 ## Reporting a vulnerability
 
 Please report suspected vulnerabilities privately through GitHub's private
-vulnerability reporting: open the repository's **Security and quality** tab and choose
-**Report a vulnerability**. Please do not open a public issue, pull request or
+vulnerability reporting:
+<https://github.com/rhymion/app-generator/security/advisories/new>
+(or open the repository's **Security and quality** tab and choose
+**Report a vulnerability**). Please do not open a public issue, pull request or
 discussion for a suspected vulnerability.
+
+GitHub documents how private reporting works at
+<https://docs.github.com/en/code-security/security-advisories/guidance-on-reporting-and-writing-information-about-vulnerabilities/privately-reporting-a-security-vulnerability>.
 
 A useful report describes the affected component, the version or commit, the
 steps to reproduce, and the impact you expect.

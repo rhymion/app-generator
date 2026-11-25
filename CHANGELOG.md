@@ -3,7 +3,26 @@ All notable changes to this project will be documented in this file.
 The format is based on Keep a Changelog (https://keepachangelog.com/),
 and this project adheres to Semantic Versioning (https://semver.org/).
 
+## [7.0.2] - 2026-11-25
+### Security
+- **Code scanning alerts fixed** Python packages, Dependabot, and other security / CI related configurations are updated. As a result, majority of code scanning issues will be solved. 
+
+### Changed
+- **Multiple list items selectable in one go** (Issue #1411). In list item selection in UI, including many-to-many relations and attachments, now it is possible to select multiple items in one go. 
+
+### Fixed
+- **Write-only entities (`x-generate` `list: false, view: false, api: true`) work again.** The generated API spec no
+  longer calls routes such an entity does not have (7.0 sent 6.1 / 6.2 / 7.1 to `GET /api/<entity>` and re-read rows
+  for 4.2 / 7.4 / 7.10 through `GET /api/<entity>/:id`, which answer 405): authentication is probed on `/options`, 7.1
+  is emitted only with `list`, and rows are re-read from the database. `GET /api/openapi.json` shows a write-only
+  entity to a caller who holds a permission one of its write operations needs, instead of hiding it from every caller
+  (grant-all-permissions never grants `read` on it). Specs of entities with `view: true` are unchanged. See
+  `docs/knowledge/testing-cypress.md` and `docs/knowledge/generated-documentation-and-openapi-spec.md`.
+
 ## [7.0.1] - 2026-11-19
+### Breaking
+Web session model (in Prisma) and corresponding migration file(s) will be needed
+
 ### Security
 - **The registration domain allow-list also applies to a changed email address** (Issue #1402). With
   `registrationAllowedDomains` / `REGISTRATION_ALLOWED_DOMAINS` set, the settings screen and `PUT /api/setting/:id` /

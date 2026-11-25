@@ -88,7 +88,7 @@ describe('API: {{ title }}', () => {
 {% if can_new %}
 
   describe('POST {{ api_path }}', () => {
-    it('3.1 creates with required fields, verified by GET', () => {
+    it('3.1 creates with required fields{{ ', verified by GET' if can_view else '' }}', () => {
 {% if reservation_count_pool_pascal %}
       cy.task('db:populate{{ reservation_count_pool_pascal }}', 1);
 {% endif %}
@@ -174,7 +174,7 @@ describe('API: {{ title }}', () => {
 {% if can_edit %}
 
   describe('PUT {{ api_path }}/:id', () => {
-    it('4.1 updates, verified by GET', () => {
+    it('4.1 updates{{ ', verified by GET' if can_view else '' }}', () => {
 {% if primary_is_fk and not primary_fk_is_ua %}
       cy.task<any>('db:populate{{ pascal }}Dependencies').then((deps) => {
         cy.task<any[]>('db:populate{{ pascal }}', 1).then((records) => {
@@ -189,6 +189,7 @@ describe('API: {{ title }}', () => {
             },
           }).then((res) => {
             expect(res.status).to.eq(200);
+{% if can_view %}
             cy.request({ url: `${API_BASE}/${records[0].id}`, headers: { 'X-API-Key': TEST_API_KEY } })
               .then((getRes) => {
                 expect(getRes.status).to.eq(200);
@@ -199,6 +200,7 @@ describe('API: {{ title }}', () => {
 {% endfor %}
 {% endif %}
               });
+{% endif %}
           });
         });
       });
@@ -215,6 +217,7 @@ describe('API: {{ title }}', () => {
           },
         }).then((res) => {
           expect(res.status).to.eq(200);
+{% if can_view %}
           cy.request({ url: `${API_BASE}/${records[0].id}`, headers: { 'X-API-Key': TEST_API_KEY } })
             .then((getRes) => {
               expect(getRes.status).to.eq(200);
@@ -225,6 +228,7 @@ describe('API: {{ title }}', () => {
 {% endfor %}
 {% endif %}
             });
+{% endif %}
         });
       });
 {% endif %}
@@ -234,7 +238,7 @@ describe('API: {{ title }}', () => {
 {% if can_delete %}
 
   describe('DELETE {{ api_path }}/:id', () => {
-    it('4.2 deletes item, verified by GET returning 4xx', () => {
+    it('4.2 deletes item, verified by {{ 'GET returning 4xx' if can_view else 'a database re-read' }}', () => {
       cy.task<any[]>('db:populate{{ pascal }}', 1).then((records) => {
         cy.request({
           method: 'DELETE',
@@ -242,10 +246,15 @@ describe('API: {{ title }}', () => {
           headers: { 'X-API-Key': TEST_API_KEY },
         }).then((res) => {
           expect(res.status).to.eq(204);
+{% if can_view %}
           cy.request({ url: `${API_BASE}/${records[0].id}`, headers: { 'X-API-Key': TEST_API_KEY }, failOnStatusCode: false })
             .then((getRes) => {
               expect(getRes.status).to.be.gte(400);
             });
+{% else %}
+          // view: false — no GET detail route (it would answer 405); re-read the database instead.
+          cy.task<any[]>('security:snapshot', { model: '{{ model }}', where: { id: records[0].id } }).should('have.length', 0);
+{% endif %}
         });
       });
     });
@@ -449,6 +458,7 @@ describe('API: {{ title }}', () => {
           expect(res.status).to.eq(207);
           expect(res.body.summary.succeeded).to.eq(1);
           expect(res.body.summary.failed).to.eq(0);
+{% if can_view %}
           cy.request({
             url: `${API_BASE}/${records[0].id}`,
             headers: { 'X-API-Key': TEST_API_KEY },
@@ -456,6 +466,10 @@ describe('API: {{ title }}', () => {
           }).then((getRes) => {
             expect(getRes.status).to.be.gte(400);
           });
+{% else %}
+          // view: false — no GET detail route (it would answer 405); re-read the database instead.
+          cy.task<any[]>('security:snapshot', { model: '{{ model }}', where: { id: records[0].id } }).should('have.length', 0);
+{% endif %}
         });
       });
     });
@@ -497,6 +511,7 @@ describe('API: {{ title }}', () => {
           },
         }).then((res) => {
           expect(res.status).to.eq(200);
+{% if can_view %}
           cy.request({ url: `${API_BASE}/${original.id}`, headers: { 'X-API-Key': TEST_API_KEY } })
             .then((getRes) => {
               expect(getRes.status).to.eq(200);
@@ -504,6 +519,15 @@ describe('API: {{ title }}', () => {
               expect(getRes.body.{{ f }}, '{{ f }} must not be overwritten by PUT').to.eq(original.{{ f }});
 {% endfor %}
             });
+{% else %}
+          // view: false — no GET detail route; re-read the database (same row shape as `original`).
+          cy.task<any[]>('security:snapshot', { model: '{{ model }}', where: { id: original.id } }).then((rows) => {
+            expect(rows).to.have.length(1);
+{% for f in readonly_fields %}
+            expect(rows[0].{{ f }}, '{{ f }} must not be overwritten by PUT').to.eq(original.{{ f }});
+{% endfor %}
+          });
+{% endif %}
         });
       });
     });
@@ -553,6 +577,7 @@ describe('API: {{ title }}', () => {
             },
           }).then((res) => {
             expect(res.status).to.eq(200);
+{% if can_view %}
             cy.request({ url: `${API_BASE}/${original.id}`, headers: { 'X-API-Key': restrictedKey } })
               .then((getRes) => {
                 expect(getRes.status).to.eq(200);
@@ -561,10 +586,21 @@ describe('API: {{ title }}', () => {
                   '{{ fk_preservation_relation.prop_name }} must not be nulled out by a PUT that omits it',
                 ).to.eq(original.{{ fk_preservation_relation.prop_name }});
               });
+{% else %}
+            // view: false — no GET detail route; re-read the database instead.
+            cy.task<any[]>('security:snapshot', { model: '{{ model }}', where: { id: original.id } }).then((rows) => {
+              expect(rows).to.have.length(1);
+              expect(
+                rows[0].{{ fk_preservation_relation.prop_name }},
+                '{{ fk_preservation_relation.prop_name }} must not be nulled out by a PUT that omits it',
+              ).to.eq(original.{{ fk_preservation_relation.prop_name }});
+            });
+{% endif %}
           });
         });
       });
     });
+{% if can_list or can_view %}
 
     // cmd_648: pure-API counterpart of the UI regression spec
     // (fk_read_permission_graceful_degradation.cy.ts, now under
@@ -583,30 +619,39 @@ describe('API: {{ title }}', () => {
           organizationId: original.organization_id,
 {% endif %}
         }).then((restrictedKey) => {
+{% if can_list %}
           cy.request({ url: API_BASE, headers: { 'X-API-Key': restrictedKey } })
             .then((listRes) => {
               expect(listRes.status).to.eq(200);
             });
+{% endif %}
+{% if can_view %}
           cy.request({ url: `${API_BASE}/${original.id}`, headers: { 'X-API-Key': restrictedKey } })
             .then((getRes) => {
               expect(getRes.status).to.eq(200);
             });
+{% endif %}
         });
       });
     });
+{% endif %}
   });
 {% endif %}
 
   describe('Authentication errors', () => {
+{% if not can_list %}
+    // list: false — the collection route has no GET (it would answer 405), so
+    // authentication is probed on the options route, which every API entity has.
+{% endif %}
     it('6.1 returns 401 without API key', () => {
-      cy.request({ url: API_BASE, failOnStatusCode: false })
+      cy.request({ url: {{ 'API_BASE' if can_list else '`${API_BASE}/options`' }}, failOnStatusCode: false })
         .then((res) => {
           expect(res.status).to.eq(401);
         });
     });
 
     it('6.2 returns 401 with invalid API key', () => {
-      cy.request({ url: API_BASE, headers: { 'X-API-Key': 'invalid_key' }, failOnStatusCode: false })
+      cy.request({ url: {{ 'API_BASE' if can_list else '`${API_BASE}/options`' }}, headers: { 'X-API-Key': 'invalid_key' }, failOnStatusCode: false })
         .then((res) => {
           expect(res.status).to.eq(401);
         });
@@ -614,6 +659,7 @@ describe('API: {{ title }}', () => {
   });
 
   describe('Permission errors', () => {
+{% if can_list %}
     it('7.1 returns 403 for GET list when permission denied', () => {
       // security-cell: entity={{ parent }} operation=list case=permission_denied
       cy.task<string>('db:createLimitedApiUser', '{{ parent }}').then((limitedKey) => {
@@ -623,6 +669,7 @@ describe('API: {{ title }}', () => {
           });
       });
     });
+{% endif %}
 {% if can_new %}
 
     it('7.2 returns 403 for POST when permission denied', () => {
@@ -655,7 +702,12 @@ describe('API: {{ title }}', () => {
     it('7.3 returns 403 for PUT when permission denied and writes nothing', () => {
       // security-cell: entity={{ parent }} operation=update case=permission_denied
       cy.task<any>('db:populate{{ pascal }}', 1).then((records) => {
+{% if can_view %}
         cy.request({ url: `${API_BASE}/${records[0].id}`, headers: { 'X-API-Key': TEST_API_KEY } }).then((before) => {
+{% else %}
+        // view: false — no GET detail route; the record is read from the database.
+        cy.task<any[]>('security:snapshot', { model: '{{ model }}', where: { id: records[0].id } }).then((before) => {
+{% endif %}
           cy.task<string>('db:createLimitedApiUser', '{{ parent }}').then((limitedKey) => {
             cy.request({
               method: 'PUT',
@@ -667,9 +719,16 @@ describe('API: {{ title }}', () => {
               expect(res.status).to.eq(403);
             });
             // Re-read: the record is unchanged.
+{% if can_view %}
             cy.request({ url: `${API_BASE}/${records[0].id}`, headers: { 'X-API-Key': TEST_API_KEY } }).then((after) => {
               expect(after.body).to.deep.eq(before.body);
             });
+{% else %}
+            cy.task<any[]>('security:snapshot', { model: '{{ model }}', where: { id: records[0].id } }).then((after) => {
+              expect(before).to.have.length(1);
+              expect(after).to.deep.eq(before);
+            });
+{% endif %}
           });
         });
       });
@@ -690,7 +749,11 @@ describe('API: {{ title }}', () => {
             expect(res.status).to.eq(403);
           });
           // Re-read: the record still exists.
+{% if can_view %}
           cy.request({ url: `${API_BASE}/${records[0].id}`, headers: { 'X-API-Key': TEST_API_KEY } }).its('status').should('eq', 200);
+{% else %}
+          cy.task<any[]>('security:snapshot', { model: '{{ model }}', where: { id: records[0].id } }).should('have.length', 1);
+{% endif %}
         });
       });
     });
@@ -791,6 +854,28 @@ describe('API: {{ title }}', () => {
     it('7.9 returns 403 for bulk PUT when permission denied and writes nothing', () => {
       // security-cell: entity={{ parent }} operation=bulk_update case=permission_denied
       cy.task<any>('db:populate{{ pascal }}', 2).then((records) => {
+{% if not can_view %}
+        // view: false — no GET detail route; both rows are read from the database.
+        const where = { id: { in: [records[0].id, records[1].id] } };
+        cy.task<any[]>('security:snapshot', { model: '{{ model }}', where }).then((before) => {
+          cy.task<string>('db:createLimitedApiUser', '{{ parent }}').then((limitedKey) => {
+            cy.request({
+              method: 'PUT',
+              url: `${API_BASE}/bulk`,
+              headers: { 'X-API-Key': limitedKey },
+              body: [{ id: records[0].id }, { id: records[1].id }],
+              failOnStatusCode: false,
+            }).then((res) => {
+              expect(res.status).to.eq(403);
+            });
+            // Re-read every row of the bulk request: none changed.
+            cy.task<any[]>('security:snapshot', { model: '{{ model }}', where }).then((after) => {
+              expect(before).to.have.length(2);
+              expect(after).to.deep.eq(before);
+            });
+          });
+        });
+{% else %}
         cy.request({ url: `${API_BASE}/${records[0].id}`, headers: { 'X-API-Key': TEST_API_KEY } }).then((before0) => {
         cy.request({ url: `${API_BASE}/${records[1].id}`, headers: { 'X-API-Key': TEST_API_KEY } }).then((before1) => {
           cy.task<string>('db:createLimitedApiUser', '{{ parent }}').then((limitedKey) => {
@@ -813,6 +898,7 @@ describe('API: {{ title }}', () => {
           });
         });
         });
+{% endif %}
       });
     });
 {% endif %}
@@ -832,8 +918,12 @@ describe('API: {{ title }}', () => {
             expect(res.status).to.eq(403);
           });
           // Re-read every row of the bulk request: all still exist.
+{% if can_view %}
           cy.request({ url: `${API_BASE}/${records[0].id}`, headers: { 'X-API-Key': TEST_API_KEY } }).its('status').should('eq', 200);
           cy.request({ url: `${API_BASE}/${records[1].id}`, headers: { 'X-API-Key': TEST_API_KEY } }).its('status').should('eq', 200);
+{% else %}
+          cy.task<any[]>('security:snapshot', { model: '{{ model }}', where: { id: { in: [records[0].id, records[1].id] } } }).should('have.length', 2);
+{% endif %}
         });
       });
     });

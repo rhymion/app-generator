@@ -17,6 +17,7 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
 import AddIcon from '@mui/icons-material/Add';
 import UploadFileIcon from '@mui/icons-material/UploadFile';
+import CloseIcon from '@mui/icons-material/Close';
 import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
 import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward';
 import Paper from '@mui/material/Paper';
@@ -25,7 +26,7 @@ import CircularProgress from '@mui/material/CircularProgress';
 import Typography from '@mui/material/Typography';
 import Link from '@mui/material/Link';
 import { isSafeUrl } from '@/lib/_safe_url';
-import { attachmentUrl } from '@/lib/attachment/url';
+import { itemsFromOptions, mergeFiles, uploadFiles } from './editableListAdd';
 
 import type { ItemType, EditableListWrapperItem, AutocompleteOption } from './EditableListWrapper';
 import type { EntitySearchAction } from './EntityAutocomplete';
@@ -99,8 +100,8 @@ const OrderedEditableListWrapper = forwardRef<OrderedEditableListWrapperHandle, 
     const [openEditDialog, setOpenEditDialog] = useState(false);
     const [editingItem, setEditingItem] = useState<EditableListWrapperItem | null>(null);
     const [inputValue, setInputValue] = useState('');
-    const [selectedAutocomplete, setSelectedAutocomplete] = useState<AutocompleteOption | null>(null);
-    const [selectedFile, setSelectedFile] = useState<File | null>(null);
+    const [selectedAutocomplete, setSelectedAutocomplete] = useState<AutocompleteOption[]>([]);
+    const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
     const [error, setError] = useState<string | null>(null);
     const [uploading, setUploading] = useState(false);
 
@@ -188,8 +189,8 @@ const OrderedEditableListWrapper = forwardRef<OrderedEditableListWrapperHandle, 
 
     const handleOpenAddDialog = () => {
       setInputValue('');
-      setSelectedAutocomplete(null);
-      setSelectedFile(null);
+      setSelectedAutocomplete([]);
+      setSelectedFiles([]);
       setError(null);
       setSearchQuery('');
       setSearchResults(initialAutocompleteOptions ?? []);
@@ -208,8 +209,8 @@ const OrderedEditableListWrapper = forwardRef<OrderedEditableListWrapperHandle, 
       if (uploading) return;
       setOpenAddDialog(false);
       setInputValue('');
-      setSelectedAutocomplete(null);
-      setSelectedFile(null);
+      setSelectedAutocomplete([]);
+      setSelectedFiles([]);
       setError(null);
     };
 
@@ -221,82 +222,54 @@ const OrderedEditableListWrapper = forwardRef<OrderedEditableListWrapperHandle, 
     };
 
     const handleAdd = async () => {
-      let value: string | number;
-      let label: string = '';
-      // For an uploaded file: the id of the attachment the upload created (the file itself is
-      // delivered from /api/attachments/<id>).
-      let uploadedId: string | undefined;
-
-      switch (itemType) {
-        case 'text':
-          value = inputValue.trim();
-          if (!value) {
-            setError('Value cannot be empty');
-            return;
-          }
-          label = value;
-          break;
-        case 'autocomplete':
-          if (!selectedAutocomplete) {
-            setError('Please select an option');
-            return;
-          }
-          value = selectedAutocomplete.id;
-          label = selectedAutocomplete.label;
-          break;
-        case 'file':
-          if (!selectedFile) {
-            setError('Please select a file');
-            return;
-          }
-          if (selectedFile.size > maxFileSize) {
-            setError(`File size must be less than ${maxFileSize / 1024 / 1024}MB`);
-            return;
-          }
-          setUploading(true);
-          try {
-            const uploadFormData = new FormData();
-            uploadFormData.append('file', selectedFile);
-            const response = await fetch(uploadEndpoint, {
-              method: 'POST',
-              body: uploadFormData,
-            });
-            if (!response.ok) {
-              const errorData = await response.json();
-              throw new Error(errorData.error || 'Upload failed');
-            }
-            const data = await response.json();
-            uploadedId = data.id;
-            value = attachmentUrl(data.id);
-            label = selectedFile.name;
-          } catch (err) {
-            setError(err instanceof Error ? err.message : 'Upload failed');
-            setUploading(false);
-            return;
-          } finally {
-            setUploading(false);
-          }
-          break;
-      }
-
-      if (validateItem) {
-        const validationError = validateItem(value);
-        if (validationError) {
-          setError(validationError);
+      if (itemType === 'text') {
+        const value = inputValue.trim();
+        if (!value) {
+          setError('Value cannot be empty');
           return;
         }
+        if (validateItem) {
+          const validationError = validateItem(value);
+          if (validationError) {
+            setError(validationError);
+            return;
+          }
+        }
+        updateItemsOrder([...items, { id: `temp-${Date.now()}-${Math.random()}`, value, label: value, type: itemType }]);
+        handleCloseAddDialog();
+        return;
       }
 
-      const newItem: EditableListWrapperItem = {
-        id: `temp-${Date.now()}-${Math.random()}`,
-        value,
-        label,
-        type: itemType,
-        ...(uploadedId ? { originalId: uploadedId } : {}),
-      };
+      if (itemType === 'autocomplete') {
+        // Several options can be picked in one dialog (#1411); all are added together.
+        const { added, error: addError } = itemsFromOptions(selectedAutocomplete, validateItem);
+        if (addError) {
+          setError(addError);
+          return;
+        }
+        updateItemsOrder([...items, ...added]);
+        handleCloseAddDialog();
+        return;
+      }
 
-      updateItemsOrder([...items, newItem]);
-      handleCloseAddDialog();
+      // file: several files can be chosen in one dialog (#1411). The ones that uploaded are added
+      // even when others fail; the failed ones stay selected with their errors so they can be retried.
+      setUploading(true);
+      let result: Awaited<ReturnType<typeof uploadFiles>>;
+      try {
+        result = await uploadFiles(selectedFiles, { maxFileSize, uploadEndpoint, validateItem });
+      } finally {
+        setUploading(false);
+      }
+      if (result.added.length > 0) updateItemsOrder([...items, ...result.added]);
+      if (result.error) {
+        setSelectedFiles(result.failed);
+        setError(result.error);
+        return;
+      }
+      setOpenAddDialog(false);
+      setSelectedFiles([]);
+      setError(null);
     };
 
     const handleEdit = () => {
@@ -344,11 +317,17 @@ const OrderedEditableListWrapper = forwardRef<OrderedEditableListWrapperHandle, 
     };
 
     const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-      const file = event.target.files?.[0];
-      if (file) {
-        setSelectedFile(file);
+      const chosen = event.target.files;
+      if (chosen && chosen.length > 0) {
+        setSelectedFiles((prev) => mergeFiles(prev, chosen));
         setError(null);
       }
+      // Reset so the same file can be chosen again after it was removed from the selection.
+      event.target.value = '';
+    };
+
+    const handleRemoveSelectedFile = (index: number) => {
+      setSelectedFiles((prev) => prev.filter((_, i) => i !== index));
     };
 
     const isUrlValue = isSafeUrl;
@@ -489,6 +468,8 @@ const OrderedEditableListWrapper = forwardRef<OrderedEditableListWrapperHandle, 
 
             {itemType === 'autocomplete' && (
               <Autocomplete
+                multiple
+                filterSelectedOptions
                 options={availableOptions}
                 getOptionLabel={(option) => option.label}
                 isOptionEqualToValue={(opt, val) => opt.id === val.id}
@@ -530,22 +511,33 @@ const OrderedEditableListWrapper = forwardRef<OrderedEditableListWrapperHandle, 
 
             {itemType === 'file' && (
               <Box sx={{ mt: 2 }}>
-                <Tooltip title="Choose File">
+                <Tooltip title="Choose Files">
                   <span>
-                    <IconButton component="label" disabled={uploading} aria-label="Choose File">
+                    <IconButton component="label" disabled={uploading} aria-label="Choose Files">
                       <UploadFileIcon />
                       <input
                         type="file"
                         hidden
+                        multiple
                         accept={acceptedFileTypes}
                         onChange={handleFileChange}
                       />
                     </IconButton>
                   </span>
                 </Tooltip>
-                {selectedFile && !uploading && (
+                {selectedFiles.length > 0 && !uploading && (
                   <Box sx={{ mt: 1 }}>
-                    <strong>Selected:</strong> {selectedFile.name} ({(selectedFile.size / 1024).toFixed(2)} KB)
+                    <strong>Selected:</strong>
+                    <Box component="ul" sx={{ m: 0, pl: 0, listStyle: 'none' }}>
+                      {selectedFiles.map((f, i) => (
+                        <Box component="li" key={`${f.name}-${f.size}-${f.lastModified}`} sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                          <span>{f.name} ({(f.size / 1024).toFixed(2)} KB)</span>
+                          <IconButton size="small" aria-label={`Remove ${f.name}`} onClick={() => handleRemoveSelectedFile(i)}>
+                            <CloseIcon fontSize="small" />
+                          </IconButton>
+                        </Box>
+                      ))}
+                    </Box>
                   </Box>
                 )}
                 {uploading && (
@@ -555,7 +547,7 @@ const OrderedEditableListWrapper = forwardRef<OrderedEditableListWrapperHandle, 
                   </Box>
                 )}
                 {error && (
-                  <Box sx={{ mt: 1, color: 'error.main', fontSize: '0.875rem' }}>
+                  <Box sx={{ mt: 1, color: 'error.main', fontSize: '0.875rem', whiteSpace: 'pre-line' }}>
                     {error}
                   </Box>
                 )}
