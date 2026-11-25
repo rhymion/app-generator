@@ -1,22 +1,21 @@
 name: Dependabot auto-merge
 
-# Approves a Dependabot patch or minor update and turns on auto-merge, so the
-# PR merges by itself once every *required* status check passes. Major
-# updates are left for a person. See docs/knowledge/ci-security-workflows.md
-# ("Dependabot auto-merge") for the policy and the repository settings it
-# needs.
+# Turns on auto-merge for a Dependabot patch or minor update. The PR then
+# merges by itself once a maintainer approves it (ruleset "Master protection")
+# and every required status check passes (ruleset "Required checks", which
+# nobody can bypass). Major updates get no auto-merge. See
+# docs/knowledge/ci-security-workflows.md ("Dependabot auto-merge").
 #
-# Off switch: AUTOMERGE_ENABLED below. It stays 'false' until three repository
-# settings are in place, because without them the steps fail or, worse, merge
-# without any check gating the merge:
-#   1. Settings > General > "Allow auto-merge" is on.
-#   2. Settings > Actions > General > "Allow GitHub Actions to create and
-#      approve pull requests" is on (the ruleset requires 1 approval).
-#   3. The rulesets for main and develop require the CI status checks, so
-#      auto-merge waits for them.
-# The switch lives in this file, not in a repository variable: the docs do not
-# say whether the `vars` context reaches Dependabot-triggered runs, and a switch
-# that silently never fires would look like a working one.
+# The workflow does not approve. The organization does not let GitHub Actions
+# approve pull requests, and the built-in GitHub Actions app cannot be a
+# ruleset bypass actor, so the one approval stays a human click.
+#
+# Off switch: AUTOMERGE_ENABLED below. It needs "Allow auto-merge" on
+# (Settings > General) and the required checks on main and develop; without
+# required checks, an approval alone would merge. The switch lives in this
+# file, not in a repository variable: the docs do not say whether the `vars`
+# context reaches Dependabot-triggered runs, and a switch that silently never
+# fires would look like a working one.
 on:
   pull_request:
     branches: [main, develop]
@@ -26,7 +25,7 @@ permissions:
 
 jobs:
   auto-merge:
-    name: Approve and auto-merge patch/minor updates
+    name: Auto-merge patch/minor updates
     runs-on: ubuntu-latest
     # Dependabot-triggered pull_request runs are treated like fork PRs: the
     # GITHUB_TOKEN is read-only unless `permissions` raises it, and only
@@ -37,7 +36,7 @@ jobs:
       contents: write
       pull-requests: write
     env:
-      AUTOMERGE_ENABLED: 'false'
+      AUTOMERGE_ENABLED: 'true'
     steps:
       - name: Dependabot metadata
         id: metadata
@@ -52,7 +51,7 @@ jobs:
           echo "Dependencies: ${DEPENDENCIES}"
           echo "Update type: ${UPDATE_TYPE:-unknown}"
           echo "Auto-merge enabled in this workflow: ${AUTOMERGE_ENABLED}"
-      - name: Approve and enable auto-merge
+      - name: Enable auto-merge
         if: >-
           env.AUTOMERGE_ENABLED == 'true' &&
           (steps.metadata.outputs.update-type == 'version-update:semver-patch' ||
@@ -60,6 +59,4 @@ jobs:
         env:
           PR_URL: ${{ github.event.pull_request.html_url }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh pr review --approve "$PR_URL"
-          gh pr merge --auto --squash "$PR_URL"
+        run: gh pr merge --auto --squash "$PR_URL"

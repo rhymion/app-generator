@@ -86,36 +86,57 @@ when its condition changes, or by 2027-05-31 at the latest.
 | Check (alert) | Score | Status and reason |
 |---|---|---|
 | Code-Review (#166) | 0 | **Accepted for now.** The project has one active maintainer, so changes merge through the admin bypass of the `main` ruleset without a second approval. Compensating controls: required CI, CodeQL, Semgrep and workflow-lint checks, and the per-task gates in `CLAUDE.md`. Revisit when a second reviewer is available (CODEOWNERS for security-critical paths). |
-| Branch-Protection (#161) | 5 | **Partly accepted.** The admin bypass and the missing stale-review dismissal follow from Code-Review above. Required status checks are a settings change to make, not an accepted gap. |
+| Branch-Protection (#161) | 5 | **Partly accepted.** Required status checks and stale-review dismissal are now in place (see "Branch rulesets"). The admin bypass of the review rule follows from Code-Review above. |
 | Fuzzing (#165) | 0 | **Accepted.** No fuzzer integration. The candidate with real value is property-based testing (Hypothesis) of the YAML/schema parsers in `code_generator/`. |
 | CII-Best-Practices (#167) | 0 | **Open.** The OpenSSF Best Practices "passing" badge is a self-assessment form; no code change. |
 | SAST (#163) | 8 | **Open.** CodeQL runs on every push and PR to `main`/`develop`; Scorecard counts commits whose PR had no completed SAST run. |
-| CI-Tests (#168) | 6 | **Open.** Fixed by making the CI checks required in the rulesets, so no PR merges without them. |
+| CI-Tests (#168) | 6 | **Addressed.** The CI checks are required by the *Required checks* ruleset, which has no bypass. The score rises as new PRs merge. |
 | Security-Policy (#162) | 4 | Fixed: `SECURITY.md` now links the private reporting URL. |
 | Vulnerabilities (#164) | 9 | Fixed: minimatch override raised to `^11.0.9` (GHSA-g3hv-75wg-m249). |
 
 ## Dependabot auto-merge
 
-`.github/workflows/dependabot-auto-merge.yml` approves a Dependabot PR to
-`main` or `develop` and turns on auto-merge (squash) when
-`dependabot/fetch-metadata` reports a semver patch or minor update. A grouped
-PR is reported with its highest update type. Major updates are left for a
-person. The PR merges only after every required status check passes, so the
-safety of this workflow is exactly the set of required checks.
+`.github/workflows/dependabot-auto-merge.yml` turns on auto-merge (squash) for
+a Dependabot PR to `main` or `develop` when `dependabot/fetch-metadata`
+reports a semver patch or minor update. A grouped PR is reported with its
+highest update type. Major updates get no auto-merge. The PR then merges by
+itself once a maintainer approves it and every required check passes, so
+handling a routine update takes one click.
 
-It ships switched off (`AUTOMERGE_ENABLED: 'false'` in the job's `env`). Turn
-it on only after:
+The workflow does not approve. The organization's Actions policy does not let
+workflows approve pull requests, and GitHub rejects the built-in GitHub
+Actions app as a ruleset bypass actor ("must be part of the ruleset source or
+owner organization"). Making it fully automatic would need a dedicated GitHub
+App as the bypass actor, with its key stored as a Dependabot secret.
 
-1. **Settings → General → Pull Requests → Allow auto-merge** is enabled.
-2. **Settings → Actions → General → Workflow permissions → Allow GitHub
-   Actions to create and approve pull requests** is enabled, because the
-   ruleset requires one approval.
-3. The rulesets for `main` and `develop` require the CI status checks.
-   Without required checks, auto-merge merges as soon as the approval lands.
+The switch is `AUTOMERGE_ENABLED` in the job's `env`. It depends on:
 
-A merge made with the `GITHUB_TOKEN` does not trigger other workflows, so the
-`push` runs on the target branch (CI, CodeQL) do not start for an auto-merged
-Dependabot PR. The same checks already ran on the PR head.
+1. **Settings → General → Pull Requests → Allow auto-merge** (enabled).
+2. The required checks on `main` and `develop` (ruleset *Required checks*,
+   below). Without them, auto-merge would merge as soon as the approval lands.
+
+A merge made through auto-merge enabled with the `GITHUB_TOKEN` does not
+trigger other workflows, so the `push` runs on the target branch (CI, CodeQL)
+do not start for an auto-merged Dependabot PR. The same checks already ran on
+the PR head.
+
+## Branch rulesets
+
+Two repository rulesets cover `main` and `develop`, kept apart so that the
+status checks have no bypass at all:
+
+| Ruleset | Rules | Bypass |
+|---|---|---|
+| *Required checks* | required status checks: `Lint`, `Unit Tests`, `Python Generator Tests`, `E2E Tests`, `Dependency Audit`, `Hand-written Route Guards`, `Semgrep`, `Dependency Review`, `Secret Scan (gitleaks)`, `Analyze (javascript-typescript)`, `Analyze (python)`, `Analyze (actions)` | none, admins included |
+| *Master protection* | no deletion, no force push, pull request with 1 approval, stale approvals dismissed on push | admin role, through a pull request only |
+
+A required check must come from a workflow with no trigger-level `paths:`
+filter. Otherwise a PR that does not touch those paths waits forever for a
+check that never starts. `Workflow Lint` and `OSV-Scanner` are path-filtered
+and must stay out of the list. Renaming a job in `ci.yml`,
+`security-checks.yml` or `codeql.yml` changes its check name, so update the
+ruleset in the same change. Read the current list with
+`gh api repos/rhymion/app-generator/rulesets`.
 
 ## Dynamic Scans workflow
 
