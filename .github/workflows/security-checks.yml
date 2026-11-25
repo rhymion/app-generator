@@ -94,7 +94,12 @@ jobs:
       - name: Install tools
         run: |
           set -euo pipefail
-          python3 -m pip install --quiet 'semgrep==1.183.0' -r requirements.txt
+          # requirements.txt is a pip-compile lock (exact pins), and semgrep pins
+          # some of the same packages to other versions (e.g. tomli~=2.4.0), so
+          # one resolve cannot satisfy both. pipx gives semgrep its own venv and
+          # puts the binary on PATH.
+          python3 -m pip install --quiet -r requirements.txt
+          pipx install --python python3 'semgrep==1.183.0'
       - name: Test the project-owned rules
         working-directory: .semgrep
         run: semgrep test .

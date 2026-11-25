@@ -1,0 +1,24 @@
+# Direct Python dependencies of the code generator and its gates.
+#
+# Edit THIS file, not requirements.txt. requirements.txt is the lock that
+# pip-compile writes from this file: every package, transitive ones included,
+# at an exact version, so CI, dev machines and the scanners (pip-audit,
+# OSV-Scanner) all see the same set. Regenerate it with Python 3.12, the
+# version CI uses; see docs/knowledge/dependency-and-resource-controls.md
+# ("Python lock file").
+jinja2>=3.1.6
+pyyaml>=6.0.3
+# Round-trip YAML load/dump (preserves comments, quoting, blank lines) used
+# by code_generator/build_user_schema.py -- plain pyyaml dump does not
+# preserve formatting well enough for the cmd_395 Stage 1 byte-for-byte
+# identity requirement.
+ruamel.yaml>=0.19.1
+pytest>=9.2.0
+pytest-cov>=7.1.0
+fonttools[woff]>=4.68.0
+# Used by the Type B / Type A gates and by the dependency-audit CI job to
+# surface known CVEs in the Python tooling. Even though nothing here ships
+# to end users, the generator runs in CI and on dev laptops; keeping pip
+# deps clean is policy.
+pip-audit>=2.10.1
+

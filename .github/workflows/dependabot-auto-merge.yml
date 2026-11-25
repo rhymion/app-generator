@@ -1,0 +1,62 @@
+name: Dependabot auto-merge
+
+# Turns on auto-merge for a Dependabot patch or minor update. The PR then
+# merges by itself once a maintainer approves it (ruleset "Master protection")
+# and every required status check passes (ruleset "Required checks", which
+# nobody can bypass). Major updates get no auto-merge. See
+# docs/knowledge/ci-security-workflows.md ("Dependabot auto-merge").
+#
+# The workflow does not approve. The organization does not let GitHub Actions
+# approve pull requests, and the built-in GitHub Actions app cannot be a
+# ruleset bypass actor, so the one approval stays a human click.
+#
+# Off switch: AUTOMERGE_ENABLED below. It needs "Allow auto-merge" on
+# (Settings > General) and the required checks on main and develop; without
+# required checks, an approval alone would merge. The switch lives in this
+# file, not in a repository variable: the docs do not say whether the `vars`
+# context reaches Dependabot-triggered runs, and a switch that silently never
+# fires would look like a working one.
+on:
+  pull_request:
+    branches: [main, develop]
+
+permissions:
+  contents: read
+
+jobs:
+  auto-merge:
+    name: Auto-merge patch/minor updates
+    runs-on: ubuntu-latest
+    # Dependabot-triggered pull_request runs are treated like fork PRs: the
+    # GITHUB_TOKEN is read-only unless `permissions` raises it, and only
+    # Dependabot secrets are available. The repository check keeps forks of
+    # this repo from running it.
+    if: github.event.pull_request.user.login == 'dependabot[bot]' && github.repository == 'rhymion/app-generator'
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      AUTOMERGE_ENABLED: 'true'
+    steps:
+      - name: Dependabot metadata
+        id: metadata
+        uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98 # v3.1.0
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Report the decision
+        env:
+          UPDATE_TYPE: ${{ steps.metadata.outputs.update-type }}
+          DEPENDENCIES: ${{ steps.metadata.outputs.dependency-names }}
+        run: |
+          echo "Dependencies: ${DEPENDENCIES}"
+          echo "Update type: ${UPDATE_TYPE:-unknown}"
+          echo "Auto-merge enabled in this workflow: ${AUTOMERGE_ENABLED}"
+      - name: Enable auto-merge
+        if: >-
+          env.AUTOMERGE_ENABLED == 'true' &&
+          (steps.metadata.outputs.update-type == 'version-update:semver-patch' ||
+           steps.metadata.outputs.update-type == 'version-update:semver-minor')
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh pr merge --auto --squash "$PR_URL"

@@ -6,7 +6,7 @@ What the repository does today to keep dependencies trustworthy, and where the l
 
 | Control | Where | Behavior |
 |---|---|---|
-| Locked installs | `package-lock.json`, `requirements.txt`; CI runs `npm ci` | Installs resolve to the recorded versions. `npm ci` fails if the lock file and `package.json` disagree. |
+| Locked installs | `package-lock.json`, `requirements.txt` (compiled from `requirements.in`); CI runs `npm ci` and `pip install -r requirements.txt` | Installs resolve to the recorded versions. `npm ci` fails if the lock file and `package.json` disagree. `requirements.txt` pins every Python package, transitive ones included; see "Python lock file" below. |
 | Blocking audit | `.github/workflows/ci.yml`, job `audit` | `npm audit --omit=dev --audit-level=high` and `pip-audit -r requirements.txt`. A high or critical advisory in a production dependency fails the job. |
 | Non-blocking full-scope audit | `ci.yml`, job `audit-full-scope` | Same threshold over the whole npm tree including `devDependencies`; never fails the run. The JSON result is kept as an artifact for 30 days. |
 | Non-blocking mobile audit | `ci.yml`, job `audit-mobile` | Generates `mobile/` from the default schema with `x-generator.mobile.enabled` on, resolves its dependency tree without a committed lock file, runs `npm audit` over it including `devDependencies`, and never fails the run. A severity table goes to the job summary and the JSON is kept as an artifact for 30 days. |
@@ -15,6 +15,26 @@ What the repository does today to keep dependencies trustworthy, and where the l
 | SBOM | `.github/workflows/sbom.yml` | `npm sbom --sbom-format cyclonedx --omit dev --package-lock-only` writes a CycloneDX file of the production npm dependencies from `package-lock.json`; the job fails if the file is empty and keeps it as the `sbom-cyclonedx` artifact for 90 days. Runs when the lock file changes and on demand. `code_generator/tests/test_sbom_workflow.py` fails if the step is removed. Python dependencies and the generated mobile app are not covered. |
 | Pinned workflow actions | every file under `.github/workflows/` | Each `uses:` is pinned to a full commit SHA. `code_generator/tests/test_own_workflows_hardened.py` fails if that is lost. |
 | Task gates | `.claude/commands/*.md`, `## Completion gate` | `npm audit --omit=dev --audit-level=high` runs in the gate of the task types that change code or only prose, so the audit also runs on changes that are not Dependabot PRs. |
+
+## Python lock file
+
+`requirements.in` lists the direct Python dependencies with lower bounds and is the file to edit. `requirements.txt` is the lock that pip-compile (pip-tools) writes from it: every package at an exact version, `pip` included (`--allow-unsafe`, because `pip-audit` depends on `pip-api`, which depends on `pip`). Every install site (`ci.yml`, the other workflows, `npm run python-generate`, the README) keeps using `pip install -r requirements.txt`.
+
+Why it is a full lock: with only lower bounds, OSV-Scanner resolves the transitive tree itself and settled on `pip` 9.0.3, raising ten pip CVEs and stale `certifi` / `idna` advisories against a tree CI never installs (code scanning alerts #137–#160, November 2026). With exact pins, the scanner, `pip-audit` and CI all see the same versions.
+
+Regenerate after editing `requirements.in`, or to pick up fixed transitive versions, with Python 3.12 (the version CI uses; the resolution can differ on other versions):
+
+```bash
+docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$PWD:/w" -w /w python:3.12-slim sh -c \
+  'python -m pip install --quiet --user pip-tools && python -m piptools compile --quiet --upgrade \
+   --allow-unsafe --strip-extras --no-emit-index-url --output-file requirements.txt requirements.in'
+```
+
+Drop `--upgrade` to keep existing pins and only resolve what changed. Dependabot's pip ecosystem recognizes the pip-compile header and updates `requirements.in` and `requirements.txt` together.
+
+A tool that pins some of the same packages to other versions must not be installed into the same environment from one resolve. `semgrep` (which wants `tomli~=2.4.0`) is installed with `pipx` in `security-checks.yml` for that reason; locally, use `pipx install 'semgrep==1.183.0'`.
+
+Hashes (`--generate-hashes`) are not used yet. Adding them is a possible follow-up; every install line that combines `-r requirements.txt` with another package must first move that package to its own install (as done for semgrep), because hash-checking mode rejects an unhashed requirement.
 
 ## Where packages come from
 

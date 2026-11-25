@@ -2,7 +2,9 @@
 #
 # Scans three ecosystems weekly:
 #   - npm        : the Next.js app's runtime + dev deps.
-#   - pip        : code_generator's Python build/test tooling.
+#   - pip        : code_generator's Python build/test tooling. requirements.txt
+#                  is a pip-compile lock of requirements.in; Dependabot detects
+#                  the pip-compile header and updates both files together.
 #   - github-actions : workflow files under .github/workflows/.
 #
 # Strategy
