@@ -2856,3 +2856,44 @@ class TestIdentitySearchMatchesId:
         schema = self._schema(False)
         assert build_context(_entity("item"), schema)["searchable_id"] is False
         assert "{ id: { contains: token" not in self._render(schema)
+
+
+class TestFormDataGetsNumericEmpty:
+    """An empty numeric input (FormData key missing -> null, or '') must not
+    become 0 via Number(). Nullable -> null; non-nullable -> schema default
+    when declared, else NaN for a required field (isMissingValue rejects it
+    via REQUIRED_FIELDS)."""
+
+    def _gets(self, defn: dict, required: bool = False) -> str:
+        info = {"prop": "capacity", "var_name": "capacity", "def": defn}
+        return _build_form_data_gets([info], {"capacity"} if required else set())
+
+    def _expect(self, fallback: str) -> str:
+        return (
+            "  const capacityRaw = data.get('capacity') as string | null;\n"
+            f"  const capacity = capacityRaw === null || capacityRaw === '' ? {fallback} : Number(capacityRaw);"
+        )
+
+    def test_nullable_integer_empty_is_null(self):
+        assert self._gets({"type": ["integer", "null"], "minimum": 1}) == self._expect("null")
+
+    def test_nullable_number_empty_is_null(self):
+        assert self._gets({"type": ["number", "null"]}) == self._expect("null")
+
+    def test_nullable_integer_enum_empty_is_null(self):
+        assert self._gets({"type": ["integer", "null"], "enum": [0, 1, 2]}) == self._expect("null")
+
+    def test_required_integer_empty_is_nan_so_rejected(self):
+        assert self._gets({"type": "integer"}, required=True) == self._expect("NaN")
+
+    def test_required_integer_enum_empty_is_nan_so_rejected(self):
+        assert self._gets({"type": "integer", "enum": [0, 1]}, required=True) == self._expect("NaN")
+
+    def test_non_nullable_integer_with_default_falls_back(self):
+        assert self._gets({"type": "integer", "default": 3}) == self._expect("3")
+
+    def test_non_nullable_number_with_default_falls_back(self):
+        assert self._gets({"type": "number", "default": 1.5}) == self._expect("1.5")
+
+    def test_non_nullable_not_required_without_default_keeps_zero(self):
+        assert self._gets({"type": "integer"}) == self._expect("0")

@@ -23,6 +23,8 @@ Three other field classes had the same root bug without the crash:
 
 - **number** with a nonzero literal default (e.g. `quantity Int @default(5)`): seeded `null` →
   submitted `''` → `Number('')` is `0` → silently overwrites the default with `0`.
+  (`_build_form_data_gets()` now also maps `''` to the schema default on the server side; see
+  `decimal-and-date-empty-string-clear-crash.md` "Integer / number fields".)
 - **boolean** with `@default(true)`: `_default_value()` was hardcoded to return `'false'`,
   ignoring `defn.get('default')` entirely — an untouched field always submitted explicit `false`.
 - **plain (non-enum) string** with a literal default (e.g. `tenant_id String @default("default")`):

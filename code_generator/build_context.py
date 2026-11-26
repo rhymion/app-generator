@@ -480,16 +480,40 @@ def _build_form_data_gets(prop_infos: list[dict], required_props: set | None = N
                 )
         elif actual == 'boolean':
             lines.append(f"  const {var_name} = data.get('{prop}') === 'true';")
-        elif actual in ('integer', 'number') and isinstance(defn.get('enum'), list) and nullable:
-            # Nullable integer-enum: the client omits the FormData key when
-            # cleared, so data.get() returns null. Number(null) is 0, not
-            # null/NaN -- guard explicitly or a cleared field silently
-            # becomes enum member 0 instead of staying null (cmd_472/R-2).
-            lines.append(
-                f"  const {var_name} = data.get('{prop}') !== null ? Number(data.get('{prop}')) : null;"
-            )
         elif actual in ('integer', 'number'):
-            lines.append(f"  const {var_name} = Number(data.get('{prop}'));")
+            # An empty numeric input reaches here as either a missing key
+            # (data.get() -> null: a cleared nullable integer-enum, which the
+            # client omits, cmd_472/R-2) or '' (a plain number input:
+            # form_data_sets sends `{p}Ref.current?.value || ''`). Number()
+            # turns both into 0, so a cleared field was silently saved as 0
+            # -- or rejected by a `minimum` rule above 0 -- instead of being
+            # treated as empty. Treat null and '' alike as "no value".
+            raw = f"{var_name}Raw"
+            empty = f"{raw} === null || {raw} === ''"
+            if nullable:
+                # Nullable column: empty is saved as null.
+                fallback = 'null'
+            elif defn.get('default') is not None:
+                # Non-nullable with a schema default: empty falls back to it,
+                # so the column stays legally NOT NULL.
+                default_val = defn['default']
+                fallback = str(int(default_val)) if actual == 'integer' else str(default_val)
+            elif prop in required_props:
+                # Non-nullable + required, no default: NaN keeps the const's
+                # type plain `number` (the service parameter type) and
+                # isMissingValue() (service_validation.ts) treats NaN as
+                # missing, so REQUIRED_FIELDS rejects it with an AppError.
+                fallback = 'NaN'
+            else:
+                # Non-nullable, not required, no static default: the column
+                # has a dynamic Prisma @default (e.g. autoincrement()), so no
+                # REQUIRED_FIELDS check runs and NaN would reach Prisma raw.
+                # Keeps the previous value (0).
+                fallback = '0'
+            lines.append(
+                f"  const {raw} = data.get('{prop}') as string | null;\n"
+                f"  const {var_name} = {empty} ? {fallback} : Number({raw});"
+            )
         elif actual == 'string' and (pattern == '^c[a-z0-9]{24,}$' or defn.get('x-relationship')) and nullable:
             lines.append(f"  const {var_name} = (data.get('{prop}') as string | null) || null;")
         elif actual == 'string' and defn.get('_prisma_native_enum_type') and defn.get('enum'):
