@@ -115,3 +115,35 @@ test outright). Fixed by wrapping those two error types as a clean
 catch block (`service.ts.jinja2`) — this is a broader net than just the date
 case: it also covers any other unvalidated child-row defect reaching Prisma
 raw, not only Invalid Date.
+
+## Integer / number fields: empty input became `0`
+
+**Symptom**: clearing a nullable integer or number field (e.g. a
+`room_type.capacity Int?` with `minimum: 1`) failed validation with
+"must be at least 1" instead of saving `null`. Before the value check
+(`FIELD_RULES`, #1271) existed, the same field was silently saved as `0`.
+
+**Root cause**: the client sends an empty number input as `''`
+(`formData.set('<p>', <p>Ref.current?.value || '')`), and a cleared nullable
+integer-enum omits the key (`data.get()` returns `null`).
+`_build_form_data_gets()` emitted `Number(data.get('<p>'))`, and both
+`Number('')` and `Number(null)` are `0`. Only a nullable integer-enum guarded
+`null`; nobody guarded `''`.
+
+**Fix**: every integer/number field (enum or not) now reads the raw value and
+treats `null` and `''` the same way:
+
+```ts
+const capacityRaw = data.get('capacity') as string | null;
+const capacity = capacityRaw === null || capacityRaw === '' ? <fallback> : Number(capacityRaw);
+```
+
+| Field shape | `<fallback>` | Result |
+|---|---|---|
+| nullable | `null` | saved as `null` |
+| non-nullable, schema `default:` declared | the default | saved as the default |
+| non-nullable, `required:`, no default | `NaN` | `isMissingValue()` treats `NaN` as missing, so `REQUIRED_FIELDS` rejects it with "is required"; the const stays typed `number` |
+| non-nullable, not required, no static default (dynamic `@default`, e.g. `autoincrement()`) | `0` | unchanged from before; `NaN` would reach Prisma, since no `REQUIRED_FIELDS` check runs |
+
+Unit tests: `TestFormDataGetsNumericEmpty` in
+`code_generator/tests/test_build_context.py`.
