@@ -21,6 +21,7 @@ PATHS=(
   'code_generator/tests/fixtures/scheduled_task_e2e_gate'   # fixture schema of the scheduled mode
   'scripts/compose_child_datagrid_e2e_fixture.py'           # merges those fixtures
   'scripts/run_mobile_entity_playwright.sh'                 # the runner itself
+  'scripts/enable_mobile_generation.py'                     # switches mobile on in the runner's schema copy
   'scripts/mobile_pw_gate_applies.sh'                       # this list
   '.github/workflows/ci.yml'                                # the CI job that runs this suite
 )
