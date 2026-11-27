@@ -611,6 +611,5 @@ export default defineConfig({
     retries: { runMode: 1, openMode: 0 },
     scrollBehavior: 'center',
     video: false,
-    allowCypressEnv: false,
   },
 });

@@ -673,6 +673,42 @@ Run E2E suites sequentially, not in parallel.
 
 ## Cypress version held back
 
+**Update, 2026-11-27: cypress moved to `^16.4.0` for Chrome 158.** The GitHub-hosted runner image
+started shipping Chromium 158, and cypress 16.0.0 then aborted every multi-spec `cypress run` as the
+**second** spec opened. The first spec passed in full, then:
+
+```
+Running:  approval_flow_desktop_crud.cy.ts    (2 of 77)
+* is not a valid URL
+Error: * is not a valid URL
+    at b._handleMessage (<embedded>:...)
+```
+
+The error comes from the cypress process itself, not from a spec. Between specs, cypress clears
+browser storage through CDP with the origin `*`, and Chrome 158 rejects that origin. The CI symptom
+depends on the browser on each job's runner. Within one CI run, jobs that got Chromium 157 passed
+(List Child, Version Of and Child DataGrid gates), and jobs that got Chromium 158 failed (E2E Tests,
+Security Matrix E2E Gate). A job that runs a single spec never fails this way, so a passing gate job
+does not prove the cypress version is compatible. Cypress fixed this in **16.3.0** (and 15.21.2):
+"in Chrome 158 and later, `cypress run` stopped with the error `* is not a valid URL` when it opened
+a second spec" (cypress-io/cypress#35195; the related Chrome 158 `unload` fix is #35198). 16.1.x and
+16.2.x do not have the fix.
+
+The `ignore:` rule in `.github/dependabot.yml` (below) is why no automatic PR delivered the fix:
+dependabot suppresses cypress minor/patch updates, so a browser-compatibility fix in a cypress minor
+release has to be applied by hand. When CI fails inside the cypress process (no failing `it`, an
+`<embedded>` stack trace) right after the runner's Chrome major version changes, check the cypress
+changelog for a fix before you debug the specs.
+
+Bumping cypress by hand also means bumping its `allowScripts` key in `package.json`.
+`"cypress@<version>": true` names an exact version. If the key is stale, npm blocks cypress's
+postinstall, which is the script that downloads the binary.
+
+Re-verified on 16.4.0 (2026-11-27, local Chromium 157): `dashboard.cy.ts` passed 13/13 with no
+retries, so the `group_by_field` timeout described below does not reproduce on this version. The full
+`test:e2e:cy:api` gate passed as well (38 specs, 467 tests). The dependabot `ignore:` rule is still in
+place. Whether to lift it now is a separate decision.
+
 **Important update, verified 2026-09-12**: `package.json` now pins `"cypress": "^16.0.0"` — a
 **major**-version bump past the 15.16.0 baseline this whole section is about (landed via a plain
 dependabot PR, "build(deps-dev): bump cypress from 15.16.0 to 16.0.0", merged as PR #495). This is not

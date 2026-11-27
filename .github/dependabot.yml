@@ -65,6 +65,11 @@
 # additionally silences routine minor/patch bumps outright. Scoped to
 # `update-types` minor/patch only, so a cypress CVE still reaches us via
 # `npm-security` (ignore does not apply to security-update PRs).
+# Consequence: browser-compatibility fixes in a cypress minor release never
+# arrive as a PR either. Cypress 16.0.0 -> 16.4.0 was applied by hand on
+# 2026-11-27 for Chrome 158 ("* is not a valid URL" at the second spec; see
+# testing-cypress.md). Also bump the exact-version `cypress@<v>` key under
+# `allowScripts` in package.json when bumping cypress by hand.
 #
 # Exception: jsdom is likewise excluded from routine minor/patch
 # grouping/updates (cmd_1128, 2026-09-21). Root cause (isolated-worktree

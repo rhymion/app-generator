@@ -192,7 +192,7 @@
     "@vitejs/plugin-react": "^6.3.0",
     "@vitest/coverage-v8": "^5.1.1",
     "cross-env": "^10.1.0",
-    "cypress": "^16.0.0",
+    "cypress": "^16.4.0",
     "eslint": "^10.15.0",
     "eslint-config-next": "^16.4.6",
     "jsdom": "^31.0.0",
@@ -208,7 +208,7 @@
   "allowScripts": {
     "@prisma/engines@7.10.0": true,
     "@swc/core@1.16.1": true,
-    "cypress@16.0.0": true,
+    "cypress@16.4.0": true,
     "prisma@7.10.0": true
   }
 }
