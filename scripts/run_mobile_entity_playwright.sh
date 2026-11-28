@@ -145,17 +145,9 @@ elif [ "$MODE" = "scheduled" ]; then
 fi
 
 echo "-- opting the copy's schema in to mobile generation (x-generator.mobile.enabled) --"
-# The default schema leaves the Expo app off and the fixture merge adds entities only, so every mode needs this.
-python3 - "$BUILD_DIR/code_generator/json_schema.yaml" <<'PY'
-import sys
-
-path = sys.argv[1]
-text = open(path, encoding="utf-8").read()
-if "x-generator:\n" not in text:
-    sys.exit("mobile-entity-playwright: no top-level x-generator block to enable mobile in")
-text = text.replace("x-generator:\n", "x-generator:\n  mobile:\n    enabled: true\n", 1)
-open(path, "w", encoding="utf-8").write(text)
-PY
+# The fixture merge adds entities only, so every mode needs this. The script is idempotent: it inserts the key,
+# flips `enabled: false`, or leaves a schema that already enables mobile unchanged (no duplicate `mobile:` key).
+python3 scripts/enable_mobile_generation.py "$BUILD_DIR/code_generator/json_schema.yaml"
 
 echo "-- writing the copy's own environment --"
 python3 - "$BUILD_DIR/.env.test" "$PROJECT" "$APP_PORT" "$POSTGRES_PORT" "$REDIS_PORT" <<'PY'

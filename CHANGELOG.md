@@ -3,6 +3,15 @@ All notable changes to this project will be documented in this file.
 The format is based on Keep a Changelog (https://keepachangelog.com/),
 and this project adheres to Semantic Versioning (https://semver.org/).
 
+## [Unreleased]
+### Fixed
+- **The `audit-mobile` CI job no longer breaks when the schema already enables mobile.** The job switched
+  `x-generator.mobile.enabled` on by inserting a second `mobile:` key, so a schema that committed `mobile: enabled: true`
+  failed `generate-code` with ruamel's `DuplicateKeyError` before `npm audit` ran. `scripts/enable_mobile_generation.py`
+  now inserts the key, flips `enabled: false`, or leaves the schema unchanged, and the job audits `mobile/package.json`
+  whatever the committed schema says. Tests: `code_generator/tests/test_mobile_audit_workflow.py`. See
+  `docs/knowledge/mobile-app.md`.
+
 ## [7.0.2] - 2026-11-25
 ### Security
 - **Code scanning alerts fixed** Python packages, Dependabot, and other security / CI related configurations are updated. As a result, majority of code scanning issues will be solved. 
