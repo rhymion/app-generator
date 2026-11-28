@@ -57,9 +57,9 @@ for target in production preview; do
   echo "[Removing env vars: target=${target}]"
   for name in "${_VARS[@]}"; do
     if [[ "$DRY_RUN" == "true" ]]; then
-      echo "[DRY-RUN] vercel env rm ${name} ${target} --yes"
+      echo "[DRY-RUN] vercel env rm ${name} --environment ${target} --confirm-name ${name}"
     else
-      vercel env rm "$name" "$target" --yes 2>/dev/null || echo "  [SKIP] ${name} (${target}): not found"
+      vercel env rm "$name" --environment "$target" --confirm-name "$name" 2>/dev/null || echo "  [SKIP] ${name} (${target}): not found"
     fi
   done
 done

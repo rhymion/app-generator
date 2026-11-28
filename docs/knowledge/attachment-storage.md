@@ -34,6 +34,19 @@ orphan cleanup.
   (the keys are opaque UUIDs and are kept as they are); (3) set `ATTACHMENT_BLOB_READ_WRITE_TOKEN` to the new store's
   read-write token in a preview or staging environment and check an upload, a download and a delete there; (4) set it in
   production and redeploy; (5) once downloads are verified, disconnect the old store and remove the old variables.
+  The end state (a hand-set `ATTACHMENT_BLOB_READ_WRITE_TOKEN`, no store connection) is a configuration
+  `scripts/vercel-setup.sh` supports: record the token in `.env.production.local` (`ATTACHMENT_BLOB_READ_WRITE_TOKEN`
+  for Production, `ATTACHMENT_BLOB_READ_WRITE_TOKEN_STAGING` for Preview) so a re-run injects it again.
+- **Vercel set-up, one store per target** (`scripts/vercel-setup.sh` Step C, Issue #1434). `.env.production.local` is
+  the source of truth: Production reads `ATTACHMENT_BLOB_READ_WRITE_TOKEN`, `BLOB_STORE_ID`, `BLOB_READ_WRITE_TOKEN`,
+  and Preview reads the same names with `_STAGING`. Step 2 injects each one that is set under its own name. Nothing is
+  read back from Vercel (`vercel env pull` returns `[SENSITIVE]` for a Secret variable). A target with none of the
+  three gets a private store `<project>-uploads-<target>`, created in the committed `vercel.json` region and connected
+  to that target only (OIDC through `BLOB_STORE_ID`). Its id is saved as `BLOB_STORE_ID[_STAGING]`. Creation stops
+  instead of adopting a store of that name that already exists, or a `BLOB_READ_WRITE_TOKEN` / `BLOB_STORE_ID` already
+  on the target that the file does not record. The run also stops before injection when Production and Preview resolve
+  to the same store. Store ids are compared (a token carries its id, `vercel_blob_rw_<id>_<secret>`), never secrets.
+  `VERCEL_BLOB_STORE_ID` is no longer read.
 - **No silent local-disk fallback on ephemeral platforms.** Local disk is not shared between instances and is lost on
   restart or scale-down. When `K_SERVICE` (Cloud Run) or `VERCEL` is set, `NODE_ENV` is not `development`, and neither a
   bucket, a Blob credential nor `ATTACHMENT_LOCAL_DIR` is configured, `storageBackend()` throws with a message naming the
