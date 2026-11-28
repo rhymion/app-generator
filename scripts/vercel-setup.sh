@@ -183,6 +183,15 @@ _NEON_API="https://console.neon.tech/api/v2"
 # available.
 NEON_REGION_ID="${NEON_REGION_ID:-aws-ap-southeast-1}"
 
+# Role whose connection strings Step A writes (Issue #1432). Both URLs must
+# belong to the owner: the unpooled one becomes DIRECT_URL for `migrate
+# deploy`, and the pooled one is the DATABASE_URL fallback when
+# DATABASE_URL_APP_* is unset. neonctl picks a role on its own only when the
+# branch has exactly one, so a branch that also has the restricted
+# `app_runtime` role (docs/knowledge/audit-log-append-only.md) needs it named.
+# Override for a project whose owner role has another name.
+NEON_OWNER_ROLE="${NEON_OWNER_ROLE:-neondb_owner}"
+
 # neonctl reads the Neon API key from the NEON_API_KEY env var (already
 # exported by vercel-env.sh's `set -a` source of .env.production.local) —
 # confirmed via a live call, so it is never passed as a CLI flag (would leak
@@ -287,6 +296,21 @@ ensure_branch_compute() {
   fi
 }
 
+# Prints the owner role's connection string for one branch. Extra arguments
+# (e.g. --pooled) go to neonctl. On failure it names NEON_OWNER_ROLE, the
+# usual cause on a branch whose owner role is not called neondb_owner.
+_neon_owner_connection_string() {
+  local branch_name="$1"; shift
+  local out
+  if ! out=$(_neonctl connection-string "$branch_name" \
+      --project-id "${NEON_PROJECT_ID}" --role-name "${NEON_OWNER_ROLE}" "$@"); then
+    echo "ERROR: could not get the connection string of role '${NEON_OWNER_ROLE}' on Neon branch '${branch_name}'." >&2
+    echo "  Set NEON_OWNER_ROLE in .env.production.local to the branch's owner role if it is not '${NEON_OWNER_ROLE}'." >&2
+    return 1
+  fi
+  printf '%s\n' "$out"
+}
+
 get_neon_connection_strings() {
   # Get pooled (app runtime) and unpooled (migration) endpoints for one branch.
   local branch_name="$1" var_pooled="$2" var_unpooled="$3"
@@ -335,10 +359,8 @@ for b in json.load(sys.stdin).get('branches', []):
   # this command — confirmed live; `-o json` does NOT wrap it in JSON, so the
   # output is captured as-is, not parsed.
   local pooled_url direct_url
-  pooled_url=$(_neonctl connection-string "$branch_name" \
-    --project-id "${NEON_PROJECT_ID}" --pooled)
-  direct_url=$(_neonctl connection-string "$branch_name" \
-    --project-id "${NEON_PROJECT_ID}")
+  pooled_url=$(_neon_owner_connection_string "$branch_name" --pooled) || exit 1
+  direct_url=$(_neon_owner_connection_string "$branch_name") || exit 1
 
   for pair in "${var_pooled}=${pooled_url}" "${var_unpooled}=${direct_url}"; do
     key="${pair%%=*}"; val="${pair#*=}"
