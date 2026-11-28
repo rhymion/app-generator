@@ -4,7 +4,7 @@
 #
 # A consumer Vercel project whose Root Directory points at the app-generator
 # submodule takes its `regions` from this repo's committed vercel.json, but a
-# project created by `vercel project add` starts on the platform default
+# project created by `vercel project create` starts on the platform default
 # (iad1) until something sets `serverlessFunctionRegion`. Nothing else reads
 # that dashboard setting back, so a build that ran before Root Directory was
 # set leaves the project on iad1 silently. See

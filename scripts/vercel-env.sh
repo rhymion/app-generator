@@ -102,9 +102,11 @@ _ensure_generated_secret() {
 # cron calls and reach storage with Production's credentials. Production reads NAME;
 # Preview reads NAME_STAGING (the same suffix DATABASE_URL_STAGING already uses).
 #   - AUTH_SECRET and CRON_SECRET are generate-once-persist for both targets.
-#   - REDIS_URL, BLOB_READ_WRITE_TOKEN, GOOGLE_CLIENT_SECRET cannot be generated here:
-#     Preview gets them only from NAME_STAGING, and is left without them (never a copy
-#     of the Production value) when NAME_STAGING is unset or equals the Production value.
+#   - REDIS_URL, GOOGLE_CLIENT_SECRET cannot be generated here: Preview gets them only
+#     from NAME_STAGING, and is left without them (never a copy of the Production value)
+#     when NAME_STAGING is unset or equals the Production value.
+#   - The Blob store variables follow the same naming, but are checked by store, not by
+#     value (Issue #1434): see _blob_assert_distinct_stores below.
 #
 # AUTH_SECRET: changing it invalidates all sessions for that target.
 # CRON_SECRET (cmd_781): secures app/api/scheduled-tasks/[task]/route.ts — Vercel sends
@@ -129,7 +131,6 @@ fi
 VERCEL_ORG_ID="${VERCEL_ORG_ID:-}"
 GOOGLE_CLIENT_ID="${GOOGLE_CLIENT_ID:-}"
 GOOGLE_CLIENT_SECRET="${GOOGLE_CLIENT_SECRET:-}"
-BLOB_READ_WRITE_TOKEN="${BLOB_READ_WRITE_TOKEN:-}"
 # NEXT_PUBLIC_APP_TITLE / NEXT_PUBLIC_APP_COPYRIGHT (cmd_782/783): optional
 # branding overrides, not secrets — see lib/site-config.ts and
 # docs/knowledge/noindex-default-and-branding-env-vars.md. Both are
@@ -140,12 +141,90 @@ NEXT_PUBLIC_APP_TITLE="${NEXT_PUBLIC_APP_TITLE:-}"
 NEXT_PUBLIC_APP_COPYRIGHT="${NEXT_PUBLIC_APP_COPYRIGHT:-}"
 
 REDIS_URL_STAGING="${REDIS_URL_STAGING:-}"
-BLOB_READ_WRITE_TOKEN_STAGING="${BLOB_READ_WRITE_TOKEN_STAGING:-}"
 GOOGLE_CLIENT_ID_STAGING="${GOOGLE_CLIENT_ID_STAGING:-}"
 GOOGLE_CLIENT_SECRET_STAGING="${GOOGLE_CLIENT_SECRET_STAGING:-}"
 
-export REDIS_URL VERCEL_PROJECT_NAME VERCEL_ORG_ID GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET BLOB_READ_WRITE_TOKEN NEXT_PUBLIC_APP_TITLE NEXT_PUBLIC_APP_COPYRIGHT
-export REDIS_URL_STAGING BLOB_READ_WRITE_TOKEN_STAGING GOOGLE_CLIENT_ID_STAGING GOOGLE_CLIENT_SECRET_STAGING
+# Vercel Blob, per target (Issue #1434). The application resolves the store in this
+# order (blobTarget() in lib/attachment/storage.ts); Preview reads the _STAGING names.
+_BLOB_VARS=(ATTACHMENT_BLOB_READ_WRITE_TOKEN BLOB_STORE_ID BLOB_READ_WRITE_TOKEN)
+for _blob_var in "${_BLOB_VARS[@]}" "${_BLOB_VARS[@]/%/_STAGING}"; do
+  printf -v "$_blob_var" '%s' "${!_blob_var:-}"
+  export "${_blob_var?}"
+done
+unset _blob_var
+
+export REDIS_URL VERCEL_PROJECT_NAME VERCEL_ORG_ID GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET NEXT_PUBLIC_APP_TITLE NEXT_PUBLIC_APP_COPYRIGHT
+export REDIS_URL_STAGING GOOGLE_CLIENT_ID_STAGING GOOGLE_CLIENT_SECRET_STAGING
+
+# _blob_var_name NAME TARGET: the .env.production.local name that holds NAME for TARGET.
+_blob_var_name() {
+  if [[ "$2" == "preview" ]]; then printf '%s_STAGING' "$1"; else printf '%s' "$1"; fi
+}
+
+# _blob_configured TARGET: true when any of the three Blob variables is set for TARGET.
+_blob_configured() {
+  local name var
+  for name in "${_BLOB_VARS[@]}"; do
+    var="$(_blob_var_name "$name" "$1")"
+    [[ -n "${!var:-}" ]] && return 0
+  done
+  return 1
+}
+
+# _blob_store_key NAME VALUE: a key that is equal for two values exactly when they address
+# the same store. A read-write token carries its store id (vercel_blob_rw_<id>_<secret>,
+# the field @vercel/blob parses), and BLOB_STORE_ID may carry a `store_` prefix that the
+# SDK strips. Only the id is kept, never the secret; a value of another shape is compared
+# whole. The key is used for comparison only and is never printed.
+_blob_store_key() {
+  local name="$1" value="$2" id=""
+  case "$name" in
+    BLOB_STORE_ID) id="${value#store_}" ;;
+    *)
+      if [[ "$value" == vercel_blob_rw_* ]]; then
+        id="${value#vercel_blob_rw_}"
+        id="${id%%_*}"
+      fi
+      ;;
+  esac
+  if [[ -n "$id" ]]; then
+    printf 'id:%s' "${id,,}"
+  else
+    printf 'value:%s' "$value"
+  fi
+}
+
+# _blob_effective_var TARGET: the name of the variable the application uses for TARGET
+# (the first that is set, in blobTarget() order), or nothing when none is set.
+_blob_effective_var() {
+  local name var
+  for name in "${_BLOB_VARS[@]}"; do
+    var="$(_blob_var_name "$name" "$1")"
+    if [[ -n "${!var:-}" ]]; then
+      printf '%s' "$var"
+      return 0
+    fi
+  done
+}
+
+# _blob_assert_distinct_stores: fail when Production and Preview resolve to the same Blob
+# store, whatever kinds of variable point at it (Preview runs less-reviewed branch code and
+# must not hold Production's store). Names the two variables, never their values. A target
+# with no Blob variable passes here. Sharing a store across projects is not checked.
+_blob_assert_distinct_stores() {
+  local prod_var preview_var
+  prod_var="$(_blob_effective_var production)"
+  preview_var="$(_blob_effective_var preview)"
+  [[ -n "$prod_var" && -n "$preview_var" ]] || return 0
+  local prod_name="${prod_var}" preview_name="${preview_var%_STAGING}"
+  if [[ "$(_blob_store_key "$prod_name" "${!prod_var}")" == "$(_blob_store_key "$preview_name" "${!preview_var}")" ]]; then
+    echo "ERROR: Production (${prod_var}) and Preview (${preview_var}) use the same Vercel Blob store." >&2
+    echo "  Preview must have its own store. Set a different store for Preview in .env.production.local," >&2
+    echo "  or clear all three Preview Blob variables (ATTACHMENT_BLOB_READ_WRITE_TOKEN_STAGING," >&2
+    echo "  BLOB_STORE_ID_STAGING, BLOB_READ_WRITE_TOKEN_STAGING) to let vercel-setup.sh create one." >&2
+    return 1
+  fi
+}
 
 # _target_value NAME TARGET: print the value to inject for NAME on TARGET (Issue #1182).
 # production -> $NAME. preview -> $NAME_STAGING, or nothing when that is unset or is
@@ -181,23 +260,51 @@ inject_var() {
     echo "  [SKIP] ${name}: [unset] (not configured for ${target})"
     return 0
   fi
-  # This project has no connected Git provider (deliberate — see
-  # docs/vercel-automation-design.md "all preview/staging deploys share one
-  # DB"). Without one, `vercel env add NAME preview --force` (no branch arg)
-  # fails non-interactively with reason=git_branch_required, because the CLI
-  # can't resolve what "all Preview branches" means with no Git history
-  # (confirmed live). Passing an explicit empty git-branch argument resolves
-  # it and applies to all Preview deploys, same as the CLI's own bare-target
-  # form would if a Git provider were connected (confirmed live: `vercel env
-  # ls preview` shows the var scoped to "Preview", not to any single branch).
-  local _target_args=("$target")
-  [[ "$target" == "preview" ]] && _target_args+=("")
+  # Flag form (Issue #1434): the positional `vercel env add NAME <target> [branch]` form is
+  # deprecated. --yes accepts the CLI's default choices instead of prompting.
+  local _args=(env add "$name" --environment "$target" --force --yes)
   if [[ "$DRY_RUN" == "true" ]]; then
-    echo "[DRY-RUN] printf '%s' <redacted> | vercel env add ${name} ${_target_args[*]} --force"
-  else
-    printf '%s' "$value" | vercel env add "$name" "${_target_args[@]}" --force
-    echo "  Injected: ${name}: [set] -> ${target}"
+    echo "[DRY-RUN] printf '%s' <redacted> | vercel ${_args[*]}"
+    return 0
   fi
+  local _out
+  _out="$(mktemp)"
+  if printf '%s' "$value" | vercel "${_args[@]}" >"$_out" 2>&1; then
+    rm -f "$_out"
+    echo "  Injected: ${name}: [set] -> ${target}"
+    return 0
+  fi
+  # A project without a connected Git provider used to need an explicit empty Git branch
+  # for Preview (reason=git_branch_required, confirmed live with the positional form). If
+  # the flag form still needs it, fall back to that form once, and say so.
+  if [[ "$target" == "preview" ]] && grep -qi 'git_branch_required\|git branch' "$_out"; then
+    rm -f "$_out"
+    echo "  WARNING: 'vercel env add ${name} --environment preview' needs a Git branch on this project; using the deprecated positional form (preview \"\") for all Preview branches." >&2
+    printf '%s' "$value" | vercel env add "$name" preview "" --force
+    echo "  Injected: ${name}: [set] -> ${target}"
+    return 0
+  fi
+  # The CLI's own message, without the value (it is passed on stdin only).
+  cat "$_out" >&2
+  rm -f "$_out"
+  echo "ERROR: could not inject ${name} into ${target}." >&2
+  return 1
+}
+
+# inject_blob_vars TARGET: inject each Blob variable configured for TARGET under its own
+# name (Preview reads the _STAGING names). Values are never compared by text here; the
+# per-store check is _blob_assert_distinct_stores.
+inject_blob_vars() {
+  local target="$1" name var
+  if ! _blob_configured "$target"; then
+    local names=()
+    for name in "${_BLOB_VARS[@]}"; do names+=("$(_blob_var_name "$name" "$target")"); done
+    echo "WARNING: no Vercel Blob variable is set for ${target}, so attachments cannot be stored there. Run scripts/vercel-setup.sh to create a store, or set one of ${names[*]} in .env.production.local." >&2
+  fi
+  for name in "${_BLOB_VARS[@]}"; do
+    var="$(_blob_var_name "$name" "$target")"
+    inject_var "$name" "${!var:-}" "$target"
+  done
 }
 
 # ── vercel_env_inject: inject the full variable set for one Vercel environment ──
@@ -239,6 +346,9 @@ vercel_env_inject() {
       ;;
   esac
 
+  # Before anything is written: Production and Preview must not share a Blob store.
+  _blob_assert_distinct_stores || return 1
+
   echo "=== Injecting Vercel env vars: target=${target} ==="
   # DATABASE_URL: an app that runs as the restricted audit_log role
   # (docs/knowledge/audit-log-append-only.md) records that role's pooled connection
@@ -272,7 +382,7 @@ vercel_env_inject() {
   # environments that ever share an instance still keep separate budgets
   # (lib/rate-limit/redis.ts reads RATE_LIMIT_KEY_PREFIX).
   inject_var RATE_LIMIT_KEY_PREFIX "${target}:" "$target"
-  inject_var BLOB_READ_WRITE_TOKEN "$(_target_value BLOB_READ_WRITE_TOKEN "$target")" "$target"
+  inject_blob_vars "$target"
   # A Google OAuth client ID is public; only its secret must differ. Preview uses
   # GOOGLE_CLIENT_ID_STAGING when set (a separate OAuth client), else the shared ID.
   local google_id="$GOOGLE_CLIENT_ID"

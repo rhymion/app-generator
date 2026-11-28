@@ -103,8 +103,8 @@ echo ""
 # session for every `vercel` CLI call below — see the note next to
 # VERCEL_TOKEN in .env.vercel.production.local.example. When that token is
 # stale/invalid for the configured scope, the CLI does not fail here in an
-# obvious way: it fails several steps later, at Step 1's `vercel project add
-# --scope ...`, with the misleading "Error: The specified scope does not
+# obvious way: it fails several steps later, at Step 1's `vercel project
+# create --scope ...`, with the misleading "Error: The specified scope does not
 # exist" — the CLI's real reason ("Not authorized ... re-authenticate to this
 # scope") never reaches the operator (confirmed live 2026-08-26). `vercel
 # whoami` alone reproduces the same scope-resolution failure, so it is used
@@ -182,6 +182,15 @@ _NEON_API="https://console.neon.tech/api/v2"
 # Override with NEON_REGION_ID if a different region is later confirmed
 # available.
 NEON_REGION_ID="${NEON_REGION_ID:-aws-ap-southeast-1}"
+
+# Role whose connection strings Step A writes (Issue #1432). Both URLs must
+# belong to the owner: the unpooled one becomes DIRECT_URL for `migrate
+# deploy`, and the pooled one is the DATABASE_URL fallback when
+# DATABASE_URL_APP_* is unset. neonctl picks a role on its own only when the
+# branch has exactly one, so a branch that also has the restricted
+# `app_runtime` role (docs/knowledge/audit-log-append-only.md) needs it named.
+# Override for a project whose owner role has another name.
+NEON_OWNER_ROLE="${NEON_OWNER_ROLE:-neondb_owner}"
 
 # neonctl reads the Neon API key from the NEON_API_KEY env var (already
 # exported by vercel-env.sh's `set -a` source of .env.production.local) —
@@ -287,6 +296,21 @@ ensure_branch_compute() {
   fi
 }
 
+# Prints the owner role's connection string for one branch. Extra arguments
+# (e.g. --pooled) go to neonctl. On failure it names NEON_OWNER_ROLE, the
+# usual cause on a branch whose owner role is not called neondb_owner.
+_neon_owner_connection_string() {
+  local branch_name="$1"; shift
+  local out
+  if ! out=$(_neonctl connection-string "$branch_name" \
+      --project-id "${NEON_PROJECT_ID}" --role-name "${NEON_OWNER_ROLE}" "$@"); then
+    echo "ERROR: could not get the connection string of role '${NEON_OWNER_ROLE}' on Neon branch '${branch_name}'." >&2
+    echo "  Set NEON_OWNER_ROLE in .env.production.local to the branch's owner role if it is not '${NEON_OWNER_ROLE}'." >&2
+    return 1
+  fi
+  printf '%s\n' "$out"
+}
+
 get_neon_connection_strings() {
   # Get pooled (app runtime) and unpooled (migration) endpoints for one branch.
   local branch_name="$1" var_pooled="$2" var_unpooled="$3"
@@ -335,10 +359,8 @@ for b in json.load(sys.stdin).get('branches', []):
   # this command — confirmed live; `-o json` does NOT wrap it in JSON, so the
   # output is captured as-is, not parsed.
   local pooled_url direct_url
-  pooled_url=$(_neonctl connection-string "$branch_name" \
-    --project-id "${NEON_PROJECT_ID}" --pooled)
-  direct_url=$(_neonctl connection-string "$branch_name" \
-    --project-id "${NEON_PROJECT_ID}")
+  pooled_url=$(_neon_owner_connection_string "$branch_name" --pooled) || exit 1
+  direct_url=$(_neon_owner_connection_string "$branch_name") || exit 1
 
   for pair in "${var_pooled}=${pooled_url}" "${var_unpooled}=${direct_url}"; do
     key="${pair%%=*}"; val="${pair#*=}"
@@ -495,20 +517,36 @@ fi
 export REDIS_URL
 
 # ── Step 1: Link project ────────────────────────────────────────────────────
-# Runs before Step C (Blob) — Blob store creation/token retrieval below needs
-# the project already linked with VERCEL_PROJECT_ID resolved (see note there).
+# Runs before Step C (Blob) — creating a store connected to the project, and
+# listing the project's variables, need the project already linked with
+# VERCEL_PROJECT_ID resolved.
 echo ""
-echo "[Step 1] Adding and Linking Vercel project..."
-_ADD_ARGS=(project add "${VERCEL_PROJECT_NAME}")
-[[ -n "$VERCEL_ORG_ID" ]] && _ADD_ARGS+=(--scope "${VERCEL_ORG_ID}")
-run vercel "${_ADD_ARGS[@]}"
+echo "[Step 1] Creating and Linking Vercel project..."
+# `vercel project create` replaces the deprecated `project add` (Issue #1434).
+# A re-run must not fail on a project that already exists, so that one error is
+# treated as success; any other failure prints the CLI's message and stops.
+_CREATE_ARGS=(project create "${VERCEL_PROJECT_NAME}")
+[[ -n "$VERCEL_ORG_ID" ]] && _CREATE_ARGS+=(--scope "${VERCEL_ORG_ID}")
+if [[ "$DRY_RUN" == "true" ]]; then
+  run vercel "${_CREATE_ARGS[@]}"
+elif ! _CREATE_OUT=$(vercel "${_CREATE_ARGS[@]}" 2>&1); then
+  if grep -qi 'already exist' <<<"$_CREATE_OUT"; then
+    echo "  [SKIP] Vercel project ${VERCEL_PROJECT_NAME} already exists."
+  else
+    echo "$_CREATE_OUT" >&2
+    echo "ERROR: vercel project create ${VERCEL_PROJECT_NAME} failed." >&2
+    exit 1
+  fi
+else
+  echo "$_CREATE_OUT"
+fi
 _LINK_ARGS=(link --yes --project "${VERCEL_PROJECT_NAME}")
 [[ -n "$VERCEL_ORG_ID" ]] && _LINK_ARGS+=(--scope "${VERCEL_ORG_ID}")
 
 # VERCEL_PROJECT_ID: once VERCEL_ORG_ID is present in the environment, the
 # Vercel CLI requires VERCEL_PROJECT_ID to be present too, or commands like
 # `vercel env ls/add/pull` fail with "You specified VERCEL_ORG_ID but you
-# forgot to specify VERCEL_PROJECT_ID" (confirmed live — `link`/`project add`
+# forgot to specify VERCEL_PROJECT_ID" (confirmed live — `link`/`project create`
 # themselves are fine without it, since they take --project/--scope directly,
 # but the env-var commands used below and in vercel_env_inject are not).
 if [[ -n "${VERCEL_PROJECT_ID:-}" ]]; then
@@ -534,7 +572,7 @@ else
   # VERCEL_PROJECT_ID for this one `link` call only, so the CLI is forced
   # through the explicit --scope/--project args above and writes a fresh
   # .vercel/project.json (rather than silently deleting/skipping it) —
-  # `link`/`project add` need only --project/--scope, never the env vars, so
+  # `link`/`project create` need only --project/--scope, never the env vars, so
   # unsetting them here is safe and does not reintroduce the "you specified
   # VERCEL_ORG_ID but forgot VERCEL_PROJECT_ID" error from cmd_298.
   run env -u VERCEL_ORG_ID -u VERCEL_PROJECT_ID vercel "${_LINK_ARGS[@]}"
@@ -613,92 +651,150 @@ else
   vercel_reconcile_function_region "$VERCEL_TOKEN" "${_VERCEL_PROJECTS_API}${_VERCEL_TEAM_QS}" "$_VERCEL_REGION"
 fi
 
-# ── Helper: pull a live env-var value from Vercel (used for Blob token) ─────
-# `vercel env ls` only shows metadata ("Encrypted") — pulling is the only way
-# to get an actual decrypted value. The pulled file is written by `mktemp`
-# (private, mode 600) and removed immediately after parsing; the value is
-# returned via stdout capture only, never echoed to the terminal/log.
-_vercel_pull_env_var() {
-  local _var_name="$1" _target="$2" _tmp _val
-  _tmp="$(mktemp)"
-  if ! vercel env pull --environment "${_target}" --yes "${_tmp}" >/dev/null 2>&1; then
-    rm -f "${_tmp}"
-    return 1
+# ── Step C: Vercel Blob, one store per target (Issue #1434) ─────────────────
+# The credential in .env.production.local is the source of truth for each
+# target, and is injected by Step 2. Nothing is read back from Vercel: `vercel
+# env pull` returns the placeholder "[SENSITIVE]" for a Secret variable
+# (observed with CLI 66.6.0), and every variable Step 2 injects is a Secret.
+#
+# For each target independently (Production reads NAME, Preview NAME_STAGING):
+#   - any of ATTACHMENT_BLOB_READ_WRITE_TOKEN, BLOB_STORE_ID,
+#     BLOB_READ_WRITE_TOKEN set: nothing is created or read here;
+#   - none set: a private store <project>-uploads-<target> is created in the
+#     committed vercel.json region and connected to that target only. The
+#     connection lets the deployment authenticate with OIDC through
+#     BLOB_STORE_ID, so no token has to be read. Its id is persisted as
+#     BLOB_STORE_ID[_STAGING], which makes a re-run a no-op.
+# Then the two targets must resolve to different stores, or the run stops
+# before Step 2 (_blob_assert_distinct_stores in vercel-env.sh).
+
+# _persist_env_var NAME VALUE: write NAME="VALUE" to .env.production.local
+# (replace the line when it exists, else append) and export it.
+_persist_env_var() {
+  local name="$1" value="$2" escaped
+  escaped="$(_shell_dquote_escape "${value}")"
+  if grep -q "^${name}=" "${_ENV_FILE}" 2>/dev/null; then
+    sed -i "s|^${name}=.*|${name}=\"$(_sed_replacement_escape "${escaped}")\"|" "${_ENV_FILE}"
+  else
+    _ensure_trailing_newline "${_ENV_FILE}"
+    echo "${name}=\"${escaped}\"" >> "${_ENV_FILE}"
   fi
-  _val=$(python3 -c "
-import sys
-name = sys.argv[1]
-with open(sys.argv[2]) as f:
-    for line in f:
-        line = line.rstrip('\n')
-        if line.startswith(name + '='):
-            v = line[len(name) + 1:]
-            if len(v) >= 2 and v[0] == '\"' and v[-1] == '\"':
-                v = v[1:-1]
-            print(v)
-            break
-" "${_var_name}" "${_tmp}")
-  rm -f "${_tmp}"
-  [[ -n "$_val" ]] || return 1
-  printf '%s' "${_val}"
+  export "${name}=${value}"
 }
 
-# ── Step C: Vercel Blob get-or-create (DC-3: PD-4 superseded — CLI available) ──
-# VERCEL_BLOB_STORE_ID (persisted in .env.production.local) is the idempotency
-# anchor — `vercel blob get-store` takes a store ID, not a name. See §15.
-#
-# BLOB_READ_WRITE_TOKEN retrieval (PD-5 resolved): `vercel blob get-store` has
-# no --output/--json flag at all (confirmed live) and never returns the RW
-# token regardless of format, so parsing its output was never viable. Working
-# path: `vercel blob create-store --environment <env>` connects the new store
-# to the linked project, which auto-injects BLOB_READ_WRITE_TOKEN into that
-# project env (confirmed live: `vercel env ls production` shows
-# BLOB_READ_WRITE_TOKEN immediately after `create-store --environment
-# production`) — then `_vercel_pull_env_var` above reads the live value back.
-echo ""
-echo "=== Step C: Vercel Blob get-or-create ==="
-if [[ "$DRY_RUN" == "true" ]]; then
-  echo "[DRY-RUN] Would get-or-create Blob store for ${VERCEL_PROJECT_NAME:-<unset>}"
-  BLOB_READ_WRITE_TOKEN="${BLOB_READ_WRITE_TOKEN:-<DRY_RUN_BLOB_TOKEN>}"
-else
-  if [[ -n "${VERCEL_BLOB_STORE_ID:-}" ]]; then
-    echo "[SKIP] VERCEL_BLOB_STORE_ID already set: ${VERCEL_BLOB_STORE_ID}"
-    BLOB_READ_WRITE_TOKEN=$(_vercel_pull_env_var BLOB_READ_WRITE_TOKEN production) || BLOB_READ_WRITE_TOKEN=""
-    if [[ -z "$BLOB_READ_WRITE_TOKEN" ]]; then
-      echo "  WARNING: BLOB_READ_WRITE_TOKEN not found in production env for this store." >&2
-      echo "  This happens if the store predates the --environment auto-connect flag" >&2
-      echo "  below (existing stores are not retroactively connectable via CLI — no" >&2
-      echo "  'vercel blob connect' subcommand exists, confirmed via --help)." >&2
-      echo "  MANUAL FALLBACK: in the Vercel dashboard, open Storage ->" >&2
-      echo "  ${VERCEL_BLOB_STORE_ID} -> Connect to Project, select" >&2
-      echo "  ${VERCEL_PROJECT_NAME} (production + preview), then re-run this script." >&2
-    fi
-  else
-    _STORE_NAME="${VERCEL_PROJECT_NAME:-app-generator-sample}-uploads"
-    _STORE_JSON=$(vercel blob create-store "${_STORE_NAME}" --yes --access public \
-      --environment production --environment preview 2>&1)
-    VERCEL_BLOB_STORE_ID=$(printf '%s' "$_STORE_JSON" | python3 -c \
-      "import sys,json; d=json.load(sys.stdin); print(d.get('storeId',''))" 2>/dev/null \
-      || printf '%s' "$_STORE_JSON" | grep -oP 'store_\w+' | head -1)
-    _VERCEL_BLOB_STORE_ID_ESCAPED="$(_shell_dquote_escape "${VERCEL_BLOB_STORE_ID}")"
-    if grep -q "^VERCEL_BLOB_STORE_ID=" "${_ENV_FILE}" 2>/dev/null; then
-      sed -i "s|^VERCEL_BLOB_STORE_ID=.*|VERCEL_BLOB_STORE_ID=\"$(_sed_replacement_escape "${_VERCEL_BLOB_STORE_ID_ESCAPED}")\"|" "${_ENV_FILE}"
-    else
-      _ensure_trailing_newline "${_ENV_FILE}"
-      echo "VERCEL_BLOB_STORE_ID=\"${_VERCEL_BLOB_STORE_ID_ESCAPED}\"" >> "${_ENV_FILE}"
-    fi
-    export VERCEL_BLOB_STORE_ID
-    echo "  Created Blob store: ${_STORE_NAME} (${VERCEL_BLOB_STORE_ID})"
-    BLOB_READ_WRITE_TOKEN=$(_vercel_pull_env_var BLOB_READ_WRITE_TOKEN production) || BLOB_READ_WRITE_TOKEN=""
-    if [[ -z "$BLOB_READ_WRITE_TOKEN" ]]; then
-      echo "  WARNING: store created but BLOB_READ_WRITE_TOKEN not retrievable via env pull." >&2
-      echo "  MANUAL FALLBACK: check Vercel dashboard Storage -> ${_STORE_NAME} -> confirm" >&2
-      echo "  it is connected to ${VERCEL_PROJECT_NAME}, then set BLOB_READ_WRITE_TOKEN" >&2
-      echo "  manually in .env.production.local." >&2
-    fi
+# _blob_vars_hint TARGET: the three variable names an operator can set for TARGET.
+_blob_vars_hint() {
+  local name out=()
+  for name in "${_BLOB_VARS[@]}"; do out+=("$(_blob_var_name "$name" "$1")"); done
+  printf '%s' "${out[*]}"
+}
+
+# _blob_create_store TARGET REGION: create and connect the store for TARGET and
+# persist its id. Stops (exit 1) instead of adopting a store or a variable it
+# did not create.
+_blob_create_store() {
+  local target="$1" region="$2"
+  local store_name="${VERCEL_PROJECT_NAME}-uploads-${target}"
+  local id_var
+  id_var="$(_blob_var_name BLOB_STORE_ID "$target")"
+  local hint
+  hint="Set one of $(_blob_vars_hint "$target") in .env.production.local for ${target} and re-run."
+
+  # A store of that name already exists: never adopt it silently.
+  local stores
+  if ! stores=$(vercel blob list-stores --all --json); then
+    echo "ERROR: vercel blob list-stores failed (see the message above)." >&2
+    exit 1
   fi
+  local rc=0
+  python3 -c '
+import json, sys
+def names(node):
+    if isinstance(node, dict):
+        if isinstance(node.get("name"), str):
+            yield node["name"]
+        for v in node.values():
+            yield from names(v)
+    elif isinstance(node, list):
+        for v in node:
+            yield from names(v)
+try:
+    data = json.loads(sys.stdin.read())
+except ValueError:
+    sys.exit(2)
+sys.exit(0 if sys.argv[1] in set(names(data)) else 1)
+' "$store_name" <<<"$stores" || rc=$?
+  if [[ "$rc" -eq 0 ]]; then
+    echo "ERROR: a Vercel Blob store named '${store_name}' already exists, and .env.production.local has no Blob variable for ${target}." >&2
+    echo "  ${hint}" >&2
+    exit 1
+  elif [[ "$rc" -ne 1 ]]; then
+    echo "ERROR: could not read the output of vercel blob list-stores --all --json as JSON." >&2
+    exit 1
+  fi
+
+  # A Blob variable is already on the target but unknown here: a new connection
+  # would collide with a value this script cannot see. Names only are read.
+  local listing found
+  if ! listing=$(vercel env ls --environment "$target"); then
+    echo "ERROR: vercel env ls --environment ${target} failed (see the message above)." >&2
+    exit 1
+  fi
+  found=$(awk '$1 == "BLOB_READ_WRITE_TOKEN" || $1 == "BLOB_STORE_ID" { print $1 }' <<<"$listing" | sort -u | tr '\n' ' ')
+  if [[ -n "$found" ]]; then
+    echo "ERROR: ${target} already has ${found% } on Vercel, which .env.production.local does not record." >&2
+    echo "  ${hint}" >&2
+    exit 1
+  fi
+
+  local args=(blob create-store "$store_name" --access private --yes --environment "$target")
+  if [[ -n "$region" ]]; then
+    args+=(--region "$region")
+  else
+    echo "  WARNING: no regions entry in app-generator/vercel.json; the store is created in the CLI's default region." >&2
+  fi
+  # stdout and stderr are kept apart and both shown, so a failure prints the
+  # CLI's message and stops the run (it used to be folded into a variable and
+  # lost under `set -e`).
+  local out err
+  out="$(mktemp)"; err="$(mktemp)"
+  if ! vercel "${args[@]}" >"$out" 2>"$err"; then
+    cat "$out" "$err" >&2
+    rm -f "$out" "$err"
+    echo "ERROR: vercel blob create-store ${store_name} failed." >&2
+    exit 1
+  fi
+  cat "$out" "$err"
+  local store_id
+  store_id=$(grep -ohE 'store_[A-Za-z0-9]+' "$out" "$err" | head -1 || true)
+  rm -f "$out" "$err"
+  if [[ -z "$store_id" ]]; then
+    echo "ERROR: created Blob store '${store_name}', but found no store id (store_...) in the CLI output." >&2
+    echo "  Copy its id from the Vercel dashboard (Storage -> ${store_name}) into ${id_var} in .env.production.local and re-run." >&2
+    exit 1
+  fi
+  _persist_env_var "$id_var" "$store_id"
+  echo "  Created Blob store ${store_name} (${store_id}), connected to ${target}; saved as ${id_var}."
+}
+
+echo ""
+echo "=== Step C: Vercel Blob, one store per target ==="
+if [[ -n "${VERCEL_BLOB_STORE_ID:-}" && -z "${BLOB_STORE_ID}${BLOB_STORE_ID_STAGING}" ]]; then
+  echo "  NOTICE: VERCEL_BLOB_STORE_ID is no longer used (Issue #1434); set BLOB_STORE_ID / BLOB_STORE_ID_STAGING or a token per target instead."
 fi
-export BLOB_READ_WRITE_TOKEN
+for _blob_target in production preview; do
+  if _blob_configured "$_blob_target"; then
+    echo "[SKIP] ${_blob_target}: a Blob variable is set in .env.production.local ($(_blob_effective_var "$_blob_target") is used)."
+  elif [[ "$DRY_RUN" == "true" ]]; then
+    echo "[DRY-RUN] Would create private Blob store ${VERCEL_PROJECT_NAME}-uploads-${_blob_target} (region ${_VERCEL_REGION:-<CLI default>}) connected to ${_blob_target} only, and save its id as $(_blob_var_name BLOB_STORE_ID "$_blob_target")"
+    printf -v "$(_blob_var_name BLOB_STORE_ID "$_blob_target")" '%s' "<DRY_RUN_BLOB_STORE_ID_${_blob_target^^}>"
+  else
+    _blob_create_store "$_blob_target" "$_VERCEL_REGION"
+  fi
+done
+unset _blob_target
+_blob_assert_distinct_stores || exit 1
+echo "  OK: Production and Preview do not share a Blob store."
 
 # ── Step 2: Inject env vars (production + preview) ──────────────────────────
 echo ""
@@ -713,8 +809,8 @@ vercel_env_inject preview
 # files from being uploaded, but this cleanup is what removes an already-set
 # Vercel project env var on repeated vercel-setup.sh runs — idempotent via
 # `|| true` since `vercel env rm` errors when the var is already absent.
-run vercel env rm PRISMA_DATABASE_URL production --yes 2>/dev/null || true
-run vercel env rm PRISMA_DATABASE_URL preview --yes 2>/dev/null || true
+run vercel env rm PRISMA_DATABASE_URL --environment production --confirm-name PRISMA_DATABASE_URL 2>/dev/null || true
+run vercel env rm PRISMA_DATABASE_URL --environment preview --confirm-name PRISMA_DATABASE_URL 2>/dev/null || true
 
 # Migration and seeding are deliberately NOT run here (cmd_691 — see the file
 # header and §19 of docs/vercel-automation-design.md). `vercel-build` already

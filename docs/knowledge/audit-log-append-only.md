@@ -212,7 +212,10 @@ password or connection string is ever passed on a command line or recorded in a 
    `DATABASE_URL_APP_PROD` (Production) and `DATABASE_URL_APP_STAGING` (Preview). When one is set, the script injects it
    as `DATABASE_URL` for that target and says so; `DIRECT_URL` stays the owner's unpooled URL, because migrations need
    the owner. When it is not set, every run prints a warning that `DATABASE_URL` is being set to the owner's URL. The
-   script never creates the role or handles its password beyond reading that file.
+   script never creates the role or handles its password beyond reading that file. Re-running it on branches that also
+   have `app_runtime` is supported: Step A always asks `neonctl` for the owner role's URLs by name (`NEON_OWNER_ROLE`,
+   default `neondb_owner`; set it in `.env.production.local` if the owner role has another name), so the second role does
+   not make it fail with `Multiple roles found for the branch`.
 7. **Create the search indexes as the owner.** The generated `ensureSearchIndexes()` (`lib/db-init.ts`, run from
    `instrumentation.ts` on every cold start) reads `pg_indexes` and runs `CREATE INDEX CONCURRENTLY` only for indexes that
    are missing. A role that does not own the tables cannot create them (`42501`, `must be owner of table`), so it logs one

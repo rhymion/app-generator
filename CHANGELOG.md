@@ -11,6 +11,22 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   now inserts the key, flips `enabled: false`, or leaves the schema unchanged, and the job audits `mobile/package.json`
   whatever the committed schema says. Tests: `code_generator/tests/test_mobile_audit_workflow.py`. See
   `docs/knowledge/mobile-app.md`.
+- **`scripts/vercel-setup.sh` keeps one private Blob store per target and never injects `[SENSITIVE]`** (Issue #1434).
+  Step C used to read `BLOB_READ_WRITE_TOKEN` back with `vercel env pull`, which returns `[SENSITIVE]` for a Secret
+  variable, and could inject that placeholder into Production. It also created one public store shared by Production
+  and Preview, and could stop silently. Now `.env.production.local` is the source of truth for each target:
+  `ATTACHMENT_BLOB_READ_WRITE_TOKEN`, `BLOB_STORE_ID` and `BLOB_READ_WRITE_TOKEN` for Production, and the same names
+  with `_STAGING` for Preview (`ATTACHMENT_BLOB_READ_WRITE_TOKEN_STAGING` and `BLOB_STORE_ID_STAGING` are new). Each
+  one that is set is injected under its own name. A target with none gets a private store
+  `<project>-uploads-<target>`, created in the committed region and connected to that target only, and its id is saved
+  as `BLOB_STORE_ID[_STAGING]`. The script stops, naming the variable to set, when a store of that name already exists,
+  when an unrecorded Blob variable is already on the target, or when Production and Preview resolve to the same store.
+  `VERCEL_BLOB_STORE_ID` is no longer read. **Action:** on a project set up by the old Step C, the next run stops,
+  because the connected store's `BLOB_READ_WRITE_TOKEN` is on both targets but not in `.env.production.local`. Record
+  Production's token or store id as `BLOB_READ_WRITE_TOKEN` / `BLOB_STORE_ID`, and give Preview its own store (set its
+  `_STAGING` variable, or disconnect the old store from Preview so the script creates one). The Vercel scripts also use the non-deprecated CLI forms
+  (`project create`, `env add/rm --environment`, `env rm --confirm-name`). Tests: `scripts/vercel-blob-setup.test.ts`.
+  See `docs/knowledge/attachment-storage.md`.
 
 ## [7.0.2] - 2026-11-25
 ### Security
