@@ -577,7 +577,7 @@ app-generator/
 | [legal-documents.md](docs/knowledge/legal-documents.md) | 利用規約・プライバシーポリシー画面: 文書の言語がサイトUIの言語一覧から独立している理由、Markdown採用（JSON/MDX不採用）の理由、文書の言語追加手順 |
 | [generated-documentation-and-openapi-spec.md](docs/knowledge/generated-documentation-and-openapi-spec.md) | 生成される各エンティティのドキュメントの「Constraints」節（承認フロー・書き込みロック）と `docs/generated/openapi.json`（OpenAPI 3.1 ビルド成果物）— 一覧クエリパラメータ、`readOnly`、bulkのrequestBody、操作別4xx応答、import/exportパス。加えて `GET /api/openapi.json`（認証付き配信route、全環境）と `SWAGGER_UI_ENABLED` で有効化する `/swagger` 画面（開発・ステージング限定） |
 | [api-idempotency-and-rate-limiting.md](docs/knowledge/api-idempotency-and-rate-limiting.md) | 単一レコード作成エンドポイントの `Idempotency-Key` 対応（対象レコードと同一トランザクションのDBテーブル・保持期間1日）と `api:read`/`api:write` の API キー単位流量制限 |
-| [mobile-executable.md](docs/knowledge/mobile-executable.md) | 生成される Expo アプリのリリース `.apk` のビルド、iOS の経路、実機からサーバーへ接続する設定 |
+| [mobile-executable.md](docs/knowledge/mobile-executable.md) | ホストの準備（JDK・Android SDK・WSL2 上のエミュレータ）、生成される Expo アプリの `.apk` ビルド、エミュレータの使い方、iOS の経路、ローカルまたはデプロイ済みサーバーへの接続設定 |
 | [scheduled-task-operations.md](docs/knowledge/scheduled-task-operations.md) | 定期タスク：`depends_on` による順序、実行ガードと業務日付、管理画面、`task:run-all`、GCP での実行 |
 | [audit-log-append-only.md](docs/knowledge/audit-log-append-only.md) | 追記専用の `audit_log`：クライアントガード、行トリガー、月次パーティション、連鎖ダイジェスト、書き込み一回限りのストレージ、制限付きデータベースロールへの切り替え |
 | [logging.md](docs/knowledge/logging.md) | `lib/logger.ts`：値を伏せて出力するロガー（認証情報らしいキー、メールアドレス、Error オブジェクト）、ルールの拡張、`no-console` lint ルールとその許可リスト |

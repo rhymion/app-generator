@@ -275,15 +275,10 @@ jobs:
       - name: Generate the mobile app (x-generator.mobile.enabled on, in this runner's checkout only)
         run: |
           set -euo pipefail
-          python3 - <<'PY'
-          path = "code_generator/json_schema.yaml"
-          text = open(path, encoding="utf-8").read()
-          if "x-generator:\n" not in text:
-              raise SystemExit("no top-level x-generator block to enable mobile in")
-          open(path, "w", encoding="utf-8").write(
-              text.replace("x-generator:\n", "x-generator:\n  mobile:\n    enabled: true\n", 1)
-          )
-          PY
+          # Idempotent: inserts the key, flips `enabled: false`, or leaves an
+          # already-enabled schema alone (a second `mobile:` key would make
+          # build_user_schema.py fail with DuplicateKeyError).
+          python3 scripts/enable_mobile_generation.py code_generator/json_schema.yaml
           npm run generate-code
           test -f mobile/package.json
       - name: npm audit (mobile/, full scope incl. devDependencies, non-blocking)

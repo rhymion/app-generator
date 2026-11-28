@@ -907,8 +907,11 @@ The Playwright specs under `mobile/e2e/` already cover each of these on the web 
 ## Dependency audit in CI
 
 The generated `mobile/` has its own `package.json` and commits no lock file, so the root `audit` and
-`audit-full-scope` jobs of `.github/workflows/ci.yml` do not see it. The job `audit-mobile` covers it: it switches
-`x-generator.mobile.enabled` on in the runner's copy of the default schema, runs `npm run generate-code`, resolves
+`audit-full-scope` jobs of `.github/workflows/ci.yml` do not see it. The job `audit-mobile` covers it on every push and
+pull request, whatever the committed schema says about mobile: `scripts/enable_mobile_generation.py` switches
+`x-generator.mobile.enabled` on in the runner's copy of the default schema (it inserts the key, flips `enabled: false`,
+or leaves an already-enabled schema unchanged, so a committed `enabled: true` does not produce a duplicate `mobile` key
+that `build_user_schema.py` would reject), then the job runs `npm run generate-code`, resolves
 the tree with `npm install --package-lock-only --ignore-scripts` in `mobile/` and runs `npm audit --json` over it,
 `devDependencies` included.
 
