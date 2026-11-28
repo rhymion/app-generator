@@ -24,8 +24,11 @@ from pathlib import Path
 
 from ruamel.yaml import YAML
 
+# The two line alternatives are disjoint (a line with a non-blank character vs. a
+# whitespace-only line), so each line matches one way only: an overlapping pair
+# backtracks exponentially on runs of blank lines (CodeQL py/redos).
 _ENABLED_FALSE = re.compile(
-    r"(?m)^(  mobile:[ \t]*\n(?:    .*\n|[ \t]*\n)*?    enabled:[ \t]*)false\b"
+    r"(?m)^(  mobile:[ \t]*\n(?:    [ \t]*\S.*\n|[ \t]*\n)*?    enabled:[ \t]*)false\b"
 )
 
 

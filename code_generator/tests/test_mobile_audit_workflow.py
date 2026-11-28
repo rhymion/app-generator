@@ -121,6 +121,30 @@ def test_enable_script_is_idempotent(tmp_path):
     assert schema.read_text(encoding="utf-8") == once
 
 
+def test_enable_script_flips_false_past_blank_and_nested_lines(tmp_path):
+    schema = tmp_path / "json_schema.yaml"
+    schema.write_text(
+        "x-generator:\n  mobile:\n    # comment\n\n    \n    extra:\n      deep: 1\n"
+        "    enabled: false\ndefinitions: {}\n", encoding="utf-8")
+    result = _run(schema)
+    assert result.returncode == 0, result.stderr
+    assert _mobile_of(schema)["enabled"] is True
+
+
+def test_enable_script_regex_does_not_backtrack_on_blank_line_runs():
+    # CodeQL py/redos: the old overlapping alternatives took exponential time on
+    # many "    \n" lines with no `enabled: false` after them.
+    import importlib.util
+    import time
+    spec = importlib.util.spec_from_file_location("enable_mobile_generation", ENABLE)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    text = "  mobile:\n" + "    \n" * 5000 + "x"
+    start = time.monotonic()
+    assert module._ENABLED_FALSE.search(text) is None
+    assert time.monotonic() - start < 2
+
+
 def test_enable_script_fails_closed_without_an_x_generator_block(tmp_path):
     schema = tmp_path / "json_schema.yaml"
     schema.write_text("format-version: 6.0\ndefinitions: {}\n", encoding="utf-8")
